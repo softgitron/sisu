@@ -84,11 +84,11 @@ pub struct Timeline:
 ## `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time
 ## since, and the difference of two is a `Duration`; an instant is ordered
 ## but is not a civil time, and shows as its nanoseconds on its clock. Its
-## readings are the clock's own (`ClockOps.now`), so the test clock makes
-## them deterministic and a recorded run replays them; on the host's clock
-## they are the system's time, which a change of the system's clock moves,
-## since stage 0's `Clock` reads no monotonic time of its own (decision
-## 627).
+## readings are the clock's monotonic ones (`ClockOps.monotonic`, decision
+## 643): on the host's clock the time since the run's first reading, which
+## a change of the system's time does not move, and on the test clock its
+## time, so that the test clock makes them deterministic; a recorded run
+## replays them. Two instants of different clocks do not compare.
 ##
 ## ```
 ## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
@@ -103,9 +103,9 @@ pub struct Timeline:
 pub struct Instant:
     nanos: int
 
-    ## The clock's time now.
+    ## The clock's monotonic reading now.
     pub def now(clock: Clock) -> Instant:
-        return Instant(nanos=clock.now().unix_nanos())
+        return Instant(nanos=clock.monotonic().nanos)
 
     ## The time from this instant to the clock's time now.
     pub def elapsed(self, clock: Clock) -> Duration:

@@ -74,6 +74,8 @@ pub(package) const LIST_SLICE: int = 99
 pub(package) const LIST_SLICE_MIDDLE: int = 100
 ## `list.contains`
 pub(package) const LIST_CONTAINS: int = 101
+## `list.iter`
+pub(package) const LIST_ITER: int = 102
 ## `list.join`
 pub(package) const LIST_JOIN: int = 103
 ## `list.sort`
@@ -110,9 +112,30 @@ pub(package) const SET_REMOVE: int = 162
 pub(package) const SET_CONTAINS: int = 163
 ## `set.is_empty`
 pub(package) const SET_IS_EMPTY: int = 164
+## `set.iter`
+pub(package) const SET_ITER: int = 165
+## `list.as_slice`
+pub(package) const LIST_AS_SLICE: int = 175
+## `Slice.to_list`
+pub(package) const SLICE_TO_LIST: int = 176
+## `Slice.at`
+pub(package) const SLICE_AT: int = 177
+## `Slice.get`
+pub(package) const SLICE_GET: int = 178
+## `Slice.is_empty`
+pub(package) const SLICE_IS_EMPTY: int = 179
+## `Slice.slice`
+pub(package) const SLICE_SLICE: int = 180
+## `Slice.cut`
+pub(package) const SLICE_CUT: int = 181
+## `Slice.iter`
+pub(package) const SLICE_ITER: int = 182
 
 ## The status of a call that did what it asked.
 const OK: int = 0
+
+## A bound of `Slice.slice` left out: `int`'s least value.
+const OPEN: int = -9223372036854775807 - 1
 
 ## The most room `list.with_capacity` asks for at once, in elements.
 const MOST_ROOM: int = 1048576
@@ -127,22 +150,32 @@ struct Call:
     args: ptr mut u8
 
 impl Call:
-    ## Word `k` of the descriptor, a `u32` read a byte at a time, the lowest
-    ## first, as the runtime's code reads no `u32` of its own.
+    ## Word `k` of the descriptor, a `u32`: half of the word of eight bytes
+    ## it is in, the lower half for an even `k`, as both backends align a
+    ## descriptor to eight bytes and lay it out little-endian, and the
+    ## runtime's code reads no `u32` of its own (decision 646); the last
+    ## word of a descriptor of an odd number of words, which has no word
+    ## after it to read with it, is read a byte at a time.
     ##
     ## Requires:
     ## - `call`: the call is the generated code's, whose descriptor has
-    ##   word `k`
+    ##   word `k` and is aligned to eight bytes
     def word(self, k: int) -> int:
-        # safety: in_bounds, valid: the descriptor holds its four words and a
-        #   type for each argument and type argument, by `call`; a byte needs
-        #   no alignment.
-        unsafe:
-            let b = self.desc.offset(4 * k)
-            let low = b.read().to_int() + b.offset(1).read().to_int() * 256
-            return low
-                + b.offset(2).read().to_int() * 65536
-                + b.offset(3).read().to_int() * 16777216
+        if k % 2 == 0 and k >= 4 and k + 1 >= 4 + self.word(1) + self.word(2):
+            # safety: in_bounds, valid: the descriptor's word `k`, by `call`;
+            #   a byte needs no alignment.
+            unsafe:
+                let b = self.desc.offset(4 * k)
+                let low = b.read().to_int() + b.offset(1).read().to_int() * 256
+                return low
+                    + b.offset(2).read().to_int() * 65536
+                    + b.offset(3).read().to_int() * 16777216
+        # safety: in_bounds, valid, aligned: the descriptor's words `k` and
+        #   the one beside it in the same word of eight bytes, by `call`.
+        let w = unsafe self.desc.offset(8 * (k // 2)).cast[int]().read()
+        if k % 2 == 0:
+            return w & 4294967295
+        return (w >> 32) & 4294967295
 
     ## The type of the call's result.
     def ret_ty(self) -> int:
@@ -278,7 +311,7 @@ def utf8(c: int, out: ptr mut u8) -> int:
 ##
 ## Requires:
 ## - `typed`: `c` holds a live value of type `ct`, and `x` one of type `xt`
-def contains(ts: Types, c: ptr mut u8, ct: int, x: ptr mut u8, xt: int) -> bool:
+pub(package) def contains(ts: Types, c: ptr mut u8, ct: int, x: ptr mut u8, xt: int) -> bool:
     let (p, t) = value.target(ts, c, ct)
     let k = ts.kind(t)
     if k == LIST:
@@ -350,6 +383,10 @@ def list_call(c: Call, id: int) -> int:
         return OK
     if id == LIST_IS_EMPTY:
         c.set_bool(n == 0)
+        return OK
+    if id == LIST_ITER:
+        # The iterator of references into the list (decision 646).
+        c.set(0, iter.new_list_ref(l, size).addr())
         return OK
     if id == LIST_INSERT:
         let k = c.first(1)
@@ -472,6 +509,10 @@ def table_call(c: Call, id: int) -> int:
         c.set(0, table.value_at(tb, k).addr())
         return OK
     let tb = c.table(0)
+    if id == SET_ITER:
+        # The iterator of references to the set's elements (decision 646).
+        c.set(0, iter.table_part(tb, 0).addr())
+        return OK
     if id == DICT_KEYS or id == DICT_VALUES or id == DICT_ITEMS:
         var part = 2
         if id == DICT_KEYS:
@@ -553,6 +594,116 @@ def table_call(c: Call, id: int) -> int:
         return dropped(c.arg(1), c.ty(1))
     return OK
 
+## The intrinsics of a `Slice`, which holds copies of its elements in a
+## list's layout, as the interpreter's does (decision 646): the status.
+##
+## Requires:
+## - `call`: `c` is a call of `list.as_slice` or one of `Slice`'s
+##   intrinsics above
+def slice_call(c: Call, id: int) -> int:
+    let ts = c.ts
+    let (l, lt) = c.place(0)
+    if id == LIST_AS_SLICE or id == SLICE_TO_LIST:
+        value.copy(ts, c.ret, l, lt)
+        return OK
+    let size = ts.size(ts.a(lt))
+    let n = list.length(l)
+    if id == SLICE_AT or id == SLICE_GET:
+        let k = c.first(1)
+        if k >= 0 and k < n:
+            # safety: in_bounds: `k` is an element of the buffer.
+            let at = unsafe list.buffer(l).offset(k * size).addr()
+            if id == SLICE_GET:
+                c.some(at)
+            else:
+                c.set(0, at)
+            return OK
+        if id == SLICE_GET:
+            c.none()
+            return OK
+        # safety: returns_promptly: the runtime in Rust raises the panic.
+        return unsafe sisu_rt_list_bounds(False, k, n).to_int()
+    if id == SLICE_IS_EMPTY:
+        c.set_bool(n == 0)
+        return OK
+    if id == SLICE_SLICE or id == SLICE_CUT:
+        var lo = c.first(1)
+        var hi = c.first(2)
+        if lo == OPEN:
+            lo = 0
+        if hi == OPEN:
+            hi = n
+        if lo < 0 or hi < lo or hi > n:
+            var bad = hi
+            if lo < 0 or lo > n:
+                bad = lo
+            # safety: returns_promptly: the runtime in Rust raises the panic.
+            return unsafe sisu_rt_list_bounds(False, bad, n).to_int()
+        list.copies(ts, c.ret, l, ts.a(lt), lo, hi)
+        return OK
+    if id == SLICE_ITER:
+        c.set(0, iter.new_list_ref(l, size).addr())
+    return OK
+
+## A dict or a set of type `t` from a literal's `n` entries at `items`, each
+## the key's bytes and then the value's, moved in, its table's address
+## written at `out`: a key given again replaces the value and is itself
+## dropped, as `insert` does (decision 646). The status of the drops.
+##
+## Requires:
+## - `typed`: `t` is a dict's or a set's type, `items` holds `n` live
+##   entries of its key and value, and `out` has room for a word
+pub(package) def literal(ts: Types, t: int, items: ptr mut u8, n: int, out: ptr mut u8) -> int:
+    let kt = ts.a(t)
+    var vt = -1
+    if ts.kind(t) == DICT:
+        vt = ts.header(t).b
+    let tb = table.new(ts, kt, vt)
+    let (ksize, vsize) = (table.key_size(tb), table.value_size(tb))
+    var st = OK
+    var i = 0
+    while i < n:
+        # safety: in_bounds: entry `i` is in `items`, by `typed`.
+        let key = unsafe items.offset(i * (ksize + vsize))
+        # safety: in_bounds: its value follows its key.
+        let val = unsafe key.offset(ksize)
+        let j = table.find(ts, tb, key, kt)
+        if j >= 0:
+            if vsize > 0:
+                st = value.after_part(st, dropped(table.value_at(tb, j), vt))
+            # safety: returns_promptly: memmove moves the value in.
+            unsafe:
+                _ = memmove(table.value_at(tb, j), val.as_const(), vsize)
+            st = value.after_part(st, dropped(key, kt))
+        else:
+            let k = table.push(ts, tb, key)
+            # safety: returns_promptly: memmove moves the value in.
+            unsafe:
+                _ = memmove(table.value_at(tb, k), val.as_const(), vsize)
+        i += 1
+    # safety: valid, aligned, writable: by `typed`.
+    unsafe out.cast[int]().write(tb.addr())
+    return st
+
+## The generated code's inline lookup of the key at `key`, of type `kt`, in
+## the dict or set at `p` (decision 265): for `dict.get` (`want_value`) the
+## address of the key's value, for `contains` 1, when the key is there;
+## else 0.
+##
+## Requires:
+## - `typed`: `p` holds a live dict or set and `key` a live value of type
+##   `kt`
+pub(package) def find(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, want_value: bool) -> int:
+    # safety: valid, aligned, writable: a dict's and a set's value is its
+    #   table's address, which a lookup only reads.
+    let tb = unsafe p.cast[ptr[u8]]().read().cast_mut()
+    let i = table.find(ts, tb, key, kt)
+    if i < 0:
+        return 0
+    if want_value:
+        return table.value_at(tb, i).addr()
+    return 1
+
 ## A call of one of the intrinsics above: `desc` its descriptor, `ret` the
 ## address of its result and `args` the block of its arguments' addresses,
 ## the types those of the table at `types`. Its status: 0, or that of the
@@ -569,4 +720,6 @@ pub(package) def collection(
     let id = c.word(0)
     if id >= LIST_NEW and id <= LIST_SORT:
         return list_call(c, id)
+    if id >= LIST_AS_SLICE and id <= SLICE_ITER:
+        return slice_call(c, id)
     return table_call(c, id)

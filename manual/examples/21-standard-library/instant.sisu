@@ -1,0 +1,20 @@
+# An `Instant` reads the clock it is given, to measure how long work took.
+from std.time import Instant
+
+## How long `turns` turns of ten minutes in the sauna take, on `clock`.
+def timed(clock: Clock, turns: int) -> Duration ! TaskError:
+    let start = Instant.now(clock)
+    for _ in range(turns):
+        clock.sleep(Duration.minutes(10))?
+    return Ok(start.elapsed(clock))
+
+test "three turns take half an hour"(clock: TestClock):
+    assert timed(clock, 3) == Ok(Duration.minutes(30))
+
+test "two readings, and the time between them"(clock: TestClock):
+    let start = Instant.now(clock)
+    clock.advance(Duration.seconds(90))
+    let later = Instant.now(clock)
+    assert later > start
+    assert later.since(start) == Duration.seconds(90)
+    assert start + Duration.seconds(90) == later

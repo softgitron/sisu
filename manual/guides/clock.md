@@ -177,3 +177,10 @@ test "a tick missed while the loop was busy is skipped" ... ok
 The second test plays a turn that takes two and a half minutes:
 `advance` stands for the slow work, and the ticker skips the two ticks
 that passed and waits for the third.
+
+Code that measures how long its work took reads an `Instant` from the
+clock it was given, `Instant.now(clock)` of `std.time`, and asks its
+`elapsed(clock)` at the end
+([chapter 21](../tutorial/21-standard-library.md#time)). Under the test
+clock the time it measures is what the test advanced, the same on every
+run.

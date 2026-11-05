@@ -1,0 +1,38 @@
+# An `Instant` reads a clock's monotonic time (decision 643): the host's
+# monotonic clock, which only moves forward, the test clock's time, and
+# for a clock of the program's own its `now` from the epoch unless it
+# gives `monotonic` itself; an interceptor sees the reading as a call.
+import std.cap
+from std.cap import Call, Interceptor, Wrap
+from std.time import Instant
+
+## A clock that stands at one time.
+struct Stopped:
+    at: DateTime
+
+impl ClockOps for Stopped:
+    def now(self) -> DateTime:
+        return self.at
+    def after(self, d: Duration) -> Timer:
+        return Clock.fake().after(d)
+
+## Says each call it sees.
+struct Say:
+    pass
+
+impl Interceptor for Say:
+    def before(self, call: Call):
+        print("  before {call.capability}.{call.method}")
+
+def main(sys: System):
+    let a = Instant.now(sys.clock)
+    let b = Instant.now(sys.clock)
+    print("host: forward {b >= a}, since itself {a.since(a)}")
+    let t = Clock.frozen_at(DateTime.from_unix_nanos(5000))
+    let i = Instant.now(t)
+    t.advance(Duration.millis(2))
+    print("test clock: {i}, then {i.elapsed(t)}, monotonic {t.monotonic()}")
+    let mine: Clock = Stopped(at=DateTime.from_unix_nanos(42))
+    print("own clock: {mine.monotonic()}")
+    let seen: Clock = Wrap(inner=t, hook=Say())
+    print("wrapped: {seen.monotonic()}")

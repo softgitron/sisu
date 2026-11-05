@@ -219,6 +219,8 @@ std/doc_examples
 std/encoding
 std/fs
 std/hash
+std/instant_monotonic
+std/int_bounds
 std/io
 std/json_decode
 std/log_levels

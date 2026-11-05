@@ -78,7 +78,8 @@ sisu 0.0.1
 ```
 
 The list that `sisu help` prints is the compiler's own summary of this
-page:
+page, and its last paragraph names the commands whose front end is stage
+1's ([Choosing the front end](#choosing-the-front-end)):
 
 <details>
 <summary>What <code>sisu help</code> prints</summary>
@@ -115,7 +116,7 @@ commands:
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 
-The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens` and `parse`; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
+The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl` and `ws`; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
 ```
 
 </details>
@@ -298,14 +299,14 @@ The front end reads, checks and lowers a program; the rest of `sisu`
 runs, tests and compiles what it produces. Stage 0 has two: stage 1,
 written in Sisu and compiled natively, which is the default for
 `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`,
-`parse`, `repl` and `ws`, and the Rust front end, the oracle that stage 1 is checked
-against. `--front-end=rust` among a command's options, or
+`parse` (`--shape` too), `repl` and `ws`, as `sisu help` says, and the
+Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
 lint` and `sisu audit --unsafe` are stage 1's alone, and the Rust front
 end refuses them. The other commands, and `run --watch` and
 `--defer-borrow`, `test --std` and `--defer-borrow`, a program's
-transcripts (its tests run on stage 1, D0128), `check --diary` and
-`parse --shape`, use the Rust front end whichever you choose. `sisu
+transcripts (its tests run on stage 1, D0128) and `check --diary`,
+use the Rust front end whichever you choose. `sisu
 test` and `sisu bench` run stage 1 once for each program, and print its
 warnings once, before the report.
 
@@ -1339,8 +1340,10 @@ error[D0113]: `std.nothing` is not a module of the standard library; `sisu doc -
 $ sisu test --std --filter std.time greet.sisu
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-2 passed, 0 failed, 0 blocked
-161 not selected
+test "std.time/Instant (doc example)" ... ok
+test "std.time/Zone (doc example)" ... ok
+4 passed, 0 failed, 0 blocked
+172 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -1419,9 +1422,16 @@ session (D0084 to D0091).
 The session reruns the script from the top for each input, with the
 capability log of the run before standing in for the world, so the
 earlier inputs neither print nor touch anything again. Stage 1 checks
-and lowers each input's program, as for `sisu run`, so an input takes
-every form a script takes; `--front-end=rust` runs the session on the
-Rust front end instead.
+and lowers each input's program, as for `sisu run`, one run of it for
+each input, so an input takes every form a script takes. Its
+diagnostics are stage 1's as it writes them, with a place in the input
+drawn as `<input>` and a place in the session's program, the inputs
+kept before it, as `<repl>`; a file the session starts from is drawn
+under its own name. A panic names the line of the session's program,
+`<repl>:LINE`, in which each expression that shows its value, the one
+that panics among them, takes a line more than it was typed in. `:why` reads the inputs' syntax trees from
+stage 1 too. `--front-end=rust` runs the session on the Rust front end
+instead, which gives the same transcript.
 
 Given this file and these inputs on standard input:
 
@@ -1461,7 +1471,8 @@ sisu>
 ```
 
 The input `let wrong: int = "text"` does not check, so its E0300 goes to
-standard error and the session is as it was before it.
+standard error, at `<input>:1:18`, and the session is as it was before
+it.
 
 **Status.** In stage 0 ([10](../../proposal/10-tooling.md), "REPL and
 scripts").
@@ -1505,8 +1516,9 @@ total.to_f64() / 3.0  # => 15.666666666666666
 **Stage 0 differs.** A worksheet is tooling after 0.1 (Q-48), which the
 language server shows as values beside the lines; stage 0 has it now,
 on the command line and in the language server. `sisu ws` checks and
-lowers the worksheet with stage 1, so it takes every form `sisu run`
-takes, `^` in a slice's bound and a generator expression among them;
+lowers the worksheet with stage 1, in one run of it, so it takes every
+form `sisu run` takes, `^` in a slice's bound and a generator
+expression among them, and shows stage 1's diagnostics as they are;
 the language server's worksheets still run on the Rust front end
 ([Choosing the front end](#choosing-the-front-end)).
 

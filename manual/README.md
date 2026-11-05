@@ -284,8 +284,8 @@ could not tell a fan-out from a loop), a worker pool, a race with a
 timeout. Stage 0 runs all of it.
 
 **21. A tour of the standard library** ([written](tutorial/21-standard-library.md)). One section per module a program
-reaches for first: `std.fs` and `std.io`, `std.time` (with `Ticker` and
-`Timeline`), `std.rand`, `std.env` and `std.process`, `std.json`,
+reaches for first: `std.fs` and `std.io`, `std.time` (with `Ticker`,
+`Timeline`, `Instant` and `Zone`), `std.rand`, `std.env` and `std.process`, `std.json`,
 `std.regex`, `std.collections` (`SortedDict`, `Deque`, `Heap`,
 `BitSet`), `std.hash`, `std.encoding`, `std.sort` and `std.search`, and
 `std.log`, each with one example and a link to its source, which holds
@@ -320,8 +320,10 @@ that can lose information, strict floating point (one rounding per
 operation, `mul_add`, pairwise `sum`, `@float(fast)`; D-074), NaN and
 ordering, and the exact types `BigInt`, `Ratio` and `Decimal` with their
 suffix-free literals, which take an exact type beside an operator too
-(`f * 2` with `f` a `BigInt`), and named rounding (D-076). Exercises: a
-checksum over `u32`, a mortgage table in `Decimal`. Stage 0 runs all of
+(`f * 2` with `f` a `BigInt`), and named rounding (D-076), with the
+bit methods (`count_ones`, `rotate_left`, `swap_bytes`, `to_bits`).
+Exercises: a checksum over `u32`, a rotating hash with a parity bit, a
+mortgage table in `Decimal`. Stage 0 runs all of
 it except `total_order`; it accepts `@float(fast)` and keeps the
 arithmetic strict.
 
@@ -393,8 +395,8 @@ instead of teaching.
 | G6 | Parse command-line arguments ([written](guides/command-line.md)) | `std.x.cli` derived from a struct, help text, errors, a transcript test. |
 | G7 | Read and write JSON ([written](guides/json.md)) | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements and invariants at the boundary, a form of a type's own, `json.parse` (stage 0 encodes an enum and does not decode one). |
 | G8 | Match text with regular expressions ([written](guides/regex.md)) | `std.regex`, groups, the linear-time guarantee and what it rules out. |
-| G9 | Test code that uses the clock ([written](guides/clock.md)) | `Clock.frozen_at`, `advance`, the test clock, `Ticker` under test. |
-| G10 | Test code that uses the network ([written](guides/network.md)) | `Net.fake`, `http.FakeNet().respond_to`, request counts. |
+| G9 | Test code that uses the clock ([written](guides/clock.md)) | `Clock.frozen_at`, `advance`, the test clock, `Ticker` under test, an `Instant` read from the clock given. |
+| G10 | Test code that uses the network ([written](guides/network.md)) | `Net.fake`, `http.FakeNet().respond_to`, request counts, `HttpError` and the `NetError` it holds. |
 | G11 | Write a property test ([written](guides/property-test.md)) | `check`, `arbitrary[T]`, `@derive(Arbitrary)` and an `Arbitrary` of a type's own, reading a shrunk counterexample, the failure database (stage 0 lacks the database). |
 | G12 | Test a command-line tool ([written](guides/test-tool.md)) | Snapshots and transcripts, `--update` and reviewing the diff. |
 | G13 | Find and fix a borrow error ([written](guides/borrow-errors.md)) | Reading E04xx diagnostics, `sisu explain-borrow`, `--defer-borrow` and the counterexample (Q-73, as for chapter 11). |
@@ -955,6 +957,7 @@ solutions and passing checks.
 | 18 | Stage 1's seventh round (R65 to R72) and the stage 0 round's decisions 500 to 508 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1.5): 2 codes in R17's tables, each with an entry (E0274, E0275), E0239's entry retired with the constant it named and the new texts of E0418, E0420, E0812, R0069 and R0103, 94 sessions blessed (86 changed by the rounds, 54 of them for the blocked tests' closures, 6 new, 2 given a command more) and 16 conformance expectations; black-box tests in `tests/*.sisu` (chapters 19 and 22, R13, R15, G12), a failed `expect` going on natively and the native schedulers, faults and `sim.always` (R15, G20, R16, D0134), the blocked tests' closures back in the prose (chapters 1 and 3, G26, X13, R5, R15, R16, R17), the trace's names of a trait's impl methods (R8, R11), `lambda`, `f"..."`, `class`, `try:` and `go f()` (R19, G2, G3, G4), the spelling fixes in brackets and after a value (R19, G3), E0274 (chapter 14, R3) and E0275 (R13), the derive diagnostics at the derive (chapter 25, R12, R14, G21, G7, R17's E0347, E0235 and E0608) and the audit's names and heading (chapter 18, R16, G32) taught with checked examples; the findings at 135 (18 settled, 4 narrowed, 7 new), every check passing |
 | 19 | Stage 1's eighth round (R73 to R78, decisions 520 to 525) and the stage 0 round's decisions 540 to 547 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1.5): 5 codes in R17's tables (E0132, E0276, R0154, R0155, D0136), 4 entries added (E0132, E0276, R0154, D0136), 24 sessions blessed (13 changed by the rounds, one of them given a command more, 3 others given commands more, 8 new) and 7 conformance expectations with 6 new; test names as fixed text and E0132 (chapter 19, R15), a child module behind an import and a local that hides a module (R13, R17's E0304), the dev-dependency rule and E0276 (R13), literals beside `BigInt` and `Decimal` (chapter 24, R2), the explicit discriminant's E0900 (R2, R3, R14, R20), `expect`'s own report (chapter 19, R15), `sisu run --native --scheduler` (R16, G20, G14, chapter 20), native debug builds checking raw memory (chapter 27, G19, G20, R16), D0136 (G27, R16), the regex messages (G8), the eighth rounding mode (chapter 24), and the new notes and fixes of E0306 (chapter 3), E0117 and `else as e` (chapter 22, R17), E0201, E0304, E0342, E0405, E0438 (R17, chapter 7, G13), E0369 (R11), E0305 (R19) and of a template's instance (R12, X7, chapter 25) taught with checked examples; the findings at 118 (20 settled, 4 narrowed, 3 new), every check passing |
 | 20 | Stage 1's ninth round (R79 to R94, decisions 580 to 595) and the stage 0 round's decisions 560 to 567 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1.5): 1 code in R17's tables, with its entry (W0027), 20 sessions blessed (12 changed by the rounds, one of them given a command more, 4 changed with their examples, 4 new) and 22 conformance expectations, 13 of them new, one retired with the program it checked (chapter 5's slice made a worksheet); `sisu lint` for unused imports and `sisu fmt` keeping them (R16, R13, R1, chapter 17), the REPL and worksheets on stage 1 (R16, R4, chapter 5, X9), sized shifts keeping their type (chapter 24, R2, R4), `expect` with a message and the assertion's evaluated call (chapter 19, R15, R5), the `@refines` test at its attribute (chapter 19, R15), a hole reached at compile time (R12), the edition (R13, chapter 28), the inferred error set of a scope's body (R8), the new texts and notes of E0335, E0402, E0428, E0204 and E0124 (chapters 16, 17, 20 and 26, R1, R2, R9, R13, R17), a field's `ty` in a derive (R12, G21), the native checks of pointers to variables and of C's memory (chapter 27, G19, R16), the consumers of iterators that are `pure` (chapter 18), `DateTime`'s parts (chapter 21), `FakeNet`'s scripts (G10) and `std.log`'s `Logger` (G28, chapter 21) taught with checked examples; the findings at 104 (17 settled, 6 narrowed, 3 new), every check passing |
+| 21 | The stage 0 round's decisions 620 to 627 in the manual: the features they made teachable, every changed session reviewed, the findings checked again | done (1): no code added to the catalog, 3 sessions blessed (2 changed by the round, `sisu help`'s list of stage 1's commands and the doc examples of `std.time`, and 1 new) and 4 conformance expectations, all new, with G10's refused connection matched as `Network(Refused(_))`; the bit methods (chapter 24 with exercise 24.6, chapter 25's exercise 25.4, R2, R4), `Instant` and `Zone` (chapter 21, G9, R2, R10), `HttpError`'s `Network(cause)` and `Interrupted(cause)` (G10, R10), the REPL and worksheets on stage 1's own runs with `<input>` and `<repl>` and `:why` from stage 1's trees (R16) and `sisu help`'s list with `parse --shape` (R16) taught with checked examples; the findings at 102 (4 settled, 2 narrowed, 2 new), every check passing |
 | | Total | about 160 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -970,7 +973,7 @@ stage 0 does, and in parentheses the page whose writing found it (a
 chapter by its number, a reference page, guide or explanation by its
 letter and number, "the maintenance round" for step 13). A finding that
 the rounds R10 to R94 of [stage 1's rules](../compiler/stage1/RULES.md),
-or the decisions 354 to 595 of the driver, the runtime and the test
+or the decisions 354 to 627 of the driver, the runtime and the test
 runner in the [architecture notes](../compiler/docs/architecture.md),
 settled is no longer listed; each was checked against the compiler
 before it went. An item marked "assigned to stage 1" or "assigned to
@@ -978,7 +981,7 @@ stage 0" is one that the compiler's rounds in progress have taken on.
 The last group holds the diagnostics that lack a fix or mislead,
 whatever their area.
 
-The list holds 104 findings in ten groups. The rounds R11 to R26
+The list holds 102 findings in ten groups. The rounds R11 to R26
 settled 41 that the writers recorded (R24 alone 14, R25 9, R16 5),
 stage 1's third round, R27 to R36, with the decisions 354 to 360,
 settled 22 more (R33 alone 4, decision 357 3), and its fourth round,
@@ -1003,7 +1006,9 @@ each), and its ninth round, R79 to R94, with the decisions 580 to 595
 and the stage 0 round's decisions 560 to 567, settled 17 (R88 2, R79
 to R87, R89 to R91, R93 and R94 one each, and decision 567 one) and
 narrowed six more (R92, R94, the decisions 560 and 561 together, and
-564, 565 and 566 one each); 12 were
+564, 565 and 566 one each), and the stage 0 round's decisions 620 to
+627 settled 4 (decision 622 2, the decisions 624 and 627 one each) and
+narrowed two more (the decisions 623 and 626); 12 were
 corrections to this
 plan, its conventions or its tools, now made where they belong, and a
 finding that several pages recorded is one item that names each page;
@@ -1012,8 +1017,9 @@ manual against the third round, 11 from step 15, which checked it
 against the fourth, 8 from step 16, which checked it against the
 fifth, 4 from step 17, which checked it against the sixth, 7 from
 step 18, which checked it against the seventh, 3 from step 19,
-which checked it against the eighth, and 3 from step 20, which checked
-it against the ninth.
+which checked it against the eighth, 3 from step 20, which checked
+it against the ninth, and 2 from step 21, which checked it against the
+stage 0 round's decisions 620 to 627.
 
 ### Syntax and names
 
@@ -1044,7 +1050,7 @@ it against the ninth.
 - A field assigned through a `Shared` is E0341, whose message says that it is "not declared with `var`", also when the binding is a `var`; only its note says that a shared value changes through a `Cell` or a `Mutex` inside it (chapter 13).
 - A `Weak` is not `Copy`, so a `Cell[list[Weak[T]]]` is read by `replace` and set back (chapter 13).
 - A `CString`'s `as_ptr()` passed to a foreign function stops the interpreter with "a pointer to a value that no longer exists (`valid`)", though the `CString` lives across the call, and the native backend does not compile `mem.slice.as_ptr` of a `u8` (chapter 27, G19).
-- A native debug build checks a pointer by its address, not by the borrow it came from: a write through a pointer made from a shared borrow passes when a `mut` borrow also made a pointer to an overlapping place, a pointer into a frame that has returned passes when a later call of the same depth covers its stack, and a reference read after a drop through the pointer goes unchecked, where the interpreter stops each (chapter 27; assigned to stage 0).
+- A native debug build checks a pointer by its address, not by its provenance, the borrow it came from: a write through a pointer made from a shared borrow passes when a `mut` borrow also made a pointer to an overlapping place, a pointer into a frame that has returned passes when a later call of the same depth covers its stack, and a reference read after a drop through the pointer goes unchecked, where the interpreter stops each; decision 626 made the checks faster and left provenance out (chapter 27; pointer provenance assigned to stage 0).
 - `@no_alloc`, `@no_block` and `@stack(...)` compile without a word and check nothing, and the allocators are missing: `list.with_allocator` is E0351 and `try_push` E0304 (chapter 27).
 
 ### Errors
@@ -1089,10 +1095,10 @@ it against the ninth.
 - A `dict[String, V]` is looked up with a `String`, so a `str` key, `recipes.get(dish)`, is E0300 whose fix is `.to_string()`, an allocation for each lookup (chapters 10 and 20, G2).
 - `prices.get("bun") == Some(280)`, with `prices` a `dict[String, int]`, is E0300 ("expected `ref int`, found `int`"), since `get` gives an optional reference, with no fix; `prices["bun"] == 280` works (chapter 19).
 - The iterator adapters (`map`, `filter`, `take`, `skip`, `enumerate`) are not `pure`, so a `pure` function maps with a loop or a comprehension; the consumers that take no function, `count`, `nth`, `collect`, `sum` and `join`, are (chapter 18; assigned to stage 1).
-- The sized integers have no `truncate_to` and no narrowing methods of their own (E0304), no `MAX` or `MIN` (E0351), and no `count_ones`, `leading_zeros` or `rotate_left` (E0304), which a checksum reaches for (chapter 24; the bit methods assigned to stage 0).
+- The sized integers have no `truncate_to` and no narrowing methods of their own (E0304), so a `u32` is narrowed through `to_int()`, and no type has its limits, `MAX` or `MIN` (E0351) (chapter 24, R2; assigned to stage 0).
 - `cli.help_text[T]()` leaves out the fields' `##` comments, so a tool's help says what kind of value an option takes and not what it is for (G6).
-- There is no `Instant` and no time zone, which 11 lists for `std.time` (G9, chapter 21).
-- `HttpError.Network(message)` holds the `NetError` as text, so a client cannot tell a refused connection from a closed one (G10).
+- An `Instant` on the host's clock is the system's time, which a change of the system's clock moves, since `ClockOps` reads no monotonic time; `Zone.named` knows 52 zones, each with today's rules, which it gives an earlier year too, and the tz database with each zone's history, `std.x.tzdata` of 11, is not written (G9, chapter 21).
+- A `Zone`'s `Debug` form, which a worksheet shows for a `let`, writes its private fields, the rules among them as `Change(month=3, week=5, weekday=0, seconds=10800)`, so chapter 21 shows a zone in a program rather than a worksheet (chapter 21).
 - `json.decode`'s `Mismatch` writes the expected type with an article, `expected="a `Hour`"`, as R68 took out of the compiler's messages (G7).
 
 ### Tooling and the driver
@@ -1104,13 +1110,11 @@ it against the ninth.
 - The native executable of a ten-line program is 17.5 MB in both profiles, links dynamically to the C library, `libm` and `libgcc_s`, and keeps its debug information, where [12](../proposal/12-interop-and-targets.md#binary-size-and-startup) links statically and plans dead-code elimination and a `release-size` profile (chapter 27, G20, R22).
 - 12 chooses a runtime profile "in the manifest" without naming the key, and stage 0 has none, so `runtime = "single"` in `[package]` is W0005, and no fact of `target` names the profile (R22).
 - `sisu lint` of a `from` import of a name the module lacks reports the E0204 and then W0027 for the same name, "`lerp` is imported and not used in this file", whose fix removes it, though the name was meant to be used (R16).
-- `sisu help` says that the front end is stage 1's for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens` and `parse`, and leaves out `repl` and `ws`, which decision 563 moved to stage 1 (R16).
 - A worksheet's expression statement whose value is an optional value or a result, `"sauna".find("u")`, is E0318 ("this `int?` is not used"), so a worksheet shows such a value only in a `let` (chapter 6, R16).
 - `sisu run --stats` prints scheduling latencies that differ between runs, so only `--stats stack-depth` can be shown (chapter 19, G27).
 - The interval that `sisu bench` reports is one run's, so on a busy machine two runs of one benchmark gave 100.3 to 110.2 µs and 134.1 to 184.7 µs (G27).
 - The grammar of the architecture notes, "Parsing and the syntax tree", which stage 1's parser repeats in its `##!` comments, is a sketch without `trait_def`, `suite_def`, `bench_def`, `extern_block`, parameters, generic parameters, `where` clauses, visibility, `select`, `yield`, `unsafe:`, `comptime` statements, contracts or `expect`; R20 is written from the parser itself, and nothing checks either text against it (R20).
 - [00](../proposal/00-vision-and-principles.md#who-sisu-is-not-for-yet) ("Anyone who needs it today. There is no compiler.") and [14](../proposal/14-non-goals.md#not-finished) ("There is no compiler.") predate stage 0 (X1).
-- `sisu parse --shape` accepts a test whose name holds `{NAME}` or `{len(xs)}`, which `sisu fmt` refuses as E0132, so the conformance runner's check that such a file formats fails, and a `.unformatted` does not excuse it; stage 1's own `parse --shape` refuses it (R94), and the driver still asks the Rust front end; braces that hold a comma, `{60, 80}`, are refused by both (chapter 19; assigned to stage 0).
 - A dependency with `when` cannot be imported by code that builds on every target: `@cfg(target.os == "windows")` before the import is E0266, and an import stands outside the reach of `if comptime`, so E0275 leaves a program no way to use the dependency where it is built; 09 does not say how code reaches a conditional dependency (R13, R17).
 
 ### Diagnostics without fixes

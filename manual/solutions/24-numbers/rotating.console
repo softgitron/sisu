@@ -1,0 +1,33 @@
+$ sisu test rotating.sisu
+warning[W0001]: typed hole `rotating` of type `u32`
+  --> rotating.sisu:14:12
+   |
+14 |     return todo("rotating")
+   |            ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `odd_parity` of type `bool`
+  --> rotating.sisu:18:12
+   |
+18 |     return todo("odd_parity")
+   |            ^^^^^^^^^^^^^^^^^^
+
+test "the hash of a short text" ... blocked by todo("rotating")
+test "the bits that leave the top come back at the bottom" ... blocked by todo("rotating")
+test "parity" ... blocked by todo("odd_parity")
+
+test "the hash of a short text" ... blocked by todo("rotating")
+what the test printed:
+  in scope at the typed hole `todo("rotating")`:
+    data = b""
+
+test "the bits that leave the top come back at the bottom" ... blocked by todo("rotating")
+what the test printed:
+  in scope at the typed hole `todo("rotating")`:
+    data = b"sauna and sisu"
+
+test "parity" ... blocked by todo("odd_parity")
+what the test printed:
+  in scope at the typed hole `todo("odd_parity")`:
+    data = b""
+
+0 passed, 0 failed, 3 blocked

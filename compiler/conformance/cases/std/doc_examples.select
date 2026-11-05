@@ -29,6 +29,8 @@ test "std.core/i8.to_bits (doc example)" ... ok
 test "std.core/i8.count_ones (doc example)" ... ok
 test "std.core/int.to_bits (doc example)" ... ok
 test "std.core/int.count_ones (doc example)" ... ok
+test "std.core/u8.truncate_to (doc example)" ... ok
+test "std.core/u64.truncate_to (doc example)" ... ok
 test "std.collections/Deque (doc example)" ... ok
 test "std.collections/Deque.pop_back (doc example)" ... ok
 test "std.collections/Deque.get (doc example)" ... ok
@@ -173,4 +175,4 @@ test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
-175 passed, 0 failed, 0 blocked
+177 passed, 0 failed, 0 blocked

@@ -1,0 +1,33 @@
+##! Exercise 24.6, a hash that turns its bits. Kind: write. Level: 2.
+##!
+##! A rotating hash mixes each byte of its data into a `u32`: it turns the
+##! hash's bits 5 places to the left, the bits that leave the top coming
+##! back in at the bottom, and then flips the bits that the byte has set.
+##! A parity bit says whether data has an odd number of bits set, so that
+##! a reader of the data can tell that one bit changed. Write the bodies
+##! of `rotating` and `odd_parity` so that every test passes. Run the
+##! tests with `sisu test rotating.sisu`. The hints are in chapter 24 of
+##! the tutorial, under "Exercise 24.6: a hash that turns its bits".
+
+## The rotating hash of `data`, starting from 0.
+def rotating(data: bytes) -> u32:
+    return todo("rotating")
+
+## Whether `data` has an odd number of bits set.
+def odd_parity(data: bytes) -> bool:
+    return todo("odd_parity")
+
+test "the hash of a short text":
+    assert rotating(b"") == 0
+    assert rotating(b"a") == 0x61
+    assert rotating(b"ab") == 0xC42
+
+test "the bits that leave the top come back at the bottom":
+    assert rotating(b"sauna and sisu") == 0x610C29E6
+    assert rotating(b"\xff\xff\xff\xff\xff\xff\xff") == 0x318C6321
+
+test "parity":
+    assert not odd_parity(b"")
+    assert odd_parity(b"\x07")
+    assert not odd_parity(b"\x03\x03")
+    assert odd_parity("sisu".encode())

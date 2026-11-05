@@ -4,7 +4,7 @@ The runtime of natively compiled Sisu is being written in Sisu, piece by
 piece, as D-086 orders ([15](../../proposal/15-decision-log.md)); this
 package holds what is written so far, and `crates/sisu-rt`, the runtime
 in Rust, the rest. `docs/architecture.md` ("Stage 2", "The runtime in
-Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422, 423, 464, 469, 506, 542, 562 and 625) describes it, and
+Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422, 423, 464, 469, 506, 542, 562, 625, 645 and 646) describes it, and
 `docs/port-debt.md` ("The runtime in Sisu") lists what is left.
 
 ## What it is
@@ -23,7 +23,8 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 | Module | What |
 |---|---|
 | `lib.sisu` | the exports, `==` of two texts' bytes, and the text entries interpolation calls most (their bodies here, a call fewer) |
-| `dispatch.sisu` | the intrinsics of lists, dicts and sets, decoded from their descriptors and done here (decision 625): the runtime in Rust reads the intrinsic's number alone and hands the call over; a panic, a drop and a list's view are asked of it |
+| `dispatch.sisu` | the intrinsics of lists, dicts, sets and slices, a list's and a set's iterator among them, decoded from their descriptors and done here (decisions 625 and 646): the runtime in Rust reads the intrinsic's number alone and hands the call over; a panic, a drop and a list's view are asked of it; and `in` as an operator, a table's literal and the generated code's inline lookups, which the runtime in Rust's entries hand over (decision 646) |
+| `queue.sisu` | the scheduler's queues: the run queue, the waiters under their keys and the timers, records of one to three words in a list's layout, whose blocks the runtime in Rust gives and keeps (decision 645) |
 | `types.sisu` | the program's type table, as the runtime in Rust lays it out in memory when the program starts (`crates/sisu-rt/src/desc.rs`) |
 | `host.sisu` | the runtime in Rust's functions this code calls, and C's |
 | `value.sisu` | equality, order, the structural hash (a `Shared` followed to its value, decision 464), `.copy()`, the drop and the count of a copy's handles (a function value's environment in a heap cell copied whole, decision 382), each a walk of a value by its type's parts |

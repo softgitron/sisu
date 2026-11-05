@@ -111,6 +111,12 @@ On other types the operators call the operator traits, `Add`, `Sub`,
 (E0310 otherwise, [R17](diagnostics.md#e0310); D-022). `String`
 implements `Add` for joining text.
 
+What the operators leave to methods, every integer type has as methods:
+`count_ones()`, `leading_zeros()` and the other counts, `rotate_left(n)`
+and `rotate_right(n)`, which bring back the bits a shift loses, and
+`swap_bytes()`, `to_be()` and `to_le()` for the order of the bytes
+([R2](types.md#integers)).
+
 <!-- file: examples/reference-expressions/arithmetic.sisu -->
 ```sisu
 # The arithmetic and bitwise operators on integers and floats.

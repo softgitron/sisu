@@ -30,8 +30,11 @@
 //! diagnostics with the input's places drawn in it; `sir --worksheet
 //! FILE` the worksheet's SIR with its statements marked. One run of stage
 //! 1 for each input. `:why NAME` reads the inputs' trees from stage 1's
-//! `parse --tree`. An older stage 1, or `--front-end=rust`, leaves them to
-//! the Rust front end, which builds the same programs.
+//! `parse --tree`; a stage 1 of 0.9.0 is told where the program stands
+//! and what it is called (`--dir`, `--name`), and `:why` reads its `parse
+//! --bindings` instead (decision 640). An older stage 1, or
+//! `--front-end=rust`, leaves them to the Rust front end, which builds the
+//! same programs.
 //!
 //! A worksheet (`sisu ws FILE`, Q-48) is a script run top to bottom, with
 //! each top-level statement's value and printed output written after it
@@ -139,7 +142,14 @@ impl Checker {
     /// session's program `session` with `input` after it, or with the file
     /// `load` loaded into it (`--load`): the SIR and OUT, or the
     /// diagnostics stage 1 drew, the input's in its text.
-    fn repl(&self, session: &str, input: &str, load: Option<&str>, place: &Place, host: &mut dyn Host) -> Built {
+    fn repl(
+        &self,
+        session: &str,
+        input: &str,
+        load: Option<&str>,
+        place: &Place,
+        host: &mut dyn Host,
+    ) -> Built {
         let Checker::Stage1 { stage1, dir, options } = self else { return Err(String::new()) };
         let written = |name: &str, text: &str| -> Result<String, String> {
             let path = dir.join(name);
@@ -192,8 +202,10 @@ impl Checker {
     fn outline(&self, input: &str, host: &mut dyn Host) -> Option<Outline> {
         let text = format!("{SHEBANG}{input}\n");
         match self {
-            Checker::Rust => Syntax::read(text.clone(), &sisu_parser::parse(FileId(0), &text).tree.dump(false))
-                .map(|t| Outline::of(&t)),
+            Checker::Rust => {
+                Syntax::read(text.clone(), &sisu_parser::parse(FileId(0), &text).tree.dump(false))
+                    .map(|t| Outline::of(&t))
+            }
             Checker::Stage1 { stage1, dir, options } => {
                 let path = dir.join("tree.sisu");
                 std::fs::write(&path, &text).ok()?;
@@ -750,7 +762,13 @@ impl Session {
     /// The session's first `upto` inputs with `entry` after them, built.
     fn build(&self, upto: usize, entry: &Entry, host: &mut dyn Host) -> Built {
         if !self.rust() {
-            return self.checker.repl(&self.kept(upto), &entry.text, entry.load.as_deref(), &self.place, host);
+            return self.checker.repl(
+                &self.kept(upto),
+                &entry.text,
+                entry.load.as_deref(),
+                &self.place,
+                host,
+            );
         }
         let (program, at) = self.program(upto, Some(&entry.source));
         match rust_compile(SESSION, &program, &self.cwd, &[], host) {
@@ -1282,7 +1300,8 @@ mod tests {
     /// 640): the same outline either way.
     #[test]
     fn printed_bindings_are_read_as_the_tree_gives_them() {
-        let text = "#!/usr/bin/env sisu\nlet (a, b) = (f(x), 2)\nseen.push(a)\ndef g():\n    pass\n".to_string();
+        let text =
+            "#!/usr/bin/env sisu\nlet (a, b) = (f(x), 2)\nseen.push(a)\ndef g():\n    pass\n".to_string();
         let dump = sisu_parser::parse(super::FileId(0), &text).tree.dump(false);
         let tree = super::Syntax::read(text.clone(), &dump).expect("a tree");
         let from_tree = super::Outline::of(&tree);

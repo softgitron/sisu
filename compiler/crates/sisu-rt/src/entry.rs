@@ -560,7 +560,7 @@ unsafe fn binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, b: *mut u8, tb: u32
                     _ => c.is_ge(),
                 },
             },
-            ValueOp::In => crate::intrinsics::contains(b, tb, a, ta),
+            ValueOp::In => crate::bridge::contains(b, tb, a, ta),
             ValueOp::Concat => {
                 let x = value::text(a, ta).unwrap_or(&[]);
                 let y = value::text(b, tb).unwrap_or(&[]);
@@ -594,14 +594,7 @@ extern "C" fn sisu_rt_grow(p: *mut u8, bytes: i64) -> *mut u8 {
 unsafe extern "C" fn sisu_rt_table_find(t: *mut u8, key: *mut u8, kt: u32, value: u32) -> u64 {
     let (t, key) = (t as usize, key as usize);
     // SAFETY: as the caller guarantees.
-    system(|| unsafe {
-        let table = crate::dict::table(t as *mut u8);
-        match table.position(key as *mut u8, kt) {
-            Some(i) if value != 0 => table.val_at(i) as u64,
-            Some(_) => 1,
-            None => 0,
-        }
-    })
+    system(|| unsafe { crate::bridge::table_find(t as *mut u8, key as *mut u8, kt, value != 0) })
 }
 
 /// Room for one more element of `size` bytes in the list at `l`: a push
@@ -714,42 +707,7 @@ unsafe extern "C" fn intrinsic_call(desc: *const u32, ret: *mut u8, args: *const
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
-    system_status(|| unsafe { table(t, items, n, out) })
-}
-
-/// # Safety
-/// As `sisu_rt_table`.
-unsafe fn table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
-    let (k, v) = match ty(t).kind {
-        Kind::Dict(k, v) => (k, v),
-        Kind::Set(e) => (e, u32::MAX),
-        _ => rt::internal("a table literal of an unknown type"),
-    };
-    let made = crate::dict::Table::new(k, v);
-    // SAFETY: the table was just made.
-    let table = unsafe { &mut *made };
-    let (ksize, vsize) = (table.ksize() as usize, table.vsize() as usize);
-    let mut status = abi::OK;
-    // SAFETY: the entries are in `items`.
-    unsafe {
-        for i in 0..n as usize {
-            let key = items.add(i * (ksize + vsize));
-            let val = key.add(ksize);
-            match table.position(key, k) {
-                Some(j) => {
-                    status = value::after_part(status, value::drop_value(table.val_at(j), v));
-                    mem::copy(table.val_at(j), val, vsize);
-                    status = value::after_part(status, value::drop_value(key, k));
-                }
-                None => {
-                    let j = table.push_key(key);
-                    mem::copy(table.val_at(j), val, vsize);
-                }
-            }
-        }
-        mem::set_word(out, 0, crate::dict::into_word(made));
-    }
-    status
+    system_status(|| unsafe { crate::bridge::table_literal(t, items, n, out) })
 }
 
 /// The address of the value the dict at `d` holds for the key at `key`

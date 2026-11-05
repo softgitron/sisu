@@ -7,5 +7,7 @@ error[D0113]: `std.nothing` is not a module of the standard library; `sisu doc -
 $ sisu test --std --filter std.time greet.sisu
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-2 passed, 0 failed, 0 blocked
-161 not selected
+test "std.time/Instant (doc example)" ... ok
+test "std.time/Zone (doc example)" ... ok
+4 passed, 0 failed, 0 blocked
+172 not selected

@@ -22,13 +22,6 @@ pub(crate) struct Table {
 }
 
 impl Table {
-    /// A new table of keys of type `key` and values of type `val`
-    /// (`u32::MAX`, `()`, for a set's).
-    pub(crate) fn new(key: u32, val: u32) -> *mut Table {
-        let val = if crate::rt::ty_checked(val).is_some() { i64::from(val) } else { -1 };
-        crate::bridge::table_new(i64::from(key), val).cast::<Table>()
-    }
-
     fn addr(&self) -> *mut u8 {
         (self as *const Table).cast_mut().cast()
     }
@@ -45,11 +38,6 @@ impl Table {
     /// The bytes of a key.
     pub(crate) fn ksize(&self) -> u64 {
         self.part(TablePart::KeyBytes)
-    }
-
-    /// The bytes of a value (0 for a set's).
-    pub(crate) fn vsize(&self) -> u64 {
-        self.part(TablePart::ValueBytes)
     }
 
     /// The address of entry `i`'s value.
@@ -88,10 +76,6 @@ impl Table {
 pub(crate) unsafe fn table<'a>(p: *mut u8) -> &'a mut Table {
     // SAFETY: the word is the address of the table.
     unsafe { &mut *(crate::mem::word(p, 0) as *mut Table) }
-}
-
-pub(crate) fn into_word(t: *mut Table) -> u64 {
-    t as u64
 }
 
 /// The structural hash of the value at `p` (decision 256), as the

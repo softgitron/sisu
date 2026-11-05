@@ -1403,6 +1403,8 @@ intrinsics! {
     TestSimFaultError = "test.sim_fault_error",
     // `sim.always`, natively (decision 503).
     SimAlways = "sim.always",
+    // A clock's monotonic reading (decision 643).
+    ClockMonotonic = "clock.monotonic",
 }
 
 impl Intrinsic {

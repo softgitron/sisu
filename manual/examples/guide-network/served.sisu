@@ -32,6 +32,6 @@ test "the client and the server agree"(net: Net):
 
 test "a client with no server to ask"(net: Net):
     let refused = match weather(net, "Oulu"):
-        case Err(Network(_)): True
+        case Err(Network(Refused(_))): True
         case _: False
     assert refused

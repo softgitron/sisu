@@ -1157,4 +1157,5 @@ pub pure def intrinsic_names() -> list[str]:
         "test.sim_fault",
         "test.sim_fault_error",
         "sim.always",
+        "clock.monotonic",
     ]

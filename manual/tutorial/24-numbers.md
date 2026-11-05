@@ -125,6 +125,49 @@ since few readers know which binds first. A comparison binds less
 tightly than `&`, as in Python, so the parentheses of `(mode & WRITE)
 != 0` are there for the reader.
 
+Every integer type also has methods that count and turn its bits:
+
+<!-- file: examples/24-numbers/bit_methods.sisu -->
+```sisu
+# The bit methods count, find and turn the bits of an integer.
+def main():
+    let mode: u8 = 0b0110_1000
+    print("{mode.count_ones()} set, {mode.count_zeros()} clear")
+    print("{mode.leading_zeros()} above, {mode.trailing_zeros()} below")
+    print("{mode.rotate_left(4):08b} {mode.rotate_right(1):08b}")
+    let port: u16 = 0x1F90
+    print("{port:04x} {port.swap_bytes():04x} {port.to_be():04x}")
+    let reading: i8 = -3
+    print("{reading.to_bits():08b} {i8.from_bits(0b1111_1101u8)}")
+    print("{reading.count_ones()} {(0).leading_zeros()}")
+```
+
+<!-- output: examples/24-numbers/bit_methods.out -->
+```text
+3 set, 5 clear
+1 above, 3 below
+10000110 00110100
+1f90 901f 901f
+11111101 -3
+7 64
+```
+
+- `count_ones()` and `count_zeros()` count the bits that are set and
+  those that are not; `leading_zeros()` and `trailing_zeros()` count
+  the zeros above the highest bit that is set and below the lowest. Each
+  gives an `int`, and the width of the type for 0, so 64 for an `int`.
+- `rotate_left(n)` and `rotate_right(n)` turn the bits: those that
+  leave one end come back at the other, where a shift loses them. The
+  amount is any `int`, taken modulo the width.
+- `swap_bytes()` reverses the order of the bytes, and `to_be()` and
+  `to_le()` give the bytes in big-endian and little-endian order, for a
+  format that fixes it. Every target of stage 0 is little-endian, so
+  `to_be()` swaps and `to_le()` changes nothing.
+- A signed integer's `to_bits()` gives its bits, its two's complement,
+  as the unsigned type of the same width: -3 as an `i8` is 253, the
+  `u8` `0b1111_1101`. `i8.from_bits(...)` turns them back. The bit
+  methods of a signed type count those bits, so -3 has 7 ones.
+
 ## Arithmetic that traps, wraps, saturates or asks
 
 Every integer type has four kinds of arithmetic, and you write the one
@@ -1008,6 +1051,114 @@ copy too, since the loop goes on changing it.
 When every test passes, compare your answer with
 [`manual/solutions/24-numbers/mortgage.sisu`](../solutions/24-numbers/mortgage.sisu).
 
+## Exercise 24.6: a hash that turns its bits
+
+Open
+[`manual/exercises/24-numbers/rotating.sisu`](../exercises/24-numbers/rotating.sisu):
+
+<!-- file: exercises/24-numbers/rotating.sisu -->
+```sisu
+##! Exercise 24.6, a hash that turns its bits. Kind: write. Level: 2.
+##!
+##! A rotating hash mixes each byte of its data into a `u32`: it turns the
+##! hash's bits 5 places to the left, the bits that leave the top coming
+##! back in at the bottom, and then flips the bits that the byte has set.
+##! A parity bit says whether data has an odd number of bits set, so that
+##! a reader of the data can tell that one bit changed. Write the bodies
+##! of `rotating` and `odd_parity` so that every test passes. Run the
+##! tests with `sisu test rotating.sisu`. The hints are in chapter 24 of
+##! the tutorial, under "Exercise 24.6: a hash that turns its bits".
+
+## The rotating hash of `data`, starting from 0.
+def rotating(data: bytes) -> u32:
+    return todo("rotating")
+
+## Whether `data` has an odd number of bits set.
+def odd_parity(data: bytes) -> bool:
+    return todo("odd_parity")
+
+test "the hash of a short text":
+    assert rotating(b"") == 0
+    assert rotating(b"a") == 0x61
+    assert rotating(b"ab") == 0xC42
+
+test "the bits that leave the top come back at the bottom":
+    assert rotating(b"sauna and sisu") == 0x610C29E6
+    assert rotating(b"\xff\xff\xff\xff\xff\xff\xff") == 0x318C6321
+
+test "parity":
+    assert not odd_parity(b"")
+    assert odd_parity(b"\x07")
+    assert not odd_parity(b"\x03\x03")
+    assert odd_parity("sisu".encode())
+```
+
+<!-- output: solutions/24-numbers/rotating.console -->
+```console
+$ sisu test rotating.sisu
+warning[W0001]: typed hole `rotating` of type `u32`
+  --> rotating.sisu:14:12
+   |
+14 |     return todo("rotating")
+   |            ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `odd_parity` of type `bool`
+  --> rotating.sisu:18:12
+   |
+18 |     return todo("odd_parity")
+   |            ^^^^^^^^^^^^^^^^^^
+
+test "the hash of a short text" ... blocked by todo("rotating")
+test "the bits that leave the top come back at the bottom" ... blocked by todo("rotating")
+test "parity" ... blocked by todo("odd_parity")
+
+test "the hash of a short text" ... blocked by todo("rotating")
+what the test printed:
+  in scope at the typed hole `todo("rotating")`:
+    data = b""
+
+test "the bits that leave the top come back at the bottom" ... blocked by todo("rotating")
+what the test printed:
+  in scope at the typed hole `todo("rotating")`:
+    data = b"sauna and sisu"
+
+test "parity" ... blocked by todo("odd_parity")
+what the test printed:
+  in scope at the typed hole `todo("odd_parity")`:
+    data = b""
+
+0 passed, 0 failed, 3 blocked
+```
+
+<details>
+<summary>Hint 1</summary>
+
+Check the second byte by hand: `0x61` turned 5 places to the left is
+`0xC20`, and flipping the bits of `0x62` in it gives `0xC42`. The bits
+that leave the top of the `u32` are what a shift would lose.
+
+</details>
+
+<details>
+<summary>Hint 2</summary>
+
+A byte of `data` is a `u8`, and the hash a `u32`: a `let` with the type
+`u32` widens the byte. The section "Working with bits" has a method
+that turns the bits and one that counts them.
+
+</details>
+
+<details>
+<summary>Hint 3</summary>
+
+The parity is the count of the bits that are set in every byte, added
+up, and whether it is odd.
+
+</details>
+
+When every test passes, compare your answer with
+[`manual/solutions/24-numbers/rotating.sisu`](../solutions/24-numbers/rotating.sisu).
+
 ## What you learned
 
 - The sized integers `u8` to `u128` and `i8` to `i128` are for data
@@ -1016,6 +1167,9 @@ When every test passes, compare your answer with
   do not mix (E0310).
 - `&`, `|`, `^`, `~`, `<<` and `>>` work on the bits; a shift keeps the
   type of the value shifted, and a shift by the width panics.
+- `count_ones`, `leading_zeros`, `rotate_left`, `swap_bytes` and the
+  other bit methods count and turn the bits; a signed type's
+  `to_bits()` gives its two's complement as an unsigned type.
 - `+` traps, `+%` wraps, `+|` saturates, and `std.num`'s
   `checked_add` gives `None` where `+` would trap.
 - Conversions that lose information are methods: `to_u8()` gives

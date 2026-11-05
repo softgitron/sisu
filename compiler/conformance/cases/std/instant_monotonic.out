@@ -1,0 +1,5 @@
+host: forward True, since itself 0s
+test clock: Instant(5000ns), then 0.002s, monotonic 0.002005s
+own clock: 0.000000042s
+  before Clock.monotonic
+wrapped: 0.002005s

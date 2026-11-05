@@ -118,22 +118,29 @@ unsafe extern "C" {
     ) -> u8;
     fn sisu_rt_list_grow(ret: *mut u64, l: *const *mut u8, extra: *const i64, size: *const i64) -> u8;
     fn sisu_rt_list_reverse(ret: *mut u64, l: *const *mut u8, size: *const i64) -> u8;
-    fn sisu_rt_list_copies(
-        ret: *mut u64,
+    fn sisu_rt_table_literal(
+        ret: *mut i64,
         types: *const *const u64,
-        dst: *const *mut u8,
-        l: *const *mut u8,
-        e: *const i64,
-        lo: *const i64,
-        hi: *const i64,
+        t: *const i64,
+        items: *const *mut u8,
+        n: *const i64,
+        out: *const *mut u8,
     ) -> u8;
-    fn sisu_rt_list_contains(
+    fn sisu_rt_table_inline_find(
         ret: *mut u64,
         types: *const *const u64,
-        l: *const *mut u8,
-        e: *const i64,
+        p: *const *mut u8,
+        key: *const *mut u8,
+        kt: *const i64,
+        want_value: *const u64,
+    ) -> u8;
+    fn sisu_rt_contains(
+        ret: *mut u64,
+        types: *const *const u64,
+        c: *const *mut u8,
+        ct: *const i64,
         x: *const *mut u8,
-        tx: *const i64,
+        xt: *const i64,
     ) -> u8;
     fn sisu_rt_list_sort(ret: *mut u64, types: *const *const u64, l: *const *mut u8, e: *const i64) -> u8;
     fn sisu_rt_collection(
@@ -143,8 +150,6 @@ unsafe extern "C" {
         result: *const *mut u8,
         args: *const *const *mut u8,
     ) -> u8;
-    fn sisu_rt_table_new(ret: *mut *mut u8, types: *const *const u64, key: *const i64, val: *const i64)
-    -> u8;
     fn sisu_rt_table_lookup(
         ret: *mut i64,
         types: *const *const u64,
@@ -160,7 +165,6 @@ unsafe extern "C" {
     ) -> u8;
     fn sisu_rt_table_len(ret: *mut i64, tb: *const *mut u8) -> u8;
     fn sisu_rt_table_key_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
-    fn sisu_rt_table_value_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
     fn sisu_rt_table_value_at(ret: *mut *mut u8, tb: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_iter_next(
         ret: *mut i64,
@@ -431,35 +435,56 @@ pub(crate) unsafe fn list_reverse(l: *mut u8, size: u32) {
     }
 }
 
-/// Writes at `dst` a new list of copies of the elements from `lo` to `hi`
-/// of the list at `l`, of type `e`.
+/// A `dict` or `set` of type `t` from a literal's `n` entries, moved in
+/// from `items` (each the key's bytes, then the value's), its table's word
+/// written at `out`: the runtime in Sisu's (decision 646). The status of
+/// the drops of the keys given again.
 ///
 /// # Safety
-/// `l` must hold a list of elements of type `e`, `dst` have room for a
-/// list, and `lo <= hi <=` its length.
-pub(crate) unsafe fn list_copies(dst: *mut u8, l: *mut u8, e: u32, lo: u64, hi: u64) {
+/// `items` must hold `n` entries of the type's key and value, and `out`
+/// have room for a word.
+pub(crate) unsafe fn table_literal(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
     let types = crate::desc::base();
-    let (e, lo, hi) = (i64::from(e), lo as i64, hi as i64);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_copies(&mut ret, &types, &dst, &l, &e, &lo, &hi) } != abi::OK {
-        failed("list's slice");
+    let (t, n) = (i64::from(t), n as i64);
+    let mut status = 0i64;
+    // SAFETY: as the caller guarantees.
+    if unsafe { sisu_rt_table_literal(&mut status, &types, &t, &items, &n, &out) } != abi::OK {
+        failed("a table's literal");
     }
+    status as u8
 }
 
-/// Whether the list at `l`, of type `e`, holds an element equal to the
-/// value at `x` of type `tx`.
+/// The generated code's inline lookup of the key at `key`, of type `kt`, in
+/// the dict or set at `t` (decision 265): the value's address, for a
+/// `dict.get` (`value`), else 1, when the key is there; else 0 (the
+/// runtime in Sisu's, decision 646).
 ///
 /// # Safety
-/// `l` must hold a list of elements of type `e`, and `x` a value of type
-/// `tx`.
-pub(crate) unsafe fn list_contains(l: *mut u8, e: u32, x: *mut u8, tx: u32) -> bool {
+/// `t` must hold a dict or a set, and `key` a value of type `kt`.
+pub(crate) unsafe fn table_find(t: *mut u8, key: *mut u8, kt: u32, value: bool) -> u64 {
     let types = crate::desc::base();
-    let (e, tx) = (i64::from(e), i64::from(tx));
+    let (kt, value) = (i64::from(kt), u64::from(value));
+    let mut ret = 0u64;
+    // SAFETY: as the caller guarantees.
+    if unsafe { sisu_rt_table_inline_find(&mut ret, &types, &t, &key, &kt, &value) } != abi::OK {
+        failed("a table's lookup");
+    }
+    ret
+}
+
+/// `item in container`, the operator: whether the value at `c` of type
+/// `ct`, behind any references, holds the value at `x` of type `xt` (the
+/// runtime in Sisu's, decision 646).
+///
+/// # Safety
+/// `c` must hold a value of type `ct`, and `x` one of type `xt`.
+pub(crate) unsafe fn contains(c: *mut u8, ct: u32, x: *mut u8, xt: u32) -> bool {
+    let types = crate::desc::base();
+    let (ct, xt) = (i64::from(ct), i64::from(xt));
     let mut ret = 0u64;
     // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_contains(&mut ret, &types, &l, &e, &x, &tx) } != abi::OK {
-        failed("list's `in`");
+    if unsafe { sisu_rt_contains(&mut ret, &types, &c, &ct, &x, &xt) } != abi::OK {
+        failed("`in`");
     }
     ret != 0
 }
@@ -760,19 +785,6 @@ unsafe extern "C" fn sisu_rt_trace_retain(p: *mut u8) {
 
 // ------------------------------------------------------------------ tables
 
-/// A new table of a dict's keys of type `key` and values of type `val`, or
-/// of a set's elements (`val` -1), with no entries (the runtime in Sisu's
-/// `table.new`, decision 422): its address.
-pub(crate) fn table_new(key: i64, val: i64) -> *mut u8 {
-    let types = crate::desc::base();
-    let mut ret = std::ptr::null_mut();
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_table_new(&mut ret, &types, &key, &val) } != abi::OK {
-        failed("new table");
-    }
-    ret
-}
-
 /// The position of the entry of the table at `tb` whose key is the key at
 /// `k` of type `kt`, or -1.
 ///
@@ -806,7 +818,7 @@ pub(crate) unsafe fn table_push(tb: *mut u8, k: *mut u8) -> u64 {
 
 /// The parts of the table at `tb`'s header the runtime in Rust reads,
 /// through the runtime in Sisu's exports (decision 506): its number of
-/// entries, and the bytes of a key and of a value.
+/// entries and the bytes of a key.
 ///
 /// # Safety
 /// `tb` must be the address of a live table.
@@ -817,7 +829,6 @@ pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
         match part {
             TablePart::Len => sisu_rt_table_len(&mut ret, &tb),
             TablePart::KeyBytes => sisu_rt_table_key_bytes(&mut ret, &tb),
-            TablePart::ValueBytes => sisu_rt_table_value_bytes(&mut ret, &tb),
         }
     };
     if status != abi::OK {
@@ -831,7 +842,6 @@ pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
 pub(crate) enum TablePart {
     Len,
     KeyBytes,
-    ValueBytes,
 }
 
 /// The address of the value of entry `i` of the table at `tb`.
@@ -1090,6 +1100,7 @@ pub(crate) fn collects(id: u32) -> bool {
                 | I::ListSlice
                 | I::ListSliceMiddle
                 | I::ListContains
+                | I::ListIter
                 | I::ListJoin
                 | I::ListSort
                 | I::DictNew
@@ -1108,6 +1119,15 @@ pub(crate) fn collects(id: u32) -> bool {
                 | I::SetRemove
                 | I::SetContains
                 | I::SetIsEmpty
+                | I::SetIter
+                | I::ListAsSlice
+                | I::SliceToList
+                | I::SliceAt
+                | I::SliceGet
+                | I::SliceIsEmpty
+                | I::SliceSlice
+                | I::SliceCut
+                | I::SliceIter
         )
     )
 }

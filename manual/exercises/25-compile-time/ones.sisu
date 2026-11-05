@@ -28,6 +28,7 @@ test "the table":
     assert len(ONES) == 256
     assert ONES[0] == 0 and ONES[0b1011] == 3 and ONES[255] == 8
     assert all([ONES[b] == ones_in(b) for b in range(256)])
+    assert all([ONES[b] == b.count_ones() for b in range(256)])
 
 test "counting the bits of data":
     assert count_ones(b"") == 0

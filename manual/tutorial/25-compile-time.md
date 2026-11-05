@@ -993,6 +993,7 @@ test "the table":
     assert len(ONES) == 256
     assert ONES[0] == 0 and ONES[0b1011] == 3 and ONES[255] == 8
     assert all([ONES[b] == ones_in(b) for b in range(256)])
+    assert all([ONES[b] == b.count_ones() for b in range(256)])
 
 test "counting the bits of data":
     assert count_ones(b"") == 0
@@ -1063,6 +1064,11 @@ A byte of `data` is a `u8`, and a place in the table is an `int`; a
 `u8` widens to an `int`, or `to_int()` says so.
 
 </details>
+
+The test of the table checks it against `count_ones()` too, the method
+of every integer that counts its bits ([chapter
+24](24-numbers.md#working-with-bits)). The exercise counts them itself
+so that the compiler has a function of the program's own to run.
 
 When every test passes, compare your answer with
 [`manual/solutions/25-compile-time/ones.sisu`](../solutions/25-compile-time/ones.sisu).

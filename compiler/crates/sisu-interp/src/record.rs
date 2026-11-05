@@ -236,6 +236,11 @@ impl Host for Recorder<'_> {
         self.log("clock", "now_nanos".into(), v.to_string());
         v
     }
+    fn monotonic_nanos(&self) -> i128 {
+        let v = self.inner.monotonic_nanos();
+        self.log("clock", "monotonic_nanos".into(), v.to_string());
+        v
+    }
     fn virtual_time(&self) -> bool {
         let v = self.inner.virtual_time();
         self.log("clock", "virtual_time".into(), v.to_string());
@@ -812,6 +817,9 @@ impl Host for Replayer<'_> {
     fn now_nanos(&self) -> i128 {
         self.take("now_nanos".into()).map(|f| int(&f, 0)).unwrap_or(0)
     }
+    fn monotonic_nanos(&self) -> i128 {
+        self.take("monotonic_nanos".into()).map(|f| int(&f, 0)).unwrap_or(0)
+    }
     fn virtual_time(&self) -> bool {
         self.take("virtual_time".into()).is_some_and(|f| word(&f, 0) == "true")
     }
@@ -1045,6 +1053,9 @@ impl Host for Resume<'_> {
     }
     fn now_nanos(&self) -> i128 {
         resume_to!(self.now_nanos())
+    }
+    fn monotonic_nanos(&self) -> i128 {
+        resume_to!(self.monotonic_nanos())
     }
     fn virtual_time(&self) -> bool {
         resume_to!(self.virtual_time())

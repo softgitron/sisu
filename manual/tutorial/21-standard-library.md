@@ -194,10 +194,97 @@ t.day_of_year()  # => 309
 
 `weekday()` counts as ISO 8601 does, 1 for Monday, so the 5th of
 November 2026 is a Thursday, and `day_of_year()` counts from 1 on the
-1st of January. `second()` and `nanosecond()` give the rest. Time
-zones and an `Instant` for measuring are designed in
-[11](../../proposal/11-stdlib.md) and not in the library
-yet.
+1st of January. `second()` and `nanosecond()` give the rest.
+
+To measure how long something took, `std.time` has `Instant`, a
+reading of a clock:
+
+<!-- file: examples/21-standard-library/instant.sisu -->
+```sisu
+# An `Instant` reads the clock it is given, to measure how long work took.
+from std.time import Instant
+
+## How long `turns` turns of ten minutes in the sauna take, on `clock`.
+def timed(clock: Clock, turns: int) -> Duration ! TaskError:
+    let start = Instant.now(clock)
+    for _ in range(turns):
+        clock.sleep(Duration.minutes(10))?
+    return Ok(start.elapsed(clock))
+
+test "three turns take half an hour"(clock: TestClock):
+    assert timed(clock, 3) == Ok(Duration.minutes(30))
+
+test "two readings, and the time between them"(clock: TestClock):
+    let start = Instant.now(clock)
+    clock.advance(Duration.seconds(90))
+    let later = Instant.now(clock)
+    assert later > start
+    assert later.since(start) == Duration.seconds(90)
+    assert start + Duration.seconds(90) == later
+```
+
+<!-- output: examples/21-standard-library/instant.test -->
+```text
+test "three turns take half an hour" ... ok
+test "two readings, and the time between them" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+- `Instant.now(clock)` reads the clock it is given, so a function that
+  measures takes the clock as a parameter, and a test hands it the
+  test clock. `elapsed(clock)` is the time from the instant to the
+  clock's time now, and `later.since(start)` the time between two
+  readings, each a `Duration`.
+- Instants are ordered, and `+` and `-` move one by a `Duration`. An
+  instant is not a time of day: it prints as its nanoseconds.
+- On the test clock the readings are the same on every run, and a
+  recorded run replays them. On `sys.clock` they are the system's time,
+  so a change of the computer's clock moves them; stage 0 has no
+  monotonic clock that only goes forward.
+
+A `DateTime` is in UTC. A `Zone` of `std.time` gives the time that the
+clocks of a place show:
+
+<!-- file: examples/21-standard-library/zones.sisu -->
+```sisu
+# A `Zone` gives a place's offset from UTC and its wall clock at a moment.
+from std.time import Zone
+
+def main():
+    let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+    let summer = DateTime.parse("2026-07-01T12:00:00Z").expect("a time")
+    let winter = DateTime.parse("2026-01-15T12:00:00Z").expect("a time")
+    for t in [summer, winter]:
+        let hours = helsinki.offset_at(t).as_seconds() // 3600
+        let name = helsinki.abbreviation_at(t)
+        print("{t}: {helsinki.format(t)} {name}, UTC+{hours}")
+    print("at noon UTC it is {helsinki.local(winter).hour()} in Helsinki")
+    print(Zone.fixed(19800).format(summer))
+    print(Zone.utc().format(summer))
+    print(Zone.named("Mars/Olympus").is_err())
+```
+
+<!-- output: examples/21-standard-library/zones.out -->
+```text
+2026-07-01T12:00:00Z: 2026-07-01T15:00:00+03:00 EEST, UTC+3
+2026-01-15T12:00:00Z: 2026-01-15T14:00:00+02:00 EET, UTC+2
+at noon UTC it is 14 in Helsinki
+2026-07-01T17:30:00+05:30
+2026-07-01T12:00:00Z
+True
+```
+
+- `Zone.named(name)` takes a name of the tz database, such as
+  `Europe/Helsinki`, and gives `InvalidTime` for a name it does not
+  know. It knows 52 zones, each with the rules of its daylight time as
+  they stand today, which it uses for earlier years too.
+- `offset_at(t)` is the zone's offset from UTC at `t`, as a `Duration`,
+  and `abbreviation_at(t)` its name for it: `EEST` in the Finnish
+  summer, `EET` in the winter.
+- `local(t)` is a `DateTime` whose parts are the zone's wall clock, and
+  `format(t)` writes `t` as RFC 3339 does, with the offset.
+- `Zone.fixed(seconds)` is a zone of one offset, east of UTC, and
+  `Zone.utc()` is UTC itself.
 
 ## Randomness
 
@@ -1211,7 +1298,8 @@ When every test passes, compare your answer with
 - `std.fs` walks directories and takes paths apart; `std.io` reads and
   writes streams, a line at a time with `BufReader`.
 - `std.time`'s `Ticker` and `Timeline` keep time without drift, in real
-  time and on the test clock alike.
+  time and on the test clock alike; an `Instant` measures time on the
+  clock it is given, and a `Zone` gives a place's offset and wall clock.
 - `std.rand` chooses and samples over any `Rand`; `Rand.seeded` repeats
   its numbers.
 - `std.env` reads variables, and `std.process` runs programs through

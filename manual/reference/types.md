@@ -128,8 +128,8 @@ are the prelude's, not keywords ([R1](lexical-structure.md#keywords)).
 
 The prelude has more types, such as `Path`, `Duration` and
 `DateTime`, and the modules of the standard library more again, such as
-the exact numbers of `std.num`; the library's reference documents them
-all.
+the exact numbers of `std.num` and `std.time`'s `Instant` and `Zone`;
+the library's reference documents them all.
 
 **Status.** In stage 0.
 
@@ -150,6 +150,17 @@ all.
   `int` ([R1](lexical-structure.md#integer-literals)).
 - A literal must fit in its type: one that does not is E0374
   ([R17](diagnostics.md#e0374)), whose note gives the type's range.
+- Every integer type has the bit methods `count_ones()`,
+  `count_zeros()`, `leading_zeros()` and `trailing_zeros()`, each an
+  `int` and the type's width for 0; `rotate_left(n)` and
+  `rotate_right(n)`, by any `int` amount, taken modulo the width, a
+  negative one turning the other way; and `swap_bytes()`, `to_be()` and
+  `to_le()`, the bytes in reverse, big-endian and little-endian order.
+  A signed type's `to_bits()` gives its two's complement as the unsigned
+  type of its width, `(-1i8).to_bits()` being `255u8`, and
+  `i8.from_bits(255u8)` turns it back; the bit methods of a signed type
+  are those of its two's complement
+  ([chapter 24](../tutorial/24-numbers.md#working-with-bits)).
 
 <!-- file: examples/reference-types/integers.sisu -->
 ```sisu
@@ -197,7 +208,10 @@ error[D0006]: the program was not run: errors found (1)
 **Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#numbers)
 gives foreign code `ptrsize` and `uptrsize`, the integers as wide as a
 pointer; stage 0 has neither (E0201), and `std.ffi`'s C types, such as
-`c_size`, serve instead.
+`c_size`, serve instead. 03 names no bit methods, and stage 0's take
+Rust's names. A type's limits, `u8.MAX` and `u8.MIN`, are E0351, and
+`truncate_to` is a method of `int` alone (E0304 on a sized type), so a
+`u32` is narrowed through `to_int()` first.
 
 **Status.** In stage 0 (D-035).
 

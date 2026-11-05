@@ -1,0 +1,3 @@
+test "three turns take half an hour" ... ok
+test "two readings, and the time between them" ... ok
+2 passed, 0 failed, 0 blocked

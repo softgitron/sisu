@@ -50,6 +50,13 @@ pub trait Host: Send {
     fn now_nanos(&self) -> i128 {
         i128::from(self.now()) * 1_000_000_000
     }
+    /// A reading of the host's monotonic clock in nanoseconds, from an
+    /// origin of its own (`ClockOps.monotonic`, decision 643): it never
+    /// goes back when the system's time is set. A host without one reads
+    /// its time.
+    fn monotonic_nanos(&self) -> i128 {
+        self.now_nanos()
+    }
     /// Whether the host's clock is virtual: it advances only when the
     /// scheduler has nothing to run (17, "Isolation and parallelism").
     fn virtual_time(&self) -> bool {
@@ -262,6 +269,10 @@ impl Host for StdHost {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as i128)
             .unwrap_or(0)
+    }
+
+    fn monotonic_nanos(&self) -> i128 {
+        monotonic_nanos()
     }
 
     fn read_file(&mut self, path: &str) -> Result<String, IoErrorKind> {
@@ -610,4 +621,11 @@ impl TestHost {
         let rel = std::path::Path::new(path);
         !rel.is_absolute() && !rel.components().any(|c| matches!(c, std::path::Component::ParentDir))
     }
+}
+
+/// The process's monotonic clock in nanoseconds, from the first reading:
+/// what a real host's `monotonic_nanos` gives (decision 643).
+pub fn monotonic_nanos() -> i128 {
+    static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i128
 }

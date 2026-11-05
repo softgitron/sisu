@@ -78,12 +78,11 @@ as for literals.
 **Civil time.** `DateTime` is nanoseconds since the epoch in UTC, in an
 `i64` (the years 1678 to 2261); its RFC 3339 parser and its parts in
 UTC (decision 565) are Sisu, its `Display` and `strftime` (a fixed
-subset) are the host's (`format.rs`). `Instant` reads the clock's `now`
-and a `Zone` comes from a table of 52 zones' current rules embedded in
-`std.time` (decision 627). *Pay*: the time module of `std` replaces the
-host's text; a monotonic reading of the host's clock (an operation of
-`ClockOps`, logged and faked); the tz database's history
-(`std.x.tzdata`).
+subset) are the host's (`format.rs`). `Instant` reads the clock's
+monotonic time (`ClockOps.monotonic`, logged, replayed and faked,
+decision 643) and a `Zone` comes from a table of 52 zones' current rules
+embedded in `std.time` (decision 627). *Pay*: the time module of `std`
+replaces the host's text; the tz database's history (`std.x.tzdata`).
 
 ## Shortcuts in the interpreter
 
@@ -516,9 +515,12 @@ again against the log of the run before it (`record::Resume`), so a
 session of n inputs does O(n²) work, and an input whose capability
 results the world no longer gives diverges (`D0091`). `:why` follows the
 session's own bindings and their inputs' logs, not the data flow inside
-the functions they call (10's `sisu why`, a dynamic slice). *Pay*: the
-comptime interpreter of 10 keeps the session's values, or snapshots of
-them; the monitor's trace gives the dynamic slice.
+the functions they call (10's `sisu why`, a dynamic slice). An input
+costs a run of stage 1, 0.35 to 0.49 s, nine tenths of it the standard
+library's base made again (decision 641). *Pay*: the comptime
+interpreter of 10 keeps the session's values, or snapshots of them; the
+monitor's trace gives the dynamic slice; stage 1 serves a session from
+one process that keeps its base between inputs (decision 641).
 
 **Property testing is small.** The shrinker deletes runs of choices and
 lowers each by binary search, at most 1000 attempts; there is no
@@ -962,7 +964,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562 and 625): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645 and 646): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -978,16 +980,21 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   (the next item of every state but a generator's and a receiver's, the
   iterator of an `Iterable[T]` argument, collecting what is left, the
   drop), a table's header the runtime in Rust reads only through its
-  exports (decision 506), and the decoding and dispatch of the 35
-  intrinsics of lists, dicts and sets, their descriptors read by Sisu
-  code and their panics, drops and views asked of the runtime in Rust
-  (decision 625). Still `sisu-rt`'s: the decoding of every other
+  exports (decision 506), the decoding and dispatch of the 45
+  intrinsics of lists, dicts, sets and slices (a list's and a set's
+  iterator and the slices' joining them, decision 646), their
+  descriptors read by Sisu code and their panics, drops and views asked
+  of the runtime in Rust (decision 625), `in` as an operator, a table's
+  literal and the generated code's inline lookups (decision 646), and the
+  scheduler's queues: the run queue, the waiters and the timers
+  (decision 645). Still `sisu-rt`'s: the decoding of every other
   intrinsic's call (four words and two slices) and the other checks,
-  whose panics its messages name (a slice's bounds, a missing key), a
-  list's and a set's iterators, `in` as an operator, a generator's items and a receiver's
-  values (the iterators themselves are made by the runtime in Sisu's
-  exports, decision 542),
-  the scheduler with its tasks, channels and mutexes, capabilities and the
+  whose panics its messages name (a missing key), an iterator of a
+  borrowed value reached by `iter`, `d{k}`'s slot, a generator's items
+  and a receiver's values (the iterators themselves are made by the
+  runtime in Sisu's exports, decision 542), the scheduler's choice of
+  the next task, a task's parking and waking and its records, the
+  channels' buffers and mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of an arena, and
   the type table's words themselves (`desc.rs`), which the
@@ -1002,9 +1009,12 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   type to hash it and again to compare it, 1.024 times the instructions of
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
-  Rust counterpart: the scheduler's queues next (the dispatch of the
-  other intrinsics follows its objects, each family's descriptor read by
-  Sisu code as decision 625 reads a collection's); text constants for the runtime's code (its data in
+  Rust counterpart: the rest of the scheduler next (a task's record,
+  parking and waking, the choice of the next task by the seeded
+  generator, and the channels' buffers, whose values have a size of
+  their own; then the dispatch of the other intrinsics follows its
+  objects, each family's descriptor read by Sisu code as decision 625
+  reads a collection's); text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
   in registers, or the backend's own frames for the runtime's code), after
   which a glue's drop can stay in Sisu; a key hashed and compared by code
@@ -1039,7 +1049,7 @@ Nothing here switches the default.
   were made to by their addresses, with the interpreter's panics
   (decisions 543, 544, 560 and 561), the release profile nothing. Of the
   suite's runnable cases (a run, or a `sisu test` run, to compare,
-  decision 460), 282 run natively (`native.list`, 51 of them their tests
+  decision 460), 284 run natively (`native.list`, 51 of them their tests
   too), 17 of them `unsafe/` refusals marked `checked`; the 2 left out are
   `reference_behind` and `foreign_unknown`. *Need*, in the order of their
   worth: a pointer's provenance, the sound form of `R0135` and `R0139`
@@ -1047,7 +1057,18 @@ Nothing here switches the default.
   its place's frame, stripped at each access and at a foreign call, where
   decision 560's addresses miss a returned frame that a call of the same
   depth covers and a shared pointer to a place a mutable one also
-  reaches: a week, both lowerings and the C calls); the reads of a
+  reaches: a week, both lowerings and the C calls; stage 0's tenth round
+  did not start it, for the size of what each lowering must change in
+  the debug profile at once: `ptr.of` and `ptr.of_mut` give a tagged word
+  (a call of the runtime where they are a copy of an address now), and
+  every operation that reads a pointer's word inline strips the tag or
+  calls the runtime: `addr`, `with_addr`, a pointer's `==`, order, hash
+  and `Debug` (which must see the address, as the interpreter's do), the
+  arguments of every foreign call of a pointer type and the pointers
+  inside a `@repr(c)` value handed to C, and the stripping of the
+  descriptors' pointer arguments in `rawmem.rs` and `checked.rs`, each
+  in the Rust lowering, stage 2's and Cranelift's path the same bytes,
+  `--native-from-lir` comparing them); the reads of a
   reference into a block (`reference_behind`) checked as a pointer's are,
   which the monitor's loans do in the interpreter and native code has no
   hook for (a debug build's reference reads through the runtime: two

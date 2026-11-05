@@ -1,0 +1,15 @@
+# A `Zone` gives a place's offset from UTC and its wall clock at a moment.
+from std.time import Zone
+
+def main():
+    let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+    let summer = DateTime.parse("2026-07-01T12:00:00Z").expect("a time")
+    let winter = DateTime.parse("2026-01-15T12:00:00Z").expect("a time")
+    for t in [summer, winter]:
+        let hours = helsinki.offset_at(t).as_seconds() // 3600
+        let name = helsinki.abbreviation_at(t)
+        print("{t}: {helsinki.format(t)} {name}, UTC+{hours}")
+    print("at noon UTC it is {helsinki.local(winter).hour()} in Helsinki")
+    print(Zone.fixed(19800).format(summer))
+    print(Zone.utc().format(summer))
+    print(Zone.named("Mars/Olympus").is_err())

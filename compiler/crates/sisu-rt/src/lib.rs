@@ -37,6 +37,7 @@ mod intrinsics;
 mod iter;
 mod mem;
 mod par;
+mod queue;
 mod rawmem;
 mod rt;
 mod sched;

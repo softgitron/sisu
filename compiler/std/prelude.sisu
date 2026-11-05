@@ -3730,12 +3730,20 @@ trait ClockOps:
     def now(self) -> DateTime
     ## A timer at `d` from now on this clock, to wait for.
     def after(self, d: Duration) -> Timer
+    ## The time since an origin of the clock's own, which only moves
+    ## forward: the host's monotonic clock, which a change of the system's
+    ## time does not move, or the test clock's time. A clock of the
+    ## program's own reads its `now` from the epoch unless it says.
+    def monotonic(self) -> Duration:
+        return self.now() - DateTime.from_unix_nanos(0)
 
 impl ClockOps for Clock:
     @intrinsic("cap.forward")
     def now(self) -> DateTime
     @intrinsic("cap.forward")
     def after(self, d: Duration) -> Timer
+    @intrinsic("cap.forward")
+    def monotonic(self) -> Duration
 
 impl Clock:
     ## Waits for `d` on this clock. A blocking point.
@@ -3758,12 +3766,16 @@ impl ClockOps for HostClock:
     def now(self) -> DateTime
     @intrinsic("clock.after")
     def after(self, d: Duration) -> Timer
+    @intrinsic("clock.monotonic")
+    def monotonic(self) -> Duration
 
 impl ClockOps for TestClock:
     @intrinsic("clock.now")
     def now(self) -> DateTime
     @intrinsic("clock.after")
     def after(self, d: Duration) -> Timer
+    @intrinsic("clock.monotonic")
+    def monotonic(self) -> Duration
 
 impl TestClock:
     @intrinsic("cap.lend")
@@ -3783,6 +3795,8 @@ impl[T: ClockOps + Copy] ClockOps for Lent[T]:
     def now(self) -> DateTime
     @intrinsic("cap.forward")
     def after(self, d: Duration) -> Timer
+    @intrinsic("cap.forward")
+    def monotonic(self) -> Duration
 
 ## The operations of the randomness capability.
 trait RandOps:
@@ -4924,7 +4938,7 @@ impl i128:
 
 # Each integer type's `MIN` and `MAX` (03 names `int.MIN`), and the sized
 # types' `truncate_to`, which `int` has as a method of the front ends
-# (decision 641): written in Sisu, at the end of the prelude so that the
+# (decision 642): written in Sisu, at the end of the prelude so that the
 # lines of the functions before them do not move.
 
 
@@ -4970,8 +4984,10 @@ impl u64:
     const MAX: u64 = 18446744073709551615u64
     ## The value reduced to `T`'s width, as two's complement wrapping does,
     ## as `int.truncate_to` reduces an `int`.
-    ## A value above `int.MAX` reaches a type of 128 bits only by widening
-    ## (`into`), and panics here.
+    ## `T` is narrower than the value's type, or as wide: a value above
+    ## `int.MAX` taken to a type of 128 bits gives its bits as an `int`'s,
+    ## since `Integer` makes a value from an `int` alone; widening (`into`)
+    ## is the conversion to a wider type.
     ##
     ## ```
     ## assert u64.MAX.truncate_to[u32]() == u32.MAX
@@ -4991,8 +5007,9 @@ impl u128:
     const MAX: u128 = 340282366920938463463374607431768211455u128
     ## The value reduced to `T`'s width, as two's complement wrapping does,
     ## as `int.truncate_to` reduces an `int`.
-    ## A value outside `int`'s range reaches a type of 128 bits only by
-    ## widening (`into`) or by `to_bits` and `from_bits`, and panics here.
+    ## A value outside `int`'s range taken to a type of 128 bits gives its
+    ## low 64 bits as an `int`'s, since `Integer` makes a value from an `int`
+    ## alone; `to_bits` and `from_bits` convert between `i128` and `u128`.
     pure def truncate_to[T: Integer](self) -> T:
         match self.to_int():
             case Some(n):
@@ -5046,8 +5063,9 @@ impl i128:
     const MAX: i128 = 170141183460469231731687303715884105727i128
     ## The value reduced to `T`'s width, as two's complement wrapping does,
     ## as `int.truncate_to` reduces an `int`.
-    ## A value outside `int`'s range reaches a type of 128 bits only by
-    ## widening (`into`) or by `to_bits` and `from_bits`, and panics here.
+    ## A value outside `int`'s range taken to a type of 128 bits gives its
+    ## low 64 bits as an `int`'s, since `Integer` makes a value from an `int`
+    ## alone; `to_bits` and `from_bits` convert between `i128` and `u128`.
     pure def truncate_to[T: Integer](self) -> T:
         match self.to_int():
             case Some(n):

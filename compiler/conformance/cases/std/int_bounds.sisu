@@ -1,0 +1,28 @@
+# Each integer type's `MIN` and `MAX`, and the sized types' `truncate_to`
+# (decision 642; the manual's finding from chapter 24): a value reduced to
+# a narrower type's width as two's complement wrapping does, from each
+# width, a `u64` above `int.MAX` among them, as a checksum reduces it.
+
+## FNV-1a over the bytes, reduced to 32 bits from a 64-bit state.
+def folded(data: bytes) -> u32:
+    var h = 0xcbf29ce484222325u64
+    for b in data:
+        h = (h ^ b.to_int().truncate_to[u64]()) *% 0x100000001b3u64
+    return (h ^ (h >> 32u64)).truncate_to[u32]()
+
+def main():
+    print("int {int.MIN} {int.MAX}")
+    print("u8 {u8.MIN} {u8.MAX}, i8 {i8.MIN} {i8.MAX}, u16 {u16.MAX}, i16 {i16.MIN}")
+    print("u32 {u32.MAX}, i32 {i32.MIN} {i32.MAX}, u64 {u64.MAX}")
+    print("u128 {u128.MAX}, i128 {i128.MIN} {i128.MAX}")
+    print(
+        "{200u8.truncate_to[i8]()} {(-1i8).truncate_to[u16]()} {(-300i16).truncate_to[u8]()} {u32.MAX.truncate_to[i16]()}"
+    )
+    print(
+        "{u64.MAX.truncate_to[u32]()} {u64.MAX.truncate_to[int]()} {(u64.MAX - 255u64).truncate_to[u8]()}"
+    )
+    print(
+        "{u128.MAX.truncate_to[u16]()} {(-1i128).truncate_to[u8]()} {i128.MIN.truncate_to[u64]()} {(2i128 ** 100 + 5i128).truncate_to[i8]()}"
+    )
+    print("{(-5i32).truncate_to[u128]()} {7u16.truncate_to[i128]()} {i32.MIN.truncate_to[int]()}")
+    print("folded {folded(b"sauna")}")

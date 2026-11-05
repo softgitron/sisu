@@ -1037,3 +1037,7 @@ D0135 cli     cli.test-output             what the test printed:
 # `sisu bench --samples K` (decision 468): an interval needs two samples
 # at least (decision 546; the manual's finding G27).
 D0136 cli     cli.bench-samples           `--samples` takes 2 or more, not {value}: the interval of the mean needs two samples
+# `sisu test` of more than one program (a workspace's members, a package's
+# black-box test files) names each before its list (decision 644; the
+# manual's finding from chapter 19 and R15).
+D0137 cli     cli.test-program            tests of `{program}`:

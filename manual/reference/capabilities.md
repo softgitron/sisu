@@ -130,6 +130,16 @@ copy reaches the same object, so a fake's state is seen by all of them
 (Q-51). A function that needs a capability takes it as a parameter, and
 a struct that needs one keeps it in a field.
 
+What the library builds on a capability reads it through these
+operations alone. `std.x.http`'s client and server work over a `Net`,
+and their failures are `HttpError`: `Network(cause)` holds the
+`NetError` of the connection, `Interrupted(cause)` the `TaskError` of a
+wait that was cancelled, `Malformed(detail)` an answer that is not
+HTTP and `Status(code)` a status other than `2xx`
+([G10](../guides/network.md)). `std.time`'s `Instant.now(clock)` is the
+`now()` of the `Clock` it is given, so a test clock makes it
+deterministic ([chapter 21](../tutorial/21-standard-library.md#time)).
+
 **Status.** In stage 0 (Q-51).
 
 ## Attenuation

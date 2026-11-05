@@ -1,0 +1,11 @@
+# The bit methods count, find and turn the bits of an integer.
+def main():
+    let mode: u8 = 0b0110_1000
+    print("{mode.count_ones()} set, {mode.count_zeros()} clear")
+    print("{mode.leading_zeros()} above, {mode.trailing_zeros()} below")
+    print("{mode.rotate_left(4):08b} {mode.rotate_right(1):08b}")
+    let port: u16 = 0x1F90
+    print("{port:04x} {port.swap_bytes():04x} {port.to_be():04x}")
+    let reading: i8 = -3
+    print("{reading.to_bits():08b} {i8.from_bits(0b1111_1101u8)}")
+    print("{reading.count_ones()} {(0).leading_zeros()}")

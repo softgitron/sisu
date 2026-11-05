@@ -696,7 +696,7 @@ under the test clock.
 
 - [`Ticker`](#Ticker): A periodic ticker that does not drift (N-35): its `n`-th tick is at `start + n * period` whatever each iteration took, so a slow iteration does not push the ticks after it back. A tick that passes while the loop is busy is skipped, not fired late, and counted in `missed`.
 - [`Timeline`](#Timeline): Virtual time (Sonic Pi's model, N-35): `sleep(d)` moves the timeline's own time on by exactly `d` and then waits for the clock to reach it, so the time spent between sleeps does not accumulate as drift.
-- [`Instant`](#Instant): A point on a clock's time line, to measure how long something took (11, `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time since, and the difference of two is a `Duration`; an instant is ordered but is not a civil time, and shows as its nanoseconds on its clock. Its readings are the clock's own (`ClockOps.now`), so the test clock makes them deterministic and a recorded run replays them; on the host's clock they are the system's time, which a change of the system's clock moves, since stage 0's `Clock` reads no monotonic time of its own (decision 627).
+- [`Instant`](#Instant): A point on a clock's time line, to measure how long something took (11, `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time since, and the difference of two is a `Duration`; an instant is ordered but is not a civil time, and shows as its nanoseconds on its clock. Its readings are the clock's monotonic ones (`ClockOps.monotonic`, decision 643): on the host's clock the time since the run's first reading, which a change of the system's time does not move, and on the test clock its time, so that the test clock makes them deterministic; a recorded run replays them. Two instants of different clocks do not compare.
 - [`ZONES`](#ZONES): The zones whose rules `Zone.named` knows, each name with its rule as POSIX writes a `TZ` variable: the abbreviation and the offset west of UTC of its standard time, and of its daylight time with the rules of its start and its end (`M` month `.` week `.` weekday, `/` the local time), as the zones' rules stand since 2007 (decision 627).
 - [`Change`](#Change): A day a zone's rule changes its offset on: the `week`-th `weekday` (0 for Sunday) of `month`, week 5 being the last, at `seconds` of local time.
 - [`Zone`](#Zone): A time zone (11, `std.time`): the offset from UTC of its standard time and, when it has one, of its daylight time with the days that start and end it, each with the abbreviation it is shown with. `Zone.named` gives the zones of the table above by their names in the tz database; a time before the rules came into force is given today's rules (decision 627).
@@ -828,11 +828,11 @@ A point on a clock's time line, to measure how long something took (11,
 `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time
 since, and the difference of two is a `Duration`; an instant is ordered
 but is not a civil time, and shows as its nanoseconds on its clock. Its
-readings are the clock's own (`ClockOps.now`), so the test clock makes
-them deterministic and a recorded run replays them; on the host's clock
-they are the system's time, which a change of the system's clock moves,
-since stage 0's `Clock` reads no monotonic time of its own (decision
-627).
+readings are the clock's monotonic ones (`ClockOps.monotonic`, decision
+643): on the host's clock the time since the run's first reading, which
+a change of the system's time does not move, and on the test clock its
+time, so that the test clock makes them deterministic; a recorded run
+replays them. Two instants of different clocks do not compare.
 
 ```sisu
 let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
@@ -851,7 +851,7 @@ assert start + Duration.seconds(2) > later
 pub def now(clock: Clock) -> Instant
 ```
 
-The clock's time now.
+The clock's monotonic reading now.
 
 Capabilities: `clock` (`Clock`).
 

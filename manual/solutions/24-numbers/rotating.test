@@ -1,0 +1,4 @@
+test "the hash of a short text" ... ok
+test "the bits that leave the top come back at the bottom" ... ok
+test "parity" ... ok
+3 passed, 0 failed, 0 blocked

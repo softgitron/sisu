@@ -87,20 +87,6 @@ impl Call<'_> {
         unsafe { value::text(self.arg(i), self.ty(i)).unwrap_or(&[]) }
     }
 
-    /// The list argument `i` is or refers to: its header (which the
-    /// argument's memory holds, not `self`) and its element type.
-    #[allow(clippy::mut_from_ref)]
-    unsafe fn list<'b>(&self, i: usize) -> (&'b mut List, u32) {
-        // SAFETY: as `place`.
-        unsafe {
-            let (p, t) = self.place(i);
-            match ty(t).kind {
-                Kind::List(e) => (mem::at::<List>(p), e),
-                _ => rt::internal("a list method on something that is not a list"),
-            }
-        }
-    }
-
     pub(crate) unsafe fn set_word(&self, v: u64) {
         // SAFETY: the result has room for a word.
         unsafe { mem::set_word(self.ret, 0, v) }
@@ -317,48 +303,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
                 return iter::drop_iter(iter::into_word(it) as *mut u8);
             }
-            I::ListAsSlice | I::SliceToList => {
-                // A `Slice` holds copies of the elements, as the
-                // interpreter's does (docs/port-debt.md).
-                let (p, t) = c.place(0);
-                value::copy_value(c.ret, p, t);
-            }
-            I::SliceAt | I::SliceGet => {
-                let (l, e) = c.list(0);
-                let k = c.int(1);
-                let ok = k >= 0 && (k as u64) < l.len;
-                match (i, ok) {
-                    (I::SliceGet, true) => c.some_word(l.at(k as u64, ty(e).size) as u64),
-                    (I::SliceGet, false) => c.none(),
-                    (_, true) => c.set_word(l.at(k as u64, ty(e).size) as u64),
-                    (_, false) => {
-                        return rt::raise_msg(
-                            msg::PANIC_INDEX_OUT_OF_BOUNDS,
-                            &[("len", l.len.to_string()), ("index", k.to_string())],
-                        );
-                    }
-                }
-            }
-            I::SliceIsEmpty => {
-                let (l, _) = c.list(0);
-                c.set_bool(l.len == 0);
-            }
-            I::SliceSlice | I::SliceCut => {
-                let (l, e) = c.list(0);
-                let len = l.len as i64;
-                let (start, end) = (c.int(1), c.int(2));
-                let s = if start == i64::MIN { 0 } else { start };
-                let e2 = if end == i64::MIN { len } else { end };
-                if s < 0 || e2 < s || e2 > len {
-                    let bad = if s < 0 || s > len { s } else { e2 };
-                    return rt::raise_msg(
-                        msg::PANIC_INDEX_OUT_OF_BOUNDS,
-                        &[("len", len.to_string()), ("index", bad.to_string())],
-                    );
-                }
-                crate::bridge::list_copies(c.ret, (l as *mut List).cast::<u8>(), e, s as u64, e2 as u64);
-            }
-            I::IterRef | I::IterMut | I::ListIter | I::SetIter | I::SliceIter => {
+            I::IterRef | I::IterMut => {
                 let (p, t) = c.place(0);
                 match ty(t).kind {
                     Kind::List(e) => c.set_word(iter::into_word(iter::list_ref(p as *mut List, e))),
@@ -911,6 +856,11 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let now = crate::sched::with(|s| s.clock_now(clock));
                 c.set_word(i64::try_from(now).unwrap_or(i64::MAX) as u64);
             }
+            I::ClockMonotonic => {
+                let clock = crate::tasks::clock_of(c);
+                let now = crate::sched::with(|s| s.clock_monotonic(clock));
+                c.set_word(i64::try_from(now).unwrap_or(i64::MAX) as u64);
+            }
             I::DateTimeFromUnixNanos | I::DateTimeUnixNanos => c.set_word(c.word(0)),
             // A native run has no hot replacement (`--watch` runs the
             // interpreter): every task stays in epoch 0.
@@ -1235,33 +1185,6 @@ pub(crate) unsafe fn trace_lines(p: *mut u8, t: u32) -> Vec<String> {
         }
         out.reverse();
         out
-    }
-}
-
-/// `item in container`: an element of a list, or a piece of a text.
-///
-/// # Safety
-/// Both must hold values of their types.
-pub(crate) unsafe fn contains(container: *mut u8, ct: u32, item: *mut u8, it: u32) -> bool {
-    // SAFETY: as the caller guarantees.
-    unsafe {
-        let (p, t) = target(container, ct);
-        match ty(t).kind {
-            Kind::List(e) => crate::bridge::list_contains(p, e, item, it),
-            Kind::Dict(..) | Kind::Set(_) => crate::dict::table(p).position(item, it).is_some(),
-            Kind::Str | Kind::String | Kind::Path => {
-                let hay = value::text(p, t).unwrap_or(&[]);
-                let (ip, itt) = target(item, it);
-                let needle: Vec<u8> = match ty(itt).kind {
-                    Kind::Char => char::from_u32(mem::word(ip, 0) as u32)
-                        .map(|c| c.to_string().into_bytes())
-                        .unwrap_or_default(),
-                    _ => value::text(ip, itt).unwrap_or(&[]).to_vec(),
-                };
-                crate::bridge::find(hay, &needle).is_some()
-            }
-            _ => false,
-        }
     }
 }
 

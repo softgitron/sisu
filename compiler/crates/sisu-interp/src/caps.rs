@@ -208,6 +208,16 @@ impl Interp<'_, '_> {
                 let t = self.clock_now(c);
                 Ok(Value::DateTime(i64::try_from(t).unwrap_or(i64::MAX)))
             })(),
+            "clock.monotonic" => (|| {
+                let c = self.clock_index(&args[0])?;
+                let t = match self.sched.clocks.get(c as usize) {
+                    Some(k) if k.virtual_ => k.now,
+                    Some(_) => self.host.monotonic_nanos(),
+                    None => 0,
+                };
+                let n = Value::Int(i64::try_from(t).unwrap_or(i64::MAX));
+                Ok(Value::Struct(Value::adt("Duration", 0, vec![n])))
+            })(),
             "DateTime.from_unix_nanos" => (|| Ok(Value::DateTime(self.int(&args[0])?)))(),
             "DateTime.unix_nanos" => (|| Ok(Value::Int(self.datetime(&args[0])?)))(),
             n => self.host_call(n.strip_prefix("host.")?, args),

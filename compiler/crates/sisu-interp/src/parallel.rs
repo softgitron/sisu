@@ -73,6 +73,9 @@ impl Host for Shared<'_, '_> {
     fn now_nanos(&self) -> i128 {
         self.with(|h| h.now_nanos())
     }
+    fn monotonic_nanos(&self) -> i128 {
+        self.with(|h| h.monotonic_nanos())
+    }
     fn virtual_time(&self) -> bool {
         self.virtual_time
     }
@@ -268,6 +271,9 @@ impl Host for Merged<'_> {
     fn now_nanos(&self) -> i128 {
         self.inner.now_nanos()
     }
+    fn monotonic_nanos(&self) -> i128 {
+        self.inner.monotonic_nanos()
+    }
     fn virtual_time(&self) -> bool {
         self.inner.virtual_time()
     }
@@ -316,6 +322,9 @@ impl Host for Held<'_> {
     }
     fn now_nanos(&self) -> i128 {
         self.inner.now_nanos()
+    }
+    fn monotonic_nanos(&self) -> i128 {
+        self.inner.monotonic_nanos()
     }
     fn virtual_time(&self) -> bool {
         self.inner.virtual_time()

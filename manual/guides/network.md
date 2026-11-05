@@ -57,9 +57,12 @@ test "an answer that is not a number":
 ```
 
 `http.get` gives the body of a `2xx` answer, and the error
-`Status(code)` for any other status; `Network(message)` when the
-connection fails; and `Malformed(detail)` for an answer that is not
-HTTP.
+`Status(code)` for any other status; `Network(cause)` when the
+connection fails, with the network's own `NetError` as its cause, so
+that a refused connection, `Refused(address)`, is told from one closed
+early, `Closed`; `Interrupted(cause)` when the wait for the answer was
+cancelled or its task panicked, a `TaskError`; and `Malformed(detail)`
+for an answer that is not HTTP.
 
 ## 2. Script the answers
 
@@ -216,7 +219,7 @@ test "the client and the server agree"(net: Net):
 
 test "a client with no server to ask"(net: Net):
     let refused = match weather(net, "Oulu"):
-        case Err(Network(_)): True
+        case Err(Network(Refused(_))): True
         case _: False
     assert refused
 ```
@@ -231,7 +234,8 @@ test "a client with no server to ask" ... ok
 - `http.serve(listener, Service())` answers each connection with the
   handler, until `s.cancel()` stops it; the scope waits for it.
 - The second test has no server at all, so `connect` is refused and
-  the client gets `Network`: the way to test what a client does when
-  its service is down.
+  the client gets `Network(Refused(_))`: the way to test what a client
+  does when its service is down. A pattern inside a pattern reaches the
+  cause, and `Network(_)` would take any failure of the network.
 - `Net.fake()` makes the same kind of network outside a test's
   parameters, for a demo or a `main` that runs without a network.

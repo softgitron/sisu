@@ -1,0 +1,185 @@
+##! The scheduler's queues (D-086's order; decision 645): the run queue of
+##! ready tasks, the waiters registered under what wakes them, and the
+##! timers, which the runtime in Rust's scheduler (`crates/sisu-rt/src/
+##! sched.rs`) keeps here and reads only through the exports. A queue is a
+##! list of records of one width (one to three words), in the order they
+##! came, over `list.sisu`'s growth, and its header is four words: the
+##! list's three and the width. Its blocks are the runtime in Rust's, kept
+##! for the run and not counted among the program's allocations. The
+##! runtime in Rust chooses among the ready tasks by its seeded generator;
+##! a record taken out keeps the order of the others where the
+##! interpreter's scheduler keeps it (a waiter, a timer), and the last
+##! moves into its slot where the interpreter's run queue does so
+##! (`swap_remove`), so that a seed names the same schedule. Each function
+##! reads the header's words itself, a call of Sisu's convention costing
+##! more than the read (README, "What it is").
+
+import rt.list
+from rt.host import memmove
+from std.mem import ptr
+
+## The header's words of the queue at `q`: its buffer, its length, its
+## capacity and its width.
+##
+## Requires:
+## - `queue`: `q` holds a live queue
+def header(q: ptr mut u8) -> ptr mut int:
+    return q.cast[int]()
+
+## Makes the four words at `q` an empty queue of records of `width`
+## words, whose buffer is `buffer`, with room for `capacity` records: the
+## runtime in Rust gives both blocks, kept for the run and not counted
+## among the program's allocations, as the scheduler they belong to is not
+## the program's.
+##
+## Requires:
+## - `blocks`: `q` points to four writable words, and `buffer` to room for
+##   `capacity` records of `width` words from `malloc`, which `realloc` may
+##   grow
+pub(package) def init(q: ptr mut u8, buffer: ptr mut u8, capacity: int, width: int):
+    # safety: in_bounds, valid, aligned, writable: `q` is four words, by
+    #   `blocks`.
+    unsafe:
+        let w = header(q)
+        w.write(buffer.addr())
+        w.offset(1).write(0)
+        w.offset(2).write(capacity)
+        w.offset(3).write(width)
+
+## The records the queue at `q` holds.
+##
+## Requires:
+## - `queue`: `q` holds a live queue
+pub(package) def count(q: ptr mut u8) -> int:
+    # safety: in_bounds, valid, aligned: a queue's second word is its
+    #   length, by `queue`.
+    return unsafe header(q).offset(1).read()
+
+## Takes out every record.
+##
+## Requires:
+## - `queue`: `q` holds a live queue
+pub(package) def clear(q: ptr mut u8):
+    # safety: in_bounds, valid, aligned, writable: as in `count`.
+    unsafe header(q).offset(1).write(0)
+
+## Appends a record of the words `a`, `b` and `c`, as many as its width.
+##
+## Requires:
+## - `queue`: `q` holds a live queue
+pub(package) def push(q: ptr mut u8, a: int, b: int, c: int):
+    # safety: in_bounds, valid, aligned, writable: a queue is its buffer's
+    #   address, its length, its capacity and its width, by `queue`, and
+    #   the buffer has room for a record after the `n` it holds once
+    #   `list.reserve` grew it.
+    unsafe:
+        let h = header(q)
+        let n = h.offset(1).read()
+        let width = h.offset(3).read()
+        if n == h.offset(2).read():
+            list.reserve(q, 1, width * 8)
+        let at = q.cast[ptr[int]]().read().cast_mut().offset(n * width)
+        at.write(a)
+        if width > 1:
+            at.offset(1).write(b)
+        if width > 2:
+            at.offset(2).write(c)
+        h.offset(1).write(n + 1)
+
+## The word `j` of the record `i`.
+##
+## Requires:
+## - `queue`: `q` holds a live queue, `0 <= i < count` and `j` is within
+##   its width
+pub(package) def word(q: ptr mut u8, i: int, j: int) -> int:
+    # safety: in_bounds, valid, aligned: the record `i` is in the buffer and
+    #   `j` within it, as `queue` requires.
+    unsafe:
+        let h = header(q)
+        return q.cast[ptr[int]]().read().offset(i * h.offset(3).read() + j).read()
+
+## Takes out the record `i`, the last moving into its slot: its first word.
+##
+## Requires:
+## - `queue`: `q` holds a live queue and `0 <= i < count`
+pub(package) def swap_remove(q: ptr mut u8, i: int) -> int:
+    # safety: in_bounds, valid, aligned, writable: the records `i` and
+    #   `n - 1` are in the buffer, by `queue`; returns_promptly: memmove
+    #   moves the bytes.
+    unsafe:
+        let h = header(q)
+        let n = h.offset(1).read()
+        let size = h.offset(3).read() * 8
+        let items = q.cast[ptr[u8]]().read().cast_mut()
+        let first = items.offset(i * size).cast[int]().read()
+        if i != n - 1:
+            _ = memmove(items.offset(i * size), items.offset((n - 1) * size).as_const(), size)
+        h.offset(1).write(n - 1)
+        return first
+
+## Takes out the record `i`, those after it one slot down.
+##
+## Requires:
+## - `queue`: `q` holds a live queue and `0 <= i < count`
+pub(package) def remove(q: ptr mut u8, i: int):
+    # safety: in_bounds, valid, aligned, writable: the records from `i` to
+    #   `n - 1` are in the buffer, by `queue`; returns_promptly: memmove
+    #   moves the bytes.
+    unsafe:
+        let h = header(q)
+        let n = h.offset(1).read()
+        let size = h.offset(3).read() * 8
+        let at = q.cast[ptr[u8]]().read().cast_mut().offset(i * size)
+        _ = memmove(at, at.offset(size).as_const(), (n - i - 1) * size)
+        h.offset(1).write(n - 1)
+
+## The first record whose word `j` is `x`, or -1.
+##
+## Requires:
+## - `queue`: `q` holds a live queue and `j` is within its width
+pub(package) def position(q: ptr mut u8, j: int, x: int) -> int:
+    # safety: in_bounds, valid, aligned: each record of the `n` is in the
+    #   buffer and `j` within it, by `queue`.
+    unsafe:
+        let h = header(q)
+        let n = h.offset(1).read()
+        let width = h.offset(3).read()
+        let items = q.cast[ptr[int]]().read()
+        var i = 0
+        while i < n:
+            if items.offset(i * width + j).read() == x:
+                return i
+            i += 1
+    return -1
+
+## Takes out every record whose first word is `key`, keeping the others'
+## order, and appends their second words to the queue `out`, in order: the
+## tasks a key wakes, which the scheduler then wakes in that order.
+##
+## Requires:
+## - `queue`: `q` holds a live queue of at least two words a record, and
+##   `out` a live queue
+pub(package) def take_key(q: ptr mut u8, key: int, out: ptr mut u8):
+    # safety: in_bounds, valid, aligned, writable: the records `kept` and
+    #   `i` are in the buffer, `kept <= i`, by `queue`.
+    unsafe:
+        let h = header(q)
+        let n = h.offset(1).read()
+        let width = h.offset(3).read()
+        let items = q.cast[ptr[int]]().read().cast_mut()
+        var kept = 0
+        var i = 0
+        while i < n:
+            let at = items.offset(i * width)
+            if at.read() == key:
+                push(out, at.offset(1).read(), 0, 0)
+            else:
+                if kept != i:
+                    let to = items.offset(kept * width)
+                    var k = 0
+                    while k < width:
+                        to.offset(k).write(at.offset(k).read())
+                        k += 1
+                kept += 1
+            i += 1
+        h.offset(1).write(kept)

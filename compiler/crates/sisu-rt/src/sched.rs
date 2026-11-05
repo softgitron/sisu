@@ -39,12 +39,13 @@
 //! the drops an intrinsic makes.
 
 use crate::abi::{self, Kind};
+use crate::queue::Queue;
 use crate::rt::{self, Panic, ty};
 use crate::stack::{Mark, Pool, Region, Slot};
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 use sisu_diag::msg;
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 /// The root task's number.
@@ -111,6 +112,19 @@ pub(crate) enum Key {
     Scope(u32),
     Chan(u32),
     Lock,
+}
+
+impl Key {
+    /// The word the waiters' queue keeps it as: its kind above its number.
+    fn word(self) -> i64 {
+        let (kind, n) = match self {
+            Key::Task(t) => (0, t),
+            Key::Scope(s) => (1, s),
+            Key::Chan(c) => (2, c),
+            Key::Lock => (3, 0),
+        };
+        (kind << 32) | i64::from(n)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -286,9 +300,14 @@ pub(crate) struct Sched {
     pub channels: Vec<Channel>,
     pub clocks: Vec<RtClock>,
     pub rng: Rng,
-    pub ready: Vec<u32>,
-    pub waiters: HashMap<Key, Vec<u32>>,
-    pub timers: Vec<(u32, i128, u32)>,
+    /// The ready tasks (the run queue), the tasks waiting under a key
+    /// ([`Key::word`], then the task) and the timers (the clock, the time,
+    /// the task): the runtime in Sisu's queues (decision 645).
+    pub ready: Queue,
+    pub waiters: Queue,
+    pub timers: Queue,
+    /// The tasks a key woke, read once.
+    pub woken: Queue,
     /// Tasks not done.
     pub live: u64,
     pub stats: Stats,
@@ -588,9 +607,10 @@ pub(crate) fn start(
         channels: Vec::new(),
         clocks: vec![RtClock { virtual_: false, now: 0 }],
         rng,
-        ready: Vec::new(),
-        waiters: HashMap::new(),
-        timers: Vec::new(),
+        ready: Queue::new(1),
+        waiters: Queue::new(2),
+        timers: Queue::new(3),
+        woken: Queue::new(1),
         live: 1,
         stats: Stats { tasks: 1, max_live: 1, ..Stats::default() },
         keep_stats,
@@ -949,7 +969,9 @@ pub(crate) fn drive(t: u32) {
         ctx.depth += depth - g.depth_base;
         g.depth_base = depth;
         g.state = TState::Running;
-        s.ready.retain(|x| *x != t);
+        while let Some(i) = s.ready.position(0, i64::from(t)) {
+            s.ready.remove(i);
+        }
         let asking = s.cur;
         s.cur = t;
         (asking, s.starved)
@@ -1121,7 +1143,7 @@ impl Sched {
     /// Puts a task in the ready list: a spent budget then switches at the
     /// next yield point.
     pub(crate) fn push_ready(&mut self, t: u32) {
-        self.ready.push(t);
+        self.ready.push(i64::from(t), 0, 0);
         if self.keep_stats {
             self.task(t).ready_wall = Some(std::time::Instant::now());
         }
@@ -1191,7 +1213,7 @@ impl Sched {
                     self.priorities[cur as usize] = low;
                 }
                 let mine = self.priority(cur);
-                let ready = self.ready.clone();
+                let ready = self.ready_list();
                 let best = ready.iter().map(|t| self.priority(*t)).max();
                 best.is_some_and(|b| b > mine)
             }
@@ -1226,7 +1248,7 @@ impl Sched {
 
     /// The ready tasks in creation order.
     fn ready_sorted(&self) -> Vec<u32> {
-        let mut r = self.ready.clone();
+        let mut r = self.ready_list();
         r.sort_unstable();
         r
     }
@@ -1259,7 +1281,7 @@ impl Sched {
                 let i = match self.strategy {
                     Strategy::Random => self.rng.below(self.ready.len()),
                     Strategy::Pct { .. } => {
-                        let ready = self.ready.clone();
+                        let ready = self.ready_list();
                         let (mut best, mut top) = (0, None);
                         for (k, t) in ready.iter().enumerate() {
                             let p = self.priority(*t);
@@ -1279,10 +1301,10 @@ impl Sched {
                                 ready[c as usize]
                             }
                         };
-                        self.ready.iter().position(|t| *t == chosen).unwrap_or(0)
+                        self.ready.position(0, i64::from(chosen)).unwrap_or(0)
                     }
                 };
-                break self.ready.swap_remove(i);
+                break self.ready.swap_remove(i) as u32;
             }
             if !self.advance_time() {
                 rt::abort(&self.deadlock_report());
@@ -1314,7 +1336,8 @@ impl Sched {
         }
         let mut virt: Option<i128> = None;
         let mut real: Option<i128> = None;
-        for &(c, at, _) in &self.timers {
+        for k in 0..self.timers.len() {
+            let (c, at) = (self.timers.word(k, 0) as u32, i128::from(self.timers.word(k, 1)));
             let delta = at - self.clock_now(c);
             let slot =
                 if self.clocks.get(c as usize).is_some_and(|k| k.virtual_) { &mut virt } else { &mut real };
@@ -1339,13 +1362,16 @@ impl Sched {
 
     pub(crate) fn wake_due_timers(&mut self) -> bool {
         let mut due = Vec::new();
-        let timers = std::mem::take(&mut self.timers);
-        for (c, at, t) in timers {
+        let mut taken = Vec::new();
+        for k in 0..self.timers.len() {
+            let (c, at) = (self.timers.word(k, 0) as u32, i128::from(self.timers.word(k, 1)));
             if self.clock_now(c) >= at {
-                due.push(t);
-            } else {
-                self.timers.push((c, at, t));
+                due.push(self.timers.word(k, 2) as u32);
+                taken.push(k);
             }
+        }
+        for k in taken.into_iter().rev() {
+            self.timers.remove(k);
         }
         let any = !due.is_empty();
         for t in due {
@@ -1415,6 +1441,17 @@ impl Sched {
         }
     }
 
+    /// A clock's monotonic reading (decision 643): a virtual clock's time,
+    /// or the process's monotonic clock from its first reading.
+    pub(crate) fn clock_monotonic(&self, c: u32) -> i128 {
+        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        match self.clocks.get(c as usize) {
+            Some(k) if k.virtual_ => k.now,
+            Some(_) => ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i128,
+            None => 0,
+        }
+    }
+
     // ------------------------------------------------------ waiting
 
     /// Makes the running task wait: registered under the keys and its timer
@@ -1422,19 +1459,31 @@ impl Sched {
     pub(crate) fn block_on(&mut self, wait: Wait, keys: &[Key], timer: Option<(u32, i128)>, site: Site) {
         let cur = self.cur;
         for k in keys {
-            self.waiters.entry(*k).or_default().push(cur);
+            self.waiters.push(k.word(), i64::from(cur), 0);
         }
         if let Some((c, at)) = timer {
-            self.timers.push((c, at, cur));
+            self.push_timer(c, at, cur);
         }
         if !matches!(wait, Wait::Lock | Wait::ScopeEnd)
             && let Some((c, at)) = self.chain_deadline(self.context())
         {
-            self.timers.push((c, at, cur));
+            self.push_timer(c, at, cur);
         }
         let task = self.task(cur);
         task.state = TState::Blocked(wait);
         task.site = site;
+    }
+
+    /// A timer of the task `t` at `at` on the clock `c`, its time kept as a
+    /// word: one beyond a word's range is never due.
+    fn push_timer(&mut self, c: u32, at: i128, t: u32) {
+        let at = i64::try_from(at).unwrap_or(if at < 0 { i64::MIN } else { i64::MAX });
+        self.timers.push(i64::from(c), at, i64::from(t));
+    }
+
+    /// The ready tasks, in the run queue's order.
+    fn ready_list(&self) -> Vec<u32> {
+        self.ready.firsts().into_iter().map(|t| t as u32).collect()
     }
 
     pub(crate) fn wake(&mut self, t: u32) {
@@ -1446,10 +1495,9 @@ impl Sched {
     }
 
     pub(crate) fn wake_key(&mut self, k: Key) {
-        if let Some(list) = self.waiters.remove(&k) {
-            for t in list {
-                self.wake(t);
-            }
+        self.waiters.take_key(k.word(), &mut self.woken);
+        for t in self.woken.firsts() {
+            self.wake(t as u32);
         }
     }
 

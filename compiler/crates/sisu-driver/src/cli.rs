@@ -82,6 +82,9 @@ impl Host for WithArgs<'_> {
     fn now_nanos(&self) -> i128 {
         self.inner.now_nanos()
     }
+    fn monotonic_nanos(&self) -> i128 {
+        self.inner.monotonic_nanos()
+    }
     fn virtual_time(&self) -> bool {
         self.inner.virtual_time()
     }
@@ -515,6 +518,9 @@ impl Host for Captured<'_> {
     }
     fn now_nanos(&self) -> i128 {
         self.inner.now_nanos()
+    }
+    fn monotonic_nanos(&self) -> i128 {
+        self.inner.monotonic_nanos()
     }
     fn virtual_time(&self) -> bool {
         self.inner.virtual_time()
@@ -1772,7 +1778,20 @@ fn stage1_command(
                 words
             };
             let mut status = exit::OK;
+            // When the run has more than one program (a workspace's members,
+            // a package's black-box test files), each program's list starts
+            // with a line naming it (decision 644).
+            let several = cmd == "test"
+                && (inputs.len() > 1
+                    || (black_box
+                        && inputs.iter().any(|i| i.package.is_some() && !black_box_files(&i.shown).is_empty())));
+            let heading = |name: &str, host: &mut dyn Host| {
+                if several {
+                    host.stdout(&format!("{}\n", text(msg::CLI_TEST_PROGRAM, &[("program", name.to_string())])));
+                }
+            };
             for input in &inputs {
+                heading(input.package.as_ref().map_or(input.shown.as_str(), |(n, _)| n.as_str()), host);
                 let code = if once {
                     let r = match run(host, &sir_words(&input.shown), Backend::Unused) {
                         Ok(r) => r,
@@ -1793,6 +1812,7 @@ fn stage1_command(
                     if black_box && input.package.is_some() {
                         for path in black_box_files(&input.shown) {
                             let Ok(source) = std::fs::read_to_string(&path) else { continue };
+                            heading(&path, host);
                             let file = Input::single(&path, source);
                             let r = match run(host, &sir_words(&path), Backend::Unused) {
                                 Ok(r) => r,
