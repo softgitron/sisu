@@ -70,5 +70,6 @@ it.
 
 ## Not finished
 
-There is no compiler. The proposal is a hypothesis; the prototype is the
+The compiler is a prototype, not a release (the README's prototype row
+says what it does). The proposal is a hypothesis; the prototype is the
 experiment; the open questions are the things the experiment must answer.

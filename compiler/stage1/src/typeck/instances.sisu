@@ -58,12 +58,13 @@ from stage1.typeck.template import (
     Src,
     Target,
     Templates,
+    Traced,
     TypeShape,
     Unfolding,
     VariantShape,
     unfold,
     unfold_expr,
-    unfold_fn,
+    unfold_fn_traced,
     written_shape,
 )
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData
@@ -186,11 +187,13 @@ impl Resolver:
             var field_tys: list[TypeExprId] = []
             var field_names: list[String] = []
             var field_docs: list[String] = []
+            var doc = String.new()
             var body = Body.Struct([])
             var is_struct = False
             match item.kind:
                 case ItemKind.Struct(s):
                     name = s.name.text.copy()
+                    doc = self.doc_in(module, s.name.range.start)
                     gps = s.generics.copy()
                     var fields: list[(String, bool)] = []
                     for f in s.fields:
@@ -202,12 +205,14 @@ impl Resolver:
                     is_struct = True
                 case ItemKind.Enum(e):
                     name = e.name.text.copy()
+                    doc = self.doc_in(module, e.name.range.start)
                     gps = e.generics.copy()
                     var variants: list[(String, list[String?])] = []
                     for v in e.variants:
                         var fields: list[String?] = []
                         for f in v.fields:
                             field_tys.push(f.ty)
+                            field_docs.push(self.variant_field_doc(module, f.range.start))
                             match f.name:
                                 case Some(n):
                                     fields.push(Some(n.text.copy()))
@@ -348,6 +353,7 @@ impl Resolver:
                     attrs=attrs,
                     field_types=field_types,
                     field_docs=field_docs.copy(),
+                    doc=doc.copy(),
                 )
                 var unfolded: String? = None
                 # Where the template stopped, in its module, and why.
@@ -756,24 +762,26 @@ impl Resolver:
             if let Some(t) = self.std_texts.get(self.prog.modules[module.index].name):
                 source = t.copy()
         var unfolded: String? = None
+        var origins: list[(int, int, TextRange)] = []
         var failed: (TextRange, String)? = None
         if module.index < len(self.sources):
             let head: str? = match within:
                 case Some(h): Some(h)
                 case None: None
-            var result: String ! Unfolding = Err(
+            var result: Traced ! Unfolding = Err(
                 Unfolding.Failed(at=TextRange.empty(0), why=String.new())
             )
             match reparsed:
                 case Some(a):
                     let src = Src(ast=ref a, source=source)
-                    result = unfold_fn(src, f, params, types, inst, head, generic)
+                    result = unfold_fn_traced(src, f, params, types, inst, head, generic)
                 case None:
                     let src = Src(ast=ref self.sources[module.index].ast, source=source)
-                    result = unfold_fn(src, f, params, types, inst, head, generic)
+                    result = unfold_fn_traced(src, f, params, types, inst, head, generic)
             match result:
                 case Ok(x):
-                    unfolded = Some(x.copy())
+                    unfolded = Some(x.text.copy())
+                    origins = x.origins.copy()
                 case Err(Unfolding.Failed(at, why)):
                     failed = Some((at, why.copy()))
         let text = unfolded else:
@@ -802,6 +810,8 @@ impl Resolver:
         _ = self.instance_modules.add(m)
         let (site_module, site_at) = site
         _ = self.instance_sites.insert(m, (site_module, site_at, what.to_string()))
+        if not self.is_std(module):
+            _ = self.instance_origins.insert(m, (module, origins))
         # The types, by the names the unfolded code uses.
         for (alias, t) in aliases:
             let d = self.new_def(m, alias, TextRange.empty(0), Vis.Private, DefKind.TypeAlias(t))
@@ -1085,6 +1095,9 @@ impl Resolver:
         if let TyData.Adt(d, _) = self.types.data(t):
             if let Some(attrs) = self.attrs_of.get(d):
                 s.attrs = attrs.copy()
+            # Its own `##` comment (RULES.md, R129).
+            let def_ = ref self.prog.defs[d.index]
+            s.doc = self.doc_in(def_.module, def_.span.start)
         # A refinement's base, and a struct's invariant (RULES.md, R32).
         if base != t:
             s.base = [self.shape(base, "{written}_b", depth + 1, mut aliases)]
@@ -1152,7 +1165,7 @@ impl Resolver:
                 let shape = self.shape(t, "{written}_v{vi}_{k}", depth + 1, mut aliases)
                 fields.push((n.copy(), [shape]))
                 k += 1
-            out.push(VariantShape(name=v.name.copy(), fields=fields))
+            out.push(VariantShape(name=v.name.copy(), fields=fields, docs=v.docs.copy()))
             vi += 1
         return out
 

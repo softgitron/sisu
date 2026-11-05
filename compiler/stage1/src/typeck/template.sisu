@@ -153,6 +153,9 @@ pub struct TypeShape:
     ## (RULES.md, R32).
     pub base: list[TypeShape]
     pub invariant: bool
+    ## The declaration's own `##` comment, `reflect.doc_of` (RULES.md,
+    ## R129): empty for a type without one, or of the standard library.
+    pub doc: String
 
 ## A method as reflection sees it (`reflect.methods_of`, decision 251): its
 ## name, how it takes `self` (`self`, `mut self`, `own self`, or nothing
@@ -178,6 +181,8 @@ pub struct VariantShape:
     pub name: String
     ## Each field's name (`None` for positional) and type (at most one).
     pub fields: list[(String?, list[TypeShape])]
+    ## Each field's `##` comment, `f.doc` (RULES.md, R129).
+    pub docs: list[String]
 
 impl TypeShape:
     ## A shape that knows only the type's name.
@@ -194,12 +199,14 @@ impl TypeShape:
             methods=[],
             base=[],
             invariant=False,
+            doc=String.new(),
         )
 
     ## The shape of a derive's target, from its declaration's names.
     pure def of_target(t: Target) -> TypeShape:
         var s = TypeShape.named(t.name, t.written, Kind.Other)
         s.attrs = t.attrs.copy()
+        s.doc = t.doc.copy()
         match t.body:
             case Body.Struct(fields):
                 s.kind = Kind.Struct
@@ -219,13 +226,17 @@ impl TypeShape:
                 var k = 0
                 for (n, fs) in vs:
                     var fields: list[(String?, list[TypeShape])] = []
+                    var docs: list[String] = []
                     for f in fs:
                         var ty: list[TypeShape] = []
                         if k < len(t.field_types):
                             ty.push(t.field_types[k].copy())
                         fields.push((f.copy(), ty))
+                        docs.push(
+                            if k < len(t.field_docs): t.field_docs[k].copy() else: String.new()
+                        )
                         k += 1
-                    s.variants.push(VariantShape(name=n.copy(), fields=fields))
+                    s.variants.push(VariantShape(name=n.copy(), fields=fields, docs=docs))
         return s
 
 ## A field's type as its declaration writes it, which a derive sees before
@@ -456,14 +467,21 @@ pub struct Target:
     ## the variants of an enum in order, which a derive reads as `f.ty`
     ## (RULES.md, R92 and R96).
     pub field_types: list[TypeShape]
-    ## A struct's fields' `##` comments, in order (RULES.md, R117).
+    ## A struct's fields' `##` comments, in order (RULES.md, R117), or the
+    ## variants' fields', as `field_types` has them (R129).
     pub field_docs: list[String]
+    ## The declaration's own `##` comment (RULES.md, R129).
+    pub doc: String
 
 struct Unfold:
     ## The type parameters (`T`) and their arguments.
     params: list[(String, TypeShape)]
     env: list[(String, Value)]
     arms: list[ArmScope]
+    ## For the code written so far, the template's statement that wrote
+    ## each stretch of it: where it starts and ends in the code, and the
+    ## statement's range in the template (RULES.md, R131).
+    origins: list[(int, int, TextRange)]
 
 ## A failure at `at`, for `why`.
 pure def fail[T](at: TextRange, why: str) -> T ! Unfolding:
@@ -508,12 +526,76 @@ pub pure def template_parts(src: Src, f: FnDef) -> (String, ImplDef)?:
                     case StmtKind.Pass:
                         pass
                     case _:
-                        return None
+                        # Before the `return impl`, compile-time checks of
+                        # the type (RULES.md, R130).
+                        if imp.is_some() or not is_check(src, s):
+                            return None
         case None:
             return None
     return match imp:
         case Some(i): Some((name.text.copy(), i.copy()))
         case None: None
+
+## Whether a derive's template has a `return impl` among its statements.
+pub pure def returns_impl(src: Src, f: FnDef) -> bool:
+    if let Some(body) = f.body:
+        for s in body.stmts:
+            if let StmtKind.ReturnImpl(_) = src.ast.stmt(s).kind:
+                return True
+    return False
+
+## The statements of a derive's template before its `return impl`: checks
+## of the type, `comptime assert`, `comptime panic` and `if comptime`
+## (`comptime if`) of them, which the unfolding runs first and which write
+## no code (RULES.md, R130).
+pure def template_checks(src: Src, f: FnDef) -> list[StmtId]:
+    var out: list[StmtId] = []
+    if let Some(body) = f.body:
+        for s in body.stmts:
+            match src.ast.stmt(s).kind:
+                case StmtKind.ReturnImpl(_):
+                    break
+                case StmtKind.Pass:
+                    pass
+                case _:
+                    out.push(s)
+    return out
+
+## Whether `s` is a compile-time check, as a derive's template may write
+## before its `return impl`: `comptime assert`, `comptime panic(...)`, or
+## an `if comptime` or `comptime if` whose branches hold only checks.
+pure def is_check(src: Src, s: StmtId) -> bool:
+    match src.ast.stmt(s).kind:
+        case StmtKind.Pass:
+            return True
+        case StmtKind.Comptime(inner):
+            match src.ast.stmt(inner).kind:
+                case StmtKind.Assert(_, _):
+                    return True
+                case StmtKind.Expr(e):
+                    return is_panic(src, e)
+                case StmtKind.If(branches, else_block):
+                    return checks_only(src, branches, else_block)
+                case _:
+                    return False
+        case StmtKind.If(branches, else_block):
+            for (c, _) in branches:
+                if comptime_cond(src, c).is_none():
+                    return False
+            return checks_only(src, branches, else_block)
+        case _:
+            return False
+
+pure def checks_only(src: Src, branches: list[(Cond, Block)], else_block: Block?) -> bool:
+    for (_, b) in branches:
+        for x in b.stmts:
+            if not is_check(src, x):
+                return False
+    if let Some(b) = else_block:
+        for x in b.stmts:
+            if not is_check(src, x):
+                return False
+    return True
 
 ## The source of the impl that `template` (from the file whose syntax and
 ## text `src` holds) derives for `target`, under the impl header `head`.
@@ -522,8 +604,12 @@ pub pure def unfold(src: Src, template: FnDef, head: str, target: Target) -> Str
         return fail(template.name.range, "it is not a derive template")
     let (param, imp) = parts
     let shape = TypeShape.of_target(target)
-    var u = Unfold(params=[(param.copy(), shape.copy())], env=[], arms=[])
+    var u = Unfold(params=[(param.copy(), shape.copy())], env=[], arms=[], origins=[])
     u.env.push((param, Value.Type(shape)))
+    # The checks before the `return impl`, which stop the unfolding where
+    # one fails and write nothing (RULES.md, R130).
+    var none = String.new()
+    _ = u.stmts(src, template_checks(src, template), 2, mut none)?
     var out = "\n{head}"
     if not imp.assoc_types.is_empty():
         return fail(
@@ -562,6 +648,26 @@ pub pure def unfold_fn(
     within: str?,
     generic: bool,
 ) -> String ! Unfolding:
+    let traced = unfold_fn_traced(src, f, params, types, name, within, generic)?
+    return Ok(traced.text)
+
+## An instance's code, and where in the template each stretch of it comes
+## from (RULES.md, R131).
+pub struct Traced:
+    pub text: String
+    pub origins: list[(int, int, TextRange)]
+
+## `unfold_fn`, with the template's statement that wrote each stretch of
+## the instance's code.
+pub pure def unfold_fn_traced(
+    src: Src,
+    f: FnDef,
+    params: list[(String, TypeShape)],
+    types: list[(String, TypeShape)],
+    name: str,
+    within: str?,
+    generic: bool,
+) -> Traced ! Unfolding:
     var body_start = 0
     var stmts: list[StmtId] = []
     match f.body:
@@ -570,7 +676,7 @@ pub pure def unfold_fn(
             stmts = body.stmts.copy()
         case None:
             return fail(f.name.range, "a function without a body has no instance")
-    var u = Unfold(params=params.copy(), env=[], arms=[])
+    var u = Unfold(params=params.copy(), env=[], arms=[], origins=[])
     for (p, shape) in params:
         u.env.push((p.copy(), Value.Type(shape.copy())))
     for (p, shape) in types:
@@ -627,7 +733,24 @@ pub pure def unfold_fn(
     line(mut out, depth, "{pure}def {name}{u.substitute_param(rest)}")
     if u.stmts(src, stmts, depth + 1, mut out)? == 0:
         line(mut out, depth + 1, "pass")
-    return Ok(out)
+    return Ok(Traced(text=out, origins=u.origins))
+
+## The range in the template of the innermost statement that wrote the
+## code at `at` of an instance, if one did (RULES.md, R131).
+pub pure def origin_at(origins: list[(int, int, TextRange)], at: int) -> TextRange?:
+    var best: (int, TextRange)? = None
+    for (start, end, range) in origins:
+        if start <= at and at < end:
+            let width = end - start
+            match best:
+                case Some((w, _)):
+                    if width < w:
+                        best = Some((width, range))
+                case None:
+                    best = Some((width, range))
+    return match best:
+        case Some((_, r)): Some(r)
+        case None: None
 
 ## The text of the expression `e` (from the file whose syntax and text
 ## `src` holds) with its compile-time parts evaluated (decision 251): a
@@ -636,7 +759,7 @@ pub pure def unfold_fn(
 pub pure def unfold_expr(
     src: Src, e: ExprId, types: list[(String, TypeShape)]
 ) -> String ! Unfolding:
-    var u = Unfold(params=[], env=[], arms=[])
+    var u = Unfold(params=[], env=[], arms=[], origins=[])
     for (p, shape) in types:
         u.env.push((p.copy(), Value.Type(shape.copy())))
     return u.text(src, e)
@@ -1020,7 +1143,9 @@ impl Unfold:
 
     ## A copy of the unfolding's scope, to bind more names in.
     pure def fork(self) -> Unfold:
-        return Unfold(params=self.params.copy(), env=self.env.copy(), arms=self.arms.copy())
+        return Unfold(
+            params=self.params.copy(), env=self.env.copy(), arms=self.arms.copy(), origins=[]
+        )
 
     pure def eval(self, src: Src, e: ExprId) -> Value ! Unfolding:
         let here = src.ast.expr(e).range
@@ -1711,7 +1836,23 @@ impl Unfold:
             line(mut out, depth, "pass")
         return Ok(())
 
+    ## A statement unfolded, with the stretch of code it wrote recorded as
+    ## its own (RULES.md, R131).
     pure def stmt(mut self, src: Src, s: StmtId, depth: int, mut out: String) -> int ! Unfolding:
+        let before = out.byte_len()
+        let n = self.unfold_stmt(src, s, depth, mut out)?
+        if out.byte_len() > before:
+            # The statement's own text, without the line break after it.
+            let r = src.ast.stmt(s).range
+            var end = min(r.end, src.source.byte_len())
+            while end > r.start and src.source.byte_at(end - 1).to_int() <= 32:
+                end -= 1
+            self.origins.push((before, out.byte_len(), TextRange.new(r.start, end)))
+        return Ok(n)
+
+    pure def unfold_stmt(
+        mut self, src: Src, s: StmtId, depth: int, mut out: String
+    ) -> int ! Unfolding:
         let here = src.ast.stmt(s).range
         if let StmtKind.Comptime(inner) = src.ast.stmt(s).kind:
             return self.comptime_stmt(src, inner, depth, mut out)
@@ -2050,6 +2191,10 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
             return Some(Value.Type(b.copy()))
         case "has_invariant":
             return Some(Value.Bool(t.invariant))
+        # The declaration's own `##` comment (08: reflection exposes "the
+        # documentation of items"; RULES.md, R129).
+        case "doc_of":
+            return Some(Value.Str(t.doc.copy()))
         case "fields_of":
             var out: list[Value] = []
             var index = 0
@@ -2075,6 +2220,9 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                 var fields: list[Value] = []
                 var index = 0
                 for (n, ty) in v.fields:
+                    var doc = String.new()
+                    if index < len(v.docs):
+                        doc = v.docs[index].copy()
                     fields.push(
                         Value.Field(
                             name=n.copy() ?? "{index}",
@@ -2084,7 +2232,7 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                             ty=ty.copy(),
                             default=False,
                             owner=None,
-                            doc=String.new(),
+                            doc=doc,
                         )
                     )
                     index += 1
@@ -2435,6 +2583,7 @@ test "a derive template unfolds into the impl's source":
         attrs=[],
         field_types=[],
         field_docs=[],
+        doc=String.new(),
     )
     var expected = String.new("\nimpl Named for Point:\n    def name(self) -> String:\n")
     expected.push("        var parts: list[String] = []\n")

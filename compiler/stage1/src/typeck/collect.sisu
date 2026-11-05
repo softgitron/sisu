@@ -99,7 +99,7 @@ from stage1.typeck.program import (
 )
 from stage1.typeck.safety import doc_above, missing_comment, safety_list
 from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
-from stage1.typeck.template import Src, Templates, template_parts, type_params
+from stage1.typeck.template import Src, Templates, returns_impl, template_parts, type_params
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
 
 ## Where a method is declared, which decides the generics, bounds and
@@ -286,6 +286,10 @@ pub struct Resolver:
     ## instance's name (`make[User]`), where a diagnostic in the instance is
     ## placed (RULES.md, R77).
     pub instance_sites: dict[ModuleId, (ModuleId, TextRange, String)]
+    ## For an instance's module whose template is the program's, the
+    ## template's module and the statement that wrote each stretch of its
+    ## code (RULES.md, R131).
+    pub instance_origins: dict[ModuleId, (ModuleId, list[(int, int, TextRange)])]
     ## While an import is declared: whether it is `@cfg(test)`, as an import
     ## of a dev-dependency must be (RULES.md, R75).
     pub import_for_tests: bool
@@ -404,6 +408,7 @@ impl Resolver:
             instances_declared=0,
             instance_modules=set(),
             instance_sites={},
+            instance_origins={},
             import_for_tests=False,
             base_defs=0,
             base_eager=[],
@@ -835,6 +840,17 @@ impl Resolver:
         if self.is_std(module):
             return String.new()
         return doc_above(self.root_text, at).join("\n")
+
+    ## The `##` comment above a variant's field that starts its own line,
+    ## `Circle(\n    ## The radius.\n    radius: f64,\n)`; none for a field
+    ## on the variant's line, whose comment above is the variant's
+    ## (RULES.md, R129).
+    pub pure def variant_field_doc(self, module: ModuleId, at: int) -> String:
+        if let Some(t) = self.module_texts.get(module):
+            return own_line_doc(t, at)
+        if self.is_std(module):
+            return String.new()
+        return own_line_doc(self.root_text, at)
 
     pub pure def text_in(self, module: ModuleId, range: TextRange) -> String:
         if let Some(t) = self.module_texts.get(module):
@@ -1531,8 +1547,14 @@ impl Resolver:
                                 _ = self.derive_templates.insert(key, m.copy())
                         else:
                             let at = m.name.range
-                            let d = Diagnostic.new(Msg.ComptimeDeriveTemplate, at.start, at.end)
-                            self.report_other(module, d.with("trait", t.name.text))
+                            var d = Diagnostic.new(Msg.ComptimeDeriveTemplate, at.start, at.end)
+                            d = d.with("trait", t.name.text)
+                            # A template that returns its impl after other
+                            # statements is told what may come first
+                            # (RULES.md, R130).
+                            if returns_impl(src, m):
+                                d = d.note(Msg.ComptimeDeriveChecks)
+                            self.report_other(module, d)
                     self.pending.push(
                         Pending.Trait(
                             def_=def_, module=module, ast=t.copy(), attrs=item.attrs.copy()
@@ -2440,7 +2462,9 @@ impl Resolver:
             ctx.self_ty = Some(self_ty)
             ctx.predicates = predicates.copy()
             var fields: list[(String?, Ty)] = []
+            var docs: list[String] = []
             for f in v.fields:
+                docs.push(self.variant_field_doc(module, f.range.start))
                 let ty = self.resolve_ty(f.ty, ctx)
                 let at = self.ast(module).type_expr(f.ty).range
                 self.check_sized(module, ty, at)
@@ -2458,7 +2482,9 @@ impl Resolver:
                 if let Some(n) = f.name:
                     fname = Some(n.text.copy())
                 fields.push((fname, ty))
-            variants.push(VariantInfo(name=v.name.text.copy(), fields=fields, span=v.range))
+            variants.push(
+                VariantInfo(name=v.name.text.copy(), fields=fields, span=v.range, docs=docs)
+            )
         let copy = self.has_derive(module, attrs, "Copy")
         let must_consume = has_attr(attrs, "must_consume")
         let derives = self.derives(module, attrs)
@@ -6342,3 +6368,16 @@ pub pure def preview_warning(name: str, why: str, at: TextRange) -> Diagnostic:
         return Diagnostic.new(Msg.TypePreviewPlain, at.start, at.end).with("name", name)
     let d = Diagnostic.new(Msg.TypePreview, at.start, at.end).with("name", name)
     return d.with("reason", why)
+
+## The `##` comment above what starts at `at`, when it starts its own line
+## (only spaces before it); none otherwise (RULES.md, R129).
+pure def own_line_doc(text: str, at: int) -> String:
+    var i = at
+    while i > 0:
+        let b = text.byte_at(i - 1).to_int()
+        if b == 10:
+            break
+        if b != 32:
+            return String.new()
+        i -= 1
+    return doc_above(text, at).join("\n")

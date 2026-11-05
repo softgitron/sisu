@@ -64,7 +64,7 @@ from stage1.typeck.program import (
 from stage1.typeck.program import param_local_ty as local_ty_of_param
 from stage1.typeck.std_sources import builtin_impls, importable, target
 from stage1.typeck.tasks import has_yield
-from stage1.typeck.template import Templates
+from stage1.typeck.template import Templates, origin_at
 from stage1.typeck.thir import (
     BlockId,
     BodyKind,
@@ -1368,7 +1368,18 @@ pure def finish_file(
             if id.starts_with("lex.") or id.starts_with("parse.") or id.starts_with("resolve."):
                 stay.push(d.copy())
             else:
-                moved.push(placed_at_call(d, at, name, files[k].0))
+                var p = placed_at_call(d, at, name, files[k].0)
+                # The template's line that wrote the instance's, in the
+                # program's own template (RULES.md, R131).
+                if let Some((template, origins)) = r.instance_origins.get(file_modules[k]):
+                    if let Some(line) = origin_at(origins, d.start):
+                        if template == site:
+                            p = p.label(Msg.TypeInstanceLine, line.start, line.end)
+                        else:
+                            p = p.label_in(
+                                Msg.TypeInstanceLine, line.start, line.end, template.index
+                            )
+                moved.push(p)
         files[k].1 = stay
         if moved.is_empty():
             continue

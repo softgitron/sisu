@@ -6,7 +6,7 @@
 
 from stage1.diag import Diagnostic, Msg
 from stage1.mutants import Rng
-from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.kinds import KEYWORDS, PUNCTUATION, SyntaxKind
 from stage1.syntax.tree import Token
 
 ## The output of the lexer: tokens covering every byte, and diagnostics in
@@ -260,3 +260,26 @@ test "a dedent comes before the comments after its block":
     assert first_dedent < doc
     assert last_dedent < comment
     assert lossless(src)
+
+test "punctuation by its bytes":
+    # The scanner dispatches on the bytes (`scan.punctuation_of`); each
+    # spelling of the table is one token of its kind, alone or before a
+    # space, a name or another operator's first byte.
+    for (text, kind) in PUNCTUATION:
+        for after in ["", " ", "a", "(", "+"]:
+            let src = "{text}{after}"
+            let tokens = lex(src).tokens
+            assert tokens[0].kind == kind
+            assert tokens[0].end == text.byte_len()
+
+test "keywords by their bytes":
+    # The scanner compares a name's bytes with the keywords' own
+    # (`scan.keyword_at`); a longer or shorter name is a name.
+    for (text, kind) in KEYWORDS:
+        assert lex(text).tokens[0].kind == kind
+        assert lex("{text}x").tokens[0].kind == K.Ident
+        assert lex("{text}_").tokens[0].kind == K.Ident
+        assert lex(text.byte_slice(0, text.byte_len() - 1)).tokens[0].kind != kind
+    assert lex("Self").tokens[0].kind == K.SelfTypeKw
+    assert lex("self").tokens[0].kind == K.SelfKw
+    assert lex("défer").tokens[0].kind == K.Ident

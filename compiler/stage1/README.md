@@ -209,7 +209,10 @@ the rest, so that `sisu test --from-sir` and `sisu bench --from-sir` run
 what stage 1 lowered (`sir.Program.test_tags` and `benches`,
 `Program.test_tags` of the resolved program, `typeck.collect.test_tags`);
 the class `sir-tests` of `check.sh` compares it with stage 0's for every
-program of `sir.list` that has tests or benchmarks. `sir --partial` prints
+program of `sir.list` that has tests or benchmarks, and the class
+`transcripts` that of each program with transcripts, in a sandbox with
+its `tests/`, whose transcripts the driver then runs from it (RULES.md,
+R132). `sir --partial` prints
 the SIR of what lowering reached even for a program beyond its slice,
 which it then names (the class `self` compares stage 1's own package that
 way, module by module).
@@ -2486,6 +2489,56 @@ and `runtime` lines and on `sir --tests` keeping the world of transcripts
 `cases/packages/` (`private_field_hole`, `runtime_single`,
 `runtime_freestanding`) and `cases/repl/loaded_panic.repl`.
 
+### The fourteenth round: the lexer's cost, the runtime of imports, the open items, the transcripts' class
+
+This round took the lexer's cost that R125 measured, R116's open item
+(imports and dependencies under `--target-runtime`), the thirteenth
+round's open items, a class of `check.sh` for the transcripts' roots, and
+the call on D-048's Unicode names. RULES.md has the rules (R127 to R133,
+decisions 760 to 766) and their decision texts:
+
+- **The lexer and the AST builder** (R127): punctuation and keywords are
+  known by their bytes, with nothing looked up or made, and each byte is
+  read once; a tree without an `ERROR` node is walked once, and an item is
+  found among its siblings by a binary search. `sisu1 tokens` of the
+  prelude lexes in 284 M instructions where it took 543 M (1,470 a byte
+  where it was 2,800); a cached `check` of a two-line program takes 3.42 G
+  where it took 4.15 G, the lexer 0.53 G of it (1.03 G) and the AST builder
+  0.54 G (0.77 G). `types-batch` of `types.list` takes 5.1 s of user time
+  where it took 7.6 s, `sir-batch` of `sir.list` 18.6 s where it took
+  23.9 s (the same machine, the better of two runs each, at a load of 8 to
+  10 on four cores). The round's last native run of `check.sh --native
+  --names --types --sir` took 16 minutes, where the thirteenth round's
+  took 21, on the same four cores at a like load (`types-batch` 7.2 s,
+  `sir-batch` 24.1 s, `doc-batch` and `check-batch` as before).
+- **The runtime of imports and dependencies** (R128): an import's
+  `@cfg(target.runtime == ...)` and a dependency's `when = { runtime =
+  ... }` read the runtime `--target-runtime` names.
+- **Documentation to reflection** (R129): `reflect.doc_of(T)`, a variant's
+  field's `f.doc`, and `cli.about[T]()`, a struct's own comment, which a
+  tool prints before `cli.help_text`.
+- **Checks before `return impl`** (R130): a derive's template may begin
+  with `comptime assert`, `comptime panic` and `comptime if` of them.
+- **The template's line** (R131): an error of an instance placed at its
+  call labels the template's statement that wrote its line.
+- **The transcripts' class** (R132): `check.sh`'s `transcripts` compares
+  the SIR of `testing/shop`, built with its tests, with stage 0's and runs
+  its transcripts through the driver from stage 1's SIR.
+- **Unicode names** (R133): NFC and the confusable and mixed-script lints
+  decided against for this round, with what their tables would take.
+
+Decided against: a `let` before a derive's `return impl` (R130), and
+D-048's names and lints for this round (R133). Open: the parser's own
+cost (0.91 G of the two-line `check`, below, "Starting up"), `sisu doc`'s
+rendering of an example with its values (below, "What is next", item 1),
+and the lookup by `str` without its `String`, whose intrinsics are stage
+0's next round's (decision 729).
+
+Stage 1's version stays 0.11.0: the driver relies on no new form (it
+already passes `--target-runtime`, which now reaches imports and
+dependencies too). The new cases are in `cases/findings14/` and
+`cases/packages/runtime_import.pkg`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3223,6 +3276,26 @@ the base's modules; a cache of the collected items, the resolver's
 program and types with the ASTs lowering reads the std bodies from, was
 decided against (RULES.md, R125).
 
+The fourteenth round measured the lexer natively (callgrind on `sisu1
+tokens` of the prelude, then on the same cached `check`): a punctuation
+was looked up in a `dict` up to three times, a key made of its bytes for
+each length (59 M of the prelude's 543 M), every name was made a `String`
+and looked up among the keywords (27 M), the scanner built both tables
+for each text it scanned, and each byte was read by a call of
+`Scanner.byte`, some twice, at about 200 instructions a read. R127
+dispatches on the bytes, compares a name's bytes with the keywords' of
+its first byte and length, and reads the bytes of a loop in place: the
+prelude lexes in 284 M, about 1,470 instructions a byte, and the two-line
+`check` takes 3.42 G, the lexer 0.53 G of it. The same profile showed the
+AST builder walking every function's body again for an `ERROR` node no
+std text has (0.1 G) and walking a block's children from the first to
+find each item's doc comments, quadratic in an `impl` of many methods
+(0.16 G): it builds in 0.54 G where it took 0.77 G. What remains of a
+command's start is the parser's own 0.91 G, the resolution of the base
+(0.37 G) and the copies and drops of the values throughout; the lexer's
+cost a byte is now mostly the native code's for each operation, a load,
+a compare and a branch each a few instructions more than they need.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3320,7 +3393,7 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
    found in stage 0"): item 11 has those of the front end the fifth round
    left. Decided against: `enumerate(own xs)` (04 writes `mut` at a call,
    never `own`), and NFC names and the confusable lints (D-048), which wait
-   for the lexer's Unicode tables.
+   for generated Unicode tables (R133 says what they would hold).
 8. **Start-up and speed** (above, "Starting up" and "The compile-time
    evaluator"): the base's prelude, `cap` and `builtin_impls`, parsed and
    resolved again by each command, which a cache of the parsed and
@@ -3328,8 +3401,9 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
    reference of a whole value (`target`). The base cache's write is
    atomic since the sixth round (`Fs.rename`). The thirteenth round's
    cache (R125) took a tenth off a command's start; the parse of the
-   base's modules, half of it, is left, and the lexer's 3,500
-   instructions a byte are its cheaper part.
+   base's modules, half of it, is left; the fourteenth round's (R127)
+   made the lexer twice as fast and the AST builder a third faster, and
+   the parser itself, 0.91 G of a two-line `check`, is what is left.
 9. **Unsafe code** (above, "Unsafe code"): since round 11 the intrinsics
    of `std.mem` run in stage 0's interpreter, on the checked memory model
    of D-085 with the foreign calls of `extern` blocks emulated, and
@@ -3384,7 +3458,12 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     structural hashing refuses (`E0398`), and `Lookup`'s doc example by
     `str`; left: the label at an unrolled template's line, an item's own
     `##` in reflection, `@cfg` on an import and `when` under
-    `--target-runtime`, and statements before `return impl`. The tenth round took a variant's
+    `--target-runtime`, and statements before `return impl`. The fourteenth
+    round took `@cfg` on an import and `when` under `--target-runtime`
+    (R128), an item's own `##` and a variant's fields' in reflection
+    (R129), checks before `return impl` (R130; a `let` there decided
+    against) and the label at an unrolled template's line (R131); decided
+    against for the round: NFC names and the confusable lints (R133). The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

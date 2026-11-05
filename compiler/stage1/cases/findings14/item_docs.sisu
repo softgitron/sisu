@@ -1,0 +1,59 @@
+# An item's own `##` comment is `reflect.doc_of(T)` to compile-time code,
+# and a variant's field's is `f.doc`, in a derive's template and in a
+# generic function that reflects; `cli.about` gives a struct's own comment,
+# which a tool prints before `cli.help_text` (08: reflection exposes "the
+# documentation of items"; RULES.md, R129).
+import cli
+
+## How warm the sauna is.
+@derive(Debug)
+enum Reading:
+    ## Not measured yet.
+    Unknown
+    Measured(
+        ## Degrees Celsius.
+        degrees: int,
+        ## Where the thermometer hangs.
+        place: String
+    )
+    Guessed(int)
+
+trait Explained:
+    def explained(self) -> String
+
+    comptime def derive(T: type) -> impl Explained for T:
+        return impl Explained for T:
+            def explained(self) -> String:
+                var out = [reflect.doc_of(T)]
+                comptime for v in reflect.variants_of(T):
+                    comptime for f in v.fields:
+                        out.push("{v.name}.{f.name}: {f.doc}")
+                return out.join("\n")
+
+@derive(Explained)
+enum Stove:
+    Wood(
+        ## Logs an hour.
+        logs: int
+    )
+    Electric(kilowatts: int)
+
+def about[T]() -> String:
+    var out = [reflect.doc_of(T)]
+    comptime for v in reflect.variants_of(T):
+        comptime for f in v.fields:
+            out.push("{v.name}.{f.name}: [{f.doc}]")
+    return out.join("\n")
+
+## The bath's settings.
+## Read from the command line.
+struct Bath:
+    ## How hot, in degrees.
+    heat: int = 80
+
+def main():
+    print(cli.about[Bath]())
+    print(cli.help_text[Bath]())
+    print(about[Reading]())
+    print(Stove.Wood(logs=3).explained())
+    print("[{reflect.doc_of(Stove)}]")

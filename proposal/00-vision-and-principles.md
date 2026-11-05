@@ -220,4 +220,4 @@ such false friends with a check for each row
   from a notebook.
 - Code that must interoperate with C++ templates and classes directly. Carbon
   exists for that.
-- Anyone who needs it today. There is no compiler.
+- Anyone who needs it today. The compiler is a prototype of stage 0 to stage 2 ([the README's prototype row](../README.md)), not a release: it runs on one platform, its library is the standard library's first modules, and its rules still move from round to round.

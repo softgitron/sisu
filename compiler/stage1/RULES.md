@@ -6575,3 +6575,332 @@ native`, which the package loader and the name pass read from
 746. A struct of another module built without a private field is
      `E0258` alone; `TotalF64` stays no key, since the runtime hashes keys
      structurally. Stage 1 decides it (RULES.md, R126).
+
+## R127. The lexer looks nothing up, and the AST builder walks no tree twice (decision 760)
+
+**The rule.** Nothing a command prints changes; the token stream is the
+same, byte for byte (`check.sh`'s `tokens`, `tree`, `trivia-tree` and
+`print` classes), and so is every AST. What changes is how the lexer and
+the AST builder find what they find:
+
+- The scanner dispatches on a punctuation's bytes (`scan.punctuation_of`:
+  the first byte, then the next one or two, the longest of `PUNCTUATION`
+  that the text starts with), where it looked a key made of the bytes up
+  in a `dict` for a length of three, then two, then one; and it knows a
+  keyword by its first byte and its length, then its bytes
+  (`scan.keyword_at`), where it made a `String` of every name and looked
+  it up. The scanner no longer builds the two tables for each text it
+  scans. Two unit tests hold the dispatch to `PUNCTUATION` and `KEYWORDS`
+  ("punctuation by its bytes", "keywords by their bytes"), each spelling
+  alone and before a space, a name and another operator's first byte.
+- The loops over a name, a comment, a run of spaces and a string's text
+  read each byte once, in place, where each read was a call of
+  `Scanner.byte` (and a triple-quoted string's text tried `"""` at each
+  byte); a scan in code reads the mode only inside a string; the layout
+  pass counts a space of the indentation without decoding a character,
+  and finds the line breaks by a `match`.
+- The AST builder knows whether a tree has an `ERROR` node at all, and a
+  tree without one (every std text, and most programs) needs no walk of a
+  function's body for `body_broken` or of its header for `header_broken`;
+  and it finds an item among its parent's children by a binary search on
+  where the children start (`B.element_start`, `B.child_index`) to read
+  the doc comments before it, where it walked from the first child, which
+  made a block of many items, an `impl` of the prelude's, quadratic.
+
+**Measured** (callgrind, natively, the round's starting stage 1 and this
+one built by the same stage 0): `sisu1 tokens` of `std/prelude.sisu`
+(194 KB) lexes in 543 M instructions before, 284 M after (2,800 to 1,470
+a byte; the scan 440 M to 196 M, the layout 103 M to 89 M); a cached
+`sisu1 check --format=ids` of a two-line program executes 4.147 G before
+(R125's 4.15 G) and 3.420 G after (−17.5 %): the lexer 1.028 G to
+0.531 G, the AST builder 0.773 G to 0.542 G, the parser itself (without
+the lexer) 0.908 G as before, `base_of` 3.793 G to 3.067 G.
+
+**Why.** README's "Where the time goes" and R125: the lexer's 3,500
+instructions a byte were the cheaper half of a command's start, and the
+next round's.
+
+**In stage 1.** `lexer.scan` (`punctuation_of`, `with_eq`, `doubled`,
+`wrapping`, `keyword_at`, `Word`), `lexer.layout` (`split_lines`,
+`indentation_width`), `lexer` (the two tests), `syntax.ast.build` (`B.errors`,
+`docs_before`, `element_start`, `child_index`).
+
+**What it changes.** No output of the corpus.
+
+**Decision 760**, for docs/architecture.md:
+
+760. Stage 1's lexer dispatches on a punctuation's and a keyword's bytes
+     and reads each byte once, and its AST builder walks a tree without
+     errors once and finds an item among its siblings by a binary search:
+     a command's start is 17.5 % shorter (4.15 G instructions to 3.42 G
+     for a two-line `check`, the lexer 1.03 G to 0.53 G), with the same
+     tokens and trees. Stage 1 decides it (RULES.md, R127).
+
+## R128. An import's `@cfg` and a dependency's `when` read the runtime the build is for (decision 761)
+
+**The rule.** `target.runtime` in an import's `@cfg` (R106) and `runtime`
+in a dependency's `when` are the runtime `--target-runtime` names (R116),
+`native` or `interpreter`, as `if comptime target.runtime` in a body
+already was: a build for the native runtime (`sisu run --native`, `sisu
+build --native`, for which the driver passes `--target-runtime native`)
+builds and imports a dependency whose `when = { runtime = "native" }`, and
+one for the interpreter leaves it out, as `when = { os = "windows" }`
+leaves one out on Linux. Without the option the runtime is `interpreter`,
+as before.
+
+**Why.** R116's open item: the package loader and the name pass read
+`manifest.target_facts()`, the interpreter's, before the build's options
+reached them, so a program that reached a dependency for the native
+runtime only was refused by its native build.
+
+**In stage 1.** `manifest` (`target_facts_for`), `package`
+(`FeatureRequest.runtime`, `for_runtime`, `Layout.runtime`; the loader's
+facts), `cfg` (`Features.runtime`, `for_runtime`, `facts`;
+`target_condition`, `discarded_branches`), `main` (`build_request`,
+`feature_request`, the `Features` of a file and of each package,
+`target_absences`); the tests "a dependency's `when` reads the runtime
+the build is for" (`package`) and "an import's `@cfg` reads the runtime
+the build is for" (`cfg`).
+
+**What it changes.** The case `cases/packages/runtime_import.pkg` (its
+`.out`, `interpreted`, as `check.sh` builds it), whose native build
+(`sisu run --native` in its directory, and `sisu1 sir --target-runtime
+native` run from SIR) prints `native`; no other output of the corpus.
+
+- Differs: `compiler/stage1/cases/packages/runtime_import.pkg`: sir, ids, human, doc, doc-output
+
+**Decision 761**, for docs/architecture.md:
+
+761. An import's `@cfg(target.runtime == ...)` and a dependency's `when =
+     { runtime = ... }` read the runtime that `--target-runtime` names, so
+     a native build reaches a dependency for the native runtime. Stage 1
+     decides it (RULES.md, R128).
+
+## R129. An item's own `##` is `reflect.doc_of(T)`, a variant's field's is `f.doc`, and `cli.about` gives a struct's (decision 762)
+
+**The rule.**
+
+- `reflect.doc_of(T)` is the `##` comment above the declaration of `T`
+  (a struct, an enum, an error set), its attributes passed over, as R117
+  reads a field's: the lines without `##` and the space after it, joined
+  by line breaks; empty for a type without one, for a type of the
+  standard library, whose text the base does not keep, and for any other
+  type. It is a value of compile-time code, in a derive's template and in
+  a generic function that reflects, as `reflect.name_of(T)` is.
+- A variant's field that starts a line of its own has `f.doc`, the `##`
+  comment above it, in `reflect.variants_of(T)`'s `v.fields`, as a
+  struct's field has since R117; a field on the variant's own line,
+  `Guessed(int)`, has none, since the comment above that line is the
+  variant's.
+- `cli.about[T]()` is the struct's own comment, which a tool prints
+  before `cli.help_text[T]()`; `help_text` prints what it printed, so that
+  the snapshots of its text stay (the conformance suite's
+  `testing/proposal_testing` holds one of a struct with a comment).
+
+**Why.** The manual's finding under "The standard library" (R12):
+reflection gave a struct's fields their comment but not an item's own or
+a variant's fields'; 08 has reflection expose "the documentation of
+items, as values". R117 left `reflect.doc_of(T)` for when a program asked
+for it, and a tool's help is the program.
+
+**In stage 1.** `typeck.template` (`TypeShape.doc`, `VariantShape.docs`,
+`Target.doc`, `reflect`'s `doc_of`, `variants_of`), `typeck.instances`
+(a derive's target and a reflected type's shape), `typeck.collect`
+(`variant_field_doc`, `own_line_doc`), `typeck.program`
+(`VariantInfo.docs`); `std/cli.sisu` (`about`, added).
+
+**What it changes.** The case `cases/findings14/item_docs.sisu` (its
+`.out`), which the Rust front end refuses (it has no `reflect.doc_of`);
+no other output of the corpus.
+
+- Differs: `compiler/stage1/cases/findings14/item_docs.sisu`: ids, human, doc, doc-output
+
+**Decision 762**, for docs/architecture.md:
+
+762. `reflect.doc_of(T)` is the `##` comment of `T`'s declaration, a
+     variant's field on a line of its own has `f.doc`, and `cli.about[T]()`
+     gives a struct's own comment. Stage 1 decides it (RULES.md, R129).
+
+## R130. A derive's template may check the type before its `return impl` (decision 763)
+
+**The rule.** The body of a trait's `comptime def derive(T: type) -> impl
+Trait for T` may begin with checks of the type before its `return impl
+Trait for T:`: `comptime assert COND, "MESSAGE"`, `comptime panic("...")`,
+and `comptime if` or `if comptime` whose branches hold only checks. The
+unfolding runs them first, for each type the derive is for, and they
+write no code; one that fails stops the derive there, `E0608` at the
+`@derive` with the template's line where it stopped, as a failure inside
+a method of the impl does:
+
+```sisu
+comptime def derive(T: type) -> impl Tabled for T:
+    comptime if not reflect.is_struct(T):
+        comptime panic("a table's row is a struct's fields")
+    return impl Tabled for T:
+        ...
+```
+
+Any other statement before or after the `return impl` is `E0607` as
+before; when the body has a `return impl`, `E0607` now has the note
+`comptime.derive-checks`, which says what may come before it.
+
+**Decided against:** a `let` before the `return impl`, a value computed
+once for the type that the impl's methods would read. The engine writes
+the impl's methods as text for the type, and a name bound before them
+would be a compile-time variable of every method, which it has only for
+the variable of a `comptime for`; a method computes such a value itself,
+at compile time, as before.
+
+**Why.** G21's finding under "Metaprogramming": a derive's body must be
+the `return impl` alone, so a check of the type's shape goes inside a
+method. 08 makes the derive a `comptime def` like any other, whose
+`return impl` is the one place it produces a declaration; a check before
+it produces none.
+
+**In stage 1.** `typeck.template` (`template_parts`, `template_checks`,
+`is_check`, `checks_only`, `returns_impl`, `unfold`), `typeck.collect`
+(`E0607`'s note); the catalog's `comptime.derive-checks`.
+
+**What it changes.** The cases `cases/findings14/derive_checks.sisu` (its
+`.out`) and `cases/findings14/derive_checks_refused.sisu` (its `.diag`),
+both of which the Rust front end refuses with `E0607`.
+
+- Differs: `compiler/stage1/cases/findings14/derive_checks.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings14/derive_checks_refused.sisu`: ids, human, doc, doc-output
+
+**Decision 763**, for docs/architecture.md:
+
+763. A derive's template may begin with compile-time checks of the type,
+     `comptime assert`, `comptime panic` and `comptime if` of them, before
+     its `return impl`; a failing check is `E0608` at the `@derive`, and
+     `E0607` names what may come first. Stage 1 decides it (RULES.md,
+     R130).
+
+## R131. An error in an instance labels the template's line that wrote it (decision 764)
+
+**The rule.** A diagnostic of a template's instance that R77 places at the
+call that made the instance, with the instance's line in the note
+`type.instance-code`, has the label `type.instance-line` ("the template's
+line that wrote it") at the statement of the program's own template that
+wrote that line, the innermost: the body of the `comptime for` that
+unrolled it, the branch of the `if comptime` that chose it.
+
+```text
+error[E0310]: `+=` cannot be applied to `int` and `String`
+  --> unrolled_line.sisu:16:11
+   |
+16 |     print(total(Sauna(heat=80, name="Aino")))
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+12 |         n += v.[f]
+   |         ---------- the template's line that wrote it
+  = note: in the instance of `total[Sauna]` that this call makes: `n += v.name`
+```
+
+The unfolding records, for each statement of the template, the stretch of
+the instance's code it wrote (`Unfold.origins`, `Traced`), and the label
+is the statement whose stretch holds the diagnostic's start. A template
+of the standard library has no label, since a program's diagnostics show
+none of its text; one in another module than the call's is labelled in
+its own file.
+
+**Why.** The manual's finding under "Metaprogramming" (X7): an error in
+unrolled code stood at the call with the unrolled line in a note, and
+nothing pointed at the template's line. The twelfth and thirteenth rounds
+left it open (R115, R126), since the instance's text was made whole.
+
+**In stage 1.** `typeck.template` (`Unfold.origins`, `stmt`,
+`unfold_fn_traced`, `Traced`, `origin_at`), `typeck.instances`,
+`typeck.collect` (`Resolver.instance_origins`), `typeck` (the label at
+the call); the catalog's `type.instance-line`.
+
+**What it changes.** The case `cases/findings14/unrolled_line.sisu` (its
+`.diag`), and every program whose instance has an error placed at its
+call, which now has the label: the `.diag` files of
+`cases/findings8/instances.sisu`, `cases/findings11/compound_operator.sisu`
+and the conformance suite's `reflect/test_instances.sisu` are blessed
+again (each differed from stage 0 already, as R77 and R104 list).
+
+- Differs: `compiler/stage1/cases/findings14/unrolled_line.sisu`: ids, human, doc, doc-output
+
+**Decision 764**, for docs/architecture.md:
+
+764. An error of a template's instance placed at its call labels the
+     statement of the program's template that wrote the instance's line.
+     Stage 1 decides it (RULES.md, R131).
+
+## R132. `check.sh`'s class `transcripts`: the transcripts' roots on every run (decision 765)
+
+**The rule.** `check.sh` has the class `transcripts`: each program of the
+conformance suite with transcripts (`NAME.files/tests/*.transcript`, so
+far `testing/shop`), put in a sandbox as the conformance runner puts it
+(the file and what its `.files/` holds), is lowered with its tests by
+stage 0 (`sisu sir --tests NAME.sisu` there) and by stage 1, whose SIR
+must hold `transcript_world` and `transcript_system` as functions and is
+compared with stage 0's; and the driver's `sisu test --no-cache NAME.sisu`
+runs there on stage 1 (`SISU_STAGE1_TRANSCRIPTS=1`; with `--native`,
+`SISU_STAGE1` is the executable the run built), its tests and its
+transcripts from stage 1's SIR (decision 722), and must print the case's
+`NAME.test`. R120's roots, which the thirteenth round checked by hand, are
+checked on every run.
+
+**Why.** R120 kept the world of transcripts in `sir --tests`, and decision
+722 runs transcripts from that SIR; no class ran it.
+
+**In stage 1.** `check.sh` (the class, its summary line).
+
+**What it changes.** No output; `testing/shop`'s SIR differs from stage
+0's by R120's roots, as listed.
+
+- Differs: `compiler/conformance/cases/testing/shop.sisu`: transcripts
+
+**Decision 765**, for docs/architecture.md:
+
+765. Stage 1's `check.sh` compares the SIR of each program with
+     transcripts, built with its tests, with stage 0's and runs its
+     transcripts through the driver from stage 1's SIR, against the
+     case's `.test`. Stage 1 decides it (RULES.md, R132).
+
+## R133. Unicode names: NFC and the confusable lints decided against for this round (decision 766)
+
+**The rule.** Nothing changes: a name is the bytes it is written with, a
+combining mark after a letter is `E0005`, and there is no confusable or
+mixed-script lint (D-048; the manual's finding under "Syntax and names").
+
+**Decided against**, for this round, with what it would take:
+
+- **NFC.** A table of the canonical compositions whose result is a
+  letter: 1,251 pairs (base, mark) in Unicode 15.1, with the combining
+  classes of the marks to put several in canonical order first; the
+  scanner would take a mark (category `Mn`) after a letter into the name,
+  and every place that reads a name's text would read its NFC form:
+  `ast.build`'s names, the name pass, which reads the syntax tree's
+  tokens itself (`resolve`), and `sisu doc`, while the formatter keeps the
+  text as written. A token's text and a name's would then differ, which
+  the lossless tree and the name pass's labels, at a token's bytes, must
+  both carry.
+- **The confusable and mixed-script lints.** Unicode's `confusables.txt`
+  maps about 6,300 characters to their skeletons; restricted to the
+  scripts an identifier takes (Latin, Greek, Cyrillic and the rest of
+  UAX 31's recommended set) it is still over a thousand entries, and the
+  mixed-script lint needs the script of every letter (`Scripts.txt`, some
+  2,000 ranges). Stage 1 reads its tables as constants compiled into it;
+  tables of that size are a generated module, and the lints `sisu lint`'s
+  (R11), over every name of a package.
+
+Each is a round's work of its own, beside the lexer's speed (R127), which
+a table read per non-ASCII character would give back in part; the
+generated tables come first, made by a script from the Unicode data the
+round names.
+
+**Why.** D-048 decides NFC names and the lints; the manual's finding says
+they "wait for the lexer's Unicode tables", which do not exist yet.
+
+**What it changes.** Nothing.
+
+**Decision 766**, for docs/architecture.md:
+
+766. NFC names and the confusable and mixed-script lints of D-048 wait
+     for generated Unicode tables (1,251 compositions; the confusables of
+     the identifier scripts and their script ranges): not this round.
+     Stage 1 decides it (RULES.md, R133).

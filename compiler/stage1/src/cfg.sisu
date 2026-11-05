@@ -20,7 +20,7 @@
 ##! and methods the filter left out (`Filtered.left_out`).
 
 from stage1.diag import Catalog, TextRange
-from stage1.manifest import target_facts
+from stage1.manifest import target_facts, target_facts_for
 from stage1.parser import parse
 from stage1.syntax.ast import Ast, Attr, ExprId, ExprKind, FieldDef, FnDef, ItemId, ItemKind, Module, Name
 from stage1.syntax.ast import CmpOp, Cond, CondPart, StmtKind, UnOp
@@ -28,15 +28,25 @@ from stage1.syntax.ast import VariantDef
 from stage1.syntax.ast import build
 
 ## A package's features: those its `[features]` declares, and those that
-## are on in this build (09).
+## are on in this build (09); and the runtime the build is for, whose
+## `target.runtime` an import's `@cfg` reads (RULES.md, R116 and R128).
 @derive(Eq, Debug)
 pub struct Features:
     pub declared: list[String]
     pub on: list[String]
+    pub runtime: String
 
 impl Features:
     pub pure def none() -> Features:
-        return Features(declared=[], on=[])
+        return Features(declared=[], on=[], runtime="interpreter".to_string())
+
+    ## No features, in a build for `runtime`.
+    pub pure def for_runtime(runtime: str) -> Features:
+        return Features(declared=[], on=[], runtime=runtime.to_string())
+
+    ## The facts of the build's target.
+    pub pure def facts(self) -> list[(String, String)]:
+        return target_facts_for(self.runtime)
 
 ## A `@cfg` that is not a condition (`E0266`), or a `feature="NAME"` whose
 ## package declares no such feature (`W0006`).
@@ -98,7 +108,10 @@ impl Filter:
                     # A fact of the target, on an import (RULES.md, R106).
                     case ExprKind.Compare(first, rest):
                         if self.import_:
-                            if let Some(held) = target_condition(ast, first, rest):
+                            let facts = match self.features:
+                                case Some(fs): fs.facts()
+                                case None: target_facts()
+                            if let Some(held) = target_condition(ast, first, rest, facts):
                                 return held
                     case ExprKind.Call(callee, args, trailing):
                         if trailing.is_none():
@@ -253,7 +266,9 @@ pub pure def import_names(kind: ItemKind) -> list[String]:
 
 ## Whether `target.FACT == "VALUE"` (or `!=`) holds for the build's
 ## target; `None` for any other comparison.
-pub pure def target_condition(ast: Ast, first: ExprId, rest: list[(CmpOp, ExprId)]) -> bool?:
+pub pure def target_condition(
+    ast: Ast, first: ExprId, rest: list[(CmpOp, ExprId)], facts: list[(String, String)]
+) -> bool?:
     if len(rest) != 1:
         return None
     let (op, rhs) = rest[0]
@@ -265,7 +280,7 @@ pub pure def target_condition(ast: Ast, first: ExprId, rest: list[(CmpOp, ExprId
         return None
     let value = build.plain_text(parts)
     var same = False
-    for (f, v) in target_facts():
+    for (f, v) in facts:
         if f == fact and v == value:
             same = True
     return Some(if op == CmpOp.Eq: same else: not same)
@@ -274,7 +289,7 @@ pub pure def target_condition(ast: Ast, first: ExprId, rest: list[(CmpOp, ExprId
 ## leaves out (RULES.md, R106): a branch whose condition is a fact of the
 ## target that does not hold, and those after one that holds, with its
 ## `else`. A branch on anything else ends the reading of its statement.
-pub pure def discarded_branches(ast: Ast) -> list[TextRange]:
+pub pure def discarded_branches(ast: Ast, facts: list[(String, String)]) -> list[TextRange]:
     var out: list[TextRange] = []
     for s in ast.stmts:
         let StmtKind.If(branches, else_block) = s.kind.copy() else:
@@ -285,7 +300,7 @@ pub pure def discarded_branches(ast: Ast) -> list[TextRange]:
             if held:
                 out.push(b.range)
                 continue
-            let v = comptime_target(ast, c) else:
+            let v = comptime_target(ast, c, facts) else:
                 known = False
                 break
             if v:
@@ -299,7 +314,7 @@ pub pure def discarded_branches(ast: Ast) -> list[TextRange]:
 
 ## Whether `if comptime target.FACT == "VALUE":` holds; `None` for a
 ## condition of another form.
-pure def comptime_target(ast: Ast, c: Cond) -> bool?:
+pure def comptime_target(ast: Ast, c: Cond, facts: list[(String, String)]) -> bool?:
     if len(c.parts) != 1:
         return None
     let CondPart.Expr(e) = c.parts[0].copy() else:
@@ -308,7 +323,7 @@ pure def comptime_target(ast: Ast, c: Cond) -> bool?:
         return None
     let ExprKind.Comptime(inner) = ast.expr(first).kind.copy() else:
         return None
-    return target_condition(ast, inner, rest)
+    return target_condition(ast, inner, rest, facts)
 
 ## The fact `target.FACT` names, `os`, `arch` or `runtime`.
 pub pure def target_fact(ast: Ast, e: ExprId) -> String?:
@@ -426,7 +441,9 @@ pure def kept_fns(source: str, on: bool) -> (list[String], int):
     var turned: list[String] = []
     if on:
         turned.push("tls".to_string())
-    let features = Features(declared=["tls".to_string()], on=turned)
+    let features = Features(
+        declared=["tls".to_string()], on=turned, runtime="interpreter".to_string()
+    )
     let filtered = filter(m, True, Some(features))
     let kept = filtered.module ?? m
     var out: list[String] = []
@@ -442,3 +459,11 @@ test "`not(...)` turns its one condition around":
     # Two conditions are not a condition, and the item is kept.
     let two = "@cfg(not(feature=\"tls\", test))\ndef both():\n    pass\n"
     assert kept_fns(two, False) == (["both".to_string()], 1)
+
+test "an import's `@cfg` reads the runtime the build is for":
+    let source = "@cfg(target.runtime == \"native\")\nimport fast\n\ndef main():\n    pass\n"
+    let m = build.module(parse(source, Catalog.parse("")).tree)
+    let interpreted = filter(m, True, Some(Features.none())).module ?? m.copy()
+    assert len(interpreted.items) == 1
+    let native = filter(m, True, Some(Features.for_runtime("native"))).module ?? m.copy()
+    assert len(native.items) == 2

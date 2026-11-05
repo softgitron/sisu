@@ -10590,3 +10590,41 @@ intrinsics"; D-086; 06, 12, 17; stage 1's R113, R118, R120 and R122)
      to which 785's wrapper adds that a pointer handed to C must be
      stripped, and it leaves no half state only when done whole. This
      changes no rule of the language.
+
+**Stage 1's fourteenth round** (stage 1's RULES.md, R127 to R133; the lexer and the AST builder by their bytes, imports and dependencies under the target runtime, `reflect.doc_of` and a variant's fields' `doc`, checks before `return impl`, the template line's label, the transcripts class, Unicode names decided against)
+
+760. Stage 1's lexer dispatches on a punctuation's and a keyword's bytes
+     and reads each byte once, and its AST builder walks a tree without
+     errors once and finds an item among its siblings by a binary search:
+     a command's start is 17.5 % shorter (4.15 G instructions to 3.42 G
+     for a two-line `check`, the lexer 1.03 G to 0.53 G), with the same
+     tokens and trees. Stage 1 decides it (RULES.md, R127).
+
+761. An import's `@cfg(target.runtime == ...)` and a dependency's `when =
+     { runtime = ... }` read the runtime that `--target-runtime` names, so
+     a native build reaches a dependency for the native runtime. Stage 1
+     decides it (RULES.md, R128).
+
+762. `reflect.doc_of(T)` is the `##` comment of `T`'s declaration, a
+     variant's field on a line of its own has `f.doc`, and `cli.about[T]()`
+     gives a struct's own comment. Stage 1 decides it (RULES.md, R129).
+
+763. A derive's template may begin with compile-time checks of the type,
+     `comptime assert`, `comptime panic` and `comptime if` of them, before
+     its `return impl`; a failing check is `E0608` at the `@derive`, and
+     `E0607` names what may come first. Stage 1 decides it (RULES.md,
+     R130).
+
+764. An error of a template's instance placed at its call labels the
+     statement of the program's template that wrote the instance's line.
+     Stage 1 decides it (RULES.md, R131).
+
+765. Stage 1's `check.sh` compares the SIR of each program with
+     transcripts, built with its tests, with stage 0's and runs its
+     transcripts through the driver from stage 1's SIR, against the
+     case's `.test`. Stage 1 decides it (RULES.md, R132).
+
+766. NFC names and the confusable and mixed-script lints of D-048 wait
+     for generated Unicode tables (1,251 compositions; the confusables of
+     the identifier scripts and their script ranges): not this round.
+     Stage 1 decides it (RULES.md, R133).

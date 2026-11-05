@@ -44,6 +44,13 @@ def parse[T](args: list[str]) -> T ! Error:
         )
     )
 
+## What the options of `T` are for: the struct's own `##` comment, which a
+## tool prints before `help_text[T]()`; empty without one (RULES.md, R129).
+def about[T]() -> String:
+    comptime if not reflect.is_struct(T):
+        comptime panic("`cli.about` describes a struct, not `{reflect.name_of(T)}`")
+    return reflect.doc_of(T)
+
 ## The options `parse[T]` reads, one line each: the option, the kind of
 ## value it takes and its default, with the field's `##` comment under it,
 ## then the positional arguments.

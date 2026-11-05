@@ -1,0 +1,26 @@
+# A derive's template may check the type before its `return impl`: a
+# `comptime assert`, or a `comptime if` that may `comptime panic`, which
+# stops the derive for a type it does not fit, at the `@derive` (E0608),
+# and writes no code (G21; RULES.md, R130).
+
+trait Tabled:
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Tabled for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("a table's row is a struct's fields")
+        comptime assert len(reflect.fields_of(T)) > 0, "a row has a field"
+        return impl Tabled for T:
+            def row(self) -> String:
+                var cells: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    cells.push("{self.[f]}")
+                return cells.join(" | ")
+
+@derive(Tabled)
+struct Guest:
+    name: String
+    rounds: int
+
+def main():
+    print(Guest(name="Aino", rounds=3).row())
