@@ -1,0 +1,17 @@
+# `try_collect` after `take`, `filter` and the other adapters whose item is
+# their inner iterator's is decided against (RULES.md, R154): the chain
+# ends in the `map` that makes the results, or in `map(r -> r)`, whose
+# `Map[I, Result[T, E]]` has `try_collect` (R146).
+def half(n: int) -> Result[int, String]:
+    return if n % 2 == 0: Ok(n // 2) else: Err("odd: {n}")
+
+def main():
+    let xs = [2, 4, 5, 6, 8]
+    let firsts: Result[list[int], String] = xs.iter().map(x -> half(x)).take(2).map(
+        r -> r
+    ).try_collect()
+    print(firsts)
+    let all: Result[list[int], String] = xs.iter().filter(x -> x > 2).map(
+        x -> half(x)
+    ).try_collect()
+    print(all)

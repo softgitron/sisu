@@ -197,8 +197,9 @@
 #
 # Usage: compiler/stage1/check.sh [--native] [--self] [--mutants N] [--seed S] [--names] [--types] [--sir] [--check] [--keep DIR]
 #
-#   --native     build stage 1 once with stage 0's native backend (`sisu
-#                build --native`) and run that executable for every batch,
+#   --native     run stage 1 as the driver builds it natively (the release
+#                profile, every contract checked: `sisu1`, decision 860)
+#                for every batch,
 #                instead of `sisu run --` on the interpreter; the outputs
 #                are the same, in minutes instead of an hour; it implies
 #                --self and --check, and adds the classes `build`,
@@ -288,15 +289,20 @@ fi
 
 # Stage 1 itself, run from its directory (it reads the catalog and the
 # standard library relative to it): on the interpreter, or with --native
-# as the executable stage 0's backend builds once into the work directory.
+# as the executable the driver builds for every `sisu` command (decision
+# 860: the release profile, every contract checked), which `sisu1` asks it
+# for and the run copies into the work directory (RULES.md, R150). The
+# classes `self` and `fixed` run stage1-A, the debug build stage 0 makes
+# (`sisu build --native`), which the fixed point is about.
 stage1_exe=""
 if [ "$native" = 1 ]; then
-    echo "building stage 1 natively (sisu build --native)"
-    if ! (cd "$here" && "$sisu" build --native --output "$work/stage1" > "$work/native.log" 2>&1); then
+    echo "building stage 1 natively (the driver's build, sisu1)"
+    if ! "$here/sisu1" --version > "$work/native.log" 2>&1; then
         cat "$work/native.log" >&2
         echo "check.sh: stage 1 does not build natively" >&2
         exit 1
     fi
+    cp "$compiler/target/stage1/sisu1" "$work/stage1"
     stage1_exe="$work/stage1"
 fi
 stage1() {
@@ -306,7 +312,23 @@ stage1() {
         (cd "$here" && "$sisu" run -- "$@")
     fi
 }
-
+# Stage1-A, the debug build of the fixed point, made once for `self` and
+# `fixed`.
+stage1_a=""
+debug_stage1() {
+    if [ -z "$stage1_a" ]; then
+        echo "building stage 1 natively for the fixed point (sisu build --native)"
+        if ! (cd "$here" && "$sisu" build --native --output "$work/stage1-A" > "$work/fixed.A.log" 2>&1); then
+            cat "$work/fixed.A.log" >&2
+            echo "check.sh: stage 1 does not build natively" >&2
+            exit 1
+        fi
+        stage1_a="$work/stage1-A"
+    fi
+}
+stage1_debug() {
+    (cd "$here" && "$stage1_a" "$@")
+}
 # Stage 0's outputs, made `jobs` at a time: `parallel FUNCTION LIST REF`
 # runs `FUNCTION N FILE REF` for the Nth file of LIST. `sisu check
 # --format=ids` runs once per file (`check0`), from the file's directory,
@@ -1768,10 +1790,11 @@ SPLIT
         "$work/self.stage0.check" > "$work/self.stage0.names"
     awk '/^  / { if (keep) print; next } { keep = ($3 ~ /^type\./); if (keep) print }' \
         "$work/self.stage0.check" > "$work/self.stage0.types"
+    debug_stage1
     start=$(date +%s.%N)
-    if ! { stage1 names "$here" > "$work/self.stage1.names" 2> "$work/self.stderr" &&
-           stage1 types "$here" > "$work/self.stage1.types" 2> "$work/self.types.beyond" &&
-           stage1 sir --partial "$here" > "$work/self.stage1.sir" 2> "$work/self.beyond"; }; then
+    if ! { stage1_debug names "$here" > "$work/self.stage1.names" 2> "$work/self.stderr" &&
+           stage1_debug types "$here" > "$work/self.stage1.types" 2> "$work/self.types.beyond" &&
+           stage1_debug sir --partial "$here" > "$work/self.stage1.sir" 2> "$work/self.beyond"; }; then
         cat "$work/self.stderr" >&2
         echo "check.sh: stage 1 failed over its own package" >&2
         exit 1
@@ -1817,8 +1840,9 @@ SPLIT
         self-sir "$n" "$same" "$self_listed" "$beyond" "$differing" "$seconds")"
 fi
 
-# The fixed point (D-078): stage1-A, stage 1 as stage 0 builds it (the
-# executable the batches ran with --native), prints the SIR of its own
+# The fixed point (D-078): stage1-A, stage 1 as stage 0 builds it in the
+# debug profile (the executable of the class `self`; the batches ran the
+# driver's release build with --native), prints the SIR of its own
 # package (`sir`, run in its directory), which must be stage 0's (`sisu
 # sir`, from the class `self`) as a whole file; the backend alone builds
 # that SIR into stage1-B; stage1-B prints the SIR of the package again,
@@ -1826,16 +1850,7 @@ fi
 # must be stage1-A byte for byte.
 fixed_summary=""
 if [ "$self_check" = 1 ]; then
-    stage1_a="$stage1_exe"
-    if [ -z "$stage1_a" ]; then
-        echo "building stage 1 natively for the fixed point (sisu build --native)"
-        if ! (cd "$here" && "$sisu" build --native --output "$work/stage1-A" > "$work/fixed.A.log" 2>&1); then
-            cat "$work/fixed.A.log" >&2
-            echo "check.sh: stage 1 does not build natively" >&2
-            exit 1
-        fi
-        stage1_a="$work/stage1-A"
-    fi
+    debug_stage1
     start=$(date +%s.%N)
     if ! (cd "$here" && "$stage1_a" sir > "$work/fixed.A.sir" 2> "$work/fixed.A.err"); then
         cat "$work/fixed.A.err" >&2

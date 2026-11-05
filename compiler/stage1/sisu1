@@ -47,9 +47,11 @@
 # `build` builds in turn); without one, the package of the working
 # directory, whose lockfile `check`, `sir` and `build` write as `sisu`
 # does. Stage 1's other commands (`tokens`, `parse`, `names`,
-# `types`, ...) pass through as well. The first use builds stage 1 with
-# stage 0 (`sisu build --native`) into compiler/target/stage1/, and so
-# does a use after a source of stage 1 changed.
+# `types`, ...) pass through as well. The first use has the driver build
+# stage 1 into compiler/target/stage1/, as every `sisu` command builds it
+# (decision 860: the release profile, every contract checked, with the
+# stamp `target/stage1/profile`), and so does a use after a source of
+# stage 1 changed or a build the stamp does not name (RULES.md, R150).
 set -uo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -60,11 +62,23 @@ if [ ! -x "$sisu" ]; then
     echo "sisu1: stage 0 is not built (cargo build --release in $compiler)" >&2
     exit 1
 fi
-if [ ! -x "$exe" ] || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -print -quit)" ]; then
-    mkdir -p "$(dirname "$exe")"
-    # Built by the Rust front end, as the `sisu` driver builds it: stage 1
-    # is not built by itself before it exists.
-    if ! (cd "$here" && SISU_FRONT_END=rust "$sisu" build --native --output "$exe" > /dev/null); then
+# The driver's own build (decision 860): what its stamp names, the
+# profile, the executable's size and its time, is what is there, and no
+# source is newer; otherwise the driver builds it, under its lock, when a
+# command of stage 1 starts (`sisu tokens` of a file), so that `sisu1` and
+# `sisu` no longer build over each other's executable.
+profile=release
+[ "${SISU_STAGE1_PROFILE:-}" = debug ] && profile=debug
+stamped() {
+    [ -x "$exe" ] && [ -f "$(dirname "$exe")/profile" ] || return 1
+    local size nanos
+    size=$(stat -c %s "$exe") || return 1
+    nanos=$(stat -c %.9Y "$exe") || return 1
+    [ "$(cat "$(dirname "$exe")/profile")" = "$profile $size ${nanos/./}" ]
+}
+if ! stamped || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -print -quit)" ]; then
+    if ! (cd "$here" && env -u SISU_STAGE1 -u SISU_FRONT_END "$sisu" tokens "$compiler/std/test.sisu" > /dev/null) ||
+            ! stamped; then
         echo "sisu1: stage 1 does not build" >&2
         exit 1
     fi

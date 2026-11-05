@@ -2379,6 +2379,9 @@ pure def scalar(v: Value) -> Const?:
         case Value.Bool(b): Some(Const.Bool(b))
         case Value.Char(c): Some(Const.Char(c))
         case Value.Str(s): Some(Const.Str(s.copy()))
+        # A function value is the constant that names it, so a table of
+        # functions made at compile time is kept (RULES.md, R151).
+        case Value.Fn(n): Some(Const.Fn(n.copy()))
         case _: None
 
 ## Type argument `i` of a named type.

@@ -1180,6 +1180,7 @@ impl Resolver:
         wk.send = self.prog.lookup_in(p, "Send")
         wk.sync = self.prog.lookup_in(p, "Sync")
         wk.escapable = self.prog.lookup_in(p, "Escapable")
+        wk.sized = self.prog.lookup_in(p, "Sized")
         wk.system = self.prog.lookup_in(p, "System")
         wk.formatter = self.prog.lookup_in(p, "Formatter")
         wk.fs_ops = self.prog.lookup_in(p, "FsOps")
@@ -1880,7 +1881,11 @@ impl Resolver:
         var unsafe_trait = auto
         if let Some(info) = self.prog.trait_info(t):
             unsafe_trait = unsafe_trait or info.unsafe_
-        let never = Some(t) == self.prog.wk.copy or Some(t) == self.prog.wk.escapable
+        let never = (
+            Some(t) == self.prog.wk.copy
+                or Some(t) == self.prog.wk.escapable
+                or Some(t) == self.prog.wk.sized
+        )
         let trait_name = self.prog.display_trait_in(self.types, trait_ref, names)
         if imp.is_unsafe and never:
             let at = self.impl_keyword(module, span, "unsafe")

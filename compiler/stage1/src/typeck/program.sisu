@@ -456,6 +456,8 @@ pub struct WellKnown:
     pub send: DefId?
     pub sync: DefId?
     pub escapable: DefId?
+    ## `Sized` (RULES.md, R153).
+    pub sized: DefId?
     pub system: DefId?
     pub formatter: DefId?
     pub fs_ops: DefId?
@@ -501,6 +503,7 @@ impl WellKnown:
             send=None,
             sync=None,
             escapable=None,
+            sized=None,
             system=None,
             formatter=None,
             fs_ops=None,
@@ -2058,6 +2061,12 @@ impl Program:
             if not self.can_borrow_in(mut types, ty, env):
                 return Answer.Yes(ImplSource.Builtin)
             return Answer.No
+        # Every type but a `dyn` one has its size (03; `E0395` keeps a
+        # `dyn` behind `ref` or in a `Box`; RULES.md, R153).
+        if t == self.wk.sized:
+            if let TyData.Dyn(_) = types.data(ty):
+                return Answer.No
+            return Answer.Yes(ImplSource.Builtin)
         # A refinement implements the reading traits of its base (07).
         if let TyData.Adt(d, args) = types.data(ty).copy():
             if let Some(base) = self.refinement_base(mut types, d, args):

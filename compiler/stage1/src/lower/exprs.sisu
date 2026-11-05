@@ -425,6 +425,14 @@ impl FnLower:
             return Operand.Const(c)
         if self.is_place(cx, e):
             let p = self.read_place_of(cx, e)
+            # A `dict`'s entry read by value is read where the index is,
+            # so that a missing key's panic stands at the index, as it
+            # does by a `str` (RULES.md, R152).
+            if self.copies(cx, x.ty) and keyed(p):
+                let t = self.temp(cx, x.ty)
+                let at = cx.loc(x.span)
+                self.assign(cx, Place.local(t), Rvalue.Use(Operand.Copy(p)), at)
+                return Operand.Copy(Place.local(t))
             return self.copy_or_move(cx, p, x.ty)
         let t = self.temp(cx, x.ty)
         self.into(cx, Place.local(t), e)
@@ -796,6 +804,29 @@ impl FnLower:
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Tuple, operands=ops), loc)
             case TExprKind.List(xs):
                 let ops = self.operands(cx, xs)
+                # A literal typed as an `Array[T, N]` (RULES.md, R153): the
+                # array filled with its first element, the others stored in
+                # their places after it, as `a[i] = v` stores them.
+                if let TyData.Adt(d, targs) = self.types.data(x.ty).copy():
+                    if cx.prog.builtin(d) == Some("Array".to_string()) and not ops.is_empty():
+                        var sir_args: list[Type] = []
+                        if let Type.Named(_, a) = self.ty(cx, x.ty):
+                            sir_args = a.copy()
+                        self.intrinsic_call(
+                            cx, dest.copy(), "Array.filled", sir_args, [ops[0].copy()], loc
+                        )
+                        for i in range(1, len(ops)):
+                            let k = self.temp_sir(Type.Int)
+                            self.assign(
+                                cx, Place.local(k), Rvalue.Use(Operand.Const(Const.Int(i))), loc
+                            )
+                            let p = dest.copy().project(Proj.Index(k))
+                            if self.needs_drop(cx, targs[0]):
+                                self.split(cx)
+                                self.emit(cx, StatementKind.Drop(place=p.copy(), flag=None), loc)
+                                self.split(cx)
+                            self.assign(cx, p, Rvalue.Use(ops[i].copy()), loc)
+                        return
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.List, operands=ops), loc)
             case TExprKind.Set(xs):
                 let ops = self.operands(cx, xs)
@@ -1825,6 +1856,13 @@ pure def signed_text(bits: u128) -> String:
 
 ## The intrinsic that looks a `str` up where `name` looks up a `String`
 ## key (decision 784; RULES.md, R134).
+## Whether a place reads a `dict`'s entry.
+pure def keyed(p: Place) -> bool:
+    for x in p.proj:
+        if let Proj.Key(_) = x:
+            return True
+    return False
+
 pub pure def str_lookup(name: str) -> String?:
     return match name:
         case "dict.get": Some("dict.get_str".to_string())

@@ -5756,3 +5756,22 @@ impl[I: Iterator, T, E] Map[I, Result[T, E]]:
                 return Err(x.err().expect("an error"))
             out.push(x.expect("a value"))
         return Ok(out)
+
+# The address-sized integers and `Sized` (03, "Numbers" and "Auto
+# traits"), appended as R137's were (stage 1's RULES.md, R153).
+
+## The signed integer as wide as an address, for foreign interfaces only
+## (03: `int` is the index type everywhere else): on every target Sisu
+## builds for now, an `i64`.
+type ptrsize = i64
+
+## The unsigned integer as wide as an address, for foreign interfaces only:
+## on every target Sisu builds for now, a `u64`.
+type uptrsize = u64
+
+## Values whose size is known where they are held (03, "Auto traits"):
+## every type but a `dyn` one, which is held behind `ref` or in a `Box`
+## (`E0395`), so a bound `T: Sized` is met by every type argument.
+@marker
+trait Sized:
+    pass

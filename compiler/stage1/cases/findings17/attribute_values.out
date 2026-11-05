@@ -1,0 +1,2 @@
+Booking @table [:bookings] [:3] @index [:hour] [unique:True] [note:a "quoted" word]
+bookings 4
