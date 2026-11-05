@@ -160,8 +160,11 @@ file system and network are never revoked. The line that starts
 failure on any machine with the same code and toolchain, as the
 session's last command shows. It works because inside a test every
 source of chance is a fake or the seeded scheduler. A test that takes
-the real `System` runs alone and has no token; under `--sim`, the
-`System` it receives is a simulated one. Outside tests,
+the real `System` runs alone and has no token, under `--sim` too, where
+it still gets the real `System`, which no fault reaches: the real world
+can be neither simulated nor replayed, so its failure says so (D0138),
+and a test that names the capabilities it uses gets simulated ones.
+Outside tests,
 `sisu run --record` writes a log of every capability call, and
 `sisu replay` runs the program again from it.
 

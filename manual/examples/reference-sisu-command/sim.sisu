@@ -1,8 +1,12 @@
-# Under `--sim`, a test that takes a `System` gets a simulated one.
+# Under `--sim`, a test that names the file system gets a simulated one,
+# and a test that takes the real `System` gets the real one.
 def save_notes(fs: Fs, count: int) -> int ! IoError:
     for i in range(count):
         fs.write_text(Path.new("note{i}.txt"), "note {i}")?
     return Ok(count)
 
-test "every note is saved"(sys: System):
-    assert save_notes(sys.fs, 10) == Ok(10)
+test "every note is saved"(fs: Fs):
+    assert save_notes(fs, 10) == Ok(10)
+
+test "the real disk keeps them too"(sys: System):
+    assert save_notes(sys.fs, 3) == Ok(3)

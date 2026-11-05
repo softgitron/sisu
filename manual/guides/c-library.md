@@ -207,10 +207,12 @@ functions that call them, `lookup` taking an `Env`
 **Status.** In stage 0 (22). Importing a C header, `import c
 "stdlib.h"`, which would write the `extern` block, is designed (E0900).
 `CString.new(name).as_ptr()`,
-the shorter way to pass text to C, stops the interpreter with a panic
-that the pointer's value no longer exists and does not compile natively
-yet, since its slice copies the bytes into a temporary that ends when
-`as_ptr` returns, so the wrapper builds the C string in raw memory. The
+the shorter way to pass text to C, runs in the interpreter, where the
+pointer views the `CString`'s own bytes while it lives
+([chapter 27](../tutorial/27-systems.md#no-authority-without-a-capability)),
+and does not compile natively yet, since a native slice of bytes holds
+a word for each byte, so the wrapper builds the C string in raw memory
+to run both ways. The
 other direction, C calling Sisu, is `@export("NAME")`: a native build
 makes the function the global symbol `NAME` of C's own convention,
 whether or not the program calls it, so a C caller declares `int32_t

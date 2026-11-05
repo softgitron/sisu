@@ -182,7 +182,15 @@ stage 0's thirteenth round, a task's record, its parking and its waking,
 in the order the interpreter wakes tasks, so that a seed names the same
 schedule natively; each task's coroutine, its outcome and its trace
 stay in Rust beside the record, under the same number (decision 780 of
-the [architecture notes](../../compiler/docs/architecture.md)).
+the [architecture notes](../../compiler/docs/architecture.md)). Since
+the fourteenth, the thirteen operations that make an iterator or take
+every item of one (`range`, `enumerate`, `zip`, `sorted`, a loop's
+`iter.ref` and the rest) and the choices of the PCT and exhaustive
+schedulers are Sisu's too, drawn in the interpreter's order, so a depth
+and a seed, or a prefix, name the same schedule both ways (decisions
+820 and 821). What stays in Rust is the decoding of most of the other
+intrinsics, the tasks' switch and clocks, the checked memory model, the
+layout of types and the bridge between the two halves.
 
 The split follows the evidence. Zig's own x86-64 backend, its default
 for debug builds since 2025, builds the Zig compiler in 20 seconds where

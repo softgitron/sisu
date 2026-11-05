@@ -234,11 +234,11 @@ so:
 | `+`, `-`, `*`, `//`, `%`, `**` | panic ([R0003](diagnostics.md#r0003)) |
 | `+%`, `-%`, `*%` | wrap around, as two's complement does |
 | `+\|`, `-\|`, `*\|` | stay at the type's least or greatest value |
-| `a.checked_add(b)`, `checked_sub`, `checked_mul` of `int`; `checked_pow` of `std.num` | give `None` |
+| `a.checked_add(b)`, `checked_sub`, `checked_mul`, `checked_pow(exp)` | give `None` |
 
 <!-- file: examples/reference-types/wrapping.sisu -->
 ```sisu
-# Wrapping and saturating operators, and a checked addition.
+# Wrapping and saturating operators, and checked additions.
 from std.num import checked_add
 
 def main():
@@ -246,14 +246,14 @@ def main():
     print("{level +% 10} {level +| 10} {level -| 255} {level *% 2}")
     let largest = 9_223_372_036_854_775_807
     print("{largest +% 1}")
-    print("{checked_add(largest, 1)} {checked_add(2, 3)}")
+    print("{checked_add(largest, 1)} {level.checked_add(5)}")
 ```
 
 <!-- output: examples/reference-types/wrapping.out -->
 ```text
 4 255 0 244
 -9223372036854775808
-None Some(5)
+None Some(255)
 ```
 
 The panic names the operation and its operands, and its exit status is
@@ -276,12 +276,10 @@ panic: integer overflow: 250 + 10 as u8
   at main (overflow.sisu:5:11)
 ```
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#numbers)
-spells checked arithmetic as a method, `a.checked_add(b)`, on every
-integer type; stage 0 has the methods `checked_add`, `checked_sub` and
-`checked_mul` of `int` only, so the method of a sized integer is E0304,
-and `std.num` has them as functions, `checked_add(a, b)`, with
-`checked_pow`.
+The checked methods are every integer type's, `level.checked_add(10)`
+of a `u8` included ([03](../../proposal/03-types-and-generics.md#numbers)),
+and `checked_pow(exp)` takes an `int` exponent of 0 or more; `std.num`
+has them as functions too, `checked_add(a, b)`.
 
 **Status.** In stage 0 (D-009).
 

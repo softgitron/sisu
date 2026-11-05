@@ -205,16 +205,10 @@ A few Go habits do not compile:
 
 <!-- file: examples/guide-from-go/habits.sisu -->
 ```sisu
-# Two Go habits, which `sisu check` refuses.
+# Three Go habits, which `sisu check` refuses.
 def main():
     count := 3
     go print("hello {count}")
-```
-
-<!-- file: examples/guide-from-go/nil.sisu -->
-```sisu
-# Go's `nil` for a value that is not there.
-def main():
     let best: str? = nil
     print(best ?? "nobody")
 ```
@@ -235,18 +229,20 @@ error[E0117]: unexpected `print` after the end of the statement
   |        ^^^^^
   = note: a task starts in a scope, which joins it: `task.scope do s:` and `s.spawn(() -> f())`
 
-$ sisu check nil.sisu
 error[E0200]: cannot find `nil` in this scope
-  --> nil.sisu:3:22
+  --> habits.sisu:5:22
   |
-3 |     let best: str? = nil
+5 |     let best: str? = nil
   |                      ^^^
   = fix: Sisu writes it so: `None`
 
 ```
 
-E0123 names the fix, `let` (or `var`, for a value that changes), and
-E0200's fix writes `None` for `nil`, which is for an optional type
+`sisu check` reports all three, though the first two lines do not
+parse: the names of a body with a syntax error are still resolved,
+outside the statements the error broke. E0123 names the fix, `let` (or
+`var`, for a value that changes), and E0200's fix writes `None` for
+`nil`, which is for an optional type
 `T?`; a type that is not optional has no `nil` at all. `go f()` gets a
 note instead of a fix, since the task needs a scope around it: it is
 `s.spawn(() -> f())` inside `task.scope do s:`. Some other differences:

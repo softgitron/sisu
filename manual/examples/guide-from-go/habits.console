@@ -12,11 +12,10 @@ error[E0117]: unexpected `print` after the end of the statement
   |        ^^^^^
   = note: a task starts in a scope, which joins it: `task.scope do s:` and `s.spawn(() -> f())`
 
-$ sisu check nil.sisu
 error[E0200]: cannot find `nil` in this scope
-  --> nil.sisu:3:22
+  --> habits.sisu:5:22
   |
-3 |     let best: str? = nil
+5 |     let best: str? = nil
   |                      ^^^
   = fix: Sisu writes it so: `None`
 

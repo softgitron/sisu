@@ -1,4 +1,6 @@
-# Two Go habits, which `sisu check` refuses.
+# Three Go habits, which `sisu check` refuses.
 def main():
     count := 3
     go print("hello {count}")
+    let best: str? = nil
+    print(best ?? "nobody")

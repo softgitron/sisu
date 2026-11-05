@@ -276,9 +276,9 @@ named `fmt` is only a method until an impl says what it means.
 ## Text for programmers
 
 `Debug` writes a value the way it is written in code, for logs, test
-failures and `{x:?}`. Every type has it: a struct or an enum without an
-impl of its own gets the derived one, which writes the name and each
-field. An impl of `Debug`, whose method is `fmt_debug`, replaces the
+failures and `{x:?}`. Every type has it, a `pub` one too: a struct or
+an enum without an impl of its own gets the derived one, which writes
+the name and each field. An impl of `Debug`, whose method is `fmt_debug`, replaces the
 derived one, here to keep a password out of the logs:
 
 <!-- file: examples/14-traits/password.sisu -->

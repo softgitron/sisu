@@ -1,0 +1,15 @@
+# `try_map` and `try_collect` stop at the first error.
+error ParseError:
+    NotANumber(text: String)
+
+def number(text: str) -> int ! ParseError:
+    let n = text.trim().parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def main():
+    let lines = ["12", " 7", "x"]
+    print(lines.iter().try_map(line -> Ok(number(line)? * 2)))
+    print(lines[:2].iter().try_map(line -> Ok(number(line)? * 2)))
+    let results = lines.iter().map(line -> number(line)).collect()
+    print(results.try_collect())

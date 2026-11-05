@@ -1,0 +1,4 @@
+# The name in Latin letters only.
+def main():
+    let sauna_heat = 80
+    print(sauna_heat)

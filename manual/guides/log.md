@@ -214,4 +214,7 @@ facade with levels and context, and
 the module's own functions write every level, and only a `Logger`
 leaves some out and adds fields, the trace context is the path of spawn
 indices rather than trace and span identifiers, and `trace.wrap` with a
-`Tracer` is designed, so an interceptor of your own does its work.
+`Tracer` is designed, so an interceptor of your own does its work. The
+identifiers wait for 06 to settle their form, since they would change
+the text of every record (decision 826 of the [architecture
+notes](../../compiler/docs/architecture.md)).

@@ -222,7 +222,7 @@ assumptions can be read in one list.
   that every match on it needs a wildcard.
 - A `?` inside a closure returns from the closure, not from the function
   around it, so an iterator pipeline that can fail needs `try_map` and
-  `try_collect`, as in Rust; stage 0 does not have them yet.
+  `try_collect`, as in Rust.
 - Cleanup cannot fail in a drop. A type whose cleanup can fail, such as
   a file with a final flush, offers `close(own self) -> ! IoError` and
   is marked `@must_consume`, so that forgetting to close it is a compile

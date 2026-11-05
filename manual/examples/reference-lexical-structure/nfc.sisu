@@ -1,0 +1,4 @@
+# One name, spelt with `e` and a combining accent, then with `é`.
+def main():
+    let café = "kahvila"
+    print(café)

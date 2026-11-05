@@ -1,0 +1,7 @@
+# A name with a Cyrillic `а`, beside the function `part`.
+def part() -> int:
+    return 1
+
+def main():
+    let pаrt = 2
+    print(pаrt + part())

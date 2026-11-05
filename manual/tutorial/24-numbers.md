@@ -176,8 +176,9 @@ def main():
 Every integer type has four kinds of arithmetic, and you write the one
 you mean. `+`, `-` and `*` trap: a result that does not fit stops the
 program. `+%`, `-%` and `*%` wrap around, `+|`, `-|` and `*|` stop at
-the type's limits, and the methods `checked_add`, `checked_sub` and
-`checked_mul` give `None` where the operator would trap:
+the type's limits, and the methods `checked_add`, `checked_sub`,
+`checked_mul` and `checked_pow` give `None` where the operator would
+trap:
 
 <!-- file: examples/24-numbers/kinds.sisu -->
 ```sisu
@@ -187,8 +188,9 @@ def main():
     print("{volume +| 10} {volume -| 251} {volume *| 2}")
     let counter: u16 = 65535
     print("{counter +% 1} {counter *% 2}")
-    print(9_223_372_036_854_775_807.checked_add(1))
+    print("{volume.checked_add(5)} {volume.checked_add(6)}")
     print(3_037_000_499.checked_mul(3_037_000_499))
+    print("{2.checked_pow(62)} {2.checked_pow(63)}")
     print(volume + 10)
 ```
 
@@ -197,22 +199,22 @@ def main():
 $ sisu run kinds.sisu
 255 0 255
 0 65534
-None
+Some(255) None
 Some(9223372030926249001)
+Some(4611686018427387904) None
 panic: integer overflow: 250 + 10 as u8
-  at main (kinds.sisu:9:11)
+  at main (kinds.sisu:10:11)
 ```
 
 - A volume control saturates: 250 and 10 is 255, and the volume never
   goes below 0 or wraps to a whisper.
 - A `u16` counter that wraps goes from 65535 to 0, as a checksum or a
   sequence number of a protocol does.
-- `checked_mul` tells the caller that 3037000499 squared fits and
-  `checked_add` that the largest `int` plus one does not, without a
-  panic. The methods are `int`'s; `std.num` has them as functions too,
-  `checked_add(a, b)`, with `checked_pow`. The sized types' methods
-  that [03](../../proposal/03-types-and-generics.md#numbers) gives are
-  not in the compiler yet.
+- The checked methods give an optional value: a `u8` of 250 has room
+  for 5 more and not for 6, 3037000499 squared fits in an `int`, and 2
+  to the 62nd power does while 2 to the 63rd does not, all without a
+  panic. Every integer type has them, and `checked_pow` takes an `int`
+  exponent of 0 or more.
 - The panic names the type, `as u8`: overflow traps for every size, in
   every build. So does a division by zero, and the smallest `int`
   divided by -1, whose result is one more than the largest.

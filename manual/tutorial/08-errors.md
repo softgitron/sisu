@@ -413,9 +413,39 @@ no hour in "evening": NoColon(text="evening")
   error `e`.
 - `hour("x:15").or(-1)` gives -1, because "x" is not a number.
 
-`.or_else`, which computes the fallback from the error only when it is
-needed, is designed in [05](../../proposal/05-errors.md#handling) and
-is not in the compiler yet.
+`.or_else(f)` computes the fallback from the error, and only when there
+is one. Give it a function or a closure that takes the error:
+
+<!-- file: examples/08-errors/or_else.sisu -->
+```sisu
+# `.or_else` computes the fallback from the error, and only for an error.
+error BookingError:
+    NoRoom(guest: String)
+
+def room(guest: str) -> int ! BookingError:
+    if guest == "Aino":
+        return Ok(12)
+    return Err(NoRoom(guest.to_string()))
+
+def spare(e: BookingError) -> int:
+    print("{e}: the spare room")
+    return 99
+
+def main():
+    print(room("Aino").or_else(spare))
+    print(room("Roni").or_else(spare))
+```
+
+<!-- output: examples/08-errors/or_else.out -->
+```text
+12
+NoRoom(guest="Roni"): the spare room
+99
+```
+
+`spare` runs once, for Roni, and is given the error. `.or(default)`
+takes a value made before the call, error or not, so a fallback that
+needs the error, or costs something to make, is `.or_else`'s.
 
 ## Error sets that combine
 

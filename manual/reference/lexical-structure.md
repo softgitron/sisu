@@ -58,11 +58,6 @@ error[E0005]: `\u{a0}` cannot appear in Sisu source outside a string or comment
 The line in the message looks right, since the character looks like a
 space; the escape `\u{a0}` and the note say what it is.
 
-**Stage 0 differs.** [02](../../proposal/02-syntax.md) normalises names
-to NFC, so a letter written as a base and a combining mark is the same
-name as the letter written as one character. Stage 0 does not: the
-combining mark is E0005.
-
 **Status.** In stage 0.
 
 ## Names
@@ -86,6 +81,54 @@ def main():
 <!-- output: examples/reference-lexical-structure/identifiers.out -->
 ```text
 maanantai sauna 7
+```
+
+A letter may be followed by marks that combine with it, such as an
+accent typed as a character of its own, and a name is read in NFC
+([02](../../proposal/02-syntax.md), D-048): its letters and marks are
+composed as Unicode's normal form C composes them, so `e` followed by
+the combining acute accent `\u{301}` and the one letter `é` name the
+same binding. The text of the file stays as it was written. In this
+program, the binding is spelt the first way and its use the second:
+
+<!-- file: examples/reference-lexical-structure/nfc.sisu -->
+```sisu
+# One name, spelt with `e` and a combining accent, then with `é`.
+def main():
+    let café = "kahvila"
+    print(café)
+```
+
+<!-- output: examples/reference-lexical-structure/nfc.out -->
+```text
+kahvila
+```
+
+Two lints, on by default, catch a name that is not what it looks like.
+W0031 (`resolve.mixed-script`) warns of a declared name whose letters
+come from more than one script, Latin and Cyrillic, say; digits, `_`
+and letters of no script do not count, and the scripts of Chinese,
+Japanese and Korean count as one. W0032 (`resolve.confusable`) warns
+of a declared name that reads as another name in scope, a module's
+item or a local of an enclosing scope, when one of the two holds a
+letter beyond ASCII; its label stands at the module's declaration. A
+program whose names are all ASCII pays nothing for either. This one
+has a Cyrillic `а` (`\u{430}`) in its local `pаrt`:
+
+<!-- file: examples/reference-lexical-structure/lookalikes.sisu -->
+```sisu
+# A name with a Cyrillic `а`, beside the function `part`.
+def part() -> int:
+    return 1
+
+def main():
+    let pаrt = 2
+    print(pаrt + part())
+```
+
+<!-- output: examples/reference-lexical-structure/lookalikes.console -->
+```console
+$ sisu run lookalikes.sisu
 ```
 
 A keyword where a name should be is an error. Where a function's, a
@@ -141,14 +184,17 @@ error[E0124]: `match` is a keyword and cannot be used as a name here
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** The confusable and mixed-script lints of D-048 are
-on by default in [02](../../proposal/02-syntax.md); stage 0 has neither,
-so a name that mixes Latin and Cyrillic letters that look alike
-compiles without a word. A keyword as a binding's name gets E0105, whose
+**Stage 0 differs.** The lints' tables are generated from Unicode 15.1:
+a letter's script comes from its character name, an approximation of
+Unicode's script property, and the confusable letters are a subset of
+Unicode's list (those whose compatibility form is one ASCII letter or
+digit, and the common Cyrillic, Greek and Latin look-alikes), so some
+look-alikes go unreported. A Hangul syllable written as its parts is
+not composed. A keyword as a binding's name gets E0105, whose
 note `parse.keyword-name` says that the word is a keyword, and each use
 of it E0103, where E0124 reports the declaration alone.
 
-**Status.** In stage 0; non-ASCII names are decided (D-048).
+**Status.** In stage 0 (D-048), with the differences noted.
 
 ## Naming rules
 
@@ -757,5 +803,6 @@ lint` names it, with the fix that removes it
 | [E0123](diagnostics.md#e0123) | `parse.walrus` | [Operators and punctuation](#operators-and-punctuation) |
 | [E0124](diagnostics.md#e0124) | `parse.keyword-as-name` | [Names](#names) |
 | [W0027](diagnostics.md#w0027) | `lint.unused-import` | [The formatter's layout](#the-formatters-layout) |
+| [W0031](diagnostics.md#w0031), [W0032](diagnostics.md#w0032) | `resolve.mixed-script`, `resolve.confusable` | [Names](#names) |
 
 [R17, Diagnostics](diagnostics.md) lists every code.

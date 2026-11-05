@@ -1,2 +1,3 @@
 test "every note is saved" ... ok
-1 passed, 0 failed, 0 blocked
+test "the real disk keeps them too" ... ok
+2 passed, 0 failed, 0 blocked

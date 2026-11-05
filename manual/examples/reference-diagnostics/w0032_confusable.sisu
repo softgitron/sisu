@@ -1,0 +1,5 @@
+# Two names that look the same: the second has a Greek `ο`.
+def main():
+    let total = 4
+    let tοtal = total + 1
+    print(tοtal)

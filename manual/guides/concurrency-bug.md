@@ -159,8 +159,11 @@ schedulers run natively with the interpreter's choices, for `sisu run
 capability calls fail now and then, at the rate `P`, each with an error
 of its own error set other than `Revoked`, which only a revoked
 caretaker gives and the simulator's own file system and network never
-are. This sauna keeps each booking in memory and in a
-file, and its test says that the two agree:
+are. The faults reach the capabilities a test names, `files: Fs` here; a
+test that takes the real `System` gets the real one, which no fault
+reaches ([R15](../reference/testing.md#simulation)). This sauna keeps
+each booking in memory and in a file, and its test says that the two
+agree:
 
 <!-- file: examples/guide-concurrency-bug/disk.sisu -->
 ```sisu

@@ -147,7 +147,7 @@ test "more used than there was" ... ok
 With `left` written as `full - used`, without the clamp, the black-box
 test fails, and its replay token runs it again from its file:
 
-<!-- file: examples/reference-testing/levels_bug.files/src/lib.sisu -->
+<!-- file: examples/reference-testing/levels_bug.pkg/src/lib.sisu -->
 ```sisu
 ##! A water tank's level, in whole litres.
 
@@ -160,6 +160,20 @@ def clamp(litres: int) -> int:
 
 test "clamp keeps zero":
     assert clamp(-4) == 0
+```
+
+The variant keeps the package's black-box test as it was:
+
+<!-- file: examples/reference-testing/levels_bug.pkg/tests/tank.sisu -->
+```sisu
+# A test from outside the package: `levels.clamp` is not reachable here.
+from levels import left
+
+test "a full tank":
+    assert left(40, 0) == 40
+
+test "more used than there was":
+    assert left(40, 50) == 0
 ```
 
 <!-- output: examples/reference-testing/levels_bug.console -->
@@ -322,8 +336,8 @@ and their output is captured in the same way.
 
 `sisu test --native` compiles the program's tests into one executable,
 with the native backend, and runs each test in a process of its own, as
-the interpreter would run it: with the real `System`, a simulated one
-under `--sim`, or fresh fakes of the capabilities it names. `--release`
+the interpreter would run it: with the real `System`, or fresh fakes of
+the capabilities it names, simulated ones under `--sim`. `--release`
 compiles it with the release profile, whose contract level is still
 `all`, since `sisu test` checks every contract. The report, the replay
 tokens and `--explore N`, each seed a run of the executable, are the
@@ -774,17 +788,22 @@ for a property, the choices of the shrunk case, so `--replay` runs that
 test exactly as it failed. A token for other code (D0033), another
 toolchain (D0034) or a test that is gone (D0035) is refused, as is a
 word that is not a token (D0032), and a test that takes the real
-`System` has none (D0031). Its text is for the
-command, not for reading.
+`System` has none (D0031, and D0138 under `--sim`), since no replay can
+stand in for the real world. Its text is for the command, not for
+reading.
 
 **Status.** In stage 0 (leaning, D-070).
 
 ## Simulation
 
-`sisu test --sim` gives a test that takes a `System` the `sim` profile's
-instead of the real one: a file system that keeps only what was synced
+`sisu test --sim` gives a test the `sim` profile's objects for the
+capabilities it names: a file system that keeps only what was synced
 when a node crashes, a network inside the process, the test clock and
-seeded fakes of the rest. `--faults P` makes each operation of those
+seeded fakes of the rest. A test that takes the real `System` gets the
+real one under `--sim` too ([17](../../proposal/17-testing.md#simulation-and-replay)):
+it runs alone, after the others, no fault reaches it, and its failure
+prints D0138 (`cli.replay-no-token-sim`) where a token would be, which
+says that a test naming its capabilities gets simulated ones. `--faults P` makes each operation of those
 objects fail at that rate with an error from its own set, never
 `Revoked`, since nothing in the simulation is revoked unless a test
 revokes a caretaker of it. `std.sim` adds
@@ -793,7 +812,32 @@ revokes a caretaker of it. `std.sim` adds
 `always(what, holds, body)`, an invariant checked at every switch
 between tasks (R0105). A `sim` build that could reach an `extern` call
 without a model does not compile (E0971).
-[R16](sisu-command.md#sisu-test) has an example.
+[R16](sisu-command.md#sisu-test) has an example of both kinds of test.
+A test of the real `System` that fails under `--sim` says why it has no
+token:
+
+<!-- file: examples/reference-testing/real_system.sisu -->
+```sisu
+# A test that takes the real `System` is neither simulated nor replayed.
+test "the notes directory exists"(sys: System):
+    assert sys.fs.exists(Path.new("notes"))
+```
+
+<!-- output: examples/reference-testing/real_system.console -->
+```console
+$ sisu test --sim real_system.sisu
+test "the notes directory exists" ... FAILED
+
+test "the notes directory exists" ... FAILED
+panic: assertion failed: sys.fs.exists(Path.new("notes"))
+  at test "the notes directory exists" (real_system.sisu:3:5)
+no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones
+
+0 passed, 1 failed, 0 blocked
+```
+
+Name the capabilities, `test "..."(fs: Fs):`, and the same test runs on
+a simulated file system, which faults reach and a token replays.
 
 **Status.** A prototype of the experiment (D-070; 17, "Simulation and
 replay").
@@ -852,4 +896,4 @@ and the reports of coverage and mutation testing are designed
 | D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |
-| R0105, E0971 | `sim.always-failed`, `sim.unmodelled-extern` | [Simulation](#simulation) |
+| R0105, E0971, [D0138](diagnostics.md#d0138) | `sim.always-failed`, `sim.unmodelled-extern`, `cli.replay-no-token-sim` | [Simulation](#simulation) |

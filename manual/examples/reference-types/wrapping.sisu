@@ -1,4 +1,4 @@
-# Wrapping and saturating operators, and a checked addition.
+# Wrapping and saturating operators, and checked additions.
 from std.num import checked_add
 
 def main():
@@ -6,4 +6,4 @@ def main():
     print("{level +% 10} {level +| 10} {level -| 255} {level *% 2}")
     let largest = 9_223_372_036_854_775_807
     print("{largest +% 1}")
-    print("{checked_add(largest, 1)} {checked_add(2, 3)}")
+    print("{checked_add(largest, 1)} {level.checked_add(5)}")

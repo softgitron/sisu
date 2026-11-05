@@ -601,7 +601,42 @@ warning[W0014]: `is_set` is public and safe and reaches the foreign function `ge
 W0014 (`unsafe.ambient-authority`) says that `is_set` reads the
 environment without an `Env`, so any code could call it and learn what
 the environment holds. `CString.new(name)` makes the text with the NUL
-that C needs, and `c.as_ptr()` its pointer.
+that C needs, and `c.as_ptr()` its pointer, which points to the
+`CString`'s own bytes and stays valid while it lives. C's `strlen`
+counts them up to the NUL:
+
+<!-- file: examples/27-systems/cstring.sisu -->
+```sisu
+# A `CString` hands C a pointer to its own bytes, ended by a NUL.
+from std.ffi import CString, c_char, c_size
+from std.mem import ptr
+
+# safety: the signature as <string.h> declares it; it returns promptly.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+
+def main():
+    let name = CString.new("löyly") else:
+        return
+    # safety: valid: `name` lives across the call and ends with its NUL,
+    #   and strlen keeps no pointer to it.
+    print(unsafe strlen(name.as_ptr()))
+    print(name.byte_len())
+```
+
+<!-- output: examples/27-systems/cstring.console -->
+```console
+$ sisu run cstring.sisu
+6
+6
+$ sisu run --native cstring.sisu
+the native backend does not compile `mem.slice.as_ptr` of a `u8`, which raw memory holds otherwise than a value of it yet (in `ffi.CString.as_ptr`); `sisu run` without `--native` runs the program
+```
+
+`löyly`, the steam of a sauna, is five letters and six bytes, since
+`ö` takes two. The native backend does not compile `as_ptr` of a
+`CString` yet (D0103), so such a program runs in the interpreter
+only.
 
 **Try it.** Give `is_set` a first parameter `env: Env`.
 

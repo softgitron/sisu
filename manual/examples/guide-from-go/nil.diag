@@ -1,2 +1,0 @@
-3:22-3:25 E0200 resolve.undefined-name name="nil"
-  fix parse.sisu-spelling 3:22-3:25 "None"

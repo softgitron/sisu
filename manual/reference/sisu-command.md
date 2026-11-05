@@ -1140,10 +1140,12 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   (D0031).
 - `--update` accepts what the snapshots and transcripts now show,
   rewriting them (D0054, D0055, D0063).
-- `--sim` runs the tests that take a `System` in the `sim` runtime
-  profile, against a simulated one; `--faults P` sets the probability
-  that a capability call fails with an error of its declared set,
-  0.01 by default (D0051, and D0052 without `--sim`).
+- `--sim` runs the tests that name their capabilities in the `sim`
+  runtime profile, against simulated ones; `--faults P` sets the
+  probability that a capability call fails with an error of its
+  declared set, 0.01 by default (D0051, and D0052 without `--sim`). A
+  test that takes the real `System` gets the real one, which no fault
+  reaches, and its failure has no token (D0138).
 - `--std` runs the standard library's doc examples besides the
   program's tests; outside a package and without a file, it runs them
   alone.
@@ -1198,37 +1200,45 @@ test "greets everyone" ... ok
 1 passed, 0 failed, 0 blocked
 ```
 
-A test that takes a `System` writes real files when it runs, and
-simulated ones under `--sim`, where some writes fail:
+A test that names the file system it uses, `fs: Fs`, writes to a fake
+one when it runs, and to a simulated one under `--sim`, where some
+writes fail. A test that takes the real `System` gets the real one in
+both runs: it runs alone, after the others, and no fault reaches it:
 
 <!-- file: examples/reference-sisu-command/sim.sisu -->
 ```sisu
-# Under `--sim`, a test that takes a `System` gets a simulated one.
+# Under `--sim`, a test that names the file system gets a simulated one,
+# and a test that takes the real `System` gets the real one.
 def save_notes(fs: Fs, count: int) -> int ! IoError:
     for i in range(count):
         fs.write_text(Path.new("note{i}.txt"), "note {i}")?
     return Ok(count)
 
-test "every note is saved"(sys: System):
-    assert save_notes(sys.fs, 10) == Ok(10)
+test "every note is saved"(fs: Fs):
+    assert save_notes(fs, 10) == Ok(10)
+
+test "the real disk keeps them too"(sys: System):
+    assert save_notes(sys.fs, 3) == Ok(3)
 ```
 
 <!-- output: examples/reference-sisu-command/sim.console -->
 ```console
 $ sisu test sim.sisu
 test "every note is saved" ... ok
-1 passed, 0 failed, 0 blocked
+test "the real disk keeps them too" ... ok
+2 passed, 0 failed, 0 blocked
 $ sisu test --sim --faults 0.2 sim.sisu
 test "every note is saved" ... FAILED
+test "the real disk keeps them too" ... ok
 
 test "every note is saved" ... FAILED
-panic: assertion failed: save_notes(sys.fs, 10) == Ok(10)
+panic: assertion failed: save_notes(fs, 10) == Ok(10)
   left:  Err(InvalidData(path="note0.txt"))
   right: Ok(10)
-  at test "every note is saved" (sim.sisu:8:5)
-replay: sisu test --replay 1-9b4ccffd37116d1b-0.0.1-t0-s0-r0-m200000 sim.sisu
+  at test "every note is saved" (sim.sisu:9:5)
+replay: sisu test --replay 1-e3c3fb213982d560-0.0.1-t0-s0-r0-m200000 sim.sisu
 
-0 passed, 1 failed, 0 blocked
+1 passed, 1 failed, 0 blocked
 $ sisu test --faults 0.2 sim.sisu
 error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 ```
@@ -1346,7 +1356,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-182 not selected
+188 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a

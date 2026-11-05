@@ -542,10 +542,41 @@ Ok([24, 14])
 - `all_doubled` wants every number or the first error. A loop with `?`
   gives that: the first `Err` returns from `all_doubled` at once.
 
-`try_map` and `try_collect`, which stop a pipeline at its first error
-the way the loop does, are designed in
-[05](../../proposal/05-errors.md#propagation) and are not in the
-compiler yet, so a parse that can fail is a loop.
+`try_map` stops a pipeline at its first error the way the loop does
+([05](../../proposal/05-errors.md#propagation)): it gives `Ok` of a
+list of the closure's values, or the first `Err` the closure returns,
+after which no item is taken. `try_collect` does the same for a list of
+results that is already made:
+
+<!-- file: examples/16-closures-and-iterators/try_map.sisu -->
+```sisu
+# `try_map` and `try_collect` stop at the first error.
+error ParseError:
+    NotANumber(text: String)
+
+def number(text: str) -> int ! ParseError:
+    let n = text.trim().parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def main():
+    let lines = ["12", " 7", "x"]
+    print(lines.iter().try_map(line -> Ok(number(line)? * 2)))
+    print(lines[:2].iter().try_map(line -> Ok(number(line)? * 2)))
+    let results = lines.iter().map(line -> number(line)).collect()
+    print(results.try_collect())
+```
+
+<!-- output: examples/16-closures-and-iterators/try_map.out -->
+```text
+Err(NotANumber(text="x"))
+Ok([24, 14])
+Err(NotANumber(text="x"))
+```
+
+`try_collect` is a method of a list of results, not of an iterator yet,
+so a pipeline collects first, `.map(f).collect().try_collect()`; written
+straight after `map`, it is E0304.
 
 ## Exercise 16.1: predict the pipelines
 

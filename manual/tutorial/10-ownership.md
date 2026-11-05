@@ -689,8 +689,8 @@ several statements at once.
 
 The dict owns its keys, each a `String`, and `rooms.get(guest)` looks
 one up by the `str` it is given: a lookup only reads its key, so you
-write no `.to_string()`. For now the lookup makes a `String` of the
-`str` itself and drops it as soon as it is done.
+write no `.to_string()`. The `str` is compared with the keys as it is,
+so the lookup makes no `String` either.
 
 A block's drops and `defer`s run together, in the reverse of the order
 in which they appear in the code: a `defer` runs where a value declared

@@ -1,0 +1,16 @@
+# `.or_else` computes the fallback from the error, and only for an error.
+error BookingError:
+    NoRoom(guest: String)
+
+def room(guest: str) -> int ! BookingError:
+    if guest == "Aino":
+        return Ok(12)
+    return Err(NoRoom(guest.to_string()))
+
+def spare(e: BookingError) -> int:
+    print("{e}: the spare room")
+    return 99
+
+def main():
+    print(room("Aino").or_else(spare))
+    print(room("Roni").or_else(spare))

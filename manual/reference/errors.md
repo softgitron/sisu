@@ -102,10 +102,18 @@ the set, and `?` in a function whose result is no result is E0320
 ([R17](diagnostics.md#e0320)). `?` inside a closure returns from the
 closure.
 
-**Stage 0 differs.** `try_map` and `try_collect`, which pass an error
-out of an iterator's pipeline, are E0304.
+An iterator's pipeline passes an error out with `try_map(f)`, `Ok` of
+the values of `f` in a list or the first `Err` that `f` returns, after
+which no item is taken, and a list of results with `try_collect()`, the
+values or the first error
+([chapter 16](../tutorial/16-closures-and-iterators.md#errors-inside-a-pipeline)).
 
-**Status.** In stage 0 (D-042).
+**Stage 0 differs.** [05](../../proposal/05-errors.md#propagation) has
+`try_collect` end a chain of adapters; in stage 0 it is a method of
+`list[Result[T, E]]`, so `xs.iter().map(f).try_collect()` is E0304 and
+is written `xs.iter().map(f).collect().try_collect()`.
+
+**Status.** In stage 0 (D-042), with the differences noted.
 
 ## Results that must be used
 

@@ -1,0 +1,3 @@
+6:9-6:13 W0031 resolve.mixed-script name="pаrt" scripts="Latin and Cyrillic"
+6:9-6:13 W0032 resolve.confusable name="pаrt" other="part"
+  label 2:5-2:9 resolve.confusable-here other="part"

@@ -45,7 +45,9 @@ Point(x=2.5, y=1.0)
 - `home.x` reads a field. A field of a `var` binding can be changed,
   as `boat.x = 2.5` does; the fields of a `let` binding cannot.
 - `{boat:?}` shows the value's `Debug` form, which chapter 6 met: the
-  type's name and each field. Every type you declare has one. A plain
+  type's name and each field. Every type you declare has one, public
+  or not; a type that keeps its fields from readers writes its own,
+  as chapter 14 shows. A plain
   `{boat}` does not compile, because a struct has no form for people to
   read until you write one, which chapter 14 shows.
 

@@ -1,0 +1,15 @@
+# A `CString` hands C a pointer to its own bytes, ended by a NUL.
+from std.ffi import CString, c_char, c_size
+from std.mem import ptr
+
+# safety: the signature as <string.h> declares it; it returns promptly.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+
+def main():
+    let name = CString.new("löyly") else:
+        return
+    # safety: valid: `name` lives across the call and ends with its NUL,
+    #   and strlen keeps no pointer to it.
+    print(unsafe strlen(name.as_ptr()))
+    print(name.byte_len())

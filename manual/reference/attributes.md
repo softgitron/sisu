@@ -275,7 +275,9 @@ derive at compile time (D-018). It takes:
   [R17](diagnostics.md#e0244)); a type is `Copy` only through the
   derive ([R7](ownership.md#copy-types-and-explicit-copies));
 - `Debug`: the name and the fields as they are written, the form `{x:?}`
-  prints, which every type has without asking;
+  prints, which every type has without asking, a `pub` one too, and
+  which a type that hides its fields replaces with an `impl Debug` of
+  its own ([10](../../proposal/10-tooling.md#debugging-and-profiling));
 - `Eq`: equal when the variants are and every field is;
 - `PartialOrd` and `Ord`: by variant in the order declared, then field
   by field, the first that differs deciding;

@@ -1,0 +1,8 @@
+test "the notes directory exists" ... FAILED
+
+test "the notes directory exists" ... FAILED
+panic: assertion failed: sys.fs.exists(Path.new("notes"))
+  at test "the notes directory exists" (real_system.sisu:3:5)
+no replay token: the test takes the real `System`, which a replay cannot stand in for
+
+0 passed, 1 failed, 0 blocked

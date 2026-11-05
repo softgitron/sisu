@@ -1,0 +1,3 @@
+# A test that takes the real `System` is neither simulated nor replayed.
+test "the notes directory exists"(sys: System):
+    assert sys.fs.exists(Path.new("notes"))

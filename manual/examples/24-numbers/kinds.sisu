@@ -4,6 +4,7 @@ def main():
     print("{volume +| 10} {volume -| 251} {volume *| 2}")
     let counter: u16 = 65535
     print("{counter +% 1} {counter *% 2}")
-    print(9_223_372_036_854_775_807.checked_add(1))
+    print("{volume.checked_add(5)} {volume.checked_add(6)}")
     print(3_037_000_499.checked_mul(3_037_000_499))
+    print("{2.checked_pow(62)} {2.checked_pow(63)}")
     print(volume + 10)

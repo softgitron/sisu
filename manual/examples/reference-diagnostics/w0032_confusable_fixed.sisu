@@ -1,0 +1,5 @@
+# The new value gets a name of its own.
+def main():
+    let total = 4
+    let with_guest = total + 1
+    print(with_guest)

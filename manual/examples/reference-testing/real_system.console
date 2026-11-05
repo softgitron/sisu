@@ -1,0 +1,9 @@
+$ sisu test --sim real_system.sisu
+test "the notes directory exists" ... FAILED
+
+test "the notes directory exists" ... FAILED
+panic: assertion failed: sys.fs.exists(Path.new("notes"))
+  at test "the notes directory exists" (real_system.sisu:3:5)
+no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones
+
+0 passed, 1 failed, 0 blocked

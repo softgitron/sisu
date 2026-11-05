@@ -254,7 +254,12 @@ as `xs[1:^1]` does.
 - A lookup, `d[k]`, `get`, `contains` and `remove` of a `dict` and
   `contains` and `remove` of a `set`, takes the key's type or one that
   implements the prelude's `Lookup[K]` for it: a `str` looks up a
-  `String` key, with no `.to_string()`.
+  `String` key, with no `.to_string()`, and `get`, `remove` and the
+  index of a `dict[String, V]` and `contains` and `remove` of a
+  `set[String]` make no `String` of it. The panic of an index by a
+  `str` that is missing stands at the index (`ages[name]`), where that
+  of an index by a string literal, which the type checker makes a
+  `String`, stands at its statement.
 - A constant negative index, Python's `xs[-1]`, does not compile
   (E0344, with the fix `^1`), since it would mean the other end in
   Python; a negative index computed while the program runs panics
@@ -504,9 +509,12 @@ def main():
 0 -1 7 5 nobody Ok(42) Err(Bad(text="x"))
 ```
 
-**Stage 0 differs.** `.or_else(f)`, which computes the fallback only
-when it is needed, is E0304, and so are `try_map` and `try_collect`.
-`?.` is one token, so Rust's `x?.lines()` on a result is E0370; it is
+`x.or_else(f)` on a `T ! E` is the value, or `f` of the error, which
+runs only when there is one; `try_map` and `try_collect` pass an
+error out of an iterator's pipeline
+([R8](errors.md#propagation)).
+
+**Stage 0 differs.** `?.` is one token, so Rust's `x?.lines()` on a result is E0370; it is
 written `(x?).lines()`.
 
 **Status.** In stage 0 (D-042), with the differences noted.

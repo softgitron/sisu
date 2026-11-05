@@ -1,7 +1,8 @@
 $ sisu run kinds.sisu
 255 0 255
 0 65534
-None
+Some(255) None
 Some(9223372030926249001)
+Some(4611686018427387904) None
 panic: integer overflow: 250 + 10 as u8
-  at main (kinds.sisu:9:11)
+  at main (kinds.sisu:10:11)

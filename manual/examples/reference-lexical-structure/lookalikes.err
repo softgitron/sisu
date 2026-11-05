@@ -1,0 +1,15 @@
+warning[W0031]: `pаrt` mixes letters of the Latin and Cyrillic scripts
+  --> lookalikes.sisu:6:9
+  |
+6 |     let pаrt = 2
+  |         ^^^^
+
+warning[W0032]: `pаrt` looks like `part`, another name in scope
+  --> lookalikes.sisu:6:9
+  |
+6 |     let pаrt = 2
+  |         ^^^^
+  |
+2 | def part() -> int:
+  |     ---- `part` is declared here
+

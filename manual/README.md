@@ -152,7 +152,7 @@ free, inferred sets `T !`, results that must be used and `_ =`, `main`
 returning `! E` and the exit status, `.context(...)`, error traces, and
 panics as bugs, not errors. Exercises: parse a version string, a
 configuration lookup with a fallback, propagate through three layers.
-Stage 0 runs all of it except `.or_else`.
+Stage 0 runs all of it.
 
 **9. Project: a word counter** ([written](tutorial/09-word-counter.md)). The first complete program, built step
 by step: `sisu new`, the package layout (`sisu.toml`, `src/main.sisu`),
@@ -233,8 +233,8 @@ the `Iterator` trait and its adapters (`map`, `filter`, `fold`, `take`,
 `collect[T]`), laziness, generators with `yield` and `Iter[T]`,
 generator expressions, and `?` inside closures with `try_map` and
 `try_collect`. Exercises: a pipeline over records, an infinite generator
-taken lazily, a fallible parse of many lines. Stage 0 runs all of it
-except `try_map` and `try_collect`.
+taken lazily, a fallible parse of many lines. Stage 0 runs all of it;
+`try_collect` is a list's method, so a pipeline collects before it.
 
 **17. Modules and packages** ([written](tutorial/17-modules-and-packages.md)). Files and directories as modules, `pub`
 and `pub(package)`, `import` and `from ... import`, re-exports, the
@@ -326,8 +326,8 @@ suffix-free literals, which take an exact type beside an operator too
 bit methods (`count_ones`, `rotate_left`, `swap_bytes`, `to_bits`).
 Exercises: a checksum over `u32`, a rotating hash with a parity bit, a
 mortgage table in `Decimal`. Stage 0 runs all of
-it, `total_order`, `round_to` and the checked methods of `int`
-included; it accepts `@float(fast)` and keeps the arithmetic strict.
+it, `total_order`, `round_to` and the checked methods of every integer
+type included; it accepts `@float(fast)` and keeps the arithmetic strict.
 
 **25. Compile-time code** ([written](tutorial/25-compile-time.md)). `comptime` expressions, `const`, `comptime
 def` and `comptime assert`, fuel and `@comptime_budget`, reflection
@@ -969,6 +969,7 @@ solutions and passing checks.
 | 24 | Stage 1's twelfth round (R111 to R119, decisions 700 to 708) and the stage 0 round's decisions 680 to 694 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 4 codes in R17's tables, each with an entry (E0343, E0991, W0028, W0029), and E0220's note at its entry, 16 sessions blessed (4 changed by the rounds: E0343 for a `Shared`'s field, `sisu help`'s `--echo`, the standard library's new doc example, and G6's transcript, which the Rust front end now refuses with E0609; 2 changed with their examples; 10 new) and 25 conformance expectations (2 changed by the rounds, `E0343` and G6's failing transcript, 3 with their examples, 20 new); a session's command may end `< FILE` (`tools/check.py`), so chapter 1 and R16 show REPL sessions with `sisu repl --echo`; lookups by `str` and `.copied()` (chapters 10 and 19, G2, R4, and the code of chapters 13, 20 and 22 and G10 without `.to_string()`), E0343 (chapter 13, R7), `@preview` and W0028 and W0029 (chapter 28, R14, R13, X11, the glossary), `f.doc` and `cli.help_text`'s option text (G6, R12, R15), the `@export` symbol, Sisu's convention and E0991 (chapter 27, R14, R22, G19), `Zone`'s `Debug` in a worksheet (chapter 21), the executable's size and what remains in it (chapter 27, G20, R22), G14's joined tasks and R0079, the manifest's `runtime` key (R22), `target.runtime` and `--target-runtime` (chapter 25, R12, R22), E0220's note (chapter 17, R13), `Decimal` and Q-79 (G31) and the exact `truncate_to` (chapter 24, R2) taught with checked examples; the findings at 59 (5 settled, 1 found intended, 1 decided against, 8 narrowed, 1 new), every check passing |
 | 25 | Stage 1's thirteenth round (R120 to R126, decisions 740 to 746) and the stage 0 round's decisions 720 to 729 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 2 codes in R17's tables, each with an entry (E1023, W0030), and D0128's entry rewritten for transcripts on stage 1's build, 12 sessions blessed (5 changed by the rounds: G6's transcript, which passes now, D0128's, `target.runtime` under `--native`, the `runtime` key read, W0030 in exercise 27.3's start state; 1 changed with its example; 6 new) and 13 conformance expectations (5 changed by the rounds, 2 with their examples, 6 new); transcripts on stage 1's build (G6, R15, R12, R16, R17, X9), the REPL's one process and its `<input>` and file lines with a panic's session (R16, chapter 1), `target.runtime` in native builds and `target.runtime_profile` (chapter 25, R12, R22), the manifest's `runtime` key with its three values, E1003 and E1023 (R22, R13), W0030 (chapter 27, R14), the loop over a `mut` parameter that reads it (chapter 13's challenge, its hint and solution), `E0258` alone (G32), `@export` end to end (chapter 27, R14, R22, G19) and the bootstrap's comparison (X9) taught with checked examples; the findings at 54 (6 settled, 4 narrowed, 1 new), every check passing |
 | 26 | Stage 1's fourteenth round (R127 to R133, decisions 760 to 766) and the stage 0 round's decisions 780 to 787 in the manual: the features they made teachable, every changed session reviewed, the findings checked again | done (1): no code added to the catalog, 2 entries added (E0607 with its note `comptime.derive-checks`, D0103), 9 sessions blessed (2 changed by the rounds, both for the label `type.instance-line`: X7's `total` and exercise 25.4's start state; 3 changed with their examples, G21's and E0608's checks moved before the `return impl` and G6's help with `cli.about`; 4 new) and 8 conformance expectations (1 changed by the rounds, X7's `.diag`; 2 with their examples; 5 new, among them a package's output and lockfile); `@export` with C's convention, the C declaration, a struct by a pointer and D0103 by value, and a panic's status 134 (chapter 27, R14, R22, R8, R16, G19), `runtime = "single"` without `std.par`'s workers and `par.map`'s pool natively (R22, R9, chapter 26, G17), `reflect.doc_of` and a variant's fields' `doc` (R12), `cli.about` (G6, R15), checks before `return impl` and E0607's note (G21, R12, R17's E0607 and E0608), the instance line's label (R12, X7), imports and dependencies under the target runtime (R13, R12, chapter 17) and the tasks' records in the runtime in Sisu (X9) taught with checked examples; the findings at 51 (7 settled, 1 narrowed, 4 new), every check passing |
+| 27 | Stage 1's fifteenth round (R134 to R141, decisions 800 to 807) and the stage 0 round's decisions 820 to 828 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 3 codes in R17's tables, each with an entry (W0031, W0032, D0138), 9 sessions blessed (2 changed by the rounds: the standard library's six new doc examples in `sisu test --std`'s count, and R16's `--sim` session, whose test now names its file system beside one that takes the real `System`; 2 changed with their examples, chapter 24's checked methods and G4's three habits in one body; 5 new) and 23 conformance expectations (1 changed by the rounds, R16's `sim.test`; 4 with their examples; 17 new, among them a package's failing black-box test replayed, R15's `levels_bug`; 1 retired with G4's `nil.sisu`); lookups by `str` without a `String` (chapter 10, R4), NFC names and W0031 and W0032 with the limits of their tables (R1, R17), the checked methods of every integer and `checked_pow` (chapter 24, R2), `.or_else` (chapter 8, R4), `try_map` and `try_collect` with the `map` limit (chapter 16, R8, R4, X2), names reported despite a parse error (G4), every type's `Debug` (chapters 7 and 14, R14), the real `System` under `--sim` and D0138 (R15, R16, X12, G14, chapter 19), a package's failing test in a package case (R15), the `CString` pointer in the interpreter and D0103 natively (chapter 27, G19, R17), the trace context kept (G28) and the runtime in Sisu's iterators and choices (X9) taught with checked examples; the findings at 47 (4 settled, 1 decided against, 5 narrowed, 1 new), every check passing |
 | | Total | about 160 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -983,8 +984,8 @@ and later pages do not rediscover them. Each item is one finding: what
 stage 0 does, and in parentheses the page whose writing found it (a
 chapter by its number, a reference page, guide or explanation by its
 letter and number, "the maintenance round" for step 13). A finding that
-the rounds R10 to R133 of [stage 1's rules](../compiler/stage1/RULES.md),
-or the decisions 354 to 787 of the driver, the runtime and the test
+the rounds R10 to R141 of [stage 1's rules](../compiler/stage1/RULES.md),
+or the decisions 354 to 828 of the driver, the runtime and the test
 runner in the [architecture notes](../compiler/docs/architecture.md),
 settled is no longer listed; each was checked against the compiler
 before it went. An item marked "assigned to stage 1" or "assigned to
@@ -992,7 +993,7 @@ stage 0" is one that the compiler's rounds in progress have taken on.
 The last group holds the diagnostics that lack a fix or mislead,
 whatever their area.
 
-The list holds 51 findings in ten groups. The rounds R11 to R26
+The list holds 47 findings in ten groups. The rounds R11 to R26
 settled 41 that the writers recorded (R24 alone 14, R25 9, R16 5),
 stage 1's third round, R27 to R36, with the decisions 354 to 360,
 settled 22 more (R33 alone 4, decision 357 3), and its fourth round,
@@ -1045,7 +1046,11 @@ round, R127 to R133, with the stage 0 round's decisions 780 to 787,
 settled 7 (R128, R129, R130, R131, the decisions 783 and 785 one each,
 and the proposal's 00 and 14, which no longer say "There is no
 compiler", one) and narrowed one more (R133, which leaves NFC names to
-generated tables); 12 were
+generated tables), and its fifteenth round, R134 to R141, with the
+stage 0 round's decisions 820 to 828, settled 4 (R138, R140, and the
+decisions 822 and 827 one each), decided against one (the trace
+context of 06, decision 826) and narrowed five more (R136, R137 two,
+and the decisions 823 and 828); 12 were
 corrections to this
 plan, its conventions or its tools, now made where they belong, and a
 finding that several pages recorded is one item that names each page;
@@ -1061,23 +1066,23 @@ it against stage 1's tenth round and the decisions 640 to 646, 2
 from step 23, which checked it against the eleventh, 1 from step
 24, which checked it against the twelfth and the decisions 680 to 694,
 1 from step 25, which checked it against the thirteenth and the
-decisions 720 to 729, and 4 from step 26, which checked it against the
-fourteenth and the decisions 780 to 787.
+decisions 720 to 729, 4 from step 26, which checked it against the
+fourteenth and the decisions 780 to 787, and 1 from step 27, which
+checked it against the fifteenth and the decisions 820 to 828.
 
 ### Syntax and names
 
 - [14](../proposal/14-non-goals.md) lists "variadic functions" among what Sisu does not have, where [02](../proposal/02-syntax.md#declarations) gives `*xs: T` (X1).
 - `for i, d in enumerate(own drafts)` is E0100 ("expected `->`"), so consuming a list with its positions takes a counter (chapter 13).
-- Names are not normalised to NFC, so a letter written as a base and a combining mark is E0005 for the mark, and the confusable and mixed-script lints of D-048 are missing; both wait for generated Unicode tables, which stage 1's fifteenth round attempts (R133; R1).
+- The lints of D-048 read their tables from Python's Unicode data (15.1): a letter's script comes from its character name, an approximation of Unicode's `Scripts.txt`, the confusables are a subset of `confusables.txt`, and a Hangul syllable written as its parts is not composed, so some look-alikes go unreported (R136; R1).
 - The prelude is wider than 09's fixed list: helpers such as `days_in_month` and `Formatter` are visible to every program (R13).
 - D-055 keeps two silent differences from Python, a default argument computed at each call and a loop variable bound anew in each iteration, and neither is a row of the false-friend table that the model arm of [20](../proposal/20-pre-registration.md) measures (section 6.9, FF-1 to FF-6), so the experiment cannot see them (X8).
 
 ### Types and traits
 
-- A `pub` type has a `Debug` form without asking, though [10](../proposal/10-tooling.md) makes it opt-in (chapter 7).
 - D-060's allocator parameter, `list[T, A]` with `Global` in the prelude, is missing (E0208, E0201), so the chapter shows a defaulted parameter on a type of its own (chapter 15).
 - `@derive(Plain)` accepts a `@repr(c)` struct with padding, whose `as_bytes` would read it, though 22 allows no padding in a plain type; R108 left it open, since the derive's template has no compile-time size of a field until the layouts are lowered (chapter 27, R14).
-- Missing beside 03: `ptrsize` and `uptrsize`, `Sized`, `Decimal`'s `/` giving a `Ratio`, `graphemes` and the normalisation forms, `@derive(Into, From)`, a list literal typed as an `Array`, `FromLiteral` for `Url`, the sharing of instances with `--explain-size`, and the checked methods of the sized integers (`int` has `checked_add`, `checked_sub` and `checked_mul`, and `checked_pow` is `std.num`'s function only); R108 left the rest to the runtime, the design or the owner (R2, chapters 5, 6 and 24).
+- Missing beside 03: `ptrsize` and `uptrsize`, `Sized`, `Decimal`'s `/` giving a `Ratio`, `graphemes` and the normalisation forms, `@derive(Into, From)`, a list literal typed as an `Array`, `FromLiteral` for `Url`, and the sharing of instances with `--explain-size`; R108 left the rest to the runtime, the design or the owner (R2, chapters 5, 6 and 24).
 - [14](../proposal/14-non-goals.md) lists "implicit conversions" among what Sisu does not have, where D-016 keeps implicit lossless widening and the proposal's README says "implicit lossy conversions" (X1).
 - A method that takes `own self`, changes a copy of its value and returns it, is no exit that checks the invariant, so `Gauge(level=4).filled(20)` gives a level of 24 under `invariant 0 <= self.level <= 10`; 07 checks construction and `mut self` methods only, so the gap is the design's, now the owner's question Q-78 (R11).
 - A `Decimal` is not `Copy`, so a loop that pushes the same share needs `.copy()` (E0400), which a reader who thinks of it as a number does not expect; stage 1's twelfth round kept it, since a `Decimal` is of any size, and whether a fixed-size decimal type that is `Copy` stands beside it is the owner's question Q-79 (G31).
@@ -1086,7 +1091,7 @@ fourteenth and the decisions 780 to 787.
 ### Ownership
 
 - A `Weak` is not `Copy`, so a `Cell[list[Weak[T]]]` is read by `replace` and set back (chapter 13).
-- A `CString`'s `as_ptr()` passed to a foreign function stops the interpreter with "a pointer to a value that no longer exists (`valid`)", though the `CString` lives across the call, because `bytes.as_slice()` makes a slice of copies of the bytes that dies when `as_ptr` returns; the native backend does not compile `mem.slice.as_ptr` of a `u8`; the fix, a slice that views its list's elements in place, waits (decisions 688 and 785; chapter 27, G19; assigned to stage 0).
+- Natively a `CString`'s `as_ptr()` does not compile (D0103, "`mem.slice.as_ptr` of a `u8`"), since a native `Slice[u8]` holds a word for each byte where a `bytes` holds bytes, so no slice views a `bytes` in place until the layouts are per type (D-086); the interpreter runs it since decision 823 (chapter 27, G19; assigned to stage 0).
 - A native debug build checks a pointer by its address, not by its provenance, the borrow it came from: a write through a pointer made from a shared borrow passes when a `mut` borrow also made a pointer to an overlapping place, a pointer into a frame that has returned passes when a later call of the same depth covers its stack, and a reference read after a drop through the pointer goes unchecked, where the interpreter stops each; decision 626 made the checks faster and left provenance out, and decision 686 measured what tagged pointers would change, every inline use of a pointer's word in both lowerings and the C calls, and left them for a round of their own (chapter 27; pointer provenance assigned to stage 0).
 - A raw pointer to a struct does not compile natively: `ptr.of(ref reading)` and `ptr.of_mut(mut reading)` of a `@repr(c)` `Reading` are D0103, so a program cannot hand its own export the `ptr[Reading]` that C passes, and shows it only in the interpreter, which calls no export (R14).
 - The allocators are missing: `list.with_allocator` is E0351 and `try_push` E0304, so a program says that a function allocates nothing with `@no_alloc`, which nothing checks yet (W0030) (chapter 27).
@@ -1094,7 +1099,7 @@ fourteenth and the decisions 780 to 787.
 ### Errors
 
 - An error that `main` returns is printed in its `Debug` form, `Context(message="...", cause="NotANumber(text=\"kolme\")")`, rather than its `Display` form (Q-74), and so is a `cli.Error`, `InvalidValue(name="--total", value="lots")` (chapter 8, G6).
-- `.or_else`, `try_map` and `try_collect` are E0304, as planned (chapters 8 and 16).
+- `try_collect` is a method of `list[Result[T, E]]`, not of an iterator, so `xs.iter().map(f).try_collect()` is E0304, with no fix that names `.collect().try_collect()`, since a method appended to the prelude cannot join `Iterator`'s trait (R137; chapter 16, R8).
 - A `main` that passes an error on with `?` adds the line of the `?` under it, also in a transcript; returning it from an `else as e:` block keeps the line out (G6).
 - A run-time message is printed without its code (`panic: ...`), so a reader has nothing to give `sisu explain`; the R codes are visible only in the catalog, and decision 689 keeps the form for now, since the codes would change 81 of the suite's expectations and 193 of the manual's sessions in one round (R17; decided against for now).
 
@@ -1102,14 +1107,11 @@ fourteenth and the decisions 780 to 787.
 
 - `xs.par_iter()` is E0304, `par_iter_mut` is missing and `SoaList` is E0201, as planned, so stage 0 spells the parallel loop `par.iter(xs)` and the parallel map `par.map` (chapter 26, R9).
 - `System` has no `stdout` and `stderr` fields, which [06](../proposal/06-concurrency-and-capabilities.md#the-rule) lists among the root capabilities; `print` and `print_err` are ambient instead (chapter 18); what they are is now the owner's question Q-76.
-- The trace context is the path of spawn indices, `[task 2.1]`, not the trace and span identifiers of [06](../proposal/06-concurrency-and-capabilities.md#interceptors-and-trace-context), and `trace.wrap` with a `Tracer` is missing, so a program writes its own `cap.Interceptor` (G28).
 
 ### Testing
 
 - The failure database of property tests, `@fixture`, `Expectation`, `--fuzz`, `--cover`, `--mutate` and the JSON output of `sisu test` are missing, as planned (chapter 19, G11).
 - A test's output is captured and shown only with its failure (decision 466), and a test cannot read it, so a test cannot check what a `Drop` printed, and chapter 10's drop-order exercise predicts the order of `defer`s instead (chapter 10).
-- A test that takes the real `System` runs under `--sim` against a simulated `System`, and outside it prints no token (D0031), where 17 says such a test can be neither simulated nor replayed and its token says so; the decisions 692 and 728 leave the test runner's choice of a `System` and the token's message to a round of their own, with the suite's cases that rely on it (X12; assigned to stage 0).
-- The conformance runner replays a failing test's token in a package case without the file the token names, so the replay of a failing test of `tests/NAME.sisu` runs no test and the case fails; a manual's package can show such a failure only in a session over a `NAME.files/` tree (R15).
 
 ### Metaprogramming
 
@@ -1127,7 +1129,7 @@ fourteenth and the decisions 780 to 787.
 ### Tooling and the driver
 
 - `sisu explain CODE` prints the code's message alone, without the long form with an example that 10 describes, whose text is Q-66 (chapter 1, R17).
-- `sisu test FILE` compiles the file alone even in a package's directory, so a file cannot import the module beside it (E0220, whose note now says that only a package makes them one program), and an exercise, which `tools/check.py` runs as `sisu test NAME.sisu`, cannot be a workspace (chapter 17).
+- `sisu test FILE` compiles the file alone even when it is a module under a package's `src/`, so it cannot import the module beside it (E0220, whose note says that only a package makes them one program); decision 828 has it run the package's tests of that module, which waits for stage 1's `sir --tests` to name each test's module; an exercise, which `tools/check.py` runs as `sisu test NAME.sisu`, cannot be a workspace (chapter 17; assigned to stage 1).
 - `sisu build --explain-size`, `sisu run --profile`, `sisu check --holes` and `--target` are D0009, and `sisu fix`, `why`, `review`, `publish`, `add`, `update` and `eval` are D0003, as planned, with the registry of D-031 they wait for (chapters 15, 25 and 28, G20, G26, G27).
 - The native executable of a ten-line program is 6.25 MB in both profiles (21 MB when the driver is a debug build), 1.74 MB stripped: the link drops what nothing reaches, and what remains is the runtime's code, Rust's standard library, 3.8 MB of debug information and 0.4 MB of symbols, with the C library and `libgcc_s` linked dynamically, where [12](../proposal/12-interop-and-targets.md#binary-size-and-startup) links statically and plans a `release-size` profile (chapter 27, G20, R22).
 - `sisu run --stats` prints scheduling latencies that differ between runs, so only `--stats stack-depth` can be shown (chapter 19, G27).
@@ -1138,12 +1140,12 @@ fourteenth and the decisions 780 to 787.
 ### Diagnostics without fixes
 
 - E0117 for Python's `f"..."` after `=`, `let s = f"n is {n}"`, has the fix now and still the message "unexpected a string after the end of the statement", the catalog's `unexpected {found}` filled with a noun phrase (R19, G2).
-- A file with a parse error reports nothing of its names, so the `nil` of a file that also holds `go f()` goes unreported until the parse is fixed (G4).
 - E0333 is the ownership checker's, so a run ends with D0021, which offers `--defer-borrow`; under it the Rust front end refuses `print` in a `pure` function with D0006, and runs `Atomic.load` as if it were pure (chapter 26).
 - E0241 for a trait with a constant used as `dyn Shape` calls the constant a method: "its method `SIDES` cannot be called through it, because it is a constant" (R3).
 - D0103 is printed without the `error[D0103]` heading, and for a `@repr(c)` struct that an exported function takes by value it says "a parameter of the exported function `sauna_load`, a `ref Reading`", a `ref` the program did not write, and leaves empty the name of the function it is in (R14).
 - A derive whose body E0607 refuses also makes each `@derive` of its trait E0243, "`Columns` cannot be derived", though the trait declares a derive, and each use of the impl's functions E0351, three errors for one mistake (R12).
 - In a `pure` function, the consumer after an adapter, the `count()` of `split_whitespace().filter(...).count()`, is a second E0333 of the same chain, without the note `type.pure-adapter` that the adapter's has (chapter 18).
+- A missing key of a `dict[String, V]` indexed by a string literal, `ages["Roni"]`, panics at the start of its statement (`r0010_missing_key.sisu:4:5`), and one indexed by a `str` at the index (`4:11`), since R134 lowers the `str`'s index to its own intrinsic and the type checker makes the literal a `String` (R4, R17).
 
 ## Open questions
 

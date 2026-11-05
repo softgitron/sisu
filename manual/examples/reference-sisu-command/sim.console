@@ -1,16 +1,18 @@
 $ sisu test sim.sisu
 test "every note is saved" ... ok
-1 passed, 0 failed, 0 blocked
+test "the real disk keeps them too" ... ok
+2 passed, 0 failed, 0 blocked
 $ sisu test --sim --faults 0.2 sim.sisu
 test "every note is saved" ... FAILED
+test "the real disk keeps them too" ... ok
 
 test "every note is saved" ... FAILED
-panic: assertion failed: save_notes(sys.fs, 10) == Ok(10)
+panic: assertion failed: save_notes(fs, 10) == Ok(10)
   left:  Err(InvalidData(path="note0.txt"))
   right: Ok(10)
-  at test "every note is saved" (sim.sisu:8:5)
-replay: sisu test --replay 1-9b4ccffd37116d1b-0.0.1-t0-s0-r0-m200000 sim.sisu
+  at test "every note is saved" (sim.sisu:9:5)
+replay: sisu test --replay 1-e3c3fb213982d560-0.0.1-t0-s0-r0-m200000 sim.sisu
 
-0 passed, 1 failed, 0 blocked
+1 passed, 1 failed, 0 blocked
 $ sisu test --faults 0.2 sim.sisu
 error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`

@@ -1,0 +1,4 @@
+# A name typed with a Cyrillic `а` among its Latin letters.
+def main():
+    let sаuna_heat = 80
+    print(sаuna_heat)

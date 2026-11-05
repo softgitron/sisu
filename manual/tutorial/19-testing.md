@@ -561,13 +561,13 @@ everything that decides the run: the code's content hash, the
 toolchain's version, which test, the scheduler's seed, the seed of the
 case and, for a property, the shrunk case. The second command of the
 session in the previous section ran it, and failed the same way at
-once, with the shrunk case as its first case.
+once, on the shrunk case.
 
 A token fits in a bug report: whoever has the same code can run the
-failure again on any machine, since inside a test every source of
-chance is a fake or the seeded scheduler. A token for other code, or
-for another version of the toolchain, is refused with a message that
-says so. A test that takes the real `System` has no token.
+failure again on any machine, since in a test every source of chance
+is a fake or the seeded scheduler. A token for other code, or
+another version of the toolchain, is refused. A test that takes the real `System` gets it even under
+`--sim`, and has no token.
 
 ## Every small case
 

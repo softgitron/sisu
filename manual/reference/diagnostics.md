@@ -9854,7 +9854,7 @@ Shown in [R22](targets.md#runtime-profiles).
 
 ## Warnings
 
-Codes W0001 to W0030. A warning does not stop a program: `sisu run`
+Codes W0001 to W0032. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -10246,9 +10246,9 @@ warning[W0014]: `is_set` is public and safe and reaches the foreign function `ge
 Take the capability, as `env: Env` here for `getenv`, so that only a
 caller that holds it can read the environment. A foreign function that
 reaches nothing, such as `abs`, belongs in a `pure` function, whose `#
-safety:` comment says so under `pure:`. Both programs are only checked:
-the interpreter cannot yet pass a `CString` to C, as [chapter
-27](../tutorial/27-systems.md) says.
+safety:` comment says so under `pure:`. Both programs are only
+checked, as [chapter 27](../tutorial/27-systems.md#no-authority-without-a-capability)
+checks its own; it runs a `CString` through C's `strlen`.
 
 <!-- file: examples/reference-diagnostics/w0014_ambient_authority_fixed.sisu -->
 ```sisu
@@ -10854,6 +10854,92 @@ def main():
 
 Shown in [R14](attributes.md#resource-limits) and the tutorial's
 [chapter 27](../tutorial/27-systems.md#exercise-273-an-audio-callback-without-allocation).
+
+### W0031
+
+`resolve.mixed-script`: `{name}` mixes letters of the {scripts}
+scripts.
+
+A declared name holds letters of more than one script, as a name typed
+or pasted with a Cyrillic `а` (`\u{430}`) among Latin letters does
+([R1](lexical-structure.md#names)). Digits, `_` and letters of no
+script do not count, and the scripts of Chinese, Japanese and Korean
+count as one.
+
+<!-- file: examples/reference-diagnostics/w0031_mixed_script.sisu -->
+```sisu
+# A name typed with a Cyrillic `а` among its Latin letters.
+def main():
+    let sаuna_heat = 80
+    print(sаuna_heat)
+```
+
+<!-- output: examples/reference-diagnostics/w0031_mixed_script.console -->
+```console
+$ sisu run w0031_mixed_script.sisu
+```
+
+Retype the name in one script. The two names look the same, so the
+warning is often the only sign of the stray letter.
+
+<!-- file: examples/reference-diagnostics/w0031_mixed_script_fixed.sisu -->
+```sisu
+# The name in Latin letters only.
+def main():
+    let sauna_heat = 80
+    print(sauna_heat)
+```
+
+<!-- output: examples/reference-diagnostics/w0031_mixed_script_fixed.out -->
+```text
+80
+```
+
+Shown in [R1](lexical-structure.md#names).
+
+### W0032
+
+`resolve.confusable`: `{name}` looks like `{other}`, another name in
+scope.
+
+A declared name reads as another name in scope, a module's item or a
+local or parameter of an enclosing scope: the two differ, one of them
+holds a letter beyond ASCII, and written with the ASCII letters they
+look like, they are the same. When the other name is the module's, the
+label `resolve.confusable-here` stands at its declaration. A name that
+also mixes scripts gets W0031 as well:
+
+<!-- file: examples/reference-diagnostics/w0032_confusable.sisu -->
+```sisu
+# Two names that look the same: the second has a Greek `ο`.
+def main():
+    let total = 4
+    let tοtal = total + 1
+    print(tοtal)
+```
+
+<!-- output: examples/reference-diagnostics/w0032_confusable.console -->
+```console
+$ sisu run w0032_confusable.sisu
+```
+
+Give the new value a name of its own, which a reader can tell apart:
+
+<!-- file: examples/reference-diagnostics/w0032_confusable_fixed.sisu -->
+```sisu
+# The new value gets a name of its own.
+def main():
+    let total = 4
+    let with_guest = total + 1
+    print(with_guest)
+```
+
+<!-- output: examples/reference-diagnostics/w0032_confusable_fixed.out -->
+```text
+5
+```
+
+Shown in [R1](lexical-structure.md#names).
 
 ## Run time
 
@@ -11613,7 +11699,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0137. The messages of the `sisu` command itself
+Codes D0001 to D0138. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -11914,15 +12000,17 @@ Example: [R16](sisu-command.md#sisu-new).
 
 The program is valid, and the interpreter runs it, but the native
 backend has no lowering yet for a part of it, which the message names:
-a `@repr(c)` struct passed by value to an exported function, or a raw
-pointer to a struct. The message is printed without the `error[D0103]`
+a `@repr(c)` struct passed by value to an exported function, a raw
+pointer to a struct, or the pointer of a `CString`, `as_ptr`, which
+the interpreter gives. The message is printed without the `error[D0103]`
 heading of other diagnostics, and for an exported function's parameter
 it calls the parameter a `ref` and leaves the function's name empty.
 
 Run the program without `--native`, or change it to what the backend
 compiles: pass a struct to an exported function by a pointer.
 
-Example: [R14](attributes.md#exported-functions).
+Example: [R14](attributes.md#exported-functions), [chapter
+27](../tutorial/27-systems.md#no-authority-without-a-capability).
 
 ### D0111
 
@@ -12186,6 +12274,24 @@ has no such line.
 
 Example: [R15](testing.md#black-box-tests), [chapter
 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
+
+### D0138
+
+`cli.replay-no-token-sim`: no replay token: the test takes the real
+`System`, which `--sim` does not simulate and a replay cannot stand in
+for; a test that names the capabilities it uses gets simulated ones.
+
+A test that takes the real `System` failed under `sisu test --sim`, and
+this line stands where its replay token would be. Such a test gets the
+real `System` under `--sim` too, runs alone and meets no fault, since
+the real world can be neither simulated nor replayed; outside `--sim`
+the same failure prints D0031. It is no error of its own: the status is
+the run's.
+
+Name the capabilities the test uses, `test "..."(fs: Fs):`, and it
+runs on simulated ones, which faults reach and a token replays.
+
+Example: [R15](testing.md#simulation).
 
 ## Every code
 
@@ -12616,6 +12722,8 @@ it. `sisu explain CODE` prints the same line.
 | [W0028](#w0028) | `type.preview` | `{name}` is a preview, which may change or be removed before it is stable: {reason} |
 | [W0029](#w0029) | `type.preview-plain` | `{name}` is a preview, which may change or be removed before it is stable |
 | [W0030](#w0030) | `resolve.unchecked-attribute` | `@{name}` is accepted and checked by nothing yet, so nothing ensures {what} |
+| [W0031](#w0031) | `resolve.mixed-script` | `{name}` mixes letters of the {scripts} scripts |
+| [W0032](#w0032) | `resolve.confusable` | `{name}` looks like `{other}`, another name in scope |
 
 ### Run time, every code
 
@@ -12904,4 +13012,5 @@ it. `sisu explain CODE` prints the same line.
 | [D0135](#d0135) | `cli.test-output` | what the test printed: |
 | [D0136](#d0136) | `cli.bench-samples` | `--samples` takes 2 or more, not {value}: the interval of the mean needs two samples |
 | [D0137](#d0137) | `cli.test-program` | tests of `{program}`: |
+| [D0138](#d0138) | `cli.replay-no-token-sim` | no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones |
 

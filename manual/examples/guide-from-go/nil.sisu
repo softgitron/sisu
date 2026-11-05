@@ -1,4 +1,0 @@
-# Go's `nil` for a value that is not there.
-def main():
-    let best: str? = nil
-    print(best ?? "nobody")
