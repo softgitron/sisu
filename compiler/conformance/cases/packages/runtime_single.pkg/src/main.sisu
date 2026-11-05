@@ -1,0 +1,23 @@
+# The threads a call of `std.par.map` starts, as Linux counts this
+# process's in `/proc/self/status`: none under the profile `single`, in the
+# interpreter and natively (decision 783), where a program of the profile
+# `full` starts its pool of workers at its first call.
+
+import std.par
+
+## The threads of this process, 0 where `/proc` does not say.
+def threads(sys: System) -> int:
+    let text = sys.fs.read_to_string(Path.new("/proc/self/status")).or("".to_string())
+    for line in text.lines():
+        if line.starts_with("Threads:"):
+            return line.byte_slice(8, line.byte_len()).trim().parse_int() ?? 0
+    return 0
+
+def main(sys: System):
+    if comptime target.runtime_profile == "single":
+        print("profile: single")
+    else:
+        print("profile: full")
+    let before = threads(sys)
+    print(par.map([1, 2, 3, 4, 5, 6, 7, 8], (x) -> x * x))
+    print("threads std.par started: {threads(sys) - before}")

@@ -1,0 +1,111 @@
+sir 0
+source 0 "lookups.sisu"
+entry main
+
+intrinsic dict.get_str pure from 0
+intrinsic dict.index_str pure from 0
+intrinsic dict.insert pure from 1 2 inner 0 own 1 2 keeps 0 2
+intrinsic dict.remove_str pure inner 0 keeps 0
+intrinsic print
+intrinsic set.contains_str pure
+intrinsic set.remove_str pure
+intrinsic str.to_string pure
+
+fn main(0) source 0 @1:5-1:9 {
+    let _0: ()
+    let _1: dict[String, int] "ages" @2:9-2:13
+    let _2: Option[int]
+    let _3: ref mut dict[String, int]
+    let _4: String
+    let _5: Option[int]
+    let _6: ref mut dict[String, int]
+    let _7: String
+    let _8: set[String] "names" @5:9-5:14
+    let _9: String
+    let _10: ()
+    let _11: ref dict[String, int]
+    let _12: Option[ref int]
+    let _13: ref dict[String, int]
+    let _14: Option[ref int]
+    let _15: ref set[String]
+    let _16: bool
+    let _17: ref set[String]
+    let _18: bool
+    let _19: ref mut dict[String, int]
+    let _20: Option[int]
+    let _21: ref mut dict[String, int]
+    let _22: Option[int]
+    let _23: ref mut set[String]
+    let _24: bool
+    let _25: ref set[String]
+    let _26: bool
+    let _27: ref dict[String, int]
+    let _28: ref dict[String, int]
+    let _29: ref int
+    let _30: int
+    let _31: ref dict[String, int]
+    let _32: ref int
+    let _33: int
+  bb0:
+    _1 = dict() @2:35-2:37
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = ref mut _1 @3:9-3:13
+    _4 = call intrinsic str.to_string(const "ada") @3:21-3:38
+    _2 = call intrinsic dict.insert(copy _3, move _4, const 36) @3:9-3:43
+    _6 = ref mut _1 @4:9-4:13
+    _7 = call intrinsic str.to_string(const "alan") @4:21-4:39
+    _5 = call intrinsic dict.insert(copy _6, move _7, const 41) @4:9-4:44
+    _9 = call intrinsic str.to_string(const "grace") @5:31-5:50
+    _8 = set(move _9) @5:30-5:51
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
+    _11 = ref _1 @6:11-6:15
+    _12 = call intrinsic dict.get_str(copy _11, const "ada") @6:11-6:30
+    _10 = call intrinsic print(copy _12) @6:5-6:31
+    _13 = ref _1 @7:11-7:15
+    _14 = call intrinsic dict.get_str(copy _13, const "bob") @7:11-7:30
+    _10 = call intrinsic print(copy _14) @7:5-7:31
+    _15 = ref _8 @8:11-8:16
+    _16 = call intrinsic set.contains_str(copy _15, const "grace") @8:11-8:38
+    _10 = call intrinsic print(copy _16) @8:5-8:39
+    _17 = ref _8 @9:11-9:16
+    _18 = call intrinsic set.contains_str(copy _17, const "ada") @9:11-9:36
+    _10 = call intrinsic print(copy _18) @9:5-9:37
+    _19 = ref mut _1 @10:11-10:15
+    _20 = call intrinsic dict.remove_str(copy _19, const "alan") @10:11-10:34
+    _10 = call intrinsic print(copy _20) @10:5-10:35
+    _21 = ref mut _1 @11:11-11:15
+    _22 = call intrinsic dict.remove_str(copy _21, const "alan") @11:11-11:34
+    _10 = call intrinsic print(copy _22) @11:5-11:35
+    _23 = ref mut _8 @12:11-12:16
+    _24 = call intrinsic set.remove_str(copy _23, const "grace") @12:11-12:36
+    _10 = call intrinsic print(copy _24) @12:5-12:37
+    _25 = ref _8 @13:11-13:16
+    _26 = call intrinsic set.contains_str(copy _25, const "grace") @13:11-13:38
+    _10 = call intrinsic print(copy _26) @13:5-13:39
+    _27 = ref _1 @14:11-14:15
+    _10 = call intrinsic print(copy _27) @14:5-14:16
+    _28 = ref _1 @15:11-15:15
+    _29 = call intrinsic dict.index_str(copy _28, const "ada") @15:11-15:22
+    _30 = copy _29.* @15:11-15:22
+    _10 = call intrinsic print(copy _30) @15:5-15:23
+    _31 = ref _1 @16:11-16:15
+    _32 = call intrinsic dict.index_str(copy _31, const "zed") @16:11-16:22
+    _33 = copy _32.* @16:11-16:22
+    _10 = call intrinsic print(copy _33) @16:5-16:23
+    _0 = const ()
+    goto bb5
+  bb4 (cleanup):
+    drop _8
+    goto bb2
+  bb5 (unwind bb2):
+    drop _8 @16:23-16:23
+    goto bb6
+  bb6:
+    drop _1 @16:23-16:23
+    return
+}

@@ -17,7 +17,9 @@
 //! another.
 //!
 //! `SISU_PAR_THREADS=N` sets the number of workers (1 to 256; by default
-//! the machine's processors): the result is the same for every number.
+//! the machine's processors): the result is the same for every number. A
+//! program of the runtime profile `single` has none (decision 783): its
+//! calls run their bodies on the asking thread, as a worker's call does.
 
 use crate::abi;
 use crate::intrinsics::Call;
@@ -25,7 +27,7 @@ use crate::mem;
 use crate::rt::{self, Panic, ty};
 use crate::value;
 use std::cell::Cell;
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 /// A closure's code called with its result's address, its environment and
@@ -45,6 +47,15 @@ static UNPROBED: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn set_unprobed(n: usize) {
     UNPROBED.store(n, Relaxed);
+}
+
+/// Whether the program's runtime profile is `single` (decision 783): no
+/// worker is started, and every call runs its bodies on the asking thread,
+/// one after another.
+static SINGLE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_single(on: bool) {
+    SINGLE.store(on, Relaxed);
 }
 
 thread_local! {
@@ -232,7 +243,8 @@ pub(crate) unsafe fn map(c: &Call<'_>) -> u8 {
         all_done: Condvar::new(),
     });
     let on_worker = WORKER.with(Cell::get);
-    let pool = if on_worker || n == 0 { None } else { pool().filter(|p| start_workers(p)) };
+    let single = SINGLE.load(Relaxed);
+    let pool = if on_worker || single || n == 0 { None } else { pool().filter(|p| start_workers(p)) };
     match pool {
         Some(p) => {
             if let Ok(mut w) = p.work.lock() {

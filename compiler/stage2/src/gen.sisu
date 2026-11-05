@@ -362,6 +362,92 @@ impl Cg:
         self.queue.push((name.to_string(), [], symbol.to_string()))
         return Ok(())
 
+    ## A program's `@export("name")` (decision 785): the function under a
+    ## local symbol of Sisu's convention, which `main`'s calls call, and the
+    ## global symbol `symbol` of C's own convention over plain values, a
+    ## wrapper lowered at once that writes each argument where Sisu's
+    ## convention reads it, calls the function and gives back its result as
+    ## C does; a panic that leaves the function stops the program with its
+    ## report (`sisu_rt_export_panic`), since no C caller can unwind.
+    pub pure def export_c(mut self, p: Program, name: str, symbol: str) -> () ! LirError:
+        let fi = self.function(name) else:
+            return internal("the program has no function `{name}`")
+        let f = ref p.functions[fi]
+        var params: list[(String, int)] = []
+        for k in range(f.param_count):
+            let t = f.locals[k + 1].ty.copy()
+            let plain = export_type(t) else:
+                return unsupported(
+                    "a parameter of the exported function `{symbol}`, a `{write.ty(t)}`"
+                )
+            params.push(plain)
+        var ret: (String, int)? = None
+        let rt = f.locals[0].ty.copy()
+        if rt != Type.Unit:
+            let plain = export_type(rt) else:
+                return unsupported("the result of the exported function `{symbol}`, a `{write.ty(rt)}`")
+            ret = Some(plain)
+        let inner = self.instance(p, name, [])?
+        var sig = String.new("(")
+        for k in range(len(params)):
+            if k > 0:
+                sig.push(", ")
+            sig.push(params[k].0)
+        sig.push(") -> (")
+        if let Some((t, _)) = ret:
+            sig.push(t)
+        sig.push(")")
+        self.items.push(Item.Line("declare {symbol} export {sig}"))
+        self.runtime(abi.SYM_EXPORT_PANIC)?
+        var b = Fb.new(len(params))
+        let result = b.create_slot(8)
+        var slots: list[int] = []
+        for _ in range(len(params)):
+            slots.push(b.create_slot(8))
+        let entry = b.create_block()
+        b.switch_to_block(entry)
+        var args = [b.stack_addr(result)]
+        for k in range(len(params)):
+            let v = k
+            let kind = params[k].1
+            var word = v
+            if kind == PLAIN_SIGNED:
+                word = b.convert("sextend", "i64", v)
+            elif kind == PLAIN_UNSIGNED:
+                word = b.convert("uextend", "i64", v)
+            elif kind == PLAIN_F64:
+                word = b.convert("bitcast", "i64", v)
+            elif kind == PLAIN_F32:
+                let bits = b.convert("bitcast", "i32", v)
+                word = b.convert("uextend", "i64", bits)
+            b.stack_store(word, slots[k])
+            args.push(b.stack_addr(slots[k]))
+        let status = b.call(inner, args, 1)[0]
+        let fail = b.create_block()
+        let done = b.create_block()
+        b.brif(status, fail, [], done, [])
+        b.set_cold_block(fail)
+        b.switch_to_block(fail)
+        _ = b.call(abi.SYM_EXPORT_PANIC, [], 0)
+        b.trap(1)
+        b.switch_to_block(done)
+        match ret:
+            case None:
+                b.return_([])
+            case Some((t, kind)):
+                let word = b.stack_load(result)
+                var v = word
+                if kind == PLAIN_SIGNED or kind == PLAIN_UNSIGNED:
+                    v = b.convert("ireduce", t, word)
+                elif kind == PLAIN_F64:
+                    v = b.convert("bitcast", "f64", word)
+                elif kind == PLAIN_F32:
+                    let low = b.convert("ireduce", "i32", word)
+                    v = b.convert("bitcast", "f32", low)
+                b.return_([v])
+        self.define(symbol, "unprobed", symbol, None, b, [])
+        return Ok(())
+
     ## Records that a `dyn` of type `dyn_ty` holds a value of `value_ty`.
     pub pure def carry(mut self, dyn_ty: Type, value_ty: Type) -> () ! LirError:
         let key = write.ty(dyn_ty)
@@ -615,7 +701,7 @@ impl Cg:
         # convention (decision 683), first, so that `main`'s calls of it call
         # that symbol.
         for (symbol, function) in exports:
-            self.export_instance(p, function, symbol)?
+            self.export_c(p, function, symbol)?
         let main = self.instance(p, entry.function, [])?
         self.complete(p)?
         var ret = Type.Unit
@@ -629,6 +715,11 @@ impl Cg:
         # The debug profile checks raw memory (decision 543).
         if not self.release:
             flags = flags | abi.ENTRY_CHECKED
+        # The runtime profile `single` has no workers for `std.par`
+        # (decision 783).
+        if let Some(r) = p.runtime:
+            if r == "single":
+                flags = flags | abi.ENTRY_SINGLE
         return Ok((main, flags, ret_ty))
 
     ## Lowers every queued instance, and the drop glue the type table
@@ -1119,6 +1210,53 @@ pure def par_map(f: Function) -> Function:
         shown=[],
     )
 
+## How a plain value of an exported function's signature goes between C's
+## register and the word Sisu's convention keeps it in (decision 785): a
+## word as it is, a narrower signed integer sign-extended, a `bool`, a
+## `char` or a narrower unsigned integer zero-extended, and the floats'
+## bits.
+const PLAIN_WORD: int = 0
+const PLAIN_SIGNED: int = 1
+const PLAIN_UNSIGNED: int = 2
+const PLAIN_F64: int = 3
+const PLAIN_F32: int = 4
+
+## The C type of a plain value an exported function takes or gives (stage
+## 1's `E0991` admits the rest of its signature: a `@repr(c)` struct,
+## passed by a raw pointer to it), and how it becomes a word.
+pure def export_type(t: Type) -> (String, int)?:
+    match t:
+        case Type.Int:
+            return Some(("i64".to_string(), PLAIN_WORD))
+        case Type.Float:
+            return Some(("f64".to_string(), PLAIN_F64))
+        case Type.Bool:
+            return Some(("i8".to_string(), PLAIN_UNSIGNED))
+        case Type.Char:
+            return Some(("i32".to_string(), PLAIN_UNSIGNED))
+        case Type.Named(n, _):
+            match n:
+                case "u64" | "i64" | "ptr" | "ptr_mut":
+                    return Some(("i64".to_string(), PLAIN_WORD))
+                case "i8":
+                    return Some(("i8".to_string(), PLAIN_SIGNED))
+                case "i16":
+                    return Some(("i16".to_string(), PLAIN_SIGNED))
+                case "i32":
+                    return Some(("i32".to_string(), PLAIN_SIGNED))
+                case "u8":
+                    return Some(("i8".to_string(), PLAIN_UNSIGNED))
+                case "u16":
+                    return Some(("i16".to_string(), PLAIN_UNSIGNED))
+                case "u32":
+                    return Some(("i32".to_string(), PLAIN_UNSIGNED))
+                case "f32":
+                    return Some(("f32".to_string(), PLAIN_F32))
+                case _:
+                    return None
+        case _:
+            return None
+
 ## The signature of the runtime's entry point `name` as LIR declares it.
 pub pure def runtime_signature(name: str) -> str?:
     return match name:
@@ -1158,6 +1296,7 @@ pub pure def runtime_signature(name: str) -> str?:
         case "sisu_rt_c_checked": Some("() -> (i8)")
         case "sisu_rt_thread_slot": Some("() -> (i64)")
         case "sisu_rt_switch": Some("(i64, i64) -> ()")
+        case "sisu_rt_export_panic": Some("() -> ()")
         case _: None
 
 ## How many values a call of the runtime's `name` gives.

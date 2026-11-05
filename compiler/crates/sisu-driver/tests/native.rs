@@ -829,6 +829,48 @@ fn machine_intrinsics_run_natively_and_the_interpreter_refuses_them() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The lookups by a `str` of a dict's or a set's `String` keys (decision
+/// 784), `dict.get_str`, `dict.remove_str`, `dict.index_str`,
+/// `set.contains_str` and `set.remove_str`, which no front end lowers to
+/// yet, from SIR written for them (`tests/lookups/lookups.sir`): the
+/// interpreter and the executables of both lowerings and both profiles
+/// give the same output, `dict.index_str`'s missing key's panic last, and
+/// free what they allocated.
+#[test]
+fn lookups_by_a_str_run_interpreted_and_natively() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("lookups");
+    let sir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/lookups/lookups.sir");
+    std::fs::copy(&sir, dir.join("lookups.sir")).expect("the SIR");
+    let out = "Some(36)\nNone\nTrue\nFalse\nSome(41)\nNone\nTrue\nFalse\n{\"ada\": 36}\n36\n";
+    let err = "panic: the key \"zed\" is not in the dict\n  at main (lookups.sisu:16:11)\n";
+    let interpreted = std::process::Command::new(&sisu)
+        .args(["run", "--from-sir", "lookups.sir"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    assert_eq!(outcome(interpreted), (out.to_string(), err.to_string(), Some(101)));
+    for (exe, extra) in [("debug", &[][..]), ("release", &["--release"][..]), ("rust", &["--lower=rust"][..])]
+    {
+        let built = std::process::Command::new(&sisu)
+            .args(["build", "--native"])
+            .args(extra)
+            .args(["--from-sir", "lookups.sir", "--output", exe])
+            .current_dir(&dir)
+            .output()
+            .expect("sisu builds");
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let ran = std::process::Command::new(dir.join(exe))
+            .env("SISU_RT_ALLOCS", "1")
+            .current_dir(&dir)
+            .output()
+            .expect("it runs");
+        let leaks = "allocations: 0 of the runtime's live at exit\n";
+        assert_eq!(outcome(ran), (out.to_string(), format!("{err}{leaks}"), Some(101)), "{exe}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Foreign calls whose arguments and results are narrower than a word (a C
 /// `int` sign-extended back, a `uint16_t`) or floats (decision 302),
 /// lowered by stage 2, the only lowering a build uses unless the Rust one
@@ -1151,13 +1193,15 @@ fn the_release_profile_leaves_out_the_checks_it_proves() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `@export("name")` (decision 683): a native build gives the function the
-/// global symbol `name`, of Sisu's convention, in both profiles, where it
-/// was a local one named by the lowering (`sisu$heat$2`), and C calls it so.
-/// Stage 1 does not write the SIR's `export` line yet, so the program is
-/// the Rust front end's, and the C caller's SIR is stage 1's with the line
-/// the Rust front end writes added; the executable that calls C is linked
-/// here, as the driver links one, with the C caller beside it.
+/// `@export("name")` (decisions 683 and 785): a native build gives the
+/// function the global symbol `name` of C's own convention over plain
+/// values, in both profiles, a wrapper of the function compiled under a
+/// local symbol, and C calls it as it calls any C function: the integers
+/// at their width, a `bool`, a `char` and the floats in registers. Both
+/// lowerings give the same executable. The executable that calls C is
+/// linked here, as the driver links one, with the C caller beside it; a
+/// panic that leaves an exported function stops the program with its
+/// report, status 134.
 #[test]
 fn an_exported_function_is_a_global_symbol_that_c_calls() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
@@ -1186,7 +1230,7 @@ fn an_exported_function_is_a_global_symbol_that_c_calls() {
         if profile == "--release" {
             args.insert(2, "--release");
         }
-        let built = sisu_in(&args, &[("SISU_FRONT_END", "rust")]);
+        let built = sisu_in(&args, &[]);
         assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
         let symbols = std::process::Command::new("nm").arg(dir.join(exe)).output().expect("nm runs");
         let symbols = String::from_utf8_lossy(&symbols.stdout).into_owned();
@@ -1194,8 +1238,8 @@ fn an_exported_function_is_a_global_symbol_that_c_calls() {
         let ran = std::process::Command::new(dir.join(exe)).output().expect("it runs");
         assert_eq!(String::from_utf8_lossy(&ran.stdout), "42\n");
     }
-    // A C caller, called from `main` through an `extern` block; the
-    // arguments of Sisu's convention are each a word in memory.
+    // A C caller, called from `main` through an `extern` block, calling the
+    // exported functions with C's own convention.
     let src = dir.join("pkg/src");
     std::fs::create_dir_all(&src).expect("a package");
     std::fs::write(
@@ -1206,17 +1250,26 @@ fn an_exported_function_is_a_global_symbol_that_c_calls() {
     std::fs::write(
         src.join("main.sisu"),
         "@export(\"sauna_heat\")\ndef heat(level: i32) -> i32:\n    return level * 2\n\n\
-         # safety: `call_heat` is the C caller's; it returns promptly.\nextern \"C\":\n    \
-         def call_heat(level: i32) -> i32\n\ndef main():\n    \
-         # safety: the C caller takes and gives plain integers.\n    print(unsafe call_heat(21))\n",
+         @export(\"sauna_mix\")\ndef mix(x: f64, hot: bool, c: char, k: u8, y: f32) -> f64:\n    \
+         let base = if hot: x * 2.0 else: x\n    return base + c.code().to_f64() + k.to_int().to_f64() + y.to_f64()\n\n\
+         @export(\"sauna_fail\")\ndef fail(n: i64) -> u16:\n    assert n > 0, \"the stove is cold\"\n    return 7u16\n\n\
+         # safety: the C caller's functions; each returns promptly.\nextern \"C\":\n    \
+         def call_heat(level: i32) -> i32\n    def call_mix() -> f64\n    def call_fail(n: i64) -> u16\n\n\
+         def main():\n    \
+         # safety: the C caller takes and gives plain values.\n    unsafe:\n        \
+         print(call_heat(21))\n        print(call_mix())\n        \
+         print(call_fail(3i64))\n        print(call_fail(0i64))\n",
     )
     .expect("the program");
     std::fs::write(
         dir.join("caller.c"),
-        "#include <stdint.h>\n#include <stdlib.h>\n\
-         extern uint8_t sauna_heat(int64_t *result, const int64_t *level);\n\
-         int32_t call_heat(int32_t level) {\n    int64_t result = 0, arg = level;\n    \
-         if (sauna_heat(&result, &arg) != 0) abort();\n    return (int32_t)result;\n}\n",
+        "#include <stdint.h>\n#include <stdbool.h>\n\
+         extern int32_t sauna_heat(int32_t level);\n\
+         extern double sauna_mix(double x, bool hot, uint32_t c, uint8_t k, float y);\n\
+         extern uint16_t sauna_fail(int64_t n);\n\
+         int32_t call_heat(int32_t level) { return sauna_heat(level); }\n\
+         double call_mix(void) { return sauna_mix(1.5, true, 'A', 200, 0.25f); }\n\
+         uint16_t call_fail(int64_t n) { return sauna_fail(n); }\n",
     )
     .expect("the caller");
     let sir = std::process::Command::new(&sisu)
@@ -1225,37 +1278,52 @@ fn an_exported_function_is_a_global_symbol_that_c_calls() {
         .output()
         .expect("sisu runs");
     assert!(sir.status.success(), "{}", String::from_utf8_lossy(&sir.stderr));
-    // Stage 1 writes the `export` line itself since its 0.11.0 (decision
-    // 740); an older stage 1 leaves it to the test.
-    let mut sir = String::from_utf8_lossy(&sir.stdout).into_owned();
-    if !sir.contains("export \"sauna_heat\"") {
-        sir = sir.replacen("entry main\n", "entry main\nexport \"sauna_heat\" heat\n", 1);
-    }
+    let sir = String::from_utf8_lossy(&sir.stdout).into_owned();
+    assert!(sir.contains("\nexport \"sauna_mix\" mix\n"), "{sir}");
     std::fs::write(dir.join("sauna.sir"), sir).expect("the SIR");
-    // The driver's link has no C caller: it fails, keeping the object.
-    let built = sisu_in(
-        &["build", "--native", "--from-sir", "sauna.sir", "--output", "sauna"],
-        &[("SISU_NATIVE_KEEP", "1")],
-    );
-    assert!(
-        String::from_utf8_lossy(&built.stderr).contains("call_heat"),
-        "{}",
-        String::from_utf8_lossy(&built.stderr)
-    );
     let target = sisu.parent().and_then(|d| d.parent()).expect("the target directory").to_path_buf();
     let runtime = sisu_codegen::find_runtime(&sisu).expect("the runtime in Rust");
-    let linked = std::process::Command::new("cc")
-        .arg("-o")
-        .arg(dir.join("sauna"))
-        .arg(dir.join("sauna.o"))
-        .arg(dir.join("caller.c"))
-        .arg(target.join("rt/rt.o"))
-        .arg(runtime)
-        .args(["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"])
-        .output()
-        .expect("cc runs");
-    assert!(linked.status.success(), "{}", String::from_utf8_lossy(&linked.stderr));
-    let ran = std::process::Command::new(dir.join("sauna")).output().expect("it runs");
-    assert_eq!(String::from_utf8_lossy(&ran.stdout), "42\n");
+    let mut objects = Vec::new();
+    for (name, extra) in [
+        ("sauna", &[][..]),
+        ("sauna-release", &["--release"][..]),
+        ("sauna-stage2", &["--backend=cranelift"][..]),
+        ("sauna-rust", &["--backend=cranelift", "--lower=rust"][..]),
+    ] {
+        // The driver's link has no C caller: it fails, keeping the object.
+        let mut args = vec!["build", "--native"];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["--from-sir", "sauna.sir", "--output", name]);
+        let built = sisu_in(&args, &[("SISU_NATIVE_KEEP", "1")]);
+        assert!(
+            String::from_utf8_lossy(&built.stderr).contains("call_heat"),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let object = std::fs::read(dir.join(format!("{name}.o"))).expect("the object");
+        objects.push(object);
+        let linked = std::process::Command::new("cc")
+            .arg("-o")
+            .arg(dir.join(name))
+            .arg(dir.join(format!("{name}.o")))
+            .arg(dir.join("caller.c"))
+            .arg(target.join("rt/rt.o"))
+            .arg(&runtime)
+            .args(["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"])
+            .output()
+            .expect("cc runs");
+        assert!(linked.status.success(), "{}", String::from_utf8_lossy(&linked.stderr));
+        let ran = std::process::Command::new(dir.join(name)).output().expect("it runs");
+        let (out, err, status) = outcome(ran);
+        assert_eq!(out, "42\n268.25\n7\n", "{name}");
+        assert!(
+            err.starts_with("panic: assertion failed: n > 0\n  message: the stove is cold\n"),
+            "{name}: {err}"
+        );
+        assert!(err.contains("  at fail (src/main.sisu:12:5)\n"), "{name}: {err}");
+        assert_eq!(status, Some(134), "{name}: {err}");
+    }
+    // Stage 2's LIR and the Rust lowering give the same object.
+    assert!(objects[2] == objects[3], "the two lowerings' objects differ");
     let _ = std::fs::remove_dir_all(&dir);
 }

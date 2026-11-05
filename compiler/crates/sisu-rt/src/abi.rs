@@ -142,6 +142,10 @@ pub mod sym {
     /// `sisu_rt_flush()`: writes what the program printed so far, before a
     /// foreign call, which may write to the same streams (decision 302).
     pub const FLUSH: &str = "sisu_rt_flush";
+    /// `sisu_rt_export_panic()`: a panic left an exported function of C's
+    /// convention, whose C caller cannot unwind: its report, and the
+    /// program stops (decision 785).
+    pub const EXPORT_PANIC: &str = "sisu_rt_export_panic";
     /// `sisu_rt_c_checked() -> u8`: after a call of one of the C functions
     /// the debug profile checks ([`super::checked_c`]), whether it refused
     /// what it was given (decision 561).
@@ -221,6 +225,10 @@ pub const ENTRY_SYSTEM: u32 = 2;
 /// `flags` of `sisu_rt_start`: the program was built in the debug profile,
 /// whose raw memory the runtime checks (decision 543).
 pub const ENTRY_CHECKED: u32 = 4;
+/// `flags` of `sisu_rt_start`: the program's runtime profile is `single`
+/// (12; decision 783): `std.par`'s bodies run on the asking thread, as the
+/// elision runs them, and no worker thread is started.
+pub const ENTRY_SINGLE: u32 = 8;
 
 /// `sisu_rt_dict_slot`'s modes: a missing key panics; is inserted (the
 /// destination of an assignment); is nothing to drop.
@@ -1405,6 +1413,14 @@ intrinsics! {
     SimAlways = "sim.always",
     // A clock's monotonic reading (decision 643).
     ClockMonotonic = "clock.monotonic",
+    // A lookup by a `str` in a dict or a set of `String` keys, the text
+    // compared with the keys' bytes and no `String` made (decision 784),
+    // which a front end lowers `str.Lookup`'s calls to.
+    DictGetStr = "dict.get_str",
+    DictRemoveStr = "dict.remove_str",
+    DictIndexStr = "dict.index_str",
+    SetContainsStr = "set.contains_str",
+    SetRemoveStr = "set.remove_str",
 }
 
 impl Intrinsic {

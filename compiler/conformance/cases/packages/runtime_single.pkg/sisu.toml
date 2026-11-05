@@ -1,0 +1,9 @@
+# A package of the runtime profile `single` (12, "Runtime profiles";
+# decisions 694, 723 and 783): its executable starts no worker thread for
+# `std.par`, whose bodies run on the asking thread, as the interpreter runs
+# them; `target.runtime_profile` names the profile to compile-time code.
+[package]
+name = "mixer"
+version = "0.1.0"
+edition = "2027"
+runtime = "single"

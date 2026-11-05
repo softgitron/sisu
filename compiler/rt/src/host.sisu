@@ -68,6 +68,9 @@ extern "C":
     ## Raises the panic of a slice whose bounds `start` and `end` are not
     ## both at least 0 (decision 625): its status.
     pub def sisu_rt_slice_bounds(start: int, end: int) -> u8
+    ## Raises the panic of a key the dict does not hold, the key at `key`
+    ## of type `kt` (decision 784): its status.
+    pub def sisu_rt_missing_key(key: ptr mut u8, kt: int) -> u8
     ## Raises the panic of a sort that met two elements without an order:
     ## its status.
     pub def sisu_rt_unordered() -> u8

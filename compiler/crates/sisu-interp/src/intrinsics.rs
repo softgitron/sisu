@@ -805,7 +805,10 @@ impl<'p> Interp<'p, '_> {
         }
         match method {
             "new" => Ok(Value::Dict(Box::default())),
-            "get" => {
+            // A lookup by a `str` (decision 784): its key is the text's, as
+            // a `String`'s is, so it is looked up as the `String` would be,
+            // without one made.
+            "get" | "get_str" => {
                 let p = self.dict_ptr(a.get(0)?)?;
                 let pos = self.dict_position(&p, a.get(1)?)?;
                 Ok(Value::option(pos.map(|i| Value::Ref(Rc::new(p.join(Step::DictVal(i)))))))
@@ -828,7 +831,17 @@ impl<'p> Interp<'p, '_> {
                     other => Err(ice(format!("insert into {other:?}"))),
                 }
             }
-            "remove" => {
+            "index_str" => {
+                let p = self.dict_ptr(a.get(0)?)?;
+                match self.dict_position(&p, a.get(1)?)? {
+                    Some(i) => Ok(Value::Ref(Rc::new(p.join(Step::DictVal(i))))),
+                    None => {
+                        let shown = self.debug_string(a.get(1)?);
+                        Err(panic(msg::PANIC_MISSING_KEY, &[("key", shown)]))
+                    }
+                }
+            }
+            "remove" | "remove_str" => {
                 let p = self.dict_ptr(a.get(0)?)?;
                 let k = self.key_of(a.get(1)?)?;
                 let removed = match self.write(&p)? {
@@ -877,14 +890,14 @@ impl<'p> Interp<'p, '_> {
                     other => Err(ice(format!("add to {other:?}"))),
                 }
             }
-            "remove" => {
+            "remove" | "remove_str" => {
                 let k = self.key_of(a.get(1)?)?;
                 match self.write(&p)? {
                     Value::Set(s) => Ok(Value::Bool(s.remove(&k))),
                     other => Err(ice(format!("remove from {other:?}"))),
                 }
             }
-            "contains" => Ok(Value::Bool(self.contains(a.get(0)?, a.get(1)?)?)),
+            "contains" | "contains_str" => Ok(Value::Bool(self.contains(a.get(0)?, a.get(1)?)?)),
             "is_empty" => match self.read(&p)? {
                 Value::Set(s) => Ok(Value::Bool(s.items.is_empty())),
                 other => Err(ice(format!("expected a set, found {other:?}"))),

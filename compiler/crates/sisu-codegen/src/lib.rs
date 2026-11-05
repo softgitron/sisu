@@ -27,8 +27,8 @@ mod workers;
 pub use debug::Sources;
 pub use translate::{compile_lir, lir_is_release};
 
-use cranelift_codegen::ir::MemFlags;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, types};
+use cranelift_codegen::ir::{MemFlags, StackSlotData, StackSlotKind};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::{Context, ir::Signature};
@@ -529,6 +529,44 @@ pub(crate) fn sisu_signature(call_conv: CallConv, params: u32) -> Signature {
     sig
 }
 
+/// How a plain value of an exported function's signature goes between C's
+/// register and the word Sisu's convention keeps it in (decision 785).
+#[derive(Clone, Copy)]
+enum Plain {
+    /// A word as it is: `int`, `u64`, a raw pointer.
+    Word,
+    /// A narrower signed integer, sign-extended.
+    Signed,
+    /// A `bool`, a `char` or a narrower unsigned integer, zero-extended.
+    Unsigned,
+    F64,
+    F32,
+}
+
+/// The C type of a plain value an exported function takes or gives
+/// (stage 1's `E0991` admits the rest of its signature: a `@repr(c)`
+/// struct, passed by a raw pointer to it), and how it becomes a word.
+fn export_type(t: &Type) -> Option<(ir::Type, Plain)> {
+    Some(match t {
+        Type::Int => (types::I64, Plain::Word),
+        Type::Float => (types::F64, Plain::F64),
+        Type::Bool => (types::I8, Plain::Unsigned),
+        Type::Char => (types::I32, Plain::Unsigned),
+        Type::Named(n, _) => match n.as_str() {
+            "u64" | "i64" | "ptr" | "ptr_mut" => (types::I64, Plain::Word),
+            "i8" => (types::I8, Plain::Signed),
+            "i16" => (types::I16, Plain::Signed),
+            "i32" => (types::I32, Plain::Signed),
+            "u8" => (types::I8, Plain::Unsigned),
+            "u16" => (types::I16, Plain::Unsigned),
+            "u32" => (types::I32, Plain::Unsigned),
+            "f32" => (types::F32, Plain::F32),
+            _ => return None,
+        },
+        _ => return None,
+    })
+}
+
 /// The function a call of a trait's method on a `dyn` calls: it reads the
 /// type of the value the `dyn` holds and calls what the call runs for that
 /// type, with `self` the value's address (`sisu-interp/src/dispatch.rs`,
@@ -669,6 +707,108 @@ impl<'p> Codegen<'p> {
         self.instances.insert((name.to_string(), Vec::new()), id);
         self.queue.push_back((name.to_string(), Vec::new(), id));
         Ok(id)
+    }
+
+    /// A program's `@export("name")` (decision 785): the function under a
+    /// local symbol of Sisu's convention, which `main`'s calls call, and the
+    /// global symbol `symbol` of C's own convention over plain values, a
+    /// wrapper compiled at once that writes each argument where Sisu's
+    /// convention reads it, calls the function and gives back its result as
+    /// C does; a panic that leaves the function stops the program with its
+    /// report (`sisu_rt_export_panic`), since no C caller can unwind.
+    fn export_c(&mut self, name: &str, symbol: &str) -> Result<(), Error> {
+        let f = self
+            .function(name)
+            .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
+        let plain = |t: &Type, what: &str| {
+            export_type(t).ok_or_else(|| {
+                Error::unsupported(format!(
+                    "{what} of the exported function `{symbol}`, a `{}`",
+                    sir::write::ty(t)
+                ))
+            })
+        };
+        let mut params = Vec::new();
+        for l in f.locals.iter().skip(1).take(f.param_count as usize) {
+            params.push(plain(&l.ty, "a parameter")?);
+        }
+        let ret = match f.ret() {
+            Type::Unit => None,
+            t => Some(plain(t, "the result")?),
+        };
+        let inner = self.instance(name, Vec::new())?;
+        let mut sig = Signature::new(self.call_conv);
+        sig.params.extend(params.iter().map(|(t, _)| AbiParam::new(*t)));
+        sig.returns.extend(ret.iter().map(|(t, _)| AbiParam::new(*t)));
+        let id = self
+            .module
+            .declare_function(symbol, Linkage::Export, &sig)
+            .map_err(|e| Error::internal(e.to_string()))?;
+        let failed = self.runtime(sym::EXPORT_PANIC)?;
+        let mut ctx = self.context();
+        ctx.func.signature = sig;
+        let mut fbctx = std::mem::take(&mut self.fbctx);
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbctx);
+            let slot = |b: &mut FunctionBuilder<'_>| {
+                b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3))
+            };
+            let result = slot(&mut b);
+            let slots: Vec<_> = params.iter().map(|_| slot(&mut b)).collect();
+            let entry = b.create_block();
+            b.append_block_params_for_function_params(entry);
+            b.switch_to_block(entry);
+            let given = b.block_params(entry).to_vec();
+            let mut args = vec![b.ins().stack_addr(types::I64, result, 0)];
+            for (((_, kind), v), s) in params.iter().zip(given).zip(&slots) {
+                let word = match kind {
+                    Plain::Word => v,
+                    Plain::Signed => b.ins().sextend(types::I64, v),
+                    Plain::Unsigned => b.ins().uextend(types::I64, v),
+                    Plain::F64 => b.ins().bitcast(types::I64, MemFlags::new(), v),
+                    Plain::F32 => {
+                        let bits = b.ins().bitcast(types::I32, MemFlags::new(), v);
+                        b.ins().uextend(types::I64, bits)
+                    }
+                };
+                b.ins().stack_store(word, *s, 0);
+                args.push(b.ins().stack_addr(types::I64, *s, 0));
+            }
+            let inner_ref = self.module.declare_func_in_func(inner, b.func);
+            let call = b.ins().call(inner_ref, &args);
+            let status = b.inst_results(call)[0];
+            let fail = b.create_block();
+            let done = b.create_block();
+            b.ins().brif(status, fail, &[], done, &[]);
+            b.set_cold_block(fail);
+            b.switch_to_block(fail);
+            let failed_ref = self.module.declare_func_in_func(failed, b.func);
+            b.ins().call(failed_ref, &[]);
+            b.ins().trap(ir::TrapCode::unwrap_user(1));
+            b.switch_to_block(done);
+            match ret {
+                None => {
+                    b.ins().return_(&[]);
+                }
+                Some((t, kind)) => {
+                    let word = b.ins().stack_load(types::I64, result, 0);
+                    let v = match kind {
+                        Plain::Word => word,
+                        Plain::Signed | Plain::Unsigned => b.ins().ireduce(t, word),
+                        Plain::F64 => b.ins().bitcast(types::F64, MemFlags::new(), word),
+                        Plain::F32 => {
+                            let low = b.ins().ireduce(types::I32, word);
+                            b.ins().bitcast(types::F32, MemFlags::new(), low)
+                        }
+                    };
+                    b.ins().return_(&[v]);
+                }
+            }
+            b.seal_all_blocks();
+            b.finalize();
+        }
+        self.fbctx = fbctx;
+        self.define(id, ctx, symbol.to_string(), Frame::Unprobed, debug::FnDebug::new(id, symbol.to_string()))
     }
 
     pub(crate) fn instance(&mut self, name: &str, targs: Vec<Type>) -> Result<FuncId, Error> {
@@ -1046,7 +1186,7 @@ impl<'p> Codegen<'p> {
         // Sisu's convention (decision 683), first, so that `main`'s calls of
         // it call that symbol.
         for (symbol, function) in &self.prog.exports {
-            self.export_instance(function, symbol)?;
+            self.export_c(function, symbol)?;
         }
         let main_id = self.instance(&entry.function, Vec::new())?;
         self.complete()?;
@@ -1060,6 +1200,11 @@ impl<'p> Codegen<'p> {
         // The debug profile checks raw memory (decision 543).
         if !self.release {
             flags |= abi::ENTRY_CHECKED;
+        }
+        // The runtime profile `single` has no workers for `std.par`
+        // (decision 783).
+        if self.prog.runtime.as_deref() == Some("single") {
+            flags |= abi::ENTRY_SINGLE;
         }
         Ok((main_id, flags, ret_ty))
     }
@@ -1237,6 +1382,7 @@ impl<'p> Codegen<'p> {
             sym::C_CHECKED => (&[], &[i8_]),
             sym::THREAD_SLOT => (&[], &[i64_]),
             sym::SWITCH => (&[i64_, i64_], &[]),
+            sym::EXPORT_PANIC => (&[], &[]),
             _ => return Err(Error::internal(format!("an unknown runtime entry point `{name}`"))),
         };
         let mut sig = Signature::new(self.call_conv);

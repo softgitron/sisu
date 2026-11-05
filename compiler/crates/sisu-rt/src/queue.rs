@@ -28,8 +28,6 @@ unsafe extern "C" {
     fn sisu_rt_queue_swap_remove(ret: *mut i64, q: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_queue_remove(ret: *mut u64, q: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_queue_position(ret: *mut i64, q: *const *mut u8, j: *const i64, x: *const i64) -> u8;
-    fn sisu_rt_queue_clear(ret: *mut u64, q: *const *mut u8) -> u8;
-    fn sisu_rt_queue_take_key(ret: *mut u64, q: *const *mut u8, key: *const i64, out: *const *mut u8) -> u8;
     fn sisu_rt_channel_init(
         ret: *mut u64,
         c: *const *mut u8,
@@ -44,6 +42,45 @@ unsafe extern "C" {
     fn sisu_rt_draw_next(ret: *mut i64, state: *const *mut i64) -> u8;
     fn sisu_rt_draw_below(ret: *mut i64, state: *const *mut i64, n: *const i64) -> u8;
     fn sisu_rt_draw_pick(ret: *mut i64, state: *const *mut i64, q: *const *mut u8) -> u8;
+    fn sisu_rt_task_add(
+        ret: *mut i64,
+        recs: *const *mut u8,
+        state: *const i64,
+        wait: *const i64,
+        flags: *const i64,
+    ) -> u8;
+    fn sisu_rt_task_state(ret: *mut i64, recs: *const *mut u8, t: *const i64) -> u8;
+    fn sisu_rt_task_set(
+        ret: *mut u64,
+        recs: *const *mut u8,
+        t: *const i64,
+        state: *const i64,
+        wait: *const i64,
+    ) -> u8;
+    fn sisu_rt_task_park(
+        ret: *mut u64,
+        recs: *const *mut u8,
+        waiters: *const *mut u8,
+        t: *const i64,
+        wait: *const i64,
+        keys: *const *const i64,
+        n: *const i64,
+    ) -> u8;
+    fn sisu_rt_task_wake(ret: *mut i64, recs: *const *mut u8, ready: *const *mut u8, t: *const i64) -> u8;
+    fn sisu_rt_task_wake_key(
+        ret: *mut i64,
+        recs: *const *mut u8,
+        waiters: *const *mut u8,
+        woken: *const *mut u8,
+        ready: *const *mut u8,
+        key: *const i64,
+    ) -> u8;
+    fn sisu_rt_task_wake_all(
+        ret: *mut i64,
+        recs: *const *mut u8,
+        woken: *const *mut u8,
+        ready: *const *mut u8,
+    ) -> u8;
 }
 
 /// The seeded generator behind every scheduling choice and the faults of
@@ -188,15 +225,117 @@ impl Queue {
         unprobed(|| unsafe { sisu_rt_queue_position(&mut i, &self.0, &(j as i64), &x) });
         usize::try_from(i).ok()
     }
+}
 
-    /// Takes out every record whose first word is `key`, keeping the
-    /// others' order, and puts their second words in `out`, emptied first,
-    /// in order.
-    pub(crate) fn take_key(&mut self, key: i64, out: &mut Queue) {
+/// The tasks' records (decision 780): the runtime in Sisu's
+/// (`compiler/rt/src/tasks.sisu`), a queue of three words a record, the
+/// record `t` the task `t`'s: its state, what it waits for (a word of the
+/// scheduler's, [`crate::sched::Wait::word`]) and its flags. It parks a
+/// task under its keys in the waiters' queue and wakes the tasks a key
+/// names into the run queue; the coroutine, its context and the rest of a
+/// task stay in the scheduler's `Task`, under the same number.
+pub(crate) struct Records(Queue);
+
+/// A record's states, as `tasks.sisu` numbers them.
+pub(crate) const READY: i64 = 0;
+pub(crate) const RUNNING: i64 = 1;
+pub(crate) const BLOCKED: i64 = 2;
+pub(crate) const DONE: i64 = 3;
+/// A record's flag: the task is a generator.
+pub(crate) const GENERATOR: i64 = 1;
+
+impl Records {
+    pub(crate) fn new() -> Records {
+        Records(Queue::new(3))
+    }
+
+    /// Appends the record of a new task: its number.
+    pub(crate) fn add(&mut self, state: i64, wait: i64, flags: i64) -> u32 {
+        let mut t = 0i64;
+        // SAFETY: `self.0` is a live queue of three words a record.
+        unprobed(|| unsafe { sisu_rt_task_add(&mut t, &self.0.0, &state, &wait, &flags) });
+        t as u32
+    }
+
+    /// The task's state, [`DONE`] for a number that is no task's, and
+    /// what it waits for.
+    pub(crate) fn state(&self, t: u32) -> i64 {
+        let mut st = 0i64;
+        // SAFETY: as in `add`.
+        unprobed(|| unsafe { sisu_rt_task_state(&mut st, &self.0.0, &i64::from(t)) });
+        st
+    }
+
+    pub(crate) fn wait(&self, t: u32) -> i64 {
+        self.0.word(t as usize, 1)
+    }
+
+    pub(crate) fn flags(&self, t: u32) -> i64 {
+        self.0.word(t as usize, 2)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Sets the state of the task `t`, one of the records, and its wait.
+    pub(crate) fn set(&mut self, t: u32, state: i64, wait: i64) {
+        if t as usize >= self.len() {
+            crate::rt::internal("no such task");
+        }
         let mut unit = 0u64;
-        // SAFETY: both are live queues, `self.0` of two words a record.
-        unprobed(|| unsafe { sisu_rt_queue_clear(&mut unit, &out.0) });
-        unprobed(|| unsafe { sisu_rt_queue_take_key(&mut unit, &self.0, &key, &out.0) });
+        // SAFETY: as in `add`, and `t` is a record's.
+        unprobed(|| unsafe { sisu_rt_task_set(&mut unit, &self.0.0, &i64::from(t), &state, &wait) });
+    }
+
+    /// Parks the task `t`, waiting for `wait`, under the `keys` in
+    /// `waiters`.
+    pub(crate) fn park(&mut self, waiters: &mut Queue, t: u32, wait: i64, keys: &[i64]) {
+        if t as usize >= self.len() {
+            crate::rt::internal("no such task");
+        }
+        let mut unit = 0u64;
+        let (at, n) = (keys.as_ptr(), keys.len() as i64);
+        // SAFETY: as in `set`; `waiters` is a live queue of two words a
+        // record and `at` the `n` keys.
+        unprobed(|| unsafe {
+            sisu_rt_task_park(&mut unit, &self.0.0, &waiters.0, &i64::from(t), &wait, &at, &n)
+        });
+    }
+
+    /// Wakes the task `t` into `ready` if it waits: whether it woke.
+    pub(crate) fn wake(&mut self, ready: &mut Queue, t: u32) -> bool {
+        let mut woke = 0i64;
+        // SAFETY: as in `add`; `ready` is a live queue of one word a record.
+        unprobed(|| unsafe { sisu_rt_task_wake(&mut woke, &self.0.0, &ready.0, &i64::from(t)) });
+        woke != 0
+    }
+
+    /// Wakes the tasks waiting under `key` in `waiters` into `ready`, in
+    /// the order they parked; `woken` holds those that woke: how many.
+    pub(crate) fn wake_key(
+        &mut self,
+        waiters: &mut Queue,
+        woken: &mut Queue,
+        ready: &mut Queue,
+        key: i64,
+    ) -> usize {
+        let mut n = 0i64;
+        // SAFETY: as in `park` and `wake`; `woken` is a live queue of one
+        // word a record.
+        unprobed(|| unsafe {
+            sisu_rt_task_wake_key(&mut n, &self.0.0, &waiters.0, &woken.0, &ready.0, &key)
+        });
+        n as usize
+    }
+
+    /// Wakes every waiting task but generators into `ready`; `woken`
+    /// holds those that woke: how many.
+    pub(crate) fn wake_all(&mut self, woken: &mut Queue, ready: &mut Queue) -> usize {
+        let mut n = 0i64;
+        // SAFETY: as in `wake_key`.
+        unprobed(|| unsafe { sisu_rt_task_wake_all(&mut n, &self.0.0, &woken.0, &ready.0) });
+        n as usize
     }
 }
 

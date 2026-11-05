@@ -22,6 +22,7 @@ import rt.queue
 import rt.search
 import rt.show
 import rt.table
+import rt.tasks
 import rt.text
 import rt.time
 import rt.value
@@ -474,13 +475,6 @@ def export_queue_init(q: ptr mut u8, buffer: ptr mut u8, capacity: int, width: i
 def export_queue_len(q: ptr mut u8) -> int:
     return queue.count(q)
 
-## Takes out every record of a queue of the scheduler.
-##
-## Requires:
-## - `queue`: `q` holds a live queue
-def export_queue_clear(q: ptr mut u8):
-    queue.clear(q)
-
 ## Appends a record of the words `a`, `b` and `c`, as many as its width.
 ##
 ## Requires:
@@ -516,15 +510,6 @@ def export_queue_remove(q: ptr mut u8, i: int):
 def export_queue_position(q: ptr mut u8, j: int, x: int) -> int:
     return queue.position(q, j, x)
 
-## Takes out every record whose first word is `key` and appends its second
-## word to `out`: the tasks a key wakes, in the order they waited.
-##
-## Requires:
-## - `queue`: `q` holds a live queue of two words a record or more, `out` a
-##   live queue
-def export_queue_take_key(q: ptr mut u8, key: int, out: ptr mut u8):
-    queue.take_key(q, key, out)
-
 ## The state the scheduler's generator starts in for the seed `seed`, as
 ## the interpreter seeds it (decision 724).
 def export_draw_seeded(seed: int) -> int:
@@ -553,6 +538,71 @@ def export_draw_below(state: ptr mut int, n: int) -> int:
 ## - `queue`: `q` holds a live queue of one word a record
 def export_draw_pick(state: ptr mut int, q: ptr mut u8) -> int:
     return draw.pick(state, q)
+
+## Appends the record of a new task of the scheduler, in the state
+## `state`, waiting for `wait`, with the flags `flags`: its number
+## (decision 780).
+##
+## Requires:
+## - `records`: `recs` holds a live queue of three words a record
+def export_task_add(recs: ptr mut u8, state: int, wait: int, flags: int) -> int:
+    return tasks.add(recs, state, wait, flags)
+
+## The state of the task `t`, done for a number that is no task's.
+##
+## Requires:
+## - `records`: as in `export_task_add`
+def export_task_state(recs: ptr mut u8, t: int) -> int:
+    return tasks.state(recs, t)
+
+## Sets the state of the task `t` and what it waits for.
+##
+## Requires:
+## - `records`: as in `export_task_add`, and `t` is a task's number
+def export_task_set(recs: ptr mut u8, t: int, state: int, wait: int):
+    tasks.set(recs, t, state, wait)
+
+## Makes the task `t` wait for `wait`, registered among the waiters under
+## each of the `n` keys at `keys`.
+##
+## Requires:
+## - `records`: as in `export_task_set`
+## - `waiters`: `waiters` holds a live queue of two words a record
+## - `keys`: `keys` points to `n` words
+def export_task_park(
+    recs: ptr mut u8, waiters: ptr mut u8, t: int, wait: int, keys: ptr[int], n: int
+):
+    tasks.park(recs, waiters, t, wait, keys, n)
+
+## Wakes the task `t` if it waits, into the run queue `ready`: 1 when it
+## woke, else 0.
+##
+## Requires:
+## - `records`: as in `export_task_add`
+## - `ready`: `ready` holds a live queue of one word a record
+def export_task_wake(recs: ptr mut u8, ready: ptr mut u8, t: int) -> int:
+    return if tasks.wake(recs, ready, t): 1 else: 0
+
+## Wakes the tasks waiting under `key`, in the order they parked: `woken`
+## holds those that woke, and the result is how many.
+##
+## Requires:
+## - `records`, `ready`: as in `export_task_wake`
+## - `waiters`: as in `export_task_park`
+## - `woken`: `woken` holds a live queue of one word a record
+def export_task_wake_key(
+    recs: ptr mut u8, waiters: ptr mut u8, woken: ptr mut u8, ready: ptr mut u8, key: int
+) -> int:
+    return tasks.wake_key(recs, waiters, woken, ready, key)
+
+## Wakes every waiting task but generators: `woken` holds those that woke,
+## and the result is how many.
+##
+## Requires:
+## - `records`, `ready`: as in `export_task_wake`
+## - `woken`: as in `export_task_wake_key`
+def export_task_wake_all(recs: ptr mut u8, woken: ptr mut u8, ready: ptr mut u8) -> int:
+    return tasks.wake_all(recs, woken, ready)
 
 ## Makes the five words at `c` an empty buffer of a channel's values of
 ## `size` bytes, its slots at `slots`, `room` of them (decision 680).

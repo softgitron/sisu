@@ -1038,6 +1038,23 @@ extern "C" fn sisu_rt_list_bounds(insert: bool, index: i64, len: i64) -> u8 {
     }
 }
 
+/// Raises the panic of a key that a dict does not hold, the key at `key`
+/// of type `key_ty` named in its `Debug` form: `d{k}`'s and
+/// `dict.index_str`'s (decisions 681 and 784). Its status.
+///
+/// # Safety
+/// `key` must hold a live value of type `key_ty`, behind any references.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn sisu_rt_missing_key(key: *mut u8, key_ty: i64) -> u8 {
+    let mut shown = Vec::new();
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        let (p, kt) = crate::value::target(key, key_ty as u32);
+        crate::value::debug(&mut shown, p, kt);
+    }
+    rt::raise_msg(sisu_diag::msg::PANIC_MISSING_KEY, &[("key", String::from_utf8_lossy(&shown).into_owned())])
+}
+
 /// Whether the intrinsic numbered `id` is a list's, a dict's or a set's,
 /// whose call the runtime in Sisu decodes and does (decision 625).
 pub(crate) fn collects(id: u32) -> bool {
@@ -1090,6 +1107,11 @@ pub(crate) fn collects(id: u32) -> bool {
                 | I::SliceSlice
                 | I::SliceCut
                 | I::SliceIter
+                | I::DictGetStr
+                | I::DictRemoveStr
+                | I::DictIndexStr
+                | I::SetContainsStr
+                | I::SetRemoveStr
         )
     )
 }

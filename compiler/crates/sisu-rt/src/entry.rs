@@ -75,6 +75,7 @@ unsafe extern "C" fn sisu_rt_start(
     let Some(table) = table else { rt::internal("the program's type table does not decode") };
     rt::init(table, fns);
     crate::checked::set_on(flags & abi::ENTRY_CHECKED != 0);
+    crate::par::set_single(flags & abi::ENTRY_SINGLE != 0);
     crate::par::set_unprobed(unprobed as usize);
     let _ = ARGS.set(args);
     let run = move || {
@@ -732,15 +733,21 @@ unsafe fn dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut 
         // missing key's panic names it, in the catalog's words.
         let at = crate::bridge::table_slot(d, key, key_ty, mode);
         if at == -1 {
-            let mut shown = Vec::new();
-            let (p, kt) = value::target(key, key_ty);
-            value::debug(&mut shown, p, kt);
-            return rt::raise_msg(
-                msg::PANIC_MISSING_KEY,
-                &[("key", String::from_utf8_lossy(&shown).into_owned())],
-            );
+            return crate::bridge::sisu_rt_missing_key(key, i64::from(key_ty));
         }
         mem::set_word(out, 0, at as u64);
     }
     abi::OK
+}
+
+/// A panic left an exported function of C's own convention (decision
+/// 785): its C caller cannot unwind, so the program stops with the panic's
+/// report on standard error and status 134, as an abort does.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_export_panic() {
+    let text = match rt::take_panic() {
+        Some(p) => rt::panic_report(&p.message, &p.stack),
+        None => rt::internal("a panic left an exported function without its message"),
+    };
+    rt::abort(text.trim_end())
 }

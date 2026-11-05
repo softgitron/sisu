@@ -16,6 +16,9 @@ pub const WORD: int = 8
 pub const SYM_START: str = "sisu_rt_start"
 pub const SYM_FRAME: str = "sisu_rt_frame"
 pub const SYM_ABORT_UNWIND: str = "sisu_rt_abort_unwind"
+## A panic left an exported function of C's convention: its report, and the
+## program stops (decision 785).
+pub const SYM_EXPORT_PANIC: str = "sisu_rt_export_panic"
 pub const SYM_PANIC_OVERFLOW: str = "sisu_rt_panic_overflow"
 pub const SYM_PANIC_INDEX: str = "sisu_rt_panic_index"
 pub const SYM_PANIC_STACK: str = "sisu_rt_panic_stack"
@@ -98,6 +101,9 @@ pub const MAX_DEPTH: int = 100000
 pub const ENTRY_RESULT: int = 1
 pub const ENTRY_SYSTEM: int = 2
 pub const ENTRY_CHECKED: int = 4
+## `sisu_rt_start`'s flags: the program's runtime profile is `single`, which
+## runs `std.par`'s bodies on the asking thread (decision 783).
+pub const ENTRY_SINGLE: int = 8
 
 ## `sisu_rt_dict_slot`'s modes.
 pub const SLOT_READ: int = 0
@@ -1158,4 +1164,11 @@ pub pure def intrinsic_names() -> list[str]:
         "test.sim_fault_error",
         "sim.always",
         "clock.monotonic",
+        # A lookup by a `str` in a dict or a set of `String` keys
+        # (decision 784).
+        "dict.get_str",
+        "dict.remove_str",
+        "dict.index_str",
+        "set.contains_str",
+        "set.remove_str",
     ]

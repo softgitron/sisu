@@ -39,7 +39,7 @@
 //! the drops an intrinsic makes.
 
 use crate::abi::{self, Kind};
-use crate::queue::Queue;
+use crate::queue::{self as records, Queue, Records};
 use crate::rt::{self, Panic, ty};
 use crate::stack::{Mark, Pool, Region, Slot};
 use corosensei::{Coroutine, CoroutineResult, Yielder};
@@ -71,7 +71,7 @@ pub(crate) enum Suspend {
 pub(crate) type Co = Coroutine<(), Suspend, (), Slot>;
 
 /// What a task waits for, for the deadlock report.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Wait {
     Join(u32),
     ScopeEnd,
@@ -95,6 +95,39 @@ pub(crate) enum Key {
     Lock,
 }
 
+impl Wait {
+    /// The word a task's record keeps it as (decision 780): its kind above
+    /// its subject.
+    pub(crate) fn word(self) -> i64 {
+        let (kind, n) = match self {
+            Wait::Join(t) => (0, t),
+            Wait::ScopeEnd => (1, 0),
+            Wait::Recv => (2, 0),
+            Wait::Send => (3, 0),
+            Wait::Lock => (4, 0),
+            Wait::Timer => (5, 0),
+            Wait::Select => (6, 0),
+            Wait::Cancellation => (7, 0),
+            Wait::Io => (8, 0),
+        };
+        (kind << 32) | i64::from(n)
+    }
+
+    fn from_word(w: i64) -> Wait {
+        match w >> 32 {
+            0 => Wait::Join(w as u32),
+            1 => Wait::ScopeEnd,
+            2 => Wait::Recv,
+            3 => Wait::Send,
+            4 => Wait::Lock,
+            5 => Wait::Timer,
+            6 => Wait::Select,
+            7 => Wait::Cancellation,
+            _ => Wait::Io,
+        }
+    }
+}
+
 impl Key {
     /// The word the waiters' queue keeps it as: its kind above its number.
     fn word(self) -> i64 {
@@ -108,12 +141,26 @@ impl Key {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+/// A task's state, which its record in the runtime in Sisu keeps
+/// (decision 780).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TState {
     Ready,
     Running,
     Blocked(Wait),
     Done,
+}
+
+impl TState {
+    /// The record's words: the state and what it waits for.
+    fn words(self) -> (i64, i64) {
+        match self {
+            TState::Ready => (records::READY, 0),
+            TState::Running => (records::RUNNING, 0),
+            TState::Blocked(w) => (records::BLOCKED, w.word()),
+            TState::Done => (records::DONE, 0),
+        }
+    }
 }
 
 /// How a task ended: the words of its closure's result, or its panic.
@@ -183,8 +230,10 @@ pub(crate) struct Ctx {
     pub panics: Vec<Panic>,
 }
 
+/// A task, but for its state, what it waits for and whether it is a
+/// generator, which its record in the runtime in Sisu keeps under the same
+/// number ([`Sched::recs`], decision 780).
 pub(crate) struct Task {
-    pub state: TState,
     /// The scope the task was spawned on (none for the root task and
     /// generators).
     pub scope: Option<u32>,
@@ -206,7 +255,6 @@ pub(crate) struct Task {
     pub ret_ty: u32,
     /// A generator's item, yielded and not taken yet.
     pub yielded: Option<Box<[u64]>>,
-    pub generator: bool,
     /// For a generator, the count of nested calls of its consumer when it
     /// last asked for an item: a generator's calls count on top of its
     /// consumer's, as the interpreter's frames do (decision 234). 0 for any
@@ -277,6 +325,9 @@ pub(crate) struct Stats {
 
 pub(crate) struct Sched {
     pub tasks: Vec<Task>,
+    /// The tasks' records: each one's state, what it waits for and whether
+    /// it is a generator, the runtime in Sisu's (decision 780).
+    pub recs: Records,
     pub cur: u32,
     pub scopes: Vec<ScopeRec>,
     pub channels: Vec<Channel>,
@@ -557,7 +608,6 @@ pub(crate) fn start(
         w.store(v, Relaxed);
     }
     let root = Task {
-        state: TState::Running,
         scope: None,
         index: 0,
         outcome: None,
@@ -570,7 +620,6 @@ pub(crate) fn start(
         ret_ty: 0,
         yielded: None,
         item_ty: 0,
-        generator: false,
         depth_base: 0,
         anchors: Vec::new(),
         site: Site::default(),
@@ -582,8 +631,11 @@ pub(crate) fn start(
         ctx: Ctx { depth: 0, stack: root_limits, panics: Vec::new() },
         body: (0, 0),
     };
+    let mut recs = Records::new();
+    recs.add(records::RUNNING, 0, 0);
     let sched = Sched {
         tasks: vec![root],
+        recs,
         cur: ROOT,
         scopes: Vec::new(),
         channels: Vec::new(),
@@ -950,7 +1002,7 @@ pub(crate) fn drive(t: u32) {
         let g = s.task(t);
         ctx.depth += depth - g.depth_base;
         g.depth_base = depth;
-        g.state = TState::Running;
+        s.set_state(t, TState::Running);
         while let Some(i) = s.ready.position(0, i64::from(t)) {
             s.ready.remove(i);
         }
@@ -1027,7 +1079,7 @@ pub(crate) fn unwind_abandoned(t: u32) -> bool {
         let task = &mut s.tasks[t as usize];
         let mark = task.mark;
         task.region = None;
-        task.state = TState::Done;
+        s.set_state(t, TState::Done);
         s.pool.release(stack.0, mark);
     });
     ended
@@ -1092,10 +1144,40 @@ impl Sched {
         }
     }
 
-    /// A new task's record.
+    /// The state of the task `t`, from its record (decision 780); done for
+    /// a number that is no task's.
+    pub(crate) fn state(&self, t: u32) -> TState {
+        match self.recs.state(t) {
+            records::READY => TState::Ready,
+            records::RUNNING => TState::Running,
+            records::BLOCKED => TState::Blocked(Wait::from_word(self.recs.wait(t))),
+            _ => TState::Done,
+        }
+    }
+
+    pub(crate) fn is_done(&self, t: u32) -> bool {
+        self.recs.state(t) == records::DONE
+    }
+
+    pub(crate) fn set_state(&mut self, t: u32, state: TState) {
+        let (st, wait) = state.words();
+        self.recs.set(t, st, wait);
+    }
+
+    /// Adds a task, in the state `state`, and its record: its number.
+    pub(crate) fn add_task(&mut self, task: Task, state: TState, generator: bool) -> u32 {
+        let (st, wait) = state.words();
+        let t = self.recs.add(st, wait, if generator { records::GENERATOR } else { 0 });
+        if t as usize != self.tasks.len() {
+            rt::internal("a task's record out of step with its task");
+        }
+        self.tasks.push(task);
+        t
+    }
+
+    /// A new task, ready, which [`Sched::add_task`] adds.
     pub(crate) fn new_task(&self, scope: Option<u32>, index: u32, path: String) -> Task {
         Task {
-            state: TState::Ready,
             scope,
             index,
             outcome: None,
@@ -1107,7 +1189,6 @@ impl Sched {
             returns_result: false,
             ret_ty: 0,
             yielded: None,
-            generator: false,
             depth_base: 0,
             item_ty: 0,
             anchors: vec![Anchor::Task],
@@ -1162,7 +1243,7 @@ impl Sched {
         }
         if (spent || asked) && !self.ready.is_empty() {
             let cur = self.cur;
-            self.task(cur).state = TState::Ready;
+            self.set_state(cur, TState::Ready);
             self.push_ready(cur);
             return true;
         }
@@ -1212,7 +1293,7 @@ impl Sched {
             }
         };
         if go {
-            self.task(cur).state = TState::Ready;
+            self.set_state(cur, TState::Ready);
             self.push_ready(cur);
         }
         go
@@ -1302,8 +1383,8 @@ impl Sched {
         }
         self.cur = next;
         let keep = self.keep_stats;
+        self.set_state(next, TState::Running);
         let task = self.task(next);
-        task.state = TState::Running;
         if keep && let Some(w) = task.ready_wall.take() {
             let us = w.elapsed().as_micros() as u64;
             self.stats.latency_micros.push(us);
@@ -1372,7 +1453,7 @@ impl Sched {
     fn deadlock_report(&self) -> String {
         let mut lines = vec![rt::render(msg::RUN_DEADLOCK, &[])];
         for (i, t) in self.tasks.iter().enumerate() {
-            let TState::Blocked(w) = t.state else { continue };
+            let TState::Blocked(w) = self.state(i as u32) else { continue };
             let who = if i == 0 {
                 rt::render(msg::RUN_TASK_ROOT, &[])
             } else {
@@ -1445,8 +1526,16 @@ impl Sched {
     /// (and the deadline on the way to the root, which wakes it to see it).
     pub(crate) fn block_on(&mut self, wait: Wait, keys: &[Key], timer: Option<(u32, i128)>, site: Site) {
         let cur = self.cur;
-        for k in keys {
-            self.waiters.push(k.word(), i64::from(cur), 0);
+        // The runtime in Sisu parks it under its keys (decision 780).
+        let mut words = [0i64; 8];
+        if keys.len() <= words.len() {
+            for (w, k) in words.iter_mut().zip(keys) {
+                *w = k.word();
+            }
+            self.recs.park(&mut self.waiters, cur, wait.word(), &words[..keys.len()]);
+        } else {
+            let words: Vec<i64> = keys.iter().map(|k| k.word()).collect();
+            self.recs.park(&mut self.waiters, cur, wait.word(), &words);
         }
         if let Some((c, at)) = timer {
             self.push_timer(c, at, cur);
@@ -1456,9 +1545,7 @@ impl Sched {
         {
             self.push_timer(c, at, cur);
         }
-        let task = self.task(cur);
-        task.state = TState::Blocked(wait);
-        task.site = site;
+        self.task(cur).site = site;
     }
 
     /// A timer of the task `t` at `at` on the clock `c`, its time kept as a
@@ -1473,18 +1560,38 @@ impl Sched {
         self.ready.firsts().into_iter().map(|t| t as u32).collect()
     }
 
+    /// Wakes the task `t` if it waits: the runtime in Sisu puts it in the
+    /// run queue (decision 780).
     pub(crate) fn wake(&mut self, t: u32) {
-        let Some(task) = self.tasks.get_mut(t as usize) else { return };
-        if matches!(task.state, TState::Blocked(_)) {
-            task.state = TState::Ready;
-            self.push_ready(t);
+        if self.recs.wake(&mut self.ready, t) {
+            self.woke(&[i64::from(t)]);
         }
     }
 
+    /// What [`Sched::push_ready`] does beside the run queue, for tasks the
+    /// runtime in Sisu woke into it.
+    fn woke(&mut self, tasks: &[i64]) {
+        if tasks.is_empty() {
+            return;
+        }
+        if self.keep_stats {
+            let now = std::time::Instant::now();
+            for &t in tasks {
+                self.task(t as u32).ready_wall = Some(now);
+            }
+        }
+        if self.starved {
+            self.starved = false;
+            crate::budget::store(0);
+        }
+    }
+
+    /// Wakes the tasks waiting under `k`, in the order they parked.
     pub(crate) fn wake_key(&mut self, k: Key) {
-        self.waiters.take_key(k.word(), &mut self.woken);
-        for t in self.woken.firsts() {
-            self.wake(t as u32);
+        let n = self.recs.wake_key(&mut self.waiters, &mut self.woken, &mut self.ready, k.word());
+        if n > 0 && (self.keep_stats || self.starved) {
+            let woken = self.woken.firsts();
+            self.woke(&woken);
         }
     }
 
@@ -1492,10 +1599,10 @@ impl Sched {
     /// generators, which run only when their consumer asks for an item
     /// (decision 236).
     pub(crate) fn wake_all_blocked(&mut self) {
-        for t in 0..self.tasks.len() as u32 {
-            if !self.tasks[t as usize].generator {
-                self.wake(t);
-            }
+        let n = self.recs.wake_all(&mut self.woken, &mut self.ready);
+        if n > 0 && (self.keep_stats || self.starved) {
+            let woken = self.woken.firsts();
+            self.woke(&woken);
         }
     }
 
@@ -1580,10 +1687,10 @@ impl Sched {
             if Some(t) == except {
                 continue;
             }
-            let task = &self.tasks[t as usize];
-            if matches!(task.state, TState::Done) {
+            if self.is_done(t) {
                 continue;
             }
+            let task = &self.tasks[t as usize];
             if after.is_some_and(|i| task.index <= i) {
                 continue;
             }

@@ -23,6 +23,7 @@ from rt.host import sisu_rt_drop_value
 from rt.host import sisu_rt_free
 from rt.host import sisu_rt_list_bounds
 from rt.host import sisu_rt_list_view
+from rt.host import sisu_rt_missing_key
 from rt.host import sisu_rt_slice_bounds
 from rt.host import sisu_rt_unordered
 from rt.types import CHAR
@@ -130,6 +131,16 @@ pub(package) const SLICE_SLICE: int = 180
 pub(package) const SLICE_CUT: int = 181
 ## `Slice.iter`
 pub(package) const SLICE_ITER: int = 182
+## `dict.get_str`
+pub(package) const DICT_GET_STR: int = 323
+## `dict.remove_str`
+pub(package) const DICT_REMOVE_STR: int = 324
+## `dict.index_str`
+pub(package) const DICT_INDEX_STR: int = 325
+## `set.contains_str`
+pub(package) const SET_CONTAINS_STR: int = 326
+## `set.remove_str`
+pub(package) const SET_REMOVE_STR: int = 327
 
 ## The status of a call that did what it asked.
 const OK: int = 0
@@ -485,6 +496,8 @@ def entry_key(e: ptr mut u8) -> ptr mut u8:
 ## - `call`: `c` is a call of one of the dict and set intrinsics above
 def table_call(c: Call, id: int) -> int:
     let ts = c.ts
+    if id >= DICT_GET_STR:
+        return by_text(c, id)
     if id == DICT_NEW or id == SET_NEW:
         let rt = c.ret_ty()
         var val = -1
@@ -592,6 +605,33 @@ def table_call(c: Call, id: int) -> int:
         free(key)
         c.set_bool(True)
         return dropped(c.arg(1), c.ty(1))
+    return OK
+
+## The lookups by a `str` of a dict's or a set's `String` keys (decision
+## 784), each its lookup by a key of the table's type but for the key
+## given, a text whose bytes `table.find` hashes and compares with the
+## keys' as `in` does, so no `String` is made: the status.
+##
+## Requires:
+## - `call`: `c` is a call of one of the five intrinsics after `Slice.iter`
+##   above, its key a `str` and the table's keys `String`s
+def by_text(c: Call, id: int) -> int:
+    if id == DICT_GET_STR:
+        return table_call(c, DICT_GET)
+    if id == DICT_REMOVE_STR:
+        return table_call(c, DICT_REMOVE)
+    if id == SET_CONTAINS_STR:
+        return table_call(c, SET_CONTAINS)
+    if id == SET_REMOVE_STR:
+        return table_call(c, SET_REMOVE)
+    # `dict.index_str`: the value's address, or the panic of a missing key.
+    let tb = c.table(0)
+    let i = table.find(c.ts, tb, c.arg(1), c.ty(1))
+    if i < 0:
+        # safety: returns_promptly: the runtime in Rust raises the panic,
+        #   naming the key, which is live.
+        return unsafe sisu_rt_missing_key(c.arg(1), c.ty(1)).to_int()
+    c.set(0, table.value_at(tb, i).addr())
     return OK
 
 ## The intrinsics of a `Slice`, which holds copies of its elements in a

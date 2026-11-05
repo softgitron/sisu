@@ -122,9 +122,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::HandleJoin => join(c),
             I::HandleIsFinished => {
                 let t = c.word(0) as u32;
-                let v = system(|| {
-                    with(|s| s.tasks.get(t as usize).is_some_and(|t| matches!(t.state, TState::Done)))
-                });
+                let v = system(|| with(|s| s.is_done(t)));
                 c.set_bool(v);
                 abi::OK
             }
@@ -391,10 +389,11 @@ impl sched::Sched {
                 returns_result && is_err(v, ret_ty) && !(cancelled && self.is_cancelled_error(v, ret_ty))
             }
         };
+        self.set_state(t, TState::Done);
+        let generator = self.recs.flags(t) & crate::queue::GENERATOR != 0;
         let task = self.task(t);
         task.outcome = Some(outcome);
-        task.state = TState::Done;
-        let (generator, scope, index) = (task.generator, task.scope, task.index);
+        let (scope, index) = (task.scope, task.index);
         if !generator {
             self.live = self.live.saturating_sub(1);
         }
@@ -714,8 +713,7 @@ unsafe fn scope(c: &Call<'_>, race: bool) -> u8 {
                     sc.wake_all_blocked();
                 }
             }
-            let waiting =
-                sc.scopes[si].children.iter().any(|&t| !matches!(sc.tasks[t as usize].state, TState::Done));
+            let waiting = sc.scopes[si].children.iter().any(|&t| !sc.is_done(t));
             if waiting {
                 sc.block_on(Wait::ScopeEnd, &[Key::Scope(s)], None, site);
                 return Attempt::Wait;
@@ -895,7 +893,7 @@ unsafe fn spawn(c: &Call<'_>, with_deadline: bool) -> u8 {
             task.body = body;
             task.ret_ty = ret_ty;
             task.returns_result = matches!(ty(ret_ty).kind, Kind::Result(..));
-            sc.tasks.push(task);
+            sc.add_task(task, TState::Ready, false);
             make_coroutine(sc, t, false);
             sc.push_ready(t);
             sc.live += 1;
@@ -981,7 +979,7 @@ unsafe fn join(c: &Call<'_>) -> u8 {
                 unsafe { write_task_error(c.ret, c.ret_ty, "Cancelled", None) };
                 return Attempt::Done(abi::OK);
             }
-            if s.tasks.get(t as usize).is_some_and(|t| matches!(t.state, TState::Done)) {
+            if s.is_done(t) {
                 // SAFETY: as above.
                 return Attempt::Done(unsafe { s.take_outcome(t, c.ret, c.ret_ty) });
             }
@@ -1223,7 +1221,7 @@ unsafe fn select(c: &Call<'_>) -> u8 {
                     2 => {
                         let t = a as u32;
                         keys.push(Key::Task(t));
-                        s.tasks.get(t as usize).is_some_and(|t| matches!(t.state, TState::Done))
+                        s.is_done(t)
                     }
                     3 => {
                         let (clock, at) = (a as u32, i128::from(b as i64));
@@ -1278,11 +1276,9 @@ unsafe fn gen_new(c: &Call<'_>) -> u8 {
         let t = s.tasks.len() as u32;
         let path = s.tasks.get(s.cur as usize).map(|t| t.path.clone()).unwrap_or_default();
         let mut task = s.new_task(None, 0, path);
-        task.state = TState::Blocked(Wait::Join(t));
-        task.generator = true;
         task.item_ty = item;
         task.body = body;
-        s.tasks.push(task);
+        s.add_task(task, TState::Blocked(Wait::Join(t)), true);
         make_coroutine(s, t, true);
         t
     });
@@ -1347,13 +1343,14 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
         },
         Some(crate::iter::Waits::Gen(t, size)) => sched::blocking(|| {
             with(|s| {
+                let done = s.is_done(t);
                 let task = s.task(t);
                 if let Some(v) = task.yielded.take() {
                     // SAFETY: the result is an option of the item.
                     unsafe { write_some(c.ret, &v, size) };
                     return Attempt::Done(abi::OK);
                 }
-                if matches!(task.state, TState::Done) {
+                if done {
                     return match task.outcome.take() {
                         Some(Outcome::Panic(p)) => Attempt::Done(rt::raise_panic(p)),
                         _ => {
@@ -1413,11 +1410,12 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
 /// ([`sched::drive`]).
 pub(crate) fn gen_item(t: u32) -> Result<Option<Box<[u64]>>, u8> {
     let ready = |s: &mut sched::Sched| {
+        let done = s.is_done(t);
         let g = s.task(t);
         if let Some(v) = g.yielded.take() {
             return Some(Ok(Some(v)));
         }
-        if matches!(g.state, TState::Done) {
+        if done {
             return Some(match g.outcome.take() {
                 Some(Outcome::Panic(p)) => Err(p),
                 _ => Ok(None),
@@ -1460,7 +1458,7 @@ pub(crate) fn abandon(t: u32) -> u8 {
             let stack = co.into_stack();
             let mark = s.task(t).mark;
             s.task(t).region = None;
-            s.task(t).state = TState::Done;
+            s.set_state(t, TState::Done);
             s.pool.release(stack.0, mark);
         }),
     }

@@ -1,0 +1,163 @@
+##! The tasks' records of the scheduler (D-086's order; decision 780): a
+##! task's state, what it waits for and whether it is a generator, and its
+##! parking and waking, which the runtime in Rust's scheduler (`crates/
+##! sisu-rt/src/sched.rs`) keeps here and reads only through the exports.
+##! The records are a queue (`queue.sisu`) of three words a record, the
+##! record `t` the task `t`'s: its state (`READY`, `RUNNING`, `BLOCKED`,
+##! `DONE`), its wait, a word the runtime in Rust gives (its kind above its
+##! subject, for the deadlock report), and its flags. A task parks under
+##! the keys of what wakes it, in the waiters' queue, and an event wakes
+##! the tasks waiting under its key in the order they parked, each put in
+##! the run queue as the interpreter's `wake` puts it, so that a seed names
+##! the same schedule. What the record does not hold, the coroutine, its
+##! context, the values moved aside, the outcome and the anchors, stays
+##! beside it in the runtime in Rust, under the same number.
+
+import rt.queue
+from std.mem import ptr
+
+## A task's states.
+pub(package) const READY: int = 0
+pub(package) const RUNNING: int = 1
+pub(package) const BLOCKED: int = 2
+pub(package) const DONE: int = 3
+
+## The flag of a generator, which only its consumer wakes.
+pub(package) const GENERATOR: int = 1
+
+## The address of the record of the task `t`, three words, in the records
+## at `recs`: the queue's buffer, read in place (README, "What it is").
+##
+## Requires:
+## - `records`: `recs` holds a live queue of three words a record, and
+##   `0 <= t < count`
+def record(recs: ptr mut u8, t: int) -> ptr mut int:
+    # safety: in_bounds, valid, aligned, writable: a queue's first word is its
+    #   buffer's address, and the record `t` is in it, by `records`.
+    return unsafe recs.cast[ptr[int]]().read().cast_mut().offset(t * 3)
+
+## The records the queue at `recs` holds: its second word.
+##
+## Requires:
+## - `records`: `recs` holds a live queue of three words a record
+def count(recs: ptr mut u8) -> int:
+    # safety: in_bounds, valid, aligned: by `records`.
+    return unsafe recs.cast[int]().offset(1).read()
+
+## Appends the record of a new task in the state `state`, waiting for
+## `wait`, with the flags `flags`: its number.
+##
+## Requires:
+## - `records`: `recs` holds a live queue of three words a record
+pub(package) def add(recs: ptr mut u8, state: int, wait: int, flags: int) -> int:
+    let t = count(recs)
+    queue.push(recs, state, wait, flags)
+    return t
+
+## The state of the task `t`, `DONE` for a number that is no task's.
+##
+## Requires:
+## - `records`: as in `add`
+pub(package) def state(recs: ptr mut u8, t: int) -> int:
+    if t < 0 or t >= count(recs):
+        return DONE
+    # safety: in_bounds, valid, aligned, writable: the record's first word,
+    #   in the queue's buffer, read in place as `record` reads it.
+    return unsafe recs.cast[ptr[int]]().read().cast_mut().offset(t * 3).read()
+
+## Sets the state of the task `t` and its wait.
+##
+## Requires:
+## - `records`: as in `add`, and `0 <= t < count`
+pub(package) def set(recs: ptr mut u8, t: int, state: int, wait: int):
+    # safety: in_bounds, valid, aligned, writable: the record's first two
+    #   words, in the queue's buffer, read in place as `record` reads it.
+    unsafe:
+        let at = recs.cast[ptr[int]]().read().cast_mut().offset(t * 3)
+        at.write(state)
+        at.offset(1).write(wait)
+
+## Makes the task `t` wait for `wait`: registered in the waiters' queue
+## under each of the `n` keys at `keys`, in order.
+##
+## Requires:
+## - `records`: as in `set`
+## - `waiters`: `waiters` holds a live queue of two words a record
+## - `keys`: `keys` points to `n` words
+pub(package) def park(
+    recs: ptr mut u8, waiters: ptr mut u8, t: int, wait: int, keys: ptr[int], n: int
+):
+    var i = 0
+    while i < n:
+        # safety: in_bounds, valid, aligned: one of the `n` words, by `keys`.
+        queue.push(waiters, unsafe keys.offset(i).read(), t, 0)
+        i += 1
+    set(recs, t, BLOCKED, wait)
+
+## Wakes the task `t` if it waits: ready, at the end of the run queue
+## `ready`. Whether it woke.
+##
+## Requires:
+## - `records`: as in `add`
+## - `ready`: `ready` holds a live queue of one word a record
+pub(package) def wake(recs: ptr mut u8, ready: ptr mut u8, t: int) -> bool:
+    if t < 0 or t >= count(recs):
+        return False
+    # safety: in_bounds, valid, aligned, writable: the record's first word,
+    #   in the queue's buffer, read in place as `record` reads it.
+    unsafe:
+        let at = recs.cast[ptr[int]]().read().cast_mut().offset(t * 3)
+        if at.read() != BLOCKED:
+            return False
+        at.write(READY)
+    queue.push(ready, t, 0, 0)
+    return True
+
+## Wakes the tasks waiting under `key`, in the order they parked, each
+## record taken out of the waiters' queue: the queue `woken` holds those
+## that woke afterwards, in order, and the result is how many.
+##
+## Requires:
+## - `records`, `ready`: as in `wake`
+## - `waiters`: as in `park`
+## - `woken`: `woken` holds a live queue of one word a record
+pub(package) def wake_key(
+    recs: ptr mut u8, waiters: ptr mut u8, woken: ptr mut u8, ready: ptr mut u8, key: int
+) -> int:
+    queue.clear(woken)
+    queue.take_key(waiters, key, woken)
+    # safety: in_bounds, valid, aligned, writable: the `n` words of the
+    #   queue `woken`, one a record, whose first `kept` are rewritten.
+    unsafe:
+        let n = woken.cast[int]().offset(1).read()
+        let tasks = woken.cast[ptr[int]]().read().cast_mut()
+        var kept = 0
+        var i = 0
+        while i < n:
+            let t = tasks.offset(i).read()
+            if wake(recs, ready, t):
+                tasks.offset(kept).write(t)
+                kept += 1
+            i += 1
+        woken.cast[int]().offset(1).write(kept)
+        return kept
+
+## Wakes every waiting task but generators, which run only when their
+## consumer asks (decision 236), in the order of their numbers: `woken`
+## holds those that woke, and the result is how many.
+##
+## Requires:
+## - `records`, `ready`: as in `wake`
+## - `woken`: as in `wake_key`
+pub(package) def wake_all(recs: ptr mut u8, woken: ptr mut u8, ready: ptr mut u8) -> int:
+    queue.clear(woken)
+    let n = count(recs)
+    var t = 0
+    while t < n:
+        # safety: in_bounds, valid, aligned: the record's third word, by
+        #   `record`.
+        let flags = unsafe record(recs, t).offset(2).read()
+        if flags & GENERATOR == 0 and wake(recs, ready, t):
+            queue.push(woken, t, 0, 0)
+        t += 1
+    return queue.count(woken)
