@@ -10700,7 +10700,10 @@ replay", "The checked memory model"; D-085, D-086; 06, 12, 17; decisions
      `queue::Choices` are most of what it gained; the runtime in Sisu is
      7 290 lines where it was 6 930, its seed 755 222 bytes where it was
      720 405, and its object 851 480 (`target/rt/rt.o`) where it was
-     809 912. What the runtime in Rust still holds, by size: the
+     809 912, and as the fixed point builds it with the Sisu backend
+     1 478 176 where it was 1 404 672; the fixed point holds (rt-A.o and
+     rt-B.o the same bytes, as sisu2-A and sisu2-B, 31 065 632, and
+     stage1-A and stage1-B, 63 418 696). What the runtime in Rust still holds, by size: the
      decoding of 265 of the 328 intrinsics (`intrinsics.rs`, `tasks.rs`,
      `host.rs`, `bytes.rs`, `cells.rs`, `caps.rs`, `rawmem.rs`, 5 047
      lines), the scheduler's tasks, switch and clocks (`sched.rs`,
