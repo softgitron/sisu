@@ -66,7 +66,8 @@ impl Len for Ledger:
 - **Give values out, and keep their parts private.** `Ledger`'s list is
   private, so only `book` adds to it, and `book` checks the hour. A
   private field cannot be set from another module, even through a
-  default (E0258, whose note then names `Ledger.new()`), so the library
+  default: `Ledger()` there is E0258 alone, whose note names
+  `Ledger.new()` as the way to make one, so the library
   gives `Ledger.new()`: a caller who cannot build a value by hand cannot
   build a wrong one.
 - **Make allocation visible.** Take views where the library only reads,

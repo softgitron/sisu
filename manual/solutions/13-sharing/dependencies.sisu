@@ -94,8 +94,8 @@ struct Graph:
     ) -> ! CycleError:
         if key.index in done:
             return Ok(())
-        for i in range(len(path)):
-            if path[i] == key:
+        for i, k in enumerate(path):
+            if k == key:
                 let names = [self.packages[k].name.copy() for k in path[i:]]
                 return Err(Cycle(names))
         path.push(key)

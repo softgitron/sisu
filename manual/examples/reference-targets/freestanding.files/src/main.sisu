@@ -1,0 +1,3 @@
+# A package that asks for the runtime without a scheduler.
+def main():
+    print("the stove runs on its own hardware")

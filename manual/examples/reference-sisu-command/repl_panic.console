@@ -1,0 +1,15 @@
+$ sisu repl --echo repl_panic.sisu < repl_panic.stdin
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+sisu> share(90, 3)
+30
+sisu> share(90, 0)
+panic: division by zero
+  at share (repl_panic.sisu:3:12)
+  at main (<input>:1:1)
+the input did not run to its end, so the session is as it was before it
+sisu> let guests = [3]
+sisu> guests[2]
+panic: index out of bounds: the length is 1 but the index is 2
+  at main (<input>:1:1)
+the input did not run to its end, so the session is as it was before it
+sisu> 

@@ -1,0 +1,4 @@
+share(90, 3)
+share(90, 0)
+let guests = [3]
+guests[2]

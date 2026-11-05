@@ -381,8 +381,11 @@ error[E0310]: `+` cannot be applied to `int` and `str`
 sisu> :quit
 ```
 
-A line that does not compile gets its diagnostic, and the session goes
-on as it was before the line. `:quit` ends it.
+A line that does not compile gets its diagnostic, whose place
+`<input>:1:1` is the line you typed, its first line and column, and the
+session goes on as it was before the line; a line that panics is left
+out in the same way. Each line answers in well under a second, since
+one compiler process serves the whole session. `:quit` ends it.
 
 Use worksheets to try things out. Programs you keep go in files with a
 `main`.

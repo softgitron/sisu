@@ -611,6 +611,7 @@ def greeting() -> str:
 
 def main():
     print("{greeting()}: paths are written home{separator()}aino")
+    print("target.runtime is {target.runtime}")
 
 test "a test has its own greeting":
     assert greeting() == "hei from a test"
@@ -620,6 +621,10 @@ test "a test has its own greeting":
 ```console
 $ sisu run targets.sisu
 hei: paths are written home/aino
+target.runtime is interpreter
+$ sisu run --native targets.sisu
+hei: paths are written home/aino
+target.runtime is native
 $ sisu test targets.sisu
 test "a test has its own greeting" ... ok
 1 passed, 0 failed, 0 blocked
@@ -628,10 +633,11 @@ test "a test has its own greeting" ... ok
 - `@cfg(test)` keeps a declaration in the builds that run the tests,
   and `@cfg(not test)` in the others: `sisu run` builds the program
   without its tests, so it gets the second `greeting`.
-- `target.runtime` is `interpreter` under `sisu run`, and for now in a
-  native build too: the front end already takes the runtime as an
-  option, and the `sisu` command passes `native` to it from its next
-  round.
+- `target.runtime` is `interpreter` under `sisu run` and `native` in a
+  native build, `sisu run --native` among them, so code can choose what
+  each way of running does best. `target.runtime_profile` names the
+  runtime profile that the package's manifest asks for, `full` unless
+  it says `single` ([R22](../reference/targets.md#runtime-profiles)).
 - `all(...)` and `any(...)` combine conditions, and `feature="NAME"`
   holds when a feature of the package is on, as chapter 17 showed.
 - An item that `@cfg` leaves out is not in the program at all, and

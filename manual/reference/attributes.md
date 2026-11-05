@@ -256,7 +256,7 @@ compile time cannot be written yet.
 | `@repr(c)`, `@repr(u8)` | a struct, an enum | fixes the layout ([The layout of a type](#the-layout-of-a-type)) | partly in stage 0 |
 | `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | designed; checked, and a symbol of Sisu's convention, in stage 0 |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
-| `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning |
+| `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; accepted with W0030 and not checked in stage 0 |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
 | `@deprecated("MESSAGE")`, `@fix_inline` | an item, a field, a variant, a method; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` designed |
 | `@preview("NAME")` | not designed yet; in stage 0 a function, a type, a constant | asks for a feature that is not stable; in stage 0 warns at each use of the item ([Preview features](#preview-features)) | leaning; the item's warning in stage 0 |
@@ -812,9 +812,10 @@ const P1 *a1, ...)`, passing the address of the result and of each
 argument, each in memory of its layout (an `i32` takes a word, as every
 sized integer does), and reads the status it returns, 0, or 1 when a
 panic left the function, after which it must not call Sisu code again.
-A symbol that takes and gives C's values directly is the next step.
-`sisu sir` of stage 1 does not name the exported function yet; its
-thirteenth round writes the line.
+The program's SIR names each exported function on a line `export
+"NAME" FUNCTION` after its entry, and the function is compiled whether
+or not `main` calls it, so the symbol is in every native build. A
+symbol that takes and gives C's values directly is the next step.
 
 **Status.** Designed ([12](../../proposal/12-interop-and-targets.md),
 [22](../../proposal/22-unsafe.md); D-080), with its checks and the
@@ -894,7 +895,11 @@ driver needs ([04](../../proposal/04-memory-and-ownership.md#resource-attributes
   can panic ([R16](sisu-command.md#sisu-audits-other-reports)).
 
 **Stage 0 differs.** Stage 0 accepts the three attributes and checks
-nothing, as it does `@fix_inline`; the call of the deprecated
+nothing, and says so at each with W0030 (`resolve.unchecked-attribute`,
+[R17](diagnostics.md#w0030)), so that a program that writes one does
+not take the promise for a check; on a declaration other than a
+function each is W0026, as any misplaced attribute is. `@fix_inline`
+does nothing either, without a warning; the call of the deprecated
 `old_levels` warns (W0023), and `@float(fast)` keeps the arithmetic
 strict, which the permission allows:
 
@@ -920,8 +925,33 @@ def main():
     print("{old_levels(3)} {blend(1.0, 2.0)}")
 ```
 
-<!-- output: examples/reference-attributes/designed.out -->
-```text
+<!-- output: examples/reference-attributes/designed.console -->
+```console
+$ sisu run designed.sisu
+warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+  --> designed.sisu:2:2
+  |
+2 | @no_alloc
+  |  ^^^^^^^^
+
+warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
+  --> designed.sisu:3:2
+  |
+3 | @no_block
+  |  ^^^^^^^^
+
+warning[W0030]: `@stack` is accepted and checked by nothing yet, so nothing ensures the function's bound on its stack
+  --> designed.sisu:4:2
+  |
+4 | @stack(max=256)
+  |  ^^^^^
+
+warning[W0023]: `old_levels` is deprecated: use `levels`
+  --> designed.sisu:18:13
+   |
+18 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
+   |             ^^^^^^^^^^^^^
+
 [3, 6] 1.5
 ```
 
@@ -1227,6 +1257,7 @@ idea for later, and `@inline` has no design.
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |
 | [E0989](diagnostics.md#e0989), [E0991](diagnostics.md#e0991) | `unsafe.export-signature`, `unsafe.export-not-c` | [Exported functions](#exported-functions) |
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
+| [W0030](diagnostics.md#w0030) | `resolve.unchecked-attribute` | [Resource limits](#resource-limits) |
 | [E0448](diagnostics.md#e0448) | `resolve.float-attribute` | [Fast floating point](#fast-floating-point) |
 | [W0023](diagnostics.md#w0023), [W0025](diagnostics.md#w0025) | `type.deprecated`, `type.deprecated-plain` | [Deprecation and migrations](#deprecation-and-migrations) |
 | [W0028](diagnostics.md#w0028), [W0029](diagnostics.md#w0029) | `type.preview`, `type.preview-plain` | [Preview features](#preview-features) |

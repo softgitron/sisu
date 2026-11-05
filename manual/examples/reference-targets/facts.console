@@ -2,5 +2,5 @@ $ sisu run facts.sisu
 linux x86_64 interpreter
 home/aino
 $ sisu run --native facts.sisu
-linux x86_64 interpreter
+linux x86_64 native
 home/aino

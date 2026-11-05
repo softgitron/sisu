@@ -14,6 +14,7 @@ def greeting() -> str:
 
 def main():
     print("{greeting()}: paths are written home{separator()}aino")
+    print("target.runtime is {target.runtime}")
 
 test "a test has its own greeting":
     assert greeting() == "hei from a test"

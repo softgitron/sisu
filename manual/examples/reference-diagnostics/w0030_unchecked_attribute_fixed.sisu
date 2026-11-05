@@ -1,0 +1,12 @@
+# The promise kept in the function's comment until a check exists.
+
+## The sum of `readings`, which allocates nothing.
+def total(readings: Array[int, 3]) -> int:
+    var sum = 0
+    for i in range(3):
+        sum += readings[i]
+    return sum
+
+def main():
+    let readings: Array[int, 3] = Array.filled(80)
+    print(total(readings))

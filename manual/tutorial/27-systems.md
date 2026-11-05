@@ -519,7 +519,8 @@ a `strlen` of text without its NUL stops the program.
   scheduler moves the call off the threads that run tasks. On anything
   but a foreign function it is E0990 (`unsafe.blocking-not-foreign`).
 - `@export("NAME")` makes a Sisu function callable from C: a native
-  build gives it the global symbol `NAME`. Its signature may hold no
+  build gives it the global symbol `NAME`, whether or not the program
+  calls it. Its signature may hold no
   reference, view, `Shared`, closure or capability, which C could not
   keep alive (E0989, `unsafe.export-signature`), and each of its types
   must be one C has a layout for, a number, `bool`, `char`, a raw
@@ -759,11 +760,14 @@ collections, `list.with_allocator(Region.bump(n))` for memory released
 all at once and `try_push` for allocation that can fail, are designed in
 [04](../../proposal/04-memory-and-ownership.md#allocators) (E0351 and
 E0304 today); `Region` exists, under `RawBuf`. The resource attributes
-`@no_alloc`, `@no_block` and `@stack` compile and check nothing yet.
-The runtime profiles `full`, `single` and `freestanding`, targets and
-cross compilation (`--target`), and `panic = "abort"` in a profile,
-which the compiler ignores with W0005, wait for the runtime of
-[12](../../proposal/12-interop-and-targets.md). A native executable
+`@no_alloc`, `@no_block` and `@stack` compile with the warning W0030
+(`resolve.unchecked-attribute`), since nothing checks them yet. The
+manifest's runtime profile is read, but `single` gets the runtime that
+`full` gets and `freestanding` is refused (E1023); the profiles'
+own runtimes, targets and cross compilation (`--target`), and
+`panic = "abort"` in a profile, which the compiler ignores with W0005,
+wait for the runtime of [12](../../proposal/12-interop-and-targets.md)
+([R22](../reference/targets.md#runtime-profiles)). A native executable
 leaves out the code that nothing reaches, but links the C library
 dynamically and keeps its debug information: a ten-line program is
 6.25 MB, 1.74 MB stripped, nearly all of it the runtime
@@ -1024,11 +1028,23 @@ test "a fade to silence":
 <!-- output: solutions/27-systems/mixer.console -->
 ```console
 $ sisu test mixer.sisu
+warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+  --> mixer.sisu:15:2
+   |
+15 | @no_alloc
+   |  ^^^^^^^^
+
 warning[W0001]: typed hole `mix` of type `()`
   --> mixer.sisu:17:5
    |
 17 |     todo("mix")
    |     ^^^^^^^^^^^
+
+warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+  --> mixer.sisu:20:2
+   |
+20 | @no_alloc
+   |  ^^^^^^^^
 
 warning[W0001]: typed hole `fade` of type `()`
   --> mixer.sisu:22:5
@@ -1053,9 +1069,10 @@ what the test printed:
 0 passed, 0 failed, 3 blocked
 ```
 
-`@no_alloc` states that the functions allocate nothing, which the
-compiler will check once the attribute is in it; today the promise is
-yours.
+`@no_alloc` states that the functions allocate nothing. W0030
+(`resolve.unchecked-attribute`) at each says that nothing checks the
+promise yet, so today it is yours to keep; the warning goes once the
+compiler checks it.
 
 <details>
 <summary>Hint 1</summary>

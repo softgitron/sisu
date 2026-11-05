@@ -71,8 +71,10 @@ and the backend written in Sisu compiles for x86-64 Linux only.
 ## The facts of the target
 
 `target` is a module that every program sees, of constants that
-describe what the program is compiled for: `target.os`, `target.arch`
-and `target.runtime`. They are known while the program compiles, so
+describe what the program is compiled for: `target.os`, `target.arch`,
+`target.runtime` (`interpreter` or `native`, how the program runs) and
+`target.runtime_profile` (the manifest's [runtime
+profile](#runtime-profiles)). They are known while the program compiles, so
 `if comptime target.os == "windows":` chooses code for a system, and
 both branches are still checked, so a branch for a system you do not
 build for keeps compiling ([R12](compile-time.md#the-facts-of-the-target)). The
@@ -96,14 +98,19 @@ $ sisu run facts.sisu
 linux x86_64 interpreter
 home/aino
 $ sisu run --native facts.sisu
-linux x86_64 interpreter
+linux x86_64 native
 home/aino
 ```
 
-**Stage 0 differs.** `target.runtime` is `interpreter` in a native
-build too, and no fact names the runtime profile. Stage 1 takes
-`--target-runtime native` for a native build, which `target.runtime`
-then gives, and the `sisu` command passes it from its next round.
+`target.runtime` is `native` for each command that builds natively
+(`sisu run`, `build`, `test` and `bench` with `--native`) and
+`interpreter` for the others, `sisu check` and `sisu sir` among them, so
+a program built from the SIR that `sisu sir` writes was compiled for the
+interpreter.
+
+**Stage 0 differs.** [08](../../proposal/08-metaprogramming.md#conditional-compilation)
+names no fact for the runtime profile; `target.runtime_profile` is
+stage 0's, and it is `"full"` or `"single"`.
 
 **Status.** In stage 0 ([08](../../proposal/08-metaprogramming.md#conditional-compilation)),
 with the difference noted.
@@ -152,14 +159,16 @@ simulation, which only an `extern` call with no simulation model can
 (E0971, `sim.unmodelled-extern`); the simulation itself is
 [R15](testing.md#simulation).
 
-**Stage 0 differs.** No profile can be chosen yet: the key is named,
-and stage 1 reads it from its thirteenth round, so for now
-`runtime = "single"` is W0005 (`package.unknown-key`). The interpreter
-and the native runtime both run every task on one thread, one at a time,
-under the seeded scheduler, which is `single`'s runtime, so a native
-build that asks for `full` or `single` will get that runtime, and
-`freestanding` will be refused until a runtime without the scheduler
-exists. `sim` is the profile of `sisu test --sim` only:
+**Stage 0 differs.** The key takes `"full"`, `"single"` and
+`"freestanding"`, and another value is E1003 (`package.bad-value`).
+`single` is written into the program's SIR, and compile-time code reads
+the profile as `target.runtime_profile`, but both profiles get the same
+runtime: the interpreter and the native runtime run every task on one
+thread, one at a time, under the seeded scheduler, which is `single`'s
+runtime. Only `std.par`'s worker threads ([R9](concurrency.md#parallel-computation-over-data))
+are still started under `single`. `sim` is the profile of `sisu test
+--sim` only. The `panic` key and the `release-size` profile are W0005
+(`package.unknown-key`):
 
 <!-- file: examples/reference-targets/profiles.pkg/sisu.toml -->
 ```toml
@@ -181,18 +190,12 @@ contracts = "off"
 ```sisu
 # A package that asks for a runtime profile and a way to panic.
 def main():
-    print("the stove runs on {target.runtime}")
+    print("the stove runs on {target.runtime}, {target.runtime_profile}")
 ```
 
 <!-- output: examples/reference-targets/profiles.console -->
 ```console
-$ sisu check
-warning[W0005]: `runtime` is not a key of `[package]` that stage 0 knows; it is ignored
-  --> sisu.toml:5:1
-  |
-5 | runtime = "single"
-  | ^^^^^^^
-
+$ sisu run --native
 warning[W0005]: `panic` is not a key of `[profile.release]` that stage 0 knows; it is ignored
   --> sisu.toml:9:1
   |
@@ -205,10 +208,35 @@ warning[W0005]: `contracts` is not a key of `[profile.release-size]` that stage 
 12 | contracts = "off"
    | ^^^^^^^^^
 
+the stove runs on native, single
 ```
 
-**Status.** Designed ([12](../../proposal/12-interop-and-targets.md#runtime-profiles));
-the `sim` profile is a prototype of the experiment (D-070).
+`freestanding` is E1023 (`package.freestanding`, [R17](diagnostics.md#e1023))
+until there is a runtime without the scheduler:
+
+<!-- file: examples/reference-targets/freestanding.files/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+runtime = "freestanding"
+```
+
+<!-- output: examples/reference-targets/freestanding.console -->
+```console
+$ sisu check
+error[E1023]: the runtime profile `freestanding` has no runtime yet: this compiler's runtime schedules tasks, so a program is built for `full` or `single`
+  --> sisu.toml:5:11
+  |
+5 | runtime = "freestanding"
+  |           ^^^^^^^^^^^^^^
+
+```
+
+**Status.** The key and `target.runtime_profile` in stage 0, with the
+differences noted; the profiles' runtimes designed ([12](../../proposal/12-interop-and-targets.md#runtime-profiles));
+the `sim` profile a prototype of the experiment (D-070).
 
 ## Tasks, I/O and stacks
 
@@ -273,7 +301,8 @@ type C's layout, and `@export` makes a function callable from C
 ([R14](attributes.md#exported-functions)).
 
 **Stage 0 differs.** A native build makes an exported function a
-global symbol under its C name, called with Sisu's convention, the
+global symbol under its C name, whether or not the program calls it,
+called with Sisu's convention, the
 addresses of the result and of each argument and a status byte, rather
 than with C's values ([R14](attributes.md#exported-functions)).
 
@@ -325,7 +354,7 @@ information left out, are still to come. `Lazy[T]` is E0201
 | Code | Identifier | Section |
 |---|---|---|
 | [D0009](diagnostics.md#d0009) | `cli.unknown-option` | [Cross compilation](#cross-compilation) |
-| [W0005](diagnostics.md#w0005), E0971 | `package.unknown-key`, `sim.unmodelled-extern` | [Runtime profiles](#runtime-profiles) |
+| [E1003](diagnostics.md#e1003), [E1023](diagnostics.md#e1023), [W0005](diagnostics.md#w0005), E0971 | `package.bad-value`, `package.freestanding`, `package.unknown-key`, `sim.unmodelled-extern` | [Runtime profiles](#runtime-profiles) |
 | R0032 | `panic.stack-overflow` | [Tasks, I/O and stacks](#tasks-io-and-stacks) |
 | [E0201](diagnostics.md#e0201) | `resolve.undefined-type` | [Binary size and startup](#binary-size-and-startup) |
 | [D0111](diagnostics.md#d0111), D0103 | `native.release`, `native.unsupported` | [Where a program runs](#where-a-program-runs) |

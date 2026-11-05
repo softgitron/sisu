@@ -306,8 +306,8 @@ reflection exposes, only a struct's fields have theirs, as `doc`: an
 item's own `##` comment and a variant's fields' have no query, and the
 attributes of a function or a field none either
 ([R14](attributes.md#attributes-are-data)). The front end written in
-Rust has no `doc`, so a transcript, which runs on its build, fails for
-a program that reads one ([R15](testing.md#transcripts)).
+Rust has no `doc`, so the standard library's doc examples, which
+`sisu test --std` runs on it, do not read one.
 Reflection in a refinement's `where` clause or an `invariant` is E0900.
 
 **Status.** In stage 0 (D-018), with the differences noted.
@@ -580,10 +580,18 @@ one exception is a name that an import under `@cfg(target.os ==
 is not checked for it, since the build has no such name
 ([R13](modules.md#target-conditions)).
 
-**Status.** In stage 0; `target.runtime` is `interpreter` in every
-build. Stage 1 takes `--target-runtime native` for a native build, and
-the `sisu` command passes it from its next round
-([R22](targets.md#the-facts-of-the-target)).
+`target.runtime` is `native` in a native build and `interpreter`
+otherwise, and `target.runtime_profile` is the runtime profile of the
+package's manifest, `"full"` or `"single"`
+([R22](targets.md#runtime-profiles)).
+
+**Stage 0 differs.** An import under `@cfg(target.runtime ==
+"native")`, and a dependency whose `when` names the runtime, read
+`interpreter` in a native build too, since the packages and the imports
+are read before the build's options reach them; a body's `if comptime
+target.runtime == "native":` reads `native`.
+
+**Status.** In stage 0, with the difference noted.
 
 ## Conditional compilation and features
 

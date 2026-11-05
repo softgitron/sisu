@@ -1,10 +1,4 @@
-$ sisu check
-warning[W0005]: `runtime` is not a key of `[package]` that stage 0 knows; it is ignored
-  --> sisu.toml:5:1
-  |
-5 | runtime = "single"
-  | ^^^^^^^
-
+$ sisu run --native
 warning[W0005]: `panic` is not a key of `[profile.release]` that stage 0 knows; it is ignored
   --> sisu.toml:9:1
   |
@@ -17,3 +11,4 @@ warning[W0005]: `contracts` is not a key of `[profile.release-size]` that stage 
 12 | contracts = "off"
    | ^^^^^^^^^
 
+the stove runs on native, single

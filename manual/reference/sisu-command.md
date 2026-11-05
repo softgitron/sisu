@@ -305,9 +305,11 @@ Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` a
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
 lint` and `sisu audit --unsafe` are stage 1's alone, and the Rust front
 end refuses them. The other commands, and `run --watch` and
-`--defer-borrow`, `test --std` and `--defer-borrow`, a program's
-transcripts (its tests run on stage 1, D0128) and `check --diary`,
-use the Rust front end whichever you choose. `sisu
+`--defer-borrow`, `test --std` and `--defer-borrow`, and `check
+--diary` use the Rust front end whichever you choose. A program's
+transcripts run on the front end its tests run on, stage 1 unless you
+choose the Rust one (with a stage 1 older than 0.11.0, on the Rust
+front end, D0128). `sisu
 test` and `sisu bench` run stage 1 once for each program, and print its
 warnings once, before the report.
 
@@ -1423,17 +1425,14 @@ session (D0084 to D0091).
 The session reruns the script from the top for each input, with the
 capability log of the run before standing in for the world, so the
 earlier inputs neither print nor touch anything again. Stage 1 checks
-and lowers each input's program, as for `sisu run`, one run of it for
-each input, so an input takes every form a script takes. Its
-diagnostics are stage 1's as it writes them, with a place in the input
-drawn as `<input>` and a place in the session's program, the inputs
-kept before it, as `<repl>`; a file the session starts from is drawn
-under its own name. A panic names the line of the session's program,
-`<repl>:LINE`, in which each expression that shows its value, the one
-that panics among them, takes a line more than it was typed in; a
-session started from a file calls its program by the file's name
-instead, `repl.sisu:LINE`, with the lines still the session
-program's. The program stands in the working directory, so an input's
+and lowers each input's program, as for `sisu run`, and one process of
+it serves the whole session, so an input answers in about a twentieth
+of a second, and an input takes every form a script takes. Its
+diagnostics and its panics name each line by the input it came from: a
+line of the input being run as `<input>:LINE`, a line of the file the
+session starts from by the file's name and its own line, as
+`repl.sisu:3`, and a place among the other inputs kept before it as
+`<repl>`. The program stands in the working directory, so an input's
 `embed("notes.txt")` and a script's inline metadata name their files
 from where the session runs. `:why` asks stage 1 what each input binds,
 reads and changes (its own command `parse --bindings`, which `sisu
@@ -1513,6 +1512,36 @@ sisu> :back 1
 forgot the last inputs (1); the session keeps 5
 sisu> sizes
 [4, 10]
+sisu> 
+```
+
+An input that panics is not kept either. The panic's trace names the
+loaded file's function at the file's own line, and the input that
+called it as `<input>:1`:
+
+<!-- file: examples/reference-sisu-command/repl_panic.sisu -->
+```sisu
+# A function to call from the prompt, which panics on no people.
+def share(total: int, people: int) -> int:
+    return total // people
+```
+
+<!-- output: examples/reference-sisu-command/repl_panic.console -->
+```console
+$ sisu repl --echo repl_panic.sisu < repl_panic.stdin
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+sisu> share(90, 3)
+30
+sisu> share(90, 0)
+panic: division by zero
+  at share (repl_panic.sisu:3:12)
+  at main (<input>:1:1)
+the input did not run to its end, so the session is as it was before it
+sisu> let guests = [3]
+sisu> guests[2]
+panic: index out of bounds: the length is 1 but the index is 2
+  at main (<input>:1:1)
+the input did not run to its end, so the session is as it was before it
 sisu> 
 ```
 

@@ -1,3 +1,2 @@
-sisu.toml:5:1-5:8 W0005 package.unknown-key key="runtime" table="[package]"
 sisu.toml:9:1-9:6 W0005 package.unknown-key key="panic" table="[profile.release]"
 sisu.toml:12:1-12:10 W0005 package.unknown-key key="contracts" table="[profile.release-size]"

@@ -1,0 +1,11 @@
+# A promise that the function allocates nothing, which nothing checks.
+@no_alloc
+def total(readings: Array[int, 3]) -> int:
+    var sum = 0
+    for i in range(3):
+        sum += readings[i]
+    return sum
+
+def main():
+    let readings: Array[int, 3] = Array.filled(80)
+    print(total(readings))

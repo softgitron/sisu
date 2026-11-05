@@ -152,7 +152,11 @@ when its behaviour is an accident. A transcription that copied accidents
 would have made them rules that nobody chose.
 
 The front end has reached its fixed point: stage 1, compiled from its
-own SIR, prints the same SIR again, byte for byte. Since November 2026
+own SIR, prints the same SIR again, byte for byte. That is what the
+bootstrap compares, stage 1's SIR of itself with the SIR of the stage 1
+built from it; the Rust front end's SIR of stage 1, which falls behind
+as stage 1 gains rules, is compared too, and the difference is reported
+rather than failing the build. Since November 2026
 it is the front end of `sisu` (D-089), the Rust front end is frozen as
 an oracle that `--front-end=rust` still runs, and a new rule of the
 language is written in stage 1 alone, listed with its cases where it
@@ -230,11 +234,13 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
   against it. Meanwhile the commands that stage 1 does not serve yet,
-  such as `sisu test --std`, `sisu run --defer-borrow`, the language
-  server's worksheets and a program's transcripts, run the Rust front
-  end, which knows none of
-  the rules added since it was frozen: a transcript of a program that
-  uses one fails with the Rust front end's errors (D0128).
+  such as `sisu test --std`, `sisu run --defer-borrow` and the language
+  server's worksheets, run the Rust front end, which knows none of the
+  rules added since it was frozen: a doc example of the standard
+  library is written in the forms both front ends read. A program's
+  transcripts left that list when stage 1's `sir --tests` came to keep
+  the world they run in; until then a transcript of a program that used
+  a newer rule failed with the Rust front end's errors (D0128).
 - **The interpreter is slow.** It is fine for development, tests and an
   oracle, and not for users, which is why the native backend was built
   beside stage 1 rather than after it.

@@ -9276,7 +9276,7 @@ Shown in [R14](attributes.md#exported-functions).
 
 ## Packages and manifests
 
-Codes E1000 to E1022. The driver reads `sisu.toml`, `sisu.lock` and
+Codes E1000 to E1023. The driver reads `sisu.toml`, `sisu.lock` and
 the module tree of a package before anything is parsed, and reports a
 mistake at its place in the manifest ([R13](modules.md#the-manifest)).
 
@@ -9727,9 +9727,61 @@ $ sisu run app
 
 Shown in the guide [Call a C library](../guides/c-library.md).
 
+### E1023
+
+`package.freestanding`: the runtime profile `freestanding` has no
+runtime yet: this compiler's runtime schedules tasks, so a program is
+built for `full` or `single`.
+
+The manifest's `runtime` key chooses the runtime profile
+([R22](targets.md#runtime-profiles)), and `freestanding`, the profile
+without a scheduler, an allocator or unwinding, has no runtime in this
+compiler, so a package that asks for it is refused at the value.
+
+<!-- file: examples/reference-diagnostics/e1023_freestanding.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+runtime = "freestanding"
+```
+
+<!-- output: examples/reference-diagnostics/e1023_freestanding.console -->
+```console
+$ sisu check
+error[E1023]: the runtime profile `freestanding` has no runtime yet: this compiler's runtime schedules tasks, so a program is built for `full` or `single`
+  --> sisu.toml:5:11
+  |
+5 | runtime = "freestanding"
+  |           ^^^^^^^^^^^^^^
+
+```
+
+Ask for `single` for now, the runtime with one thread that every
+program of this compiler gets; the program reads its profile as
+`target.runtime_profile`.
+
+<!-- file: examples/reference-diagnostics/e1023_freestanding_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+runtime = "single"
+```
+
+<!-- output: examples/reference-diagnostics/e1023_freestanding_fixed.console -->
+```console
+$ sisu run
+kiuas on single
+```
+
+Shown in [R22](targets.md#runtime-profiles).
+
 ## Warnings
 
-Codes W0001 to W0029. A warning does not stop a program: `sisu run`
+Codes W0001 to W0030. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -10664,6 +10716,71 @@ Aino at 18
 ```
 
 Shown in [R14](attributes.md#preview-features).
+
+### W0030
+
+`resolve.unchecked-attribute`: `@{name}` is accepted and checked by
+nothing yet, so nothing ensures {what}.
+
+`@no_alloc`, `@no_block` and `@stack(...)` on a function promise what
+the compiler is to check ([R14](attributes.md#resource-limits)), and
+no check of them exists yet, so each warns at its name that the promise
+is the program's own to keep.
+
+<!-- file: examples/reference-diagnostics/w0030_unchecked_attribute.sisu -->
+```sisu
+# A promise that the function allocates nothing, which nothing checks.
+@no_alloc
+def total(readings: Array[int, 3]) -> int:
+    var sum = 0
+    for i in range(3):
+        sum += readings[i]
+    return sum
+
+def main():
+    let readings: Array[int, 3] = Array.filled(80)
+    print(total(readings))
+```
+
+<!-- output: examples/reference-diagnostics/w0030_unchecked_attribute.console -->
+```console
+$ sisu run w0030_unchecked_attribute.sisu
+warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+  --> w0030_unchecked_attribute.sisu:2:2
+  |
+2 | @no_alloc
+  |  ^^^^^^^^
+
+240
+```
+
+Keep the attribute if you want the check when it comes, and the warning
+with it until then; otherwise state the promise in the function's
+comment.
+
+<!-- file: examples/reference-diagnostics/w0030_unchecked_attribute_fixed.sisu -->
+```sisu
+# The promise kept in the function's comment until a check exists.
+
+## The sum of `readings`, which allocates nothing.
+def total(readings: Array[int, 3]) -> int:
+    var sum = 0
+    for i in range(3):
+        sum += readings[i]
+    return sum
+
+def main():
+    let readings: Array[int, 3] = Array.filled(80)
+    print(total(readings))
+```
+
+<!-- output: examples/reference-diagnostics/w0030_unchecked_attribute_fixed.out -->
+```text
+240
+```
+
+Shown in [R14](attributes.md#resource-limits) and the tutorial's
+[chapter 27](../tutorial/27-systems.md#exercise-273-an-audio-callback-without-allocation).
 
 ## Run time
 
@@ -11825,13 +11942,16 @@ explored 5 schedules (seeds 0 to 4): every run exited with status 0
 build of the program, which stops at errors stage 1 does not report:
 {diagnostics}.
 
-A program's transcripts run on the Rust front end's build of the
-program, the one build that has the world a transcript runs in, while
-its tests run on stage 1's ([R15](testing.md#transcripts)). The Rust
-front end is frozen and lacks the forms that stage 1 has gained since,
-such as `^` in a slice's bound, so a program that writes one passes its
-check and its tests, and each of its transcripts fails with the Rust
-front end's diagnostics. The status is 1.
+A program's transcripts run from the SIR that its tests run from,
+which stage 1 writes with the world a transcript runs in
+([R15](testing.md#transcripts)). They run on the Rust front end's build
+instead with a stage 1 older than 0.11.0, or when the environment
+variable `SISU_STAGE1_TRANSCRIPTS` is `0`, and then D0128 is what a
+program gets that writes a form the frozen Rust front end lacks, such as
+`^` in a slice's bound: it passes its check and its tests, and each of
+its transcripts fails with the Rust front end's diagnostics. The status
+is 1. With this compiler the program's transcript passes, so the
+session shows no D0128:
 
 <!-- file: examples/reference-diagnostics/d0128_transcript_front_end.sisu -->
 ```sisu
@@ -11850,21 +11970,12 @@ $ middle sauna kiuas löyly
 <!-- output: examples/reference-diagnostics/d0128_transcript_front_end.console -->
 ```console
 $ sisu test d0128_transcript_front_end.sisu
-transcript "tests/middle.transcript" ... FAILED
-
-transcript "tests/middle.transcript" ... FAILED
-a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:
-error[E0383]: `^` counts from the end and appears only inside an index, as in `xs[^1]`
-  --> d0128_transcript_front_end.sisu:4:19
-  |
-4 |     print(words[1:^1])
-  |                   ^^
-
-0 passed, 1 failed, 0 blocked
+transcript "tests/middle.transcript" ... ok
+1 passed, 0 failed, 0 blocked
 ```
 
-Until transcripts run on stage 1, write the forms that both front ends
-read in a program that has them: here the slice's end as
+Where D0128 still comes, write the forms that both front ends read in
+a program that has transcripts: here the slice's end as
 `len(words) - 1`.
 
 <!-- file: examples/reference-diagnostics/d0128_transcript_front_end_fixed.sisu -->
@@ -12383,6 +12494,7 @@ it. `sisu explain CODE` prints the same line.
 | E1020 | `package.unsafe-level` | the package `{package}` declares `unsafe = "memory"`, which allows no {what}: declare `unsafe = "extern"` |
 | [E1021](#e1021) | `package.unsafe-untrusted` | the dependency `{name}` declares `unsafe = "{level}"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it |
 | E1022 | `package.unsafe-raised` | `sisu.lock` records `{name}` with {old}, and it now declares `unsafe = "{level}"`: accept the change with `--accept-unsafe` |
+| [E1023](#e1023) | `package.freestanding` | the runtime profile `freestanding` has no runtime yet: this compiler's runtime schedules tasks, so a program is built for `full` or `single` |
 
 ### Warnings, every code
 
@@ -12413,6 +12525,7 @@ it. `sisu explain CODE` prints the same line.
 | [W0027](#w0027) | `lint.unused-import` | `{name}` is imported and not used in this file |
 | [W0028](#w0028) | `type.preview` | `{name}` is a preview, which may change or be removed before it is stable: {reason} |
 | [W0029](#w0029) | `type.preview-plain` | `{name}` is a preview, which may change or be removed before it is stable |
+| [W0030](#w0030) | `resolve.unchecked-attribute` | `@{name}` is accepted and checked by nothing yet, so nothing ensures {what} |
 
 ### Run time, every code
 

@@ -987,9 +987,10 @@ keep each key's `index`, which is unique while nothing is removed.
 A cycle is a package that the search meets again while it is still
 visiting that package's needs. Keep the packages being visited in a
 list, in order, and when the search meets one of them, the cycle is
-the end of that list from that package on. A `mut` parameter read
-inside a `for` loop over that same parameter is refused in stage 0;
-loop over its indices with `range` instead.
+the end of that list from that package on. A `for` loop with
+`enumerate` over that `mut` list gives each package with its position,
+and the loop may read the list too, so the cycle is a slice of it from
+that position on.
 
 </details>
 

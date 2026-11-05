@@ -339,6 +339,7 @@ and an unknown key is W0005, a warning, and is ignored. The tables:
 | `description`, `license` | text | recorded for the registry |
 | `unsafe` | `"memory"` or `"extern"`: the unsafe code the package holds | D-082; [`[trust]`](#trust) |
 | `authors`, `repository`, `readme`, `keywords` | data for the registry | accepted and kept for later |
+| `runtime` | the runtime profile: `"full"`, the default, `"single"` or `"freestanding"` | [R22](targets.md#runtime-profiles); [E1023](diagnostics.md#e1023) for `freestanding`, which has no runtime yet |
 | `profile` | the teaching profile | [The teaching profile](#the-teaching-profile) |
 
 ### `[dependencies]` and `[dev-dependencies]`
@@ -514,7 +515,17 @@ $ sisu run sauna
 the stove is on
 ```
 
-**Status.** In stage 0 (D-063).
+**Stage 0 differs.** The packages and the imports are read before the
+build's options reach them, so in a native build a `when` on `runtime`
+and an import's `@cfg` on `target.runtime` read `interpreter`, while a
+body's `if comptime` reads `native` ([R22](targets.md#the-facts-of-the-target)).
+An import under `@cfg(target.runtime == "native")` is then left out of
+a native build whose `native` branch uses it, and the build is not
+refused: the use stops the program with a panic, "entered unreachable
+code". Test `os` and `arch`, which both read alike, in an import's
+condition.
+
+**Status.** In stage 0 (D-063), with the difference noted.
 
 ## Features
 
@@ -834,7 +845,7 @@ C++ interop (Q-24).
 | W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
 | [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
-| E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
+| E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [E1023](diagnostics.md#e1023), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.freestanding`, `package.unknown-key` | [The manifest](#the-manifest) |
 | [E0276](diagnostics.md#e0276) | `resolve.dev-dependency` | [`[dependencies]` and `[dev-dependencies]`](#dependencies-and-dev-dependencies) |
 | [E1015](diagnostics.md#e1015), [E0703](diagnostics.md#e0703), [E1019](diagnostics.md#e1019), E1020, [E1021](diagnostics.md#e1021), E1022 | `package.trust-unknown`, `cap.untrusted`, `package.unsafe-undeclared`, `package.unsafe-level`, `package.unsafe-untrusted`, `package.unsafe-raised` | [`[trust]`](#trust) |
 | E1011, [E0275](diagnostics.md#e0275), [E0200](diagnostics.md#e0200) | `package.bad-when`, `resolve.dependency-excluded`, `resolve.undefined-name` | [Target conditions](#target-conditions) |

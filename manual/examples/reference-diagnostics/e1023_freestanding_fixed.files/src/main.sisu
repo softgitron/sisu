@@ -1,0 +1,3 @@
+# The kiuas's program, which needs no operating system.
+def main():
+    print("kiuas on {target.runtime_profile}")

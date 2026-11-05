@@ -163,37 +163,21 @@ usage: bill [OPTIONS] NAME...; `bill --help` lists them
 error: InvalidValue(name="--total", value="lots") (exit 1)
 ```
 
-`sisu test` runs it. For now it fails: a transcript runs on the build
-of the program that the compiler's front end written in Rust makes,
-which cannot make `cli.help_text` since the fields' `doc` came, and so
-stops at E0609 before any line runs:
+`sisu test` runs it, and every line matches:
 
 <!-- output: examples/guide-command-line/bill.console -->
 ```console
 $ sisu test bill.sisu
-transcript "tests/bill.transcript" ... FAILED
-
-transcript "tests/bill.transcript" ... FAILED
-a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:
-error[E0609]: making `help_text[Options]` stopped at compile time: a field is a compile-time value with no run-time form
-  --> bill.sisu:19:15
-   |
-19 |         print(cli.help_text[Options]())
-   |               ^^^^^^^^^^^^^^^^^^^^^^^^
-
-0 passed, 1 failed, 0 blocked
+transcript "tests/bill.transcript" ... ok
+1 passed, 0 failed, 0 blocked
 ```
 
-The transcript is right, and passes once transcripts run on the build
-that `sisu run` uses, the next round of the `sisu` command's. A program
-that does not call `cli.help_text` runs its transcripts today. You need
-not write the expected lines by hand. Write the `$` lines, run `sisu
+A transcript runs the program that the tests run, built by the same
+front end as `sisu run`'s, so `cli.help_text` and the fields' `doc` work
+in it as they do in a run. You need not write the expected lines by hand. Write the `$` lines, run `sisu
 test --update`, and read what it stored before you keep it;
 [Test a command-line tool](test-tool.md#4-review-a-change) shows the
 review.
 
 **Status.** In stage 0, as `std.x.cli`, which reads the struct by
-reflection where [11](../../proposal/11-stdlib.md) plans a derive. A
-transcript of a program that calls `cli.help_text` fails with E0609
-until transcripts run on the build of stage 1, the front end written in
-Sisu.
+reflection where [11](../../proposal/11-stdlib.md) plans a derive.

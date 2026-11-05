@@ -1,0 +1,7 @@
+$ sisu check
+error[E1023]: the runtime profile `freestanding` has no runtime yet: this compiler's runtime schedules tasks, so a program is built for `full` or `single`
+  --> sisu.toml:5:11
+  |
+5 | runtime = "freestanding"
+  |           ^^^^^^^^^^^^^^
+
