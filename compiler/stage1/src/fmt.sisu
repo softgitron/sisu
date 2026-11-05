@@ -157,7 +157,7 @@ test "unused imports stay, sorted, and the lint names them"(sys: System):
     expected.push("def main():\n    print(Duration.seconds(1))\n")
     assert formatted(src, catalog) == expected
     var names: list[String] = []
-    for d in prune.lints(src, catalog):
+    for d in prune.lints(src, [], catalog):
         names.push(d.param("name") ?? String.new())
     assert names == ["json", "n", "DateTime"]
 

@@ -1,0 +1,3 @@
+Taken(place=harbour, at: a Place, unit: one of Unit, value=-4)
+Missing()
+home: a Place, readings=3

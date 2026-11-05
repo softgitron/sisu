@@ -1,0 +1,10 @@
+# `case not 0:` is no pattern; the note says what a pattern says and how
+# to match the rest, where it said that `not` names no binding (RULES.md,
+# R101).
+def main():
+    let n = 3
+    match n:
+        case not 0:
+            print("not zero")
+        case _:
+            pass

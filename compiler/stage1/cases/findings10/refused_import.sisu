@@ -1,0 +1,10 @@
+# `sisu lint` reports an import the resolver refused once, by its error,
+# `E0204` for a name the module lacks and `E0220` for a module that does
+# not exist, where `W0027` followed each (RULES.md, R103); an import that
+# resolves and is not used is still `W0027`.
+import std.json
+import std.text
+from std.time import DateTime, Nothing
+
+def main():
+    print("hei")

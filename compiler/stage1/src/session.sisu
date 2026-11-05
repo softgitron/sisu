@@ -148,6 +148,141 @@ pure def bound_names(tree: Tree, text: str, stmt: int) -> list[String]:
                         break
     return out
 
+## What `:why NAME` reads of a session's input (`parse --bindings INPUT`,
+## RULES.md, R95), parsed as the statements of a script as `entry_of`
+## parses it: for each top-level statement or item, in order, a line `KIND
+## START END` (`let` for a `let` or `var`, `assign`, `expr`, `item` or
+## `other`, and its bytes in the input), then the lines that apply, each
+## indented by two spaces: `binds` and the names a `let` or `var` binds,
+## `initialiser` and the bytes of its value, `reads` and the names that
+## value reads, and `changes` and the names the statement may change (the
+## name an assignment's target starts from, or the one a method called in
+## an expression statement is called on).
+pub pure def bindings(input: str, catalog: Catalog) -> String:
+    let text = "{SHEBANG}{input}\n"
+    let shift = SHEBANG.byte_len()
+    let parsed = parse(text, catalog)
+    let tree = ref parsed.tree
+    var out = String.new()
+    for stmt in top_level(tree):
+        let node = ref tree.nodes[stmt]
+        var kind = "other"
+        if node.kind == SyntaxKind.LetStmt:
+            kind = "let"
+        elif node.kind == SyntaxKind.AssignStmt:
+            kind = "assign"
+        elif node.kind == SyntaxKind.ExprStmt:
+            kind = "expr"
+        elif is_item(node.kind):
+            kind = "item"
+        let end = min(node.end - shift, input.byte_len())
+        out.push("{kind} {max(node.start - shift, 0)} {max(end, 0)}\n")
+        let binds = bound_names(tree, text, stmt)
+        if not binds.is_empty():
+            out.push("  binds {binds.join(" ")}\n")
+        if let Some(init) = initialiser(tree, stmt):
+            let at = ref tree.nodes[init]
+            let init_end = min(at.end - shift, input.byte_len())
+            out.push("  initialiser {at.start - shift} {init_end}\n")
+            let reads = names_read(tree, text, init)
+            if not reads.is_empty():
+                out.push("  reads {reads.join(" ")}\n")
+        let changed = changes(tree, text, stmt)
+        if not changed.is_empty():
+            out.push("  changes {changed.join(" ")}\n")
+    return out
+
+## Where each top-level expression statement of a worksheet starts, whose
+## value the worksheet shows (RULES.md, R103).
+pub pure def shown_statements(sheet: str, catalog: Catalog) -> list[int]:
+    let parsed = parse(sheet, catalog)
+    var out: list[int] = []
+    for stmt in top_level(parsed.tree):
+        if parsed.tree.nodes[stmt].kind == SyntaxKind.ExprStmt:
+            out.push(parsed.tree.nodes[stmt].start)
+    return out
+
+## The value of a `let` or `var`: its first node after the `=`.
+pure def initialiser(tree: Tree, stmt: int) -> int?:
+    if tree.nodes[stmt].kind != SyntaxKind.LetStmt:
+        return None
+    var after: int? = None
+    for e in tree.nodes[stmt].children:
+        match e:
+            case Element.Leaf(t):
+                if tree.tokens[t].kind == SyntaxKind.Eq and after.is_none():
+                    after = Some(tree.tokens[t].end)
+            case Element.Node(c):
+                if let Some(at) = after:
+                    if tree.nodes[c].start >= at:
+                        return Some(c)
+    return None
+
+## The text of a node's first `Ident` token among its children.
+pure def ident_of(tree: Tree, text: str, n: int) -> String?:
+    for x in tree.nodes[n].children:
+        if let Element.Leaf(t) = x:
+            if tree.tokens[t].kind == SyntaxKind.Ident:
+                return Some(text.byte_slice(tree.tokens[t].start, tree.tokens[t].end).to_string())
+    return None
+
+## The first node among a node's children.
+pure def first_node(tree: Tree, n: int) -> int?:
+    for x in tree.nodes[n].children:
+        if let Element.Node(c) = x:
+            return Some(c)
+    return None
+
+## The names an expression reads, each once, in order.
+pure def names_read(tree: Tree, text: str, n: int) -> list[String]:
+    var out: list[String] = []
+    for c in tree.preorder(n):
+        if tree.nodes[c].kind == SyntaxKind.NameRef:
+            if let Some(name) = ident_of(tree, text, c):
+                if not out.contains(name.copy()):
+                    out.push(name)
+    return out
+
+## The name a place starts from: `xs` of `xs[0].count`.
+pure def root_name(tree: Tree, text: str, n: int) -> String?:
+    var cur = n
+    while True:
+        match tree.nodes[cur].kind:
+            case SyntaxKind.NameRef:
+                return ident_of(tree, text, cur)
+            case SyntaxKind.FieldExpr | SyntaxKind.IndexExpr:
+                let next = first_node(tree, cur) else:
+                    return None
+                cur = next
+            case _:
+                return None
+
+## The names a statement may change: an assignment's target's, or each
+## that a method called in an expression statement is called on.
+pure def changes(tree: Tree, text: str, stmt: int) -> list[String]:
+    var out: list[String] = []
+    match tree.nodes[stmt].kind:
+        case SyntaxKind.AssignStmt:
+            if let Some(target) = first_node(tree, stmt):
+                if let Some(name) = root_name(tree, text, target):
+                    out.push(name)
+        case SyntaxKind.ExprStmt:
+            for c in tree.preorder(stmt):
+                if tree.nodes[c].kind != SyntaxKind.CallExpr:
+                    continue
+                let callee = first_node(tree, c) else:
+                    continue
+                if tree.nodes[callee].kind != SyntaxKind.FieldExpr:
+                    continue
+                let receiver = first_node(tree, callee) else:
+                    continue
+                if let Some(name) = root_name(tree, text, receiver):
+                    if not out.contains(name.copy()):
+                        out.push(name)
+        case _:
+            pass
+    return out
+
 ## The 1-based line of byte `at`.
 pure def line_of(text: str, at: int) -> int:
     return count_breaks(text.byte_slice(0, at)) + 1
@@ -181,6 +316,12 @@ test "a worksheet's statements are marked by the line they end on"(sys: System):
     assert out.starts_with(
         "{SHEBANG}__ws_at(1)\nlet x = 3\n__ws_show(1, x)\n__ws_at(2)\n__ws_show(2, x * 2)\ndef f():\n    pass\n"
     )
+
+test "an input's bindings: what it binds, reads and changes"(sys: System):
+    let catalog = test_catalog(sys)
+    let out = bindings("let x, y = (a + 1, b)\nxs.push(3)\nn = 4\ndef f():\n    pass", catalog)
+    assert out
+        == "let 0 22\n  binds x y\n  initialiser 11 21\n  reads a b\nexpr 22 33\n  changes xs\nassign 33 39\n  changes n\nitem 39 56\n"
 
 def test_catalog(sys: System) -> Catalog:
     let text = sys.fs.read_to_string(Path.new("../catalog/messages.catalog")) else:

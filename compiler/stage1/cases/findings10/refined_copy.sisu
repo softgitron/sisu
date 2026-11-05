@@ -1,0 +1,9 @@
+# E0812 notes that a copy of a refined value is refined too, and gives the
+# copy that is typed as the base (07; RULES.md, R99): `picks.copy()` is a
+# `Picks` again, which E0812 refuses to change through its base.
+type Picks = list[int] where len(self) <= 3
+
+def main():
+    var picks = Picks.try_from([1, 2]).expect("two picks")
+    picks.push(3)
+    print(picks)

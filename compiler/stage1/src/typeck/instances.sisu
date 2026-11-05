@@ -143,6 +143,23 @@ impl Resolver:
                             return Some(f.copy())
         return None
 
+    ## The structs and enums a module's names reach, its own and those it
+    ## imports, each name and whether it is a struct, which a derive sees
+    ## as the kinds of its fields' types (RULES.md, R96).
+    pure def own_type_kinds(self, module: ModuleId) -> list[(String, bool)]:
+        var out: list[(String, bool)] = []
+        if module.index >= len(self.prog.modules):
+            return out
+        for (name, d) in self.prog.modules[module.index].items.items():
+            match self.prog.def(d).kind():
+                case DefKind.Struct(_):
+                    out.push((name.copy(), True))
+                case DefKind.Enum(_) | DefKind.ErrorSet(_):
+                    out.push((name.copy(), False))
+                case _:
+                    pass
+        return out
+
     ## The derived impls of the structs and enums among `items` (stage 0's
     ## `declare_derived`): each `@derive`d trait's, `PartialOrd` with `Ord`,
     ## and `Debug` for every type without its own, unfolded from the trait's
@@ -316,11 +333,12 @@ impl Resolver:
                     for x in a.args:
                         args.push(self.text_in(module, x.range))
                     attrs.push((a.name.copy(), args))
-                # A struct's fields' types as written (RULES.md, R92).
+                # The fields' types as written, a struct's or the
+                # variants' (RULES.md, R92 and R96).
                 var field_types: list[TypeShape] = []
-                if is_struct:
-                    for ft in field_tys:
-                        field_types.push(written_shape(self.sources[module.index].ast, ft))
+                let kinds = self.own_type_kinds(module)
+                for ft in field_tys:
+                    field_types.push(written_shape(self.sources[module.index].ast, ft, kinds))
                 let target = Target(
                     name=name.copy(),
                     written=written,

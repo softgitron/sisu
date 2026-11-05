@@ -1,0 +1,6 @@
+# Python's `sum(p * p for p in primes)`: a generator expression keeps its
+# own parentheses, also as a call's only argument (02; RULES.md, R101),
+# which the note says and the fix writes.
+def main():
+    let primes = [2, 3, 5]
+    print(sum(p * p for p in primes))

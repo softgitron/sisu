@@ -1,0 +1,4 @@
+﻿# A byte-order mark at the start of a file is named as one, with the fix
+# that removes it (RULES.md, R100).
+def main():
+    print("hei")

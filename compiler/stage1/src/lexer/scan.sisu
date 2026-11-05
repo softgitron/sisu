@@ -8,7 +8,7 @@
 from stage1.diag import Diagnostic, Edit, Msg
 from stage1.syntax.kinds import KEYWORDS, PUNCTUATION, SyntaxKind
 from stage1.syntax.tree import Token
-from stage1.text import char_at, is_alphanumeric
+from stage1.text import char_at, hex, is_alphanumeric
 
 ## Where the scanner is.
 @derive(Eq, Debug, Copy)
@@ -518,7 +518,21 @@ impl Scanner:
             length -= 1
         let c = char_at(self.text, start)
         self.pos += c.len_utf8()
-        self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "{c}")
+        # A character that shows as nothing or as a space is written as its
+        # escape and named, with the fix that writes a space or removes it
+        # (RULES.md, R100).
+        match invisible(c.code(), start == 0):
+            case Some((name, space)):
+                var d = Diagnostic.new(Msg.LexUnknownCharacter, start, self.pos)
+                d = d.with("char", "\\u{{{hex(c.code())}}}")
+                d = d.note_with(Msg.LexInvisibleCharacter, "name", name)
+                if space:
+                    d = d.fix_at(Msg.LexWriteSpace, start, self.pos, " ")
+                else:
+                    d = d.fix_at(Msg.LexRemoveCharacter, start, self.pos, "")
+                self.diags.push(d)
+            case None:
+                self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "{c}")
         self.push(SyntaxKind.ErrorToken, start)
 
     ## The operator or punctuation spelled by the `length` bytes at the
@@ -565,3 +579,41 @@ pure def is_suffix(text: str) -> bool:
         if s == text:
             return True
     return False
+
+## The name of a character that shows as nothing or as a space, which a
+## message cannot show as it is, with how it shows, and whether a space is
+## what was meant (a space of another kind) or nothing (a mark of width
+## zero); `None` for any other. A byte-order mark at the start of a file is
+## named as one (RULES.md, R100).
+pure def invisible(n: int, at_start: bool) -> (String, bool)?:
+    if n == 0xFEFF and at_start:
+        return Some(("a byte-order mark, which UTF-8 text does not need".to_string(), False))
+    let space = match n:
+        case 0xA0: "a no-break space"
+        case 0x1680: "an ogham space mark"
+        case 0x202F: "a narrow no-break space"
+        case 0x205F: "a mathematical space"
+        case 0x3000: "an ideographic space"
+        case 0x2028: "a line separator"
+        case 0x2029: "a paragraph separator"
+        case _: ""
+    if not space.is_empty():
+        return Some(("{space}, which looks like a space".to_string(), True))
+    if n >= 0x2000 and n <= 0x200A:
+        return Some(("a space of another width, which looks like a space".to_string(), True))
+    var mark = match n:
+        case 0xAD: "a soft hyphen"
+        case 0xFEFF: "a zero-width no-break space"
+        case 0x200B: "a zero-width space"
+        case 0x200C: "a zero-width non-joiner"
+        case 0x200D: "a zero-width joiner"
+        case 0x2060: "a word joiner"
+        case 0x180E: "a Mongolian vowel separator"
+        case _: ""
+    if (n >= 0x200E and n <= 0x200F)
+            or (n >= 0x202A and n <= 0x202E)
+            or (n >= 0x2066 and n <= 0x2069):
+        mark = "a mark of the text's direction"
+    if not mark.is_empty():
+        return Some(("{mark}, which shows as nothing".to_string(), False))
+    return None

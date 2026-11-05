@@ -1,0 +1,15 @@
+# A trait's constant written as a method, `def MAX_HEAT(self)`, is `E0268`
+# with a note that a name in capitals is a constant's, where its fix renamed
+# the method `max_heat` and left the constant missing (RULES.md, R101).
+trait Heat:
+    const MAX_HEAT: int
+
+struct Stove:
+    level: int
+
+impl Heat for Stove:
+    def MAX_HEAT(self) -> int:
+        return 3
+
+def main():
+    print(Stove(level=1).level)

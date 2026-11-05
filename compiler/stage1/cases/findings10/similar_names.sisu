@@ -1,0 +1,18 @@
+# A misspelt constant of a trait gets the trait's constant with a similar
+# name, as a misspelt parameter's name gets the parameter's (RULES.md,
+# R97): `WARMUP` where the trait declares `WARM_UP`.
+trait Sauna:
+    const WARM_UP: int
+    def heat(self) -> int
+
+struct Kiuas:
+    level: int
+
+impl Sauna for Kiuas:
+    const WARMUP: int = 20
+
+    def heat(self) -> int:
+        return self.level
+
+def main():
+    print(Kiuas(level=3).heat())

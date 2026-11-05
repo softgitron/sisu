@@ -46,6 +46,9 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                             # `pure` function may not (06, "Effects";
                             # RULES.md, R28), its `load` too.
                             var atomic = False
+                            # An iterator's adapter, `map`, which takes any
+                            # function (RULES.md, R102).
+                            var adapter = False
                             match callee:
                                 # A `comptime` expression is a value by the
                                 # time the program runs; the compiler ran it.
@@ -57,6 +60,7 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                                             comptime_ = True
                                         if not c.pure and not comptime_:
                                             impure = Some(display_fn(n))
+                                            adapter = is_adapter(n)
                                 case Callee.Trait(n, _):
                                     if let Some(d) = types.trait_method(p, n):
                                         if not d.pure:
@@ -102,6 +106,8 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                                 ).at(b, si)
                                 if atomic:
                                     found = found.note(Msg.TypeObservesSchedule, [])
+                                if adapter:
+                                    found = found.note(Msg.TypePureAdapter, [text("callee", c)])
                                 out.push(found)
                         # Dropping a value runs its `Drop`, which must be pure
                         # too.
@@ -192,3 +198,15 @@ pure def last_dot(s: str) -> int?:
             return Some(i)
         i -= 1
     return None
+
+## Whether a function is an adapter of `Iterator`, whose `next` calls the
+## function it was given, which may be any (03, "Function types"; RULES.md,
+## R102): `Iterator.map`.
+pure def is_adapter(n: str) -> bool:
+    if not n.starts_with("Iterator."):
+        return False
+    let method = last_part(n)
+    return match method:
+        case "map" | "filter" | "filter_map" | "flat_map" | "take_while" | "skip_while": True
+        case "inspect" | "map_while" | "scan": True
+        case _: False

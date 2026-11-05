@@ -17,6 +17,9 @@ pub enum Msg:
     LexUnterminatedString
     LexUnterminatedBlockString
     LexUnknownCharacter
+    LexInvisibleCharacter
+    LexWriteSpace
+    LexRemoveCharacter
     LexUnterminatedChar
     LexInvalidEscape
     LexUnmatchedClose
@@ -103,6 +106,14 @@ pub enum Msg:
     TypeFloatSuffix
     TypeMixedNumbers
     TypeConvertToFloat
+    ResolveCfgTarget
+    TypePureAdapter
+    ResolveConstAsMethod
+    TypeDeriveTraitFor
+    TypeOperatorTraitLeft
+    TypeBigIntLiteral
+    TypeLendIt
+    TypeConvertToInt
     TypeBinaryOperator
     TypeInterpolate
     TypeUnaryOperator
@@ -331,6 +342,7 @@ pub enum Msg:
     TypeSpecLetters
     TypeMethodOfTraits
     RefineUseTryFrom
+    RefineCopyAsBase
     ResolveDefaultInFunction
     ResolveRenameDuplicate
     ResolveWriteTraitMethod
@@ -532,6 +544,8 @@ pub enum Msg:
     ResolveDeriveImport
     TypeDerivedCode
     ParseKeywordName
+    ParsePatternNot
+    ParseGeneratorParens
     ParseNoExceptions
     ParseGoTask
     TypeVarHoldsBorrow
@@ -584,6 +598,9 @@ impl Msg:
             case LexUnterminatedString: "lex.unterminated-string"
             case LexUnterminatedBlockString: "lex.unterminated-block-string"
             case LexUnknownCharacter: "lex.unknown-character"
+            case LexInvisibleCharacter: "lex.invisible-character"
+            case LexWriteSpace: "lex.write-space"
+            case LexRemoveCharacter: "lex.remove-character"
             case LexUnterminatedChar: "lex.unterminated-char"
             case LexInvalidEscape: "lex.invalid-escape"
             case LexUnmatchedClose: "lex.unmatched-close"
@@ -670,6 +687,14 @@ impl Msg:
             case TypeFloatSuffix: "type.float-suffix"
             case TypeMixedNumbers: "type.mixed-numbers"
             case TypeConvertToFloat: "type.convert-to-float"
+            case ResolveCfgTarget: "resolve.cfg-target"
+            case TypePureAdapter: "type.pure-adapter"
+            case ResolveConstAsMethod: "resolve.const-as-method"
+            case TypeDeriveTraitFor: "type.derive-trait-for"
+            case TypeOperatorTraitLeft: "type.operator-trait-left"
+            case TypeBigIntLiteral: "type.bigint-literal"
+            case TypeLendIt: "type.lend-it"
+            case TypeConvertToInt: "type.convert-to-int"
             case TypeBinaryOperator: "type.binary-operator"
             case TypeInterpolate: "type.interpolate"
             case TypeUnaryOperator: "type.unary-operator"
@@ -895,6 +920,7 @@ impl Msg:
             case TypeSpecLetters: "type.spec-letters"
             case TypeMethodOfTraits: "type.method-of-traits"
             case RefineUseTryFrom: "refine.use-try-from"
+            case RefineCopyAsBase: "refine.copy-as-base"
             case ResolveDefaultInFunction: "resolve.default-in-function"
             case ResolveRenameDuplicate: "resolve.rename-duplicate"
             case ResolveWriteTraitMethod: "resolve.write-trait-method"
@@ -1089,6 +1115,8 @@ impl Msg:
             case ResolveDeriveImport: "resolve.derive-import"
             case TypeDerivedCode: "type.derived-code"
             case ParseKeywordName: "parse.keyword-name"
+            case ParsePatternNot: "parse.pattern-not"
+            case ParseGeneratorParens: "parse.generator-parens"
             case ParseNoExceptions: "parse.no-exceptions"
             case ParseGoTask: "parse.go-task"
             case TypeVarHoldsBorrow: "type.var-holds-borrow"

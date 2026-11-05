@@ -18,7 +18,7 @@ from stage1.text import is_alphanumeric
 
 ## The imports to remove: whole `import` and `from` items, and single
 ## names (`IMPORT_NAME` nodes) of a `from` item that keeps others.
-pub pure def unused(src: Src) -> set[int]:
+pub pure def unused(src: Src, refused: list[(int, int)]) -> set[int]:
     var imports: list[int] = []
     for n in src.child_nodes(src.tree.root):
         match src.kind(n):
@@ -49,6 +49,18 @@ pub pure def unused(src: Src) -> set[int]:
     for n in imports:
         if src.first_child(n, SyntaxKind.Visibility).is_some() or has_comment(src, n):
             continue
+        # An import the resolver refused is reported by its error
+        # (RULES.md, R103): a name it refused counts as used, and so does
+        # the whole import when its path was refused.
+        let node = ref src.tree.nodes[n]
+        var path_refused = overlaps(refused, node.start, node.end)
+        for c in src.child_nodes(n):
+            if src.kind(c) == SyntaxKind.ImportName:
+                let name = ref src.tree.nodes[c]
+                if overlaps(refused, name.start, name.end):
+                    path_refused = False
+        if path_refused:
+            continue
         if src.kind(n) == SyntaxKind.ImportItem:
             if let Some(b) = binding(src, n):
                 if not used.contains(b):
@@ -60,10 +72,18 @@ pub pure def unused(src: Src) -> set[int]:
                 names.push(c)
         var gone: list[int] = []
         for c in names:
+            let name = ref src.tree.nodes[c]
+            if overlaps(refused, name.start, name.end):
+                continue
             if let Some(b) = binding(src, c):
                 if not used.contains(b):
                     gone.push(c)
-        if not names.is_empty() and len(gone) == len(names):
+        var refused_names = 0
+        for c in names:
+            let name = ref src.tree.nodes[c]
+            if overlaps(refused, name.start, name.end):
+                refused_names += 1
+        if not names.is_empty() and refused_names == 0 and len(gone) == len(names):
             _ = out.add(n)
         else:
             for c in gone:
@@ -133,7 +153,7 @@ pure def has_comment(src: Src, n: int) -> bool:
 ## The unused imports of a file that parses, each `lint.unused-import` at
 ## its name with the fix that removes it: the whole import, or the name and
 ## its comma in a `from` that keeps others (RULES.md, R87).
-pub pure def lints(text: str, catalog: Catalog) -> list[Diagnostic]:
+pub pure def lints(text: str, refused: list[(int, int)], catalog: Catalog) -> list[Diagnostic]:
     var out: list[Diagnostic] = []
     let parsed = parse(text, catalog)
     for d in parsed.diagnostics:
@@ -141,7 +161,7 @@ pub pure def lints(text: str, catalog: Catalog) -> list[Diagnostic]:
             return out
     let whole: str = parsed.tree.text
     let src = Src(tree=ref parsed.tree, text=whole)
-    let gone = unused(src)
+    let gone = unused(src, refused)
     var nodes: list[int] = []
     for n in gone:
         nodes.push(n)
@@ -175,3 +195,10 @@ pub pure def lints(text: str, catalog: Catalog) -> list[Diagnostic]:
         let d = Diagnostic.new(Msg.LintUnusedImport, node.start, node.end).with("name", name)
         out.push(d.fix_edits(Msg.LintRemoveImport, [Edit(start=start, end=end, text=String.new())]))
     return out
+
+## Whether a span of `spans` overlaps `start..end`.
+pure def overlaps(spans: list[(int, int)], start: int, end: int) -> bool:
+    for (a, b) in spans:
+        if a < end and start < b:
+            return True
+    return False

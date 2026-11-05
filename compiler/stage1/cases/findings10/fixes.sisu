@@ -1,0 +1,51 @@
+# The fixes and notes the manual's writers found missing (RULES.md, R101):
+# a value lent to a `ref dyn Trait` parameter; a loop's `ref int` where a
+# refinement of `int` goes, which `try_from` makes; an integer literal
+# beyond `int`, which a `BigInt` holds; a number on the left of a type of
+# the program's own; a derive that goes to a type argument, which the fix
+# names; and a type nothing declares, `Deque[int]()`, reported once.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    cents: int
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return self.cents
+
+def total(item: ref dyn Priced) -> int:
+    return item.price()
+
+type Percent = int where 0 <= self <= 100
+
+def show(p: Percent):
+    print(p)
+
+struct Step:
+    size: f64
+
+impl Mul[f64] for Step:
+    type Output = Step
+
+    def mul(self, k: f64) -> Step:
+        return Step(size=self.size * k)
+
+@derive(Eq)
+struct Pair[T]:
+    a: T
+    b: T
+
+struct Plain:
+    v: int
+
+def main():
+    let b = Bun(cents=3)
+    print(total(b))
+    for x in [1, 2]:
+        show(x)
+    let big = 123456789012345678901234567890
+    let step = Step(size=1.0)
+    print((3.0 * step).size)
+    print(Pair(a=Plain(v=1), b=Plain(v=2)) == Pair(a=Plain(v=1), b=Plain(v=2)))
+    let d = Deque[int]()
