@@ -1,0 +1,4 @@
+# RULES.md, R122: `freestanding` has no runtime yet (`E1023`).
+
+def main():
+    print("booted")

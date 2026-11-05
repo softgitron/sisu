@@ -1,0 +1,19 @@
+# RULES.md, R124: a loop over a `mut` parameter may read it, and a method
+# call on it may take its length: a read of a `mut` parameter is a shared
+# reborrow of what it refers to (known over-rejection 15).
+
+def walk(mut path: list[int]) -> int:
+    var total = 0
+    for i, k in enumerate(path):
+        total += (i + k) * len(path)
+    path.push(total)
+    return total
+
+def add(mut xs: list[int]):
+    xs.push(len(xs))
+
+def main():
+    var p = [1, 2, 3]
+    print("{walk(mut p)} {p}")
+    add(mut p)
+    print("{p}")

@@ -19,8 +19,9 @@
 # differ where a rule of RULES.md changes stage 1's lowering (R124, the
 # shared reborrow of a `mut` parameter), and `check.sh`'s class `self`
 # lists the difference under its rule as any other. It prints the size and
-# SHA-256 of each file, and exits non-zero when A.sir and B.sir, or
-# stage1-A and stage1-B, differ.
+# SHA-256 of each file, and exits non-zero when A.sir and B.sir differ, or
+# stage1-A and stage1-B do while A.sir is stage 0's SIR (stage1-A is built
+# from stage 0's SIR, stage1-B from A.sir).
 #
 # Usage: compiler/stage1/bootstrap.sh [--keep DIR]
 #
@@ -124,12 +125,19 @@ verdict() {
     fi
 }
 verdict "the SIR, A.sir and B.sir" "$work/A.sir" "$work/B.sir"
-verdict "the executables, stage1-A and stage1-B" "$work/stage1-A" "$work/stage1-B"
 # A report, not a verdict (RULES.md, R124): stage 0's front end is frozen.
+# stage1-A is built from stage 0's SIR and stage1-B from A.sir, so the two
+# executables are the same bytes only when those SIRs are.
 if same "$work/A.sir" "$work/stage0.sir"; then
     echo "stage 1's SIR and stage 0's, A.sir and sisu sir: identical"
+    verdict "the executables, stage1-A and stage1-B" "$work/stage1-A" "$work/stage1-B"
 else
     echo "stage 1's SIR and stage 0's, A.sir and sisu sir: differs from stage 0, as the rules list"
+    if same "$work/stage1-A" "$work/stage1-B"; then
+        echo "the executables, stage1-A and stage1-B: identical"
+    else
+        echo "the executables, stage1-A and stage1-B: differ, as A.sir and stage 0's SIR do"
+    fi
 fi
 if [ "$failed" = 0 ]; then
     echo "the fixed point holds"

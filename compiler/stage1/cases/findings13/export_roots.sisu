@@ -1,0 +1,13 @@
+# RULES.md, R120: an `@export`ed function is written in the SIR's `export`
+# line after the entry, and kept whether or not `main` calls it, as the
+# Rust lowering does (decision 683).
+
+@export("sisu_area")
+def area(width: int, height: int) -> int:
+    return width * side(height)
+
+def side(n: int) -> int:
+    return n
+
+def main():
+    print("ready")

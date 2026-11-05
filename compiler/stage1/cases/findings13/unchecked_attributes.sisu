@@ -1,0 +1,15 @@
+# RULES.md, R121: `@no_alloc`, `@no_block` and `@stack(...)` compile, and
+# nothing checks them yet, which each function that has one is told
+# (decision 693); `@no_panic` comes after 0.1 (D-059) and is not one.
+
+@no_alloc
+def add(a: int, b: int) -> int:
+    return a + b
+
+@no_block
+@stack(max=4096)
+def step(n: int) -> int:
+    return add(n, 1)
+
+def main():
+    print("{step(1)}")

@@ -26,7 +26,7 @@ printed once
 [2, 3]
 ## 10
 panic: index out of bounds: the length is 4 but the index is 10
-  at main (<repl>:14:1)
+  at main (<input>:1:1)
 (not kept)
 ## 11
 error[E0202]: `double` is defined more than once in this module

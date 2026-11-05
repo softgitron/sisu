@@ -2444,6 +2444,48 @@ Stage 1's version is 0.10.0: the driver may rely on `sir --repl-serve`
 and `--target-runtime` (RULES.md, R112 and R116). The new cases are in
 `cases/findings12/`.
 
+### The thirteenth round: what stage 0's eleventh round asks, the base cache, over-rejection 15, the open items
+
+This round took what stage 0's eleventh round left to stage 1 (decisions
+683, 687, 690, 693 and 694), the base cache (decision 641), the call on
+known over-rejection 15 and the bootstrap's comparison with stage 0, and
+the twelfth round's open items. RULES.md has the rules (R120 to R126,
+decisions 740 to 746) and their decision texts:
+
+- **`@export` and transcripts** (R120): `sir` writes `export "SYMBOL"
+  FUNCTION` after the entry and lowers the function as a root; `sir
+  --tests` of a program with transcripts keeps `transcript_world` and
+  `transcript_system`.
+- **Attributes nothing checks** (R121): `@no_alloc`, `@no_block` and
+  `@stack(...)` are `W0030`.
+- **The runtime profile** (R122): `[package] runtime`, `full`, `single`,
+  or `freestanding`, which is `E1023`; `runtime single` in the SIR after
+  the entry; `target.runtime_profile`.
+- **The REPL's lines** (R123): a loaded file's functions at the file's
+  own lines, a typed input's at `<input>`'s.
+- **Over-rejection 15** (R124): a read of a `mut` parameter is a shared
+  reborrow, `ref _1.*`, so a loop over it may read it; `bootstrap.sh`
+  reports how `A.sir` compares with stage 0's and fails only when the
+  fixed point does not hold.
+- **The base cache** (R125): its form 2 keeps which importable modules
+  hold templates and `unsafe` code; a std text's lines are found when
+  lowering reaches it. `check` of a two-line program: 4.64 G instructions
+  before, 4.15 G after; what dominates is the parse of what the base
+  declares (below, "Starting up").
+- **The open items** (R126): `E0258` alone for a private field of
+  another module's struct.
+
+Decided against: a cache of the collected items themselves (R125),
+`TotalF64` as a key and `Lookup`'s doc example by `str` (R126). Open: the
+label at an unrolled template's line, an item's own `##` in reflection,
+and `@cfg` on an import and `when` under `--target-runtime` (R126).
+
+Stage 1's version is 0.11.0: the driver may rely on the SIR's `export`
+and `runtime` lines and on `sir --tests` keeping the world of transcripts
+(RULES.md, R120 and R122). The new cases are in `cases/findings13/`,
+`cases/packages/` (`private_field_hole`, `runtime_single`,
+`runtime_freestanding`) and `cases/repl/loaded_panic.repl`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3088,6 +3130,21 @@ three items stay where they were: each is a few per cent of a batch at
 most, less than the machine's speed varies from one run to the next, and
 each a change to what an input carries through the driver.
 
+The thirteenth round measured the batches again (`check.sh --native`, on
+four cores that other work kept at a load of 3 to 11): `types-batch` of
+the 549 programs of `types.list` 7.9 s, `sir-batch` of `sir.list` 23.9 s
+(the front end 7 s, lowering 6 s, the ownership checker and the writing
+of the SIR 8 s), `check-batch` of the corpus 24.4 s, `doc-batch` 47.9 s,
+the behaviour's batch 22.8 s, stage 1 over its own package (`names`,
+`types`, `sir --partial`) 76 s, and the whole native run 21 minutes. A
+batch makes its base whole once, so R125's cache does not reach it; the
+catalog's read and the lexer's lookup of punctuation do, by less than the
+runs vary. What remains is what the items below name: the base's
+resolver copied for each program, each module parsed again by each pass,
+and the lexer and the parser themselves, which a batch pays for every
+program's text and every command for the base's (above; and below,
+"Starting up").
+
 ### Starting up
 
 A command of stage 1 that checks one program (`check`, `sir`, `build`,
@@ -3147,6 +3204,24 @@ call of the interpreter and of the native runtime, `Fs.rename`), after
 which `write_base_cache` writes `base-ID.cache.PID` and renames it. The
 sixth round does: the cache is written aside, `base-ID.cache.N.aside`,
 and renamed over the old one (decision 420).
+
+The thirteenth round measured a cached `check --format=ids` of a
+two-line file under callgrind (the cache written under valgrind first,
+since the running executable names it): 4.64 G instructions, 4.11 G of
+them `base_of`. Of the base, 1.94 G is lexing and parsing what it declares
+(the prelude, the ambient modules, `target`, `builtin_impls` and the text
+of the derived impls; the lexer 1.03 G, about 3,500 instructions a byte),
+0.56 G building their ASTs, 0.37 G resolving them and 0.15 G checking the
+traits, with the copies and drops of the values throughout; outside the
+base, the message catalog took 0.30 G (each line split into all its
+words) and the lines of every std text 0.15 G. R125 keeps in the cache
+which importable modules hold templates and `unsafe` code (0.14 G of text
+searches), finds a std text's lines when lowering first reaches it, reads
+a catalog line's first four words alone and looks punctuation up by its
+bytes: 4.15 G now, 3.79 G of it the base. What remains is the parse of
+the base's modules; a cache of the collected items, the resolver's
+program and types with the ASTs lowering reads the std bodies from, was
+decided against (RULES.md, R125).
 
 ### The compile-time evaluator
 
@@ -3251,7 +3326,10 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
    resolved again by each command, which a cache of the parsed and
    resolved base itself would remove; and the evaluator's reads through a
    reference of a whole value (`target`). The base cache's write is
-   atomic since the sixth round (`Fs.rename`).
+   atomic since the sixth round (`Fs.rename`). The thirteenth round's
+   cache (R125) took a tenth off a command's start; the parse of the
+   base's modules, half of it, is left, and the lexer's 3,500
+   instructions a byte are its cheaper part.
 9. **Unsafe code** (above, "Unsafe code"): since round 11 the intrinsics
    of `std.mem` run in stage 0's interpreter, on the checked memory model
    of D-085 with the foreign calls of `extern` blocks emulated, and
@@ -3300,7 +3378,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     `target.runtime` in a native build (R116), `f.doc` for
     `cli.help_text` (R117), the `@export` boundary (R118) and `E0220`
     beside a module (R119); left: the label at an unrolled template's
-    line and statements before `return impl`. The tenth round took a variant's
+    line and statements before `return impl`. The thirteenth round took
+    over-rejection 15 (R124) and `E0258` alone for a private field
+    (R126); decided against: `TotalF64` as a key, which the runtime's
+    structural hashing refuses (`E0398`), and `Lookup`'s doc example by
+    `str`; left: the label at an unrolled template's line, an item's own
+    `##` in reflection, `@cfg` on an import and `when` under
+    `--target-runtime`, and statements before `return impl`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

@@ -1536,7 +1536,7 @@ if [ "$native" = 1 ]; then
     cp "$compiler/conformance/cases/contracts/checks.sisu" "$work/build/contracts/src/main.sisu"
     printf '[package]\nname = "contracts"\nversion = "0.1.0"\n\n[profile.release]\ncontracts = "off"\n' \
         > "$work/build/contracts/sisu.toml"
-    builds=0; same=0
+    builds=0; same=0; build_listed=0
     start=$(date +%s.%N)
     while read -r dir path made flags; do
         builds=$((builds + 1))
@@ -1575,8 +1575,18 @@ if [ "$native" = 1 ]; then
             cp "$work/build.1.out" "$kept/1/out"
         fi
         rm -rf "$here_dir/build"
+        # The case a build of a file is of, for a difference RULES.md lists
+        # (its output `build`, R124: an executable whose SIR a rule changes).
+        case_of=""
+        case "$path" in
+            hello.sisu) case_of="compiler/conformance/cases/examples/hello.sisu" ;;
+            checks.sisu) case_of="compiler/conformance/cases/contracts/checks.sisu" ;;
+        esac
         if [ -z "$differs" ]; then
             same=$((same + 1))
+        elif [ -n "$case_of" ] && [ "$differs" = " ${path%.sisu}" ] && grep -qxF -e "$case_of build" "$allowed"; then
+            listed=$((listed + 1)); build_listed=$((build_listed + 1))
+            report="$report\n  listed:   build: $what:$differs"
         else
             unlisted=$((unlisted + 1))
             report="$report\n  UNLISTED: build: $what:$differs (stage 0 in $kept/0, stage 1 in $kept/1)"
@@ -1602,7 +1612,7 @@ BUILDS
     end=$(date +%s.%N)
     total=$((total + builds)); identical=$((identical + same))
     seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
-    build_summary="$(printf '  %-12s %4d builds, %4d identical, %3d otherwise; both %6ss' build "$builds" "$same" $((builds - same)) "$seconds")"
+    build_summary="$(printf '  %-12s %4d builds, %4d identical, %3d differing as listed, %3d otherwise; both %6ss' build "$builds" "$same" "$build_listed" $((builds - same - build_listed)) "$seconds")"
 fi
 
 # Stage 1 over its own package: its name and type diagnostics, and its

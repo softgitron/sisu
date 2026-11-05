@@ -1,0 +1,8 @@
+# RULES.md, R126: a struct of another module with a private field is
+# `E0258` alone, whose note names the function that makes one; `E0337`'s
+# hole for the private field would be refused again.
+from ledger.books import Ledger
+
+def main():
+    let l = Ledger(owner="me")
+    print(l.owner)

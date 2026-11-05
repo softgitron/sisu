@@ -1,0 +1,3 @@
+5:2-5:10 W0030 resolve.unchecked-attribute name="no_alloc" what="that the function does not allocate"
+9:2-9:10 W0030 resolve.unchecked-attribute name="no_block" what="that the function does not block"
+10:2-10:7 W0030 resolve.unchecked-attribute name="stack" what="the function's bound on its stack"

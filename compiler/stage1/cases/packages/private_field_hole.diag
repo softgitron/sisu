@@ -1,0 +1,1 @@
+src/main.sisu:7:13-7:31 E0258 resolve.private-field field="bookings" ty="Ledger" module="ledger.books"
