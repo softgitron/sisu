@@ -1,0 +1,15 @@
+# `truncate_to` of a value outside `int`'s range to a type of 128 bits is
+# exact, its bits read as that type's, where it gave its low 64 bits; the
+# prelude's template asks `reflect.name_of(T)` (RULES.md, R115; decision
+# 642, chapter 24).
+def main():
+    print(
+        "{u64.MAX.truncate_to[u128]()} {u64.MAX.truncate_to[i128]()} {u64.MAX.truncate_to[int]()}"
+    )
+    print(
+        "{u128.MAX.truncate_to[i128]()} {u128.MAX.truncate_to[u128]()} {u128.MAX.truncate_to[u64]()}"
+    )
+    print(
+        "{i128.MIN.truncate_to[u128]()} {i128.MIN.truncate_to[i128]()} {(-1i128).truncate_to[u128]()}"
+    )
+    print("{(2i128 ** 100).truncate_to[u128]()} {(2u128 ** 70 + 3u128).truncate_to[i8]()}")

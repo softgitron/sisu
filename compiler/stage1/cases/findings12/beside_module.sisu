@@ -1,0 +1,7 @@
+# A program of one file does not import the module beside it: `E0220`,
+# whose note says that a package makes them one program (09; RULES.md,
+# R119; chapter 17). `beside_stove.sisu` is the module beside it.
+import beside_stove
+
+def main():
+    print(beside_stove.heat())

@@ -1,0 +1,7 @@
+# An optional reference compared with an optional value is `E0300` with the
+# fix `.copied()` (RULES.md, R113; chapter 19).
+def main():
+    let prices: dict[String, int] = {"bun": 280}
+    print(prices.get("bun") == Some(280))
+    let counts = [3, 4]
+    print(counts.get(0) != Some(3))

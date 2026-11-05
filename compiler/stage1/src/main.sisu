@@ -122,7 +122,7 @@ from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
-from stage1.typeck.std_sources import display_path, documented, importable, std_file
+from stage1.typeck.std_sources import display_path, documented, importable, std_file, target_for
 from stage1.typeck.ty import TyKey
 
 error UsageError:
@@ -143,7 +143,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.9.0"
+const VERSION: str = "0.10.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -160,6 +160,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             continue
         if args[i] == "--home" and i + 1 < len(args):
             home = args[i + 1].to_string()
+            i += 2
+            continue
+        # The runtime the program is built for, which `std_texts` reads
+        # (RULES.md, R116).
+        if args[i] == "--target-runtime" and i + 1 < len(args):
+            if args[i + 1] != "native" and args[i + 1] != "interpreter":
+                return Err(Usage(text=usage()))
             i += 2
             continue
         rest.push(args[i].to_string())
@@ -338,6 +345,11 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Ok(())
     # `sir --repl SESSION INPUT --kept OUT [--load]` and `sir --worksheet
     # FILE`: the programs `sisu repl` and `sisu ws` run (RULES.md, R79).
+    # `sir --repl-serve`: the three served by one process that keeps the
+    # standard library's base (RULES.md, R112).
+    if command == "sir" and rest.contains("--repl-serve"):
+        repl_serve(sys, home, catalog)?
+        return Ok(())
     if command == "sir" and rest.contains("--repl"):
         return repl_command(sys, home, rest, catalog)
     if command == "sir" and rest.contains("--worksheet"):
@@ -1011,7 +1023,8 @@ def file_input(
     sys: System, home: str, arg: str, text: str, tests: bool, mut env: Environment, catalog: Catalog
 ) -> Input ! IoError:
     let built = name_diagnostics(sys, home, text, tests, Features.none(), mut env, catalog)?
-    let (syntax, names, cfg_diags) = built
+    let (syntax, found_names, cfg_diags) = built
+    let names = beside_notes(sys, arg, found_names)
     var named = False
     var name_errors: list[(int, int)] = []
     for d in names:
@@ -1237,6 +1250,29 @@ pure def without_unreachable(
                     drop = refused.contains(first)
             if not drop:
                 kept.push(d.copy())
+        out.push(kept)
+    return out
+
+## The diagnostics of a program of one file, `E0220` for an import of a
+## module whose file or directory stands beside it with the note that only
+## a package makes them one program (09: a package is a directory with a
+## `sisu.toml` and a `src/` tree; RULES.md, R119).
+def beside_notes(sys: System, path: str, own found: list[Diagnostic]) -> list[Diagnostic]:
+    var dir = ".".to_string()
+    for i in range(path.byte_len()):
+        if path.byte_at(i) == 47:
+            dir = path.byte_slice(0, i).to_string()
+    var out: list[Diagnostic] = []
+    for d in found:
+        var kept = d.copy()
+        if d.msg == Msg.ResolveImportUnknown:
+            if let Some(n) = d.param("name"):
+                var first = n.copy()
+                if let Some((a, _)) = n.split_once("."):
+                    first = a.to_string()
+                let file = "{dir}/{first}.sisu"
+                if sys.fs.exists(Path.new(file)) or sys.fs.exists(Path.new("{dir}/{first}")):
+                    kept = kept.note_with(Msg.ResolveModuleBeside, "name", first)
         out.push(kept)
     return out
 
@@ -2495,13 +2531,118 @@ enum Built:
     Stopped(Report)
     Refused(String)
 
+## How a command of `sir --repl-serve` ended (RULES.md, R112): built,
+## stopped by the program's errors, or given arguments it does not take.
+enum Ending:
+    Done
+    Failed
+    Misused
+
+## What a command of the REPL prints on standard output and on standard
+## error, and how it ended: what `sir --repl`, `sir --worksheet` and `parse
+## --bindings` print alone, and what `sir --repl-serve` answers for each.
+struct Answer:
+    out: String
+    err: String
+    ending: Ending
+
+impl Answer:
+    ## A command that printed `out`.
+    pure def done(out: str) -> Answer:
+        return Answer(out=out.to_string(), err=String.new(), ending=Ending.Done)
+
+    ## A command that said why on standard error and failed.
+    pure def failed(err: str) -> Answer:
+        return Answer(out=String.new(), err=err.to_string(), ending=Ending.Failed)
+
+    ## A command given arguments it does not take.
+    pure def misused() -> Answer:
+        return Answer(out=String.new(), err=String.new(), ending=Ending.Misused)
+
+    ## The bytes the command writes to a stream, as `emit` writes `text`:
+    ## nothing, or the text with one line break at its end.
+    pure def written(text: str) -> String:
+        if text.is_empty():
+            return String.new()
+        return "{text.strip_suffix("\n")}\n"
+
+    ## The answer's frame (RULES.md, R112): the line `answer STATUS OUT
+    ## ERR`, the exit status the command gives alone and the lengths in
+    ## bytes of what it writes to standard output and to standard error,
+    ## then those bytes, standard output's first. A failed command's
+    ## standard error ends with the line the run time prints when it
+    ## stops, `error: Failed` or `error: Usage(...)`.
+    pure def frame(self) -> String:
+        let out = Answer.written(self.out)
+        var err = Answer.written(self.err)
+        var status = 0
+        match self.ending:
+            case Ending.Done:
+                pass
+            case Ending.Failed:
+                err.push("error: Failed\n")
+                status = 1
+            case Ending.Misused:
+                let e = Usage(text=usage())
+                err.push("error: {e:?}\n")
+                status = 1
+        return "answer {status} {out.byte_len()} {err.byte_len()}\n{out}{err}"
+
+## A command's answer printed as the command alone prints it, with its
+## error for the run time to print and exit with.
+def answered(a: Answer) -> ! {UsageError, CommandError}:
+    emit(a.out, a.err)
+    return match a.ending:
+        case Ending.Done: Ok(())
+        case Ending.Failed: Err(Failed)
+        case Ending.Misused: Err(Usage(text=usage()))
+
+## `sir --repl-serve` (RULES.md, R112): the REPL's commands served by one
+## process, which makes the standard library's base once and keeps it
+## between them. Each line of standard input is a request, the arguments
+## of one command separated by tabs, `sir --repl ...`, `sir --worksheet
+## ...` or `parse --bindings INPUT`, which it answers on standard error
+## with the frame of what the command alone prints and the status it gives
+## (`Answer.frame`); an empty line or the end of the input ends it, status
+## 0. Standard error, because the native run time writes it at once and
+## keeps standard output until it holds 64 KB or the program ends.
+def repl_serve(sys: System, home: str, catalog: Catalog) -> ! IoError:
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    while let Some(line) = sys.stdin.read_line():
+        if line.is_empty():
+            break
+        var args: list[String] = []
+        for part in line.split("\t"):
+            args.push(part.to_string())
+        let command = if args.is_empty(): String.new() else: args[0].copy()
+        var served: Answer ! IoError = Ok(Answer.misused())
+        if command == "sir" and args.contains("--repl"):
+            served = repl_answer(sys, home, base, args, catalog)
+        elif command == "sir" and args.contains("--worksheet"):
+            served = worksheet_answer(sys, home, base, args, catalog)
+        elif command == "parse" and len(args) == 3 and args[1] == "--bindings":
+            served = bindings_answer(sys, args[2], catalog)
+        match served:
+            case Ok(a):
+                print_err(a.frame().strip_suffix("\n"))
+            case Err(e):
+                # What the run time prints of an error that stops `main`,
+                # without the line of the source it stopped at.
+                let text = "error: {e:?}\n"
+                print_err("answer 1 0 {text.byte_len()}\n{text.strip_suffix("\n")}")
+    return Ok(())
+
+## What `parse --bindings INPUT` answers (RULES.md, R95).
+def bindings_answer(sys: System, path: str, catalog: Catalog) -> Answer ! IoError:
+    let text = sys.fs.read_to_string(Path.new(path))?
+    return Ok(Answer.done(session.bindings(text, catalog)))
+
 ## The program `text`, held as the file `disk` (whose directory its inline
 ## metadata's paths are relative to) and named `name` in its diagnostics,
 ## built (RULES.md, R79).
 def held_build(
-    sys: System, home: str, name: str, disk: str, text: str, catalog: Catalog
+    sys: System, home: str, base: typeck.Base, name: str, disk: str, text: str, catalog: Catalog
 ) -> Built ! IoError:
-    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
     var env = base.environment()
     let layout = package.load_file_with(sys.fs, name, disk, text, FeatureRequest.none())
@@ -2552,6 +2693,13 @@ def held_build(
 def repl_command(
     sys: System, home: str, rest: list[String], catalog: Catalog
 ) -> ! {IoError, UsageError, CommandError}:
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    return answered(repl_answer(sys, home, base, rest, catalog)?)
+
+## What `sir --repl` answers with the base `base` (RULES.md, R79, R112).
+def repl_answer(
+    sys: System, home: str, base: typeck.Base, rest: list[String], catalog: Catalog
+) -> Answer ! IoError:
     var files: list[String] = []
     var kept_path = String.new()
     var load = False
@@ -2573,12 +2721,12 @@ def repl_command(
             k += 1
         elif w.starts_with("--"):
             if w != "--repl":
-                return Err(Usage(text=usage()))
+                return Ok(Answer.misused())
         else:
             files.push(w)
         k += 1
     if len(files) != 2 or kept_path.is_empty():
-        return Err(Usage(text=usage()))
+        return Ok(Answer.misused())
     let session_text = sys.fs.read_to_string(Path.new(files[0]))?
     let input_text = sys.fs.read_to_string(Path.new(files[1]))?
     var head = session_text.copy()
@@ -2607,17 +2755,16 @@ def repl_command(
     # `embed` and the inline metadata's paths are relative to, and is named
     # NAME, `<repl>` by default (RULES.md, R95).
     let disk = standing(sys, dir, name)
-    match held_build(sys, home, name, disk, program, catalog)?:
+    match held_build(sys, home, base, name, disk, program, catalog)?:
         case Sir(sir):
             sys.fs.write_text(Path.new(kept_path), kept)?
-            emit(sir, "")
-            return Ok(())
+            return Ok(Answer.done(sir))
         case Stopped(r):
-            emit("", rebased(r, at, entry.len, delta, shown_name, shown_text, catalog))
-            return Err(Failed)
+            return Ok(
+                Answer.failed(rebased(r, at, entry.len, delta, shown_name, shown_text, catalog))
+            )
         case Refused(why):
-            emit("", why)
-            return Err(Failed)
+            return Ok(Answer.failed(why))
 
 ## `sir --worksheet FILE` (RULES.md, R79): the program `sisu ws` runs, the
 ## worksheet FILE (a script, a `#!` line added when it has none) with each
@@ -2628,6 +2775,14 @@ def repl_command(
 def worksheet_command(
     sys: System, home: str, rest: list[String], catalog: Catalog
 ) -> ! {IoError, UsageError, CommandError}:
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    return answered(worksheet_answer(sys, home, base, rest, catalog)?)
+
+## What `sir --worksheet` answers with the base `base` (RULES.md, R79,
+## R112).
+def worksheet_answer(
+    sys: System, home: str, base: typeck.Base, rest: list[String], catalog: Catalog
+) -> Answer ! IoError:
     var files: list[String] = []
     var dir: String? = None
     var named: String? = None
@@ -2642,12 +2797,12 @@ def worksheet_command(
             k += 1
         elif w.starts_with("--"):
             if w != "--worksheet":
-                return Err(Usage(text=usage()))
+                return Ok(Answer.misused())
         else:
             files.push(w)
         k += 1
     if len(files) != 1:
-        return Err(Usage(text=usage()))
+        return Ok(Answer.misused())
     let source = sys.fs.read_to_string(Path.new(files[0]))?
     # The worksheet named NAME, the file as given by default, standing in
     # DIR, the file's own directory by default (RULES.md, R95).
@@ -2662,7 +2817,7 @@ def worksheet_command(
     var disk = absolute(sys, files[0])
     if dir.is_some():
         disk = standing(sys, dir, base_name(file))
-    match held_build(sys, home, file, disk, sheet, catalog)?:
+    match held_build(sys, home, base, file, disk, sheet, catalog)?:
         case Sir(_):
             pass
         case Stopped(r):
@@ -2681,22 +2836,21 @@ def worksheet_command(
             var rest_report = r.copy()
             rest_report.diags = kept
             if rest_report.errors(catalog) > 0 or none_shown:
-                emit("", rebased(rest_report, delta, source.byte_len(), 0, file, source, catalog))
-                return Err(Failed)
+                return Ok(
+                    Answer.failed(
+                        rebased(rest_report, delta, source.byte_len(), 0, file, source, catalog)
+                    )
+                )
         case Refused(why):
-            emit("", why)
-            return Err(Failed)
+            return Ok(Answer.failed(why))
     let instrumented = session.instrument(sheet, shift, catalog)
-    match held_build(sys, home, file, disk, instrumented, catalog)?:
+    match held_build(sys, home, base, file, disk, instrumented, catalog)?:
         case Sir(sir):
-            emit(sir, "")
-            return Ok(())
+            return Ok(Answer.done(sir))
         case Stopped(r):
-            emit("", r.human(catalog))
-            return Err(Failed)
+            return Ok(Answer.failed(r.human(catalog)))
         case Refused(why):
-            emit("", why)
-            return Err(Failed)
+            return Ok(Answer.failed(why))
 
 ## Where a program held in memory stands on disk: `name`'s last part in
 ## `dir`, or `name` in the working directory without one (RULES.md, R95).
@@ -3340,6 +3494,10 @@ def base_cache_place(sys: System, home: str) -> (String, String)?:
 def base_cache_key(sys: System, home: str, texts: dict[String, String], exe: str) -> String?:
     var names: list[String] = []
     for (name, _) in texts.items():
+        # The target is no file; what the cache holds does not depend on
+        # it (RULES.md, R116).
+        if name == "target":
+            continue
         names.push(name.copy())
     names.sort()
     var all = String.new()
@@ -3479,7 +3637,23 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
         names.push(name)
     for name in names:
         _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new(std_file(home, name)))?)
+    # A build for another runtime than the interpreter has its `target`
+    # (RULES.md, R116).
+    let runtime = target_runtime(sys)
+    if runtime != "interpreter":
+        _ = texts.insert("target".to_string(), target_for(runtime))
     return Ok(texts)
+
+## The runtime the program is built for (RULES.md, R116): what
+## `--target-runtime` names, `interpreter` without it, as `target.runtime`
+## gives it to compile-time code. The driver names `native` for a native
+## build.
+def target_runtime(sys: System) -> String:
+    let args = sys.env.args()
+    for i in range(len(args)):
+        if args[i] == "--target-runtime" and i + 1 < len(args):
+            return args[i + 1].to_string()
+    return "interpreter".to_string()
 
 ## The files the `embed("path")` calls of `text` name, read relative to
 ## the file at `path` (stage 0's `embedded_files`): each text, or why it
@@ -4423,3 +4597,9 @@ test "a test run's last line gives its counts, which a blocked suite's status re
     assert count_before("12 passed", " passed") == Some(12)
     assert count_before("x passed", " passed") == None
     assert count_before(" passed", " passed") == None
+
+test "an answer of `sir --repl-serve` is framed by its lengths in bytes":
+    assert Answer.done("fn main\n").frame() == "answer 0 8 0\nfn main\n"
+    assert Answer.failed("é").frame() == "answer 1 0 17\né\nerror: Failed\n"
+    assert Answer.done("").frame() == "answer 0 0 0\n"
+    assert Answer.misused().frame().starts_with("answer 1 0 ")

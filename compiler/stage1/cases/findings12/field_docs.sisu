@@ -1,0 +1,38 @@
+# A field's `##` comment is `f.doc` to compile-time code, in a derive's
+# template and in a generic function that reflects, and `cli.help_text`
+# prints it under each option (08: reflection exposes the documentation of
+# items; RULES.md, R117; G6).
+import cli
+
+## A sauna's settings.
+struct Opts:
+    ## How hot to heat it, in degrees.
+    ## Above 60, below 110.
+    heat: int = 80
+    ## Whether to throw water on the stones.
+    @deprecated("steam is always on")
+    steam: bool
+    rounds: int
+    ## The guests, in the order they come.
+    guests: list[String]
+
+trait Described:
+    def described(self) -> String
+
+    comptime def derive(T: type) -> impl Described for T:
+        return impl Described for T:
+            def described(self) -> String:
+                var out: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    out.push("{f.name}: {f.doc}")
+                return out.join("; ")
+
+@derive(Described)
+struct Room:
+    ## The benches, top first.
+    benches: int
+    stove: String
+
+def main():
+    print(cli.help_text[Opts]())
+    print(Room(benches=3, stove="wood").described())

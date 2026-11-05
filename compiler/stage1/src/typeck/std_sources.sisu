@@ -303,13 +303,18 @@ pub pure def widens(from_: str, to: str) -> bool:
 ## interpreter on the host. Stage 1 writes `linux` and `x86_64`, the
 ## values only `if comptime` reads.
 pub pure def target() -> String:
+    return target_for("interpreter")
+
+## The `target` module of a build for the runtime `runtime`, `interpreter`
+## or `native` (RULES.md, R116).
+pub pure def target_for(runtime: str) -> String:
     var s: String = "##! The build target (08, \"Conditional compilation\").\n\n"
     s.push("## The operating system: `linux`, `macos`, `windows`, ...\n")
     s.push("const os: str = \"linux\"\n\n")
     s.push("## The processor: `x86_64`, `aarch64`, ...\n")
     s.push("const arch: str = \"x86_64\"\n\n")
-    s.push("## How the target runs a program: `interpreter` in stage 0.\n")
-    s.push("const runtime: str = \"interpreter\"\n")
+    s.push("## How the target runs a program: `interpreter`, or `native` for a native build.\n")
+    s.push("const runtime: str = \"{runtime}\"\n")
     return s
 
 ## The leaf types and the traits each implements structurally.
@@ -604,3 +609,7 @@ test "the leaf impls are written as stage 0 writes them":
     assert text.contains("\nimpl Display for int:\n")
     assert text.contains("\nimpl[T0: Eq, T1: Eq] Eq for (T0, T1):\n")
     assert text.contains("\nimpl Into[int] for u8:\n")
+
+test "a build names the runtime it is for":
+    assert target() == target_for("interpreter")
+    assert target_for("native").contains("\nconst runtime: str = \"native\"\n")

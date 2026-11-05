@@ -1,0 +1,4 @@
+5:37-5:40 E0300 type.mismatch expected="ref int" found="int"
+  fix type.copy-optional 5:28-5:28 ".copied()"
+7:33-7:34 E0300 type.mismatch expected="ref int" found="int"
+  fix type.copy-optional 7:24-7:24 ".copied()"

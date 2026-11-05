@@ -2200,7 +2200,13 @@ impl Checker:
         for (op, e) in rest:
             let pt = self.decay_ty(cx, self.ty_of(prev))
             let hint = if op == CmpOp.In or op == CmpOp.NotIn: None else: Some(pt)
+            let reported = len(self.diags)
             let x0 = self.infer_expr(cx, e, hint)
+            # An optional reference compared with an optional value,
+            # `prices.get("bun") == Some(280)`: `.copied()` gives the
+            # optional value (RULES.md, R113).
+            if op == CmpOp.Eq or op == CmpOp.Ne:
+                self.copied_fix(cx, prev, pt, reported)
             var x = self.unrefined(cx, x0)
             # `x in xs` on a collection of a type's own is `xs.contains(x)`
             # by its `Contains` impl (02; decision 252).
@@ -2226,6 +2232,43 @@ impl Checker:
             prev = x
             out.push((op, x))
         return self.add(TExprKind.Compare(first=f, rest=out), Ty.bool(), range)
+
+    ## The fix `.copied()` on the left of a comparison whose left is an
+    ## optional reference to a `Copy` value, `T?` of `ref T`, for each
+    ## mismatch reported on its right since the `reported`th diagnostic
+    ## (RULES.md, R113).
+    pure def copied_fix(mut self, cx: Cx, left: TExprId, pt: Ty, reported: int):
+        if reported >= len(self.diags):
+            return
+        let TyData.Adt(d, a) = self.data(pt) else:
+            return
+        if Some(d) != cx.prog.wk.option or len(a) != 1:
+            return
+        let TyData.Ref(inner, _) = self.data(a[0]) else:
+            return
+        if not self.is_copy(cx, self.resolved(inner)):
+            return
+        let r = self.span_of(left)
+        let text = cx.source.byte_slice(r.start, r.end)
+        var simple = not text.is_empty()
+        var depth = 0
+        for b in text.bytes():
+            if b == 40 or b == 91:
+                depth += 1
+            elif b == 41 or b == 93:
+                depth -= 1
+            elif depth == 0 and not is_simple_byte(b):
+                simple = False
+        var edits = [Edit(start=r.end, end=r.end, text=".copied()".to_string())]
+        if not simple:
+            edits = [
+                Edit(start=r.start, end=r.start, text="(".to_string()),
+                Edit(start=r.end, end=r.end, text=").copied()".to_string()),
+            ]
+        for i in range(reported, len(self.diags)):
+            if self.diags[i].msg == Msg.TypeMismatch and self.diags[i].fixes.is_empty():
+                let found = self.diags[i].copy()
+                self.diags[i] = found.fix_edits(Msg.TypeCopyOptional, edits.copy())
 
     ## `x in xs` (`not in` with `negate`) on a type that is not a builtin
     ## collection or text: a call of its `Contains` method (02), when the
@@ -2276,6 +2319,43 @@ impl Checker:
         if negate:
             return Some(self.add(TExprKind.Unary(op=UnOp.Not, operand=made), Ty.bool(), range))
         return Some(made)
+
+    ## `x` as the key `key` of a lookup: itself, or when its type is
+    ## another that implements `Lookup[key]`, a `str` where the keys are
+    ## `String`s, the key it gives, `x.lookup_key()`, a temporary the lookup
+    ## borrows (RULES.md, R113); a mismatch is reported as `coerce` reports
+    ## it.
+    pub pure def key_of(mut self, cx: Cx, x: TExprId, key: Ty) -> TExprId:
+        let snap = self.infer.snapshot()
+        if self.infer.try_unify(mut self.types, self.ty_of(x), key):
+            self.infer.rollback(snap)
+            return self.coerce(cx, x, key)
+        self.infer.rollback(snap)
+        let tdef = cx.prog.lookup_in(cx.prog.prelude, "Lookup") else:
+            return self.coerce(cx, x, key)
+        let kz = self.infer.zonk(mut self.types, self.resolved(key))
+        let kt = cx.prog.normalize(mut self.types, kz, self.env)
+        let xz = self.infer.zonk(mut self.types, self.types.strip_ref(self.resolved(self.ty_of(x))))
+        let xt = cx.prog.normalize(mut self.types, xz, self.env)
+        if self.types.contains_error(kt) or self.types.contains_error(xt):
+            return self.coerce(cx, x, key)
+        if is_var_data(self.types.data(kt)) or is_var_data(self.types.data(xt)):
+            return self.coerce(cx, x, key)
+        let tr = TraitRef(def_=tdef, args=[kt])
+        if not cx.prog.implements(mut self.types, xt, tr, self.env).holds():
+            return self.coerce(cx, x, key)
+        let m = cx.prog.trait_method(tdef, "lookup_key") else:
+            return self.coerce(cx, x, key)
+        let range = self.span_of(x)
+        let sig = self.instantiate(cx, m, None, range)
+        if let Some(v) = sig.type_args.first():
+            _ = self.infer.try_unify(mut self.types, v, xt)
+        if len(sig.type_args) > 1:
+            _ = self.infer.try_unify(mut self.types, sig.type_args[1], kt)
+        let call = TExprKind.Call(
+            callee=Callee.Fn(def_=m, type_args=sig.type_args.copy()), args=[self.contains_arg(x)]
+        )
+        return self.add(call, kt, range)
 
     ## An operand of `contains_call`: a reference as it is, anything else
     ## borrowed.
@@ -3602,7 +3682,9 @@ impl Checker:
                         let k = elem
                         let v = if len(a) > 1: a[1] else: Ty.error()
                         self.require(k, cx.prog.wk.hash, at)
-                        let idx = self.check_expr(cx, e, k)
+                        # A key of a type that looks it up (RULES.md, R113).
+                        let x = self.infer_expr(cx, e, Some(k))
+                        let idx = self.key_of(cx, x, k)
                         return self.add(
                             TExprKind.Index(base=b, index=idx, kind=IndexKind.Dict), v, at
                         )

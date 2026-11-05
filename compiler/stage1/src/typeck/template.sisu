@@ -171,6 +171,8 @@ pub struct FieldShape:
     ## Its type, when known (at most one).
     pub ty: list[TypeShape]
     pub default: bool
+    ## Its `##` comment, which a template reads as `f.doc` (RULES.md, R117).
+    pub doc: String
 
 pub struct VariantShape:
     pub name: String
@@ -206,7 +208,10 @@ impl TypeShape:
                     var ty: list[TypeShape] = []
                     if k < len(t.field_types):
                         ty.push(t.field_types[k].copy())
-                    s.fields.push(FieldShape(name=n.copy(), ty=ty, default=default))
+                    var doc = String.new()
+                    if k < len(t.field_docs):
+                        doc = t.field_docs[k].copy()
+                    s.fields.push(FieldShape(name=n.copy(), ty=ty, default=default, doc=doc))
                     k += 1
             case Body.Enum(vs):
                 s.kind = Kind.Enum
@@ -348,7 +353,9 @@ pub enum Value:
         ty: list[TypeShape],
         default: bool,
         ## How the unfolded code writes the struct the field is in.
-        owner: String?
+        owner: String?,
+        ## Its `##` comment (RULES.md, R117).
+        doc: String
     )
     ## An attribute on a declaration: its name and its arguments' text.
     Attr(name: String, args: list[String])
@@ -378,8 +385,8 @@ pure def same_value(a: Value, b: Value) -> bool:
         case Value.Type(x):
             if let Value.Type(y) = b:
                 return same_shape(x, y)
-        case Value.Field(n1, i1, v1, nm1, t1, d1, o1):
-            if let Value.Field(n2, i2, v2, nm2, t2, d2, o2) = b:
+        case Value.Field(n1, i1, v1, nm1, t1, d1, o1, _):
+            if let Value.Field(n2, i2, v2, nm2, t2, d2, o2, _) = b:
                 return n1 == n2
                     and i1 == i2
                     and v1 == v2
@@ -449,6 +456,8 @@ pub struct Target:
     ## the variants of an enum in order, which a derive reads as `f.ty`
     ## (RULES.md, R92 and R96).
     pub field_types: list[TypeShape]
+    ## A struct's fields' `##` comments, in order (RULES.md, R117).
+    pub field_docs: list[String]
 
 struct Unfold:
     ## The type parameters (`T`) and their arguments.
@@ -778,7 +787,7 @@ pure def describe(v: Value) -> str:
         case Value.Attr(_, _): "an attribute"
         case Value.Method(_, _, _, _, _, _): "a method"
         case Value.Param(_, _, _, _): "a parameter"
-        case Value.Field(_, _, _, _, _, _, _): "a field"
+        case Value.Field(_, _, _, _, _, _, _, _): "a field"
         case Value.Variant(_, _, _): "a variant"
         case Value.Str(_): "text"
         case Value.Int(_): "an integer"
@@ -904,6 +913,7 @@ impl Unfold:
             case ExprKind.Field(base, name):
                 let attribute = match name.text:
                     case "name" | "index" | "named" | "fields" | "ty" | "default" | "args": True
+                    case "doc": True
                     case "receiver" | "params" | "ret" | "provided" | "mode": True
                     case _: False
                 return attribute and self.is_static(src, base) and not self.names_type(src, base)
@@ -1062,8 +1072,12 @@ impl Unfold:
                 let b = self.eval(src, base)?
                 var got: Value? = None
                 match b:
-                    case Value.Field(n, index, _, named, ty, default, _):
+                    case Value.Field(n, index, _, named, ty, default, _, doc):
                         match name.text:
+                            # Its `##` comment, empty without one (RULES.md,
+                            # R117).
+                            case "doc":
+                                got = Some(Value.Str(doc.copy()))
                             case "name":
                                 got = Some(Value.Str(n.copy()))
                             case "index":
@@ -1368,7 +1382,7 @@ impl Unfold:
             case ExprKind.FieldOf(base, field):
                 let f = self.eval(src, field)?
                 let base_text = self.text(src, base)?
-                let Value.Field(name, index, variant, _, _, _, _) = f else:
+                let Value.Field(name, index, variant, _, _, _, _, _) = f else:
                     return fail(
                         src.ast.expr(field).range, "`x.[f]` needs a field, not {describe(f)}"
                     )
@@ -1586,7 +1600,7 @@ impl Unfold:
             return fail(src.ast.expr(e).range, "`reflect.default_of` takes a field")
         let at = src.ast.expr(args[0].value).range
         match self.eval(src, args[0].value)?:
-            case Value.Field(name, _, _, _, _, default, owner):
+            case Value.Field(name, _, _, _, _, default, owner, _):
                 match owner:
                     case Some(o):
                         if default:
@@ -2049,6 +2063,7 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                         ty=f.ty.copy(),
                         default=f.default,
                         owner=Some(t.written.copy()),
+                        doc=f.doc.copy(),
                     )
                 )
                 index += 1
@@ -2069,6 +2084,7 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                             ty=ty.copy(),
                             default=False,
                             owner=None,
+                            doc=String.new(),
                         )
                     )
                     index += 1
@@ -2418,6 +2434,7 @@ test "a derive template unfolds into the impl's source":
         body=Body.Struct(fields),
         attrs=[],
         field_types=[],
+        field_docs=[],
     )
     var expected = String.new("\nimpl Named for Point:\n    def name(self) -> String:\n")
     expected.push("        var parts: list[String] = []\n")

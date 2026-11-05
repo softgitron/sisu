@@ -1,0 +1,9 @@
+  --heat <int>  (default: 80)
+      How hot to heat it, in degrees.
+      Above 60, below 110.
+  --steam
+      Whether to throw water on the stones.
+  --rounds <int>
+  guests...  (String)
+      The guests, in the order they come.
+benches: The benches, top first.; stove: 

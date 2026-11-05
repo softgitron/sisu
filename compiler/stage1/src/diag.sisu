@@ -34,6 +34,7 @@ pub enum Msg:
     LexDoubleQuotes
     ResolvePythonConversion
     TypeWrapSome
+    TypeCopyOptional
     TypeOperatorTrait
     TypeKeywordOnly
     TypeResultOr
@@ -92,6 +93,7 @@ pub enum Msg:
     ResolveImportFromModule
     ResolveShadowOuter
     ResolveImportUnknown
+    ResolveModuleBeside
     ResolveMethodSignature
     TypeNoSelf
     TypeMismatch
@@ -144,6 +146,7 @@ pub enum Msg:
     TypeNotCallable
     TypeAssignImmutable
     TypeNotMutable
+    TypeSharedNotMutable
     TypeDeclareVar
     TypeTakeMut
     ResolveDefinedHere
@@ -532,6 +535,7 @@ pub enum Msg:
     LintRemoveImport
     ResolveShadowPreludeSet
     UnsafeExportSignature
+    UnsafeExportNotC
     UnsafeBlockingNotForeign
     # Stage 1's rules of the manual's second round (RULES.md, R21 on).
     BorrowRefInCollection
@@ -582,6 +586,8 @@ pub enum Msg:
     ResolveSimilarAttribute
     TypeDeprecated
     TypeDeprecatedPlain
+    TypePreview
+    TypePreviewPlain
     TypeDecimalQuotient
     ResolveFloatAttribute
     ComptimeWriteFor
@@ -630,6 +636,7 @@ impl Msg:
             case LexDoubleQuotes: "lex.double-quotes"
             case ResolvePythonConversion: "resolve.python-conversion"
             case TypeWrapSome: "type.wrap-some"
+            case TypeCopyOptional: "type.copy-optional"
             case TypeOperatorTrait: "type.operator-trait"
             case TypeKeywordOnly: "type.keyword-only"
             case TypeResultOr: "type.result-or"
@@ -688,6 +695,7 @@ impl Msg:
             case ResolveImportFromModule: "resolve.import-from-module"
             case ResolveShadowOuter: "resolve.shadow-outer"
             case ResolveImportUnknown: "resolve.import-unknown"
+            case ResolveModuleBeside: "resolve.module-beside"
             case ResolveMethodSignature: "resolve.method-signature"
             case TypeNoSelf: "type.no-self"
             case TypeMismatch: "type.mismatch"
@@ -740,6 +748,7 @@ impl Msg:
             case TypeNotCallable: "type.not-callable"
             case TypeAssignImmutable: "type.assign-immutable"
             case TypeNotMutable: "type.not-mutable"
+            case TypeSharedNotMutable: "type.shared-not-mutable"
             case TypeDeclareVar: "type.declare-var"
             case TypeTakeMut: "type.take-mut"
             case ResolveDefinedHere: "resolve.defined-here"
@@ -1119,6 +1128,7 @@ impl Msg:
             case LintRemoveImport: "lint.remove-import"
             case ResolveShadowPreludeSet: "resolve.shadow-prelude-set"
             case UnsafeExportSignature: "unsafe.export-signature"
+            case UnsafeExportNotC: "unsafe.export-not-c"
             case UnsafeBlockingNotForeign: "unsafe.blocking-not-foreign"
             case BorrowRefInCollection: "borrow.ref-in-collection"
             case BorrowOwnItems: "borrow.own-items"
@@ -1167,6 +1177,8 @@ impl Msg:
             case ResolveSimilarAttribute: "resolve.similar-attribute"
             case TypeDeprecated: "type.deprecated"
             case TypeDeprecatedPlain: "type.deprecated-plain"
+            case TypePreview: "type.preview"
+            case TypePreviewPlain: "type.preview-plain"
             case TypeDecimalQuotient: "type.decimal-quotient"
             case ResolveFloatAttribute: "resolve.float-attribute"
             case ComptimeWriteFor: "comptime.write-comptime-for"

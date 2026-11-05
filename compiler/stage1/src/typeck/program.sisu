@@ -159,6 +159,8 @@ pub struct FieldInfo:
     pub default_module: ModuleId?
     pub span: TextRange
     pub vis: Vis
+    ## Its `##` comment (RULES.md, R117).
+    pub doc: String
 
 pub struct EnumInfo:
     pub generics: list[Generic]
@@ -582,6 +584,12 @@ pub struct Program:
     ## The fields marked `@deprecated("...")`, by their struct and index
     ## (RULES.md, R51).
     pub deprecated_fields: dict[(DefId, int), String]
+    ## The functions, types and constants marked `@preview("...")` (13,
+    ## D-072; RULES.md, R115), with the attribute's text.
+    pub previews: dict[DefId, String]
+    ## The types declared `@repr(c)`, which an exported function's
+    ## signature may hold (12, "C interop"; RULES.md, R118).
+    pub c_layout: set[DefId]
     ## The constants of a type the program gives a value folding computes,
     ## by the type and the name, for a type's constant argument written
     ## `Square.SIDES` (RULES.md, R50).
@@ -661,6 +669,8 @@ impl Program:
             deprecated={},
             deprecated_variants={},
             deprecated_fields={},
+            previews={},
+            c_layout=set(),
             const_args={},
             with_tests=False,
             test_tags={},
@@ -1720,7 +1730,10 @@ impl Program:
     pub pure def qualified_name(self, d: DefId) -> String:
         let item = ref self.defs[d.index]
         let module = ref self.modules[item.module.index]
+        # The prelude's own items, while the base is made (when the root is
+        # the prelude's module), keep their bare names: `u8.MAX` (R111).
         if item.module == self.root
+                and item.module != self.prelude
                 and not self.is_fn(d)
                 and self.prelude.index < len(self.modules):
             if self.modules[self.prelude.index].items.contains(item.name.copy()):

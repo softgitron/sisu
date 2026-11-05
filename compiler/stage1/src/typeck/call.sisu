@@ -1653,6 +1653,10 @@ impl Checker:
                     self.require_mutable(cx, x, a.value_range)
                 return TArg(expr=x, mode=ArgMode.BorrowMut)
             case Mode.Borrow:
+                # The key of a lookup, which a `str` gives for `String` keys
+                # (RULES.md, R113).
+                if self.is_lookup_key(cx) and not self.is_copy(cx, pty):
+                    return self.lookup_arg(cx, a, p, pty)
                 if p.opaque:
                     # A generic parameter: always by reference.
                     let x = self.arg_infer(cx, a, Some(pty))
@@ -1675,6 +1679,35 @@ impl Checker:
                 let y = self.coerce(cx, x, pty)
                 let mode = if self.is_copy(cx, self.ty_of(y)): ArgMode.Value else: ArgMode.Borrow
                 return TArg(expr=y, mode=mode)
+
+    ## Whether the argument being checked is the key of a lookup, the
+    ## parameter of `get`, `contains` or `remove` of a `dict`, or of
+    ## `contains` or `remove` of a `set` (RULES.md, R113).
+    pure def is_lookup_key(self, cx: Cx) -> bool:
+        let (callee, _) = self.arg_callee else:
+            return False
+        if let Some(d) = cx.prog.wk.dict:
+            for name in ["get", "contains", "remove"]:
+                if cx.prog.method(TyKey.Adt(d), name) == Some(callee):
+                    return True
+        if let Some(t) = cx.prog.wk.set:
+            for name in ["contains", "remove"]:
+                if cx.prog.method(TyKey.Adt(t), name) == Some(callee):
+                    return True
+        return False
+
+    ## A lookup's key: a `K`, or a value whose type implements `Lookup[K]`,
+    ## whose `lookup_key()` the lookup borrows (RULES.md, R113).
+    pure def lookup_arg(mut self, cx: Cx, a: ArgIn, p: InstParam, pty: Ty) -> TArg:
+        let x = self.arg_infer(cx, a, Some(pty))
+        if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):
+            if self.infer.try_unify(mut self.types, inner, pty):
+                return TArg(expr=x, mode=ArgMode.Value)
+        let y = self.key_of(cx, x, pty)
+        if p.opaque:
+            return TArg(expr=y, mode=ArgMode.Ref)
+        let mode = if self.is_copy(cx, self.ty_of(y)): ArgMode.Value else: ArgMode.Borrow
+        return TArg(expr=y, mode=mode)
 
     ## An argument for an `Iterable[T]` parameter: any collection or
     ## iterator of `T`.

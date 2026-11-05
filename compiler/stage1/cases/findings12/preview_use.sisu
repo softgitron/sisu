@@ -1,0 +1,18 @@
+# A use of an item marked `@preview("...")` warns, as a use of a deprecated
+# one does: `W0028` with the attribute's text, `W0029` without one (13 and
+# D-072; RULES.md, R115; chapter 28, X11, R14).
+@preview("the sauna's schedule may change shape before 1.0")
+def schedule(day: int) -> int:
+    return day * 2
+
+@preview("")
+struct Loyly:
+    steam: int
+
+@preview("a constant of the preview")
+const RISE: int = 3
+
+def main():
+    print(schedule(3))
+    let l = Loyly(steam=RISE)
+    print(l.steam)
