@@ -210,19 +210,27 @@ impl TypeShape:
                     k += 1
             case Body.Enum(vs):
                 s.kind = Kind.Enum
+                # The variants' fields' types, in order (RULES.md, R96).
+                var k = 0
                 for (n, fs) in vs:
                     var fields: list[(String?, list[TypeShape])] = []
                     for f in fs:
-                        fields.push((f.copy(), []))
+                        var ty: list[TypeShape] = []
+                        if k < len(t.field_types):
+                            ty.push(t.field_types[k].copy())
+                        fields.push((f.copy(), ty))
+                        k += 1
                     s.variants.push(VariantShape(name=n.copy(), fields=fields))
         return s
 
 ## A field's type as its declaration writes it, which a derive sees before
-## the types are resolved (RULES.md, R92): its text, and its kind as the
-## prelude's names give it (`int`, `f64`, `bool`, `char`, `str`, `String`,
-## a `list` or an option of a type so written, a tuple); any other type's
-## kind is not known here.
-pub pure def written_shape(ast: Ast, t: TypeExprId) -> TypeShape:
+## the types are resolved (RULES.md, R92 and R96): its text, and its kind as
+## the prelude's names give it (`int`, `f64`, `bool`, `char`, `str`,
+## `String`, a `list` or an option of a type so written, a tuple) or as
+## `kinds` gives the structs and enums the module declares or imports (each
+## name and whether it is a struct); any other type's kind is not known
+## here.
+pub pure def written_shape(ast: Ast, t: TypeExprId, kinds: list[(String, bool)]) -> TypeShape:
     let text = written_text(ast, t)
     var s = TypeShape.named(text, text, Kind.Other)
     match ast.type_expr(t).kind:
@@ -238,10 +246,14 @@ pub pure def written_shape(ast: Ast, t: TypeExprId) -> TypeShape:
                         case "str" | "String": Kind.Str
                         case _: Kind.Other
                 elif len(args) == 1 and (n == "list" or n == "Option"):
-                    s.elem = [written_shape(ast, args[0])]
+                    s.elem = [written_shape(ast, args[0], kinds)]
                     s.kind = if n == "list": Kind.List else: Kind.Option
+                if s.kind == Kind.Other:
+                    for (name, is_struct) in kinds:
+                        if name == n:
+                            s.kind = if is_struct: Kind.Struct else: Kind.Enum
         case TypeKind.Option(inner):
-            s.elem = [written_shape(ast, inner)]
+            s.elem = [written_shape(ast, inner, kinds)]
             s.kind = Kind.Option
         case TypeKind.Tuple(_):
             s.kind = Kind.Tuple
@@ -433,8 +445,9 @@ pub struct Target:
     ## which `reflect.attributes_of` gives the derive (stage 1's: the
     ## derive of `std.mem`'s `Plain` asks for `@repr(c)`, 22).
     pub attrs: list[(String, list[String])]
-    ## A struct's fields' types as written, one for each field, which a
-    ## derive reads as `f.ty` (RULES.md, R92).
+    ## The fields' types as written, one for each field of a struct, or of
+    ## the variants of an enum in order, which a derive reads as `f.ty`
+    ## (RULES.md, R92 and R96).
     pub field_types: list[TypeShape]
 
 struct Unfold:

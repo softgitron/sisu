@@ -21,6 +21,10 @@ E0003 error   lex.unterminated-string     this string literal is not closed befo
 -     fix     lex.close-bracket           close it on the line that opens it
 E0004 error   lex.unterminated-block-string  this multi-line string literal is never closed
 E0005 error   lex.unknown-character       `{char}` cannot appear in Sisu source outside a string or comment
+# Stage 1's (RULES.md, R100): a character that shows as nothing or as a space.
+-     note    lex.invisible-character     it is {name}
+-     fix     lex.write-space             write a space
+-     fix     lex.remove-character        remove it
 E0006 error   lex.unterminated-char       this character literal is not closed
 E0007 error   lex.invalid-escape          `\{escape}` is not an escape sequence; write `\\` for a backslash
 E0008 error   lex.unmatched-close         `{close}` closes nothing
@@ -84,10 +88,12 @@ E0129 error   parse.attribute-on-statement  `@{name}` stands before a statement;
 # Stage 1's (RULES.md, R72): habits a parse error stops at, which a note
 # answers.
 -     note    parse.keyword-name          `{keyword}` is a keyword, which names no binding: give it another name
+-     note    parse.pattern-not           a pattern says what a value is, not what it is not: write the case it is first (`case 0:`), then the rest with `case _:`, or test it in a guard, `case n if n != 0:`
+-     note    parse.generator-parens      a generator expression keeps its own parentheses, also as a call's only argument
 -     note    parse.no-exceptions         Sisu has no `{keyword}`: an error is a value, a `Result` or a `T ! E`, which `?` passes on and `match`, `else` or `if let` handles
 -     note    parse.go-task               a task starts in a scope, which joins it: `task.scope do s:` and `s.spawn(() -> f())`
 E0130 error   parse.visibility-scope      `pub({name})` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own
--     fix     parse.visibility-package    make it visible to its package: `pub(package)`
+-     fix     parse.visibility-package    make it visible to its package
 E0131 error   parse.attribute-line        an attribute stands on a line of its own, before its declaration
 -     fix     parse.attribute-new-line    put the declaration on the next line
 -     fix     parse.arm-block             put it in an indented block under the `case`
@@ -170,7 +176,7 @@ E0264 error   resolve.const-expression    a type's constant argument is computed
 E0265 error   resolve.const-not-int       a type's constant argument is an `int`, and this is a `{ty}`
 -     label   resolve.first-impl          the other impl is here
 -     fix     resolve.add-dyn             write `dyn {name}`
--     fix     resolve.add-ref-dyn         write `ref dyn {name}`
+-     fix     resolve.add-ref-dyn         use the trait through a reference
 -     note    resolve.trait-generic       a function that takes a value of any type implementing `{name}` is generic: `def f[T: {name}](x: T)`, made for each type it is called with
 -     label   resolve.first-defined       first defined here
 -     label   resolve.defined-here        `{name}` is defined here
@@ -317,9 +323,17 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.declare-var            declare `{name}` with `var`
 -     fix     type.from-end-index         count from the end with `^`
 -     fix     type.add-error-set          add `{set}` to the function's error set
--     fix     type.add-copy               copy it with `.copy()`
+-     fix     type.add-copy               copy it
 -     fix     type.call-with-value        the function takes a value where a reference is passed: call it from a closure that passes the value
--     fix     type.convert-to-float       make the `int` an `{ty}`
+-     fix     type.convert-to-float       convert the `int`
+-     note    resolve.cfg-target          a body tests the target with `if comptime {condition}:`, whose other branch is left out of the build
+-     note    type.pure-adapter           `{callee}` takes any function, which its iterator calls, so it is not pure, whatever the function given: a `pure` function folds the items with a `pure` function, `fold(0, (total, x) -> total + f(x))`, or loops over them
+-     note    resolve.const-as-method     a name in capitals is a constant's: a trait's constant is given as `const {name}: T = ...`
+-     fix     type.derive-trait-for       derive it for `{ty}`
+-     note    type.operator-trait-left    `{op}` with `{ty}` on the left is the method of `{trait}` that `{ty}` implements: an `impl {trait}[{rhs}] for {ty}` gives it, which only the root package may write; or write the `{rhs}` first
+-     note    type.bigint-literal         a larger integer is a `BigInt` (`from std.num import BigInt`): `BigInt.parse("{text}")`, or the literal beside a `BigInt`, which it becomes
+-     fix     type.lend-it                lend it
+-     fix     type.convert-to-int         make the `{ty}` an `int`, which holds the values of both
 # Stage 1's (RULES.md, R45): a value where an option of it is expected.
 -     fix     type.wrap-some              make it the option's value with `Some`
 -     note    type.operator-trait         `{op}` on a `{ty}` is the method of the trait `{trait}`: an `impl {trait}[{rhs}] for {ty}` gives it one
@@ -516,7 +530,7 @@ E0436 error   type.generator-result       `{name}` yields, so it must return `It
 -     label   borrow.assigned-in-loop     `{name}` is assigned here, in an earlier iteration of the loop
 -     label   borrow.made-here            the value is made here
 -     label   type.declared-pure-here     `{name}` is declared `pure` here
--     fix     borrow.declare-view         declare it `view struct {ty}`
+-     fix     borrow.declare-view         declare it a view
 -     fix     borrow.remove-from          remove the `from` clause
 -     fix     borrow.add-from             name `{param}` in the `from` clause
 # Stage 1's (RULES.md, R77): where the borrow of a loop or of `sorted` ends.
@@ -572,6 +586,7 @@ E0812 error   refine.change-through-base  `{what}` is of type `{ty}`, which a ch
 E0813 error   refine.own-impl             `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own
 E0814 error   refine.predicate-type       the predicate of `{ty}` must be a `bool`, found `{found}`
 -     help    refine.use-try-from         check it where it runs: `{name}.try_from(...)`
+-     note    refine.copy-as-base         a copy of `{name}` is a `{ty}` too: change a copy typed as the base, `var copy: {base} = {name}.copy()`, and check it again with `{ty}.try_from(copy)`
 E0820 error   test.no-generator           `{ty}` has no generator for property tests: {why}
 E0821 error   test.refines-mismatch       `@refines({reference})` on `{name}` cannot be checked: {why}
 

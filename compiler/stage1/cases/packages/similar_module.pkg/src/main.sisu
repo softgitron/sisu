@@ -1,0 +1,7 @@
+# A module one letter off, `atlas.geo.points` for `atlas.geo.point`, gets
+# the path with the similar module as its fix (RULES.md, R97), as an
+# unknown package's import does (`E0220`).
+from atlas.geo.points import Point
+
+def main():
+    print(Point(x=1, y=2).x)

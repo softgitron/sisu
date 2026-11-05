@@ -1,0 +1,8 @@
+# `@cfg` takes no condition on the target; `E0266` notes that a body tests
+# the target with `if comptime` (08; RULES.md, R101).
+@cfg(target.os == "linux")
+def hello():
+    print("hei")
+
+def main():
+    hello()

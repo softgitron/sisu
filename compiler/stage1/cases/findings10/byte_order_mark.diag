@@ -1,0 +1,2 @@
+1:1-1:2 E0005 lex.unknown-character char="\\u{feff}"
+  fix lex.remove-character 1:1-1:2 ""

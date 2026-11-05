@@ -10,6 +10,7 @@
 ##! there (`other`).
 
 from stage1.diag import Msg, TextRange
+from stage1.diag import Param
 from stage1.syntax.ast import (
     Arg,
     Ast,
@@ -495,7 +496,7 @@ impl Checker:
                     cur = base
                 case TExprKind.Coerce(inner, Coercion.Unrefine):
                     let inner_ty = self.ty_of(inner)
-                    if let Some((d, _, _)) = self.refinement_of(cx, inner_ty):
+                    if let Some((d, _, base_ty)) = self.refinement_of(cx, inner_ty):
                         var pred = String.new()
                         if let Some(r) = cx.prog.refinement(d):
                             pred = r.text.copy()
@@ -503,6 +504,19 @@ impl Checker:
                         let shown = self.show(cx, inner_ty)
                         var diag = self.error(cx, Msg.RefineChangeThroughBase, range).with(
                             "what", what
+                        )
+                        # The copy to change is typed as the base: a
+                        # `.copy()` of the refined value is still refined
+                        # (RULES.md, R99).
+                        let name = self.source_text(cx, self.span_of(inner))
+                        let base_shown = self.show(cx, base_ty)
+                        diag = diag.note_params(
+                            Msg.RefineCopyAsBase,
+                            [
+                                Param(name="name".to_string(), value=name.copy()),
+                                Param(name="ty".to_string(), value=shown.copy()),
+                                Param(name="base".to_string(), value=base_shown),
+                            ],
                         )
                         self.report_other(diag.with("ty", shown).with("predicate", pred))
                     return

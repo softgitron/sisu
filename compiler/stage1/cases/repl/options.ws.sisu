@@ -1,0 +1,15 @@
+# A worksheet shows an expression statement's value, an option or a result
+# too, which is used by being shown, so it is no `E0318` (RULES.md, R103).
+error Reading:
+    Negative
+
+def checked(n: int) -> int ! Reading:
+    if n < 0:
+        return Err(Reading.Negative)
+    return Ok(n)
+
+let xs = [1, 2]
+xs.first()
+"12".parse_int()
+checked(3)
+checked(-1)

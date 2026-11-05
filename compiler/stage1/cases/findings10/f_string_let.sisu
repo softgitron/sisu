@@ -1,0 +1,6 @@
+# Python's `f"..."` after `=` gets the fix that drops the `f`, as it does
+# inside a call (RULES.md, R101): every Sisu string interpolates.
+def main():
+    let n = 3
+    let s = f"n is {n}"
+    print(s)

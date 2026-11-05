@@ -1373,6 +1373,12 @@ impl Resolver:
             case Snake: Msg.ResolveNotSnakeCase
             case Screaming: Msg.ResolveNotScreamingCase
         var d = Diagnostic.new(m, start, end).with("kind", kind).with("name", name)
+        # A method named in capitals, `def MAX_HEAT(self)`, is most likely a
+        # constant written as one, which the rename would leave missing
+        # (RULES.md, R101).
+        if style == Style.Snake and kind == "a method" and screaming(name):
+            self.report(d.note_with(Msg.ResolveConstAsMethod, "name", name))
+            return
         self.report(d.fix_at(Msg.ResolveRename, start, end, fixed))
 
     ## An error set named as one of the prelude's (R15; D-024): the two are
@@ -2555,6 +2561,11 @@ impl Resolver:
             pass
         elif self.kind(callee) == SyntaxKind.IndexExpr and self.has_type_arguments(callee):
             self.with_type_arguments(callee)
+        elif self.kind(callee) == SyntaxKind.IndexExpr and self.unknown_base(callee):
+            # `Deque[int]()` of a name nothing declares, or an import that
+            # failed bound: the name is reported once, and a scalar type
+            # among its arguments is a type (RULES.md, R101).
+            self.member_with_arguments(callee)
         else:
             self.expr(callee)
         # A scalar type given as an argument, `comptime name(bool)` to a
@@ -2689,6 +2700,15 @@ impl Resolver:
                     or self.env.prelude.items.contains(name.copy())
             case _:
                 return False
+
+    ## Whether `n` is `name[...]` with a `name` that nothing declares.
+    pure def unknown_base(self, n: int) -> bool:
+        let parts = child_nodes(self.tree, n)
+        if parts.is_empty() or self.kind(parts[0]) != SyntaxKind.NameRef:
+            return False
+        let t = first_token(self.tree, parts[0], SyntaxKind.Ident) else:
+            return False
+        return not self.knows_value(self.text_of(t))
 
     ## An index argument read as a type, as stage 0's type checker reads
     ## one (`expr_as_type`): a name must name a type parameter, a scalar or
@@ -3029,3 +3049,14 @@ test "an attribute Sisu does not read is told from one it misspells":
         known.push(a.to_string())
     assert closest("deprecatd", known) == Some("deprecated".to_string())
     assert closest("route", known) == None
+
+## Whether a name is written in capitals, `MAX_HEAT`: a letter, and no
+## lower-case one.
+pure def screaming(name: str) -> bool:
+    var letter = False
+    for b in name.bytes():
+        if b >= 97 and b <= 122:
+            return False
+        if b >= 65 and b <= 90:
+            letter = True
+    return letter

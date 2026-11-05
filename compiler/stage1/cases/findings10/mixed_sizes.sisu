@@ -1,0 +1,12 @@
+# Two sized integers neither of which holds the other's values, an `i16`
+# and a `u32`, are `E0310` with the fix that makes the left an `int`, which
+# holds both, beside which the right widens (03, "Numbers"; RULES.md, R98).
+def total(offset: i16, count: u32) -> int:
+    return offset + count
+
+def scaled(offset: i16, count: u32) -> int:
+    return (offset * 2i16) * count
+
+def main():
+    print(total(-3i16, 7u32))
+    print(scaled(-3i16, 7u32))

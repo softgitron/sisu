@@ -1,0 +1,7 @@
+# A character that shows as a space or as nothing is written as its escape
+# and named, with the fix that writes a space or removes it (RULES.md,
+# R100): a no-break space, a zero-width space and a mark of the direction.
+def main():
+    let total = 1 + 2
+    let​ count = 3
+    print(total + count)

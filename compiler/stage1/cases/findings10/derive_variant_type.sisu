@@ -1,0 +1,56 @@
+# A variant's fields have a `ty` in a derive's template, and a field whose
+# type is a struct or an enum of the program's own is one to reflection
+# (08, "Reflection"; RULES.md, R96): a derive chooses a form field by
+# field, where a variant's field stopped with E0608, "a field has no
+# `ty`", and `is_struct` of the program's own struct was `False`.
+trait Show:
+    def show(self) -> String
+
+    comptime def derive(T: type) -> impl Show for T:
+        return impl Show for T:
+            def show(self) -> String:
+                var parts: list[String] = []
+                if comptime reflect.is_enum(T):
+                    match self:
+                        comptime for V in reflect.variants_of(T):
+                            case V(..):
+                                comptime for f in V.fields:
+                                    if comptime reflect.is_str(f.ty):
+                                        parts.push("{f.name}={self.[f]}")
+                                    elif comptime reflect.is_struct(f.ty):
+                                        parts.push("{f.name}: a {reflect.name_of(f.ty)}")
+                                    elif comptime reflect.is_enum(f.ty):
+                                        parts.push("{f.name}: one of {reflect.name_of(f.ty)}")
+                                    else:
+                                        parts.push("{f.name}={self.[f]:?}")
+                                return "{V.name}({parts.join(", ")})"
+                else:
+                    comptime for f in reflect.fields_of(T):
+                        if comptime reflect.is_struct(f.ty):
+                            parts.push("{f.name}: a {reflect.name_of(f.ty)}")
+                        else:
+                            parts.push("{f.name}={self.[f]:?}")
+                    return parts.join(", ")
+
+enum Unit:
+    Celsius
+    Fahrenheit
+
+struct Place:
+    name: String
+
+@derive(Show)
+enum Reading:
+    Missing
+    Taken(place: String, at: Place, unit: Unit, value: int)
+
+@derive(Show)
+struct Station:
+    home: Place
+    readings: int
+
+def main():
+    let oulu = Place(name="Oulu".to_string())
+    print(Reading.Taken(place="harbour".to_string(), at=oulu, unit=Unit.Celsius, value=-4).show())
+    print(Reading.Missing.show())
+    print(Station(home=Place(name="Kemi".to_string()), readings=3).show())

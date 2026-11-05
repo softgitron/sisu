@@ -143,7 +143,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.8.0"
+const VERSION: str = "0.9.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -183,6 +183,12 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if command == "parse" and len(rest) >= 2:
         let path = rest[len(rest) - 1].copy()
         let text = sys.fs.read_to_string(Path.new(path))?
+        # `--bindings`: what `:why NAME` reads of a REPL input, its
+        # statements with what each binds, reads and changes (RULES.md,
+        # R95).
+        if rest.contains("--bindings"):
+            emit(session.bindings(text, catalog), "")
+            return Ok(())
         let parsed = parse(text, catalog)
         let errs = render_ids(text, parsed.diagnostics, catalog)
         # `--shape`: what formatting keeps, which `fmt`'s self-check compares
@@ -606,7 +612,14 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             for k in range(len(r.files)):
                 let (name, text) = r.files[k].copy()
                 if name.ends_with(".sisu") and not name.starts_with("<"):
-                    for d in fmt.prune.lints(text, catalog):
+                    # An import the resolver refused (`E0204`, `E0203`,
+                    # `E0220`) is reported once, by its error (RULES.md,
+                    # R103).
+                    var refused: list[(int, int)] = []
+                    for x in r.diags:
+                        if x.file == k and catalog.is_error(x.diag.msg):
+                            refused.push((x.diag.start, x.diag.end))
+                    for d in fmt.prune.lints(text, refused, catalog):
                         shown.diags.push(Filed(file=k, diag=d.copy(), label_files=[]))
             sort_filed(mut shown.diags, catalog, True)
             if ids:
@@ -2388,7 +2401,11 @@ def held_build(
     let layout = package.load_file_with(sys.fs, name, disk, text, FeatureRequest.none())
     var inputs: list[Input] = []
     if len(layout.packages) == 1 and layout.problems.is_empty():
-        inputs.push(file_input(sys, home, name, text, False, mut env, catalog)?)
+        var input = file_input(sys, home, name, text, False, mut env, catalog)?
+        # The files `embed` names, beside where the program stands (RULES.md,
+        # R95).
+        input.embedded = embedded_files(sys, disk, None, text, catalog)
+        inputs.push(input)
     else:
         if layout.modules.is_empty():
             return Ok(Built.Stopped(problems_report(layout, catalog)))
@@ -2432,6 +2449,8 @@ def repl_command(
     var files: list[String] = []
     var kept_path = String.new()
     var load = False
+    var dir: String? = None
+    var name = "<repl>".to_string()
     var k = 1
     while k < len(rest):
         let w = rest[k].copy()
@@ -2439,6 +2458,12 @@ def repl_command(
             load = True
         elif w == "--kept" and k + 1 < len(rest):
             kept_path = rest[k + 1].copy()
+            k += 1
+        elif w == "--dir" and k + 1 < len(rest):
+            dir = Some(rest[k + 1].copy())
+            k += 1
+        elif w == "--name" and k + 1 < len(rest):
+            name = rest[k + 1].copy()
             k += 1
         elif w.starts_with("--"):
             if w != "--repl":
@@ -2472,7 +2497,11 @@ def repl_command(
     let at = head.byte_len() + entry.prefix
     let kept = "{head}{entry.source}"
     let program = "{kept}{session.TRAILER}"
-    match held_build(sys, home, "<repl>", absolute(sys, "<repl>"), program, catalog)?:
+    # The program stands in DIR, the working directory by default, which
+    # `embed` and the inline metadata's paths are relative to, and is named
+    # NAME, `<repl>` by default (RULES.md, R95).
+    let disk = standing(sys, dir, name)
+    match held_build(sys, home, name, disk, program, catalog)?:
         case Sir(sir):
             sys.fs.write_text(Path.new(kept_path), kept)?
             emit(sir, "")
@@ -2494,16 +2523,29 @@ def worksheet_command(
     sys: System, home: str, rest: list[String], catalog: Catalog
 ) -> ! {IoError, UsageError, CommandError}:
     var files: list[String] = []
-    for k in range(1, len(rest)):
-        if rest[k].starts_with("--"):
-            if rest[k] != "--worksheet":
+    var dir: String? = None
+    var named: String? = None
+    var k = 1
+    while k < len(rest):
+        let w = rest[k].copy()
+        if w == "--dir" and k + 1 < len(rest):
+            dir = Some(rest[k + 1].copy())
+            k += 1
+        elif w == "--name" and k + 1 < len(rest):
+            named = Some(rest[k + 1].copy())
+            k += 1
+        elif w.starts_with("--"):
+            if w != "--worksheet":
                 return Err(Usage(text=usage()))
         else:
-            files.push(rest[k].copy())
+            files.push(w)
+        k += 1
     if len(files) != 1:
         return Err(Usage(text=usage()))
-    let file = files[0].copy()
-    let source = sys.fs.read_to_string(Path.new(file))?
+    let source = sys.fs.read_to_string(Path.new(files[0]))?
+    # The worksheet named NAME, the file as given by default, standing in
+    # DIR, the file's own directory by default (RULES.md, R95).
+    let file = named ?? files[0].copy()
     var sheet = source.copy()
     var shift = 0
     var delta = 0
@@ -2511,13 +2553,30 @@ def worksheet_command(
         sheet = "{session.SHEBANG}{source}"
         shift = 1
         delta = session.SHEBANG.byte_len()
-    let disk = absolute(sys, file)
+    var disk = absolute(sys, files[0])
+    if dir.is_some():
+        disk = standing(sys, dir, base_name(file))
     match held_build(sys, home, file, disk, sheet, catalog)?:
         case Sir(_):
             pass
         case Stopped(r):
-            emit("", rebased(r, delta, source.byte_len(), 0, file, source, catalog))
-            return Err(Failed)
+            # A top-level expression statement is shown, so its value is
+            # used: an option or a result there is no `E0318` (RULES.md,
+            # R103); what else stopped the worksheet is reported.
+            let shown = session.shown_statements(sheet, catalog)
+            var kept: list[Filed] = []
+            for x in r.diags:
+                if x.file == 0
+                        and x.diag.msg == Msg.TypeUnusedResult
+                        and shown.contains(x.diag.start):
+                    continue
+                kept.push(x.copy())
+            let none_shown = len(kept) == len(r.diags)
+            var rest_report = r.copy()
+            rest_report.diags = kept
+            if rest_report.errors(catalog) > 0 or none_shown:
+                emit("", rebased(rest_report, delta, source.byte_len(), 0, file, source, catalog))
+                return Err(Failed)
         case Refused(why):
             emit("", why)
             return Err(Failed)
@@ -2532,6 +2591,21 @@ def worksheet_command(
         case Refused(why):
             emit("", why)
             return Err(Failed)
+
+## Where a program held in memory stands on disk: `name`'s last part in
+## `dir`, or `name` in the working directory without one (RULES.md, R95).
+def standing(sys: System, dir: String?, name: str) -> String:
+    let Some(d) = dir else:
+        return absolute(sys, name)
+    return package.join(absolute(sys, d), base_name(name))
+
+## A path's last part: `sheet.ws.sisu` of `notes/sheet.ws.sisu`.
+pure def base_name(path: str) -> String:
+    var cut = 0
+    for i in range(path.byte_len()):
+        if path.byte_at(i) == 47:
+            cut = i + 1
+    return path.byte_slice(cut, path.byte_len()).to_string()
 
 ## The human form of a report of a session's program whose input is the
 ## `size` bytes from `start` of its first file: the diagnostics inside the
@@ -3402,7 +3476,14 @@ pure def built_tree(
     let filtered = cfg.filter(build.module(tree), tests, Some(features.copy()))
     var diags: list[Diagnostic] = []
     for p in filtered.problems:
-        diags.push(cfg_diagnostic(p))
+        var d = cfg_diagnostic(p)
+        # A condition on the target, which a body tests with `if comptime`
+        # (08; RULES.md, R101).
+        if d.msg == Msg.ResolveBadCfg and d.start < d.end and d.end <= text.byte_len():
+            let written = text.byte_slice(d.start, d.end)
+            if written.starts_with("target."):
+                d = d.note_with(Msg.ResolveCfgTarget, "condition", written)
+        diags.push(d)
     if filtered.left_out.is_empty():
         return (tree.copy(), diags)
     return (tree.without(filtered.left_out), diags)

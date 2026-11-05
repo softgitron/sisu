@@ -9522,6 +9522,52 @@ findings from chapter 18 and guides G9, G10 and G28)
      the process would be state no program declares. `std/log_levels`
      holds it. This changes no rule of the language.
 
+**Stage 1's tenth round** (stage 1's RULES.md, R95 to R103; the REPL's `--dir`, `--name` and `parse --bindings`, variants' `ty` in derives, similar-name fixes, invisible characters, the findings' fixes, adapters' purity, worksheets' options and results)
+
+600. Stage 1's `sir --repl` and `sir --worksheet` take `--dir DIR`, where
+     the program stands (`embed` and the inline metadata's paths), and
+     `--name NAME`, what its diagnostics and SIR call it; `parse --bindings
+     INPUT` gives each top-level statement of an input with what it binds,
+     its initialiser's bytes, the names that reads and the names it
+     changes, which `:why NAME` reads. `sisu1 --version` is 0.9.0. Stage 1
+     decides it (RULES.md, R95).
+
+601. A derive's template sees the `ty` of a variant's fields as written,
+     and the kinds of the structs and enums the module names. Stage 1
+     decides it (RULES.md, R96).
+
+602. `E0203` offers the path with a module of a similar name, and `E0271`
+     the trait's constant of a similar name. Stage 1 decides it (RULES.md,
+     R97).
+
+603. `E0310` of two sized integers that an `int` both holds offers making
+     the left one an `int`. Stage 1 decides it (RULES.md, R98).
+
+604. `E0812` notes that the copy to change is one typed as the base. Stage
+     1 decides it (RULES.md, R99).
+
+605. `E0005` writes a character that shows as a space or as nothing as its
+     escape, names it, and offers a space or its removal. Stage 1 decides
+     it (RULES.md, R100).
+
+606. Stage 1 gives the fixes and notes the manual found missing: `ref`
+     before a value lent to a `ref dyn` parameter, `E0811` for a `ref int`
+     where a refinement goes, `BigInt` for a literal beyond `int`, the impl
+     a number on an operator's left needs, the type a derive's fix is for,
+     one `E0200` for `Deque[int]()`, the spellings of `f"..."` after `=`
+     and of a generator as a call's only argument, `case not`, a method
+     named in capitals, `@cfg` on the target; and five fixes no longer
+     name their replacement. Stage 1 decides it (RULES.md, R101).
+
+607. Purity is not inferred over the monomorphised call graph: an
+     iterator's adapter takes any function and is not `pure`, and `E0333`
+     at one notes `fold` with a `pure` function. Stage 1 decides it
+     (RULES.md, R102).
+
+608. `sisu lint` reports an import the resolver refused by its error
+     alone, and a worksheet shows an expression statement's option or
+     result. Stage 1 decides it (RULES.md, R103).
+
 **The driver: the REPL and worksheets on stage 1's own programs** (section
 "The REPL and worksheets", "The query layer and the driver"; 10; stage 1's
 RULES.md, R79 and R94; port-debt.md, "The Rust front end's roles still to

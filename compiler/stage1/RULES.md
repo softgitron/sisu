@@ -518,10 +518,12 @@ names differs from it; `foreign.sisu` and `pointers.sisu` also declare an
 - Differs: `compiler/conformance/cases/unsafe/bit_cast_sizes.sisu`: names, types, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/foreign.sisu`: tree, trivia-tree, ast, names, sir, ids, human, fmt-check, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/foreign_unknown.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/free_twice.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/gone.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/invalid_bits.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/leaked.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/layouts.sisu`: names, types, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/malloc_bounds.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/misaligned.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/mistyped.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/no_memory.sisu`: ast, names, sir, ids, human, doc, doc-output
@@ -539,6 +541,7 @@ names differs from it; `foreign.sisu` and `pointers.sisu` also declare an
 - Differs: `compiler/conformance/cases/unsafe/shared_write.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/stale_pointer.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/uninitialised.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/unterminated.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/vector.sisu`: ast, names, sir, ids, human, doc, doc-output
 
 **Documents to bring along:** 11's `std.mem` and `std.ffi` rows and 12's
@@ -1431,6 +1434,7 @@ what they print does not (the class `behaviour`). The case
 - Differs: `compiler/conformance/cases/run/proven_checks.sisu`: sir
 - Differs: `compiler/conformance/cases/run/sized_integers.sisu`: sir
 - Differs: `compiler/conformance/cases/std/json_decode.sisu`: sir
+- Differs: `compiler/conformance/cases/std/pure_iterators.sisu`: sir
 - Differs: `compiler/conformance/cases/std/search.sisu`: sir
 - Differs: `compiler/conformance/cases/testing/proposal_testing.sisu`: sir-tests
 - Differs: `compiler/conformance/cases/testing/refines.sisu`: sir, sir-tests
@@ -5108,3 +5112,350 @@ formatting, each from the same front end, so they agree either way.
 595. `parse --shape` refuses what `fmt` refuses, `E0132` among it, and a
      template instance's note at its call writes the type arguments as the
      source does. Stage 1 decides it (RULES.md, R94).
+
+## R95. What the driver's REPL needs of stage 1: where the program stands, its name, and an input's bindings (decision 600)
+
+**The rule.** Three additions to R79's commands, so that the driver runs
+`sisu repl` and `sisu ws` on stage 1 with no front end of its own:
+
+- `sir --repl SESSION INPUT --kept OUT [--load] [--dir DIR] [--name NAME]`
+  and `sir --worksheet FILE [--dir DIR] [--name NAME]`. `--dir DIR` is the
+  directory the program stands in: `embed("...")` resolves beside it and
+  the inline metadata's paths are relative to it, whatever directory the
+  files SESSION, INPUT and FILE were written to; without it, a session
+  stands in the working directory and a worksheet in its file's directory,
+  as before. `--name NAME` is what the diagnostics and the SIR's sources
+  call the program: `<repl>` by default for a session (the input is still
+  drawn as `<input>`, or as the loaded file's name with `--load`), the
+  file as given for a worksheet. The driver may write the worksheet's text
+  to a file of its own (the language server's unsaved sheet) and pass the
+  user's name and directory.
+- `parse --bindings INPUT`: what `:why NAME` reads of an input, the input
+  parsed as the statements of a script (as `sir --repl` parses it). For
+  each top-level statement or item, in order, a line `KIND START END`,
+  `KIND` one of `let` (a `let` or a `var`), `assign`, `expr`, `item` and
+  `other`, `START END` its bytes in INPUT; then, indented by two spaces,
+  those of the lines that apply: `binds N...` (the names a `let` or `var`
+  binds, its patterns' names in order), `initialiser START END` (the bytes
+  of its value), `reads N...` (the names that value reads, each once, in
+  order) and `changes N...` (the name an assignment's target starts from,
+  `xs` of `xs[0].n = 1`, or each name a method called in an expression
+  statement is called on, `xs` of `xs.push(3)`). Names are separated by a
+  space; status 0. These are the driver's `bound_names`, `initialiser`,
+  `names_read` and `changes`, which read the Rust parser's tree.
+
+`sisu1 --version` is 0.9.0: the driver may rely on the three.
+
+**Why.** The stage 0 round's items (decision 563: the driver built its REPL
+on `sir FILE` and `check FILE`, its programs in a temporary directory):
+`embed` in an input resolved beside the temporary copy, a program was
+named by its temporary path, which the driver replaced in what it printed,
+and `:why NAME` still parsed each input with the Rust parser.
+
+**In stage 1.** `main.repl_command`, `worksheet_command` (`standing`,
+`base_name`), `held_build` (the files `embed` names, beside where the
+program stands), `session.bindings`.
+
+**What it changes.** No output of the corpus; `session`'s unit test of
+`bindings`.
+
+**Decision 600**, for docs/architecture.md:
+
+600. Stage 1's `sir --repl` and `sir --worksheet` take `--dir DIR`, where
+     the program stands (`embed` and the inline metadata's paths), and
+     `--name NAME`, what its diagnostics and SIR call it; `parse --bindings
+     INPUT` gives each top-level statement of an input with what it binds,
+     its initialiser's bytes, the names that reads and the names it
+     changes, which `:why NAME` reads. `sisu1 --version` is 0.9.0. Stage 1
+     decides it (RULES.md, R95).
+
+## R96. A variant's fields' `ty` in a derive's template, and the kinds of the program's own types (decision 601)
+
+**The rule.** R92 extended: in a derive's template the fields of an enum's
+variants (`V.fields` of `reflect.variants_of(T)`) have a `ty`, the type as
+the field's declaration writes it, as a struct's fields have; and a field
+whose type is a struct or an enum the module declares or imports by name
+has that kind (`reflect.is_struct(f.ty)`, `reflect.is_enum(f.ty)`), where
+its kind was not known. Its own fields are still not looked into.
+
+**Why.** The ninth round's open item (the manual's finding, G21, and "What
+is next", 11): a variant's field stopped a derive with `E0608` ("a field
+has no `ty`"), and the program's own types were neither structs nor
+enums to it.
+
+**In stage 1.** `typeck.template` (`TypeShape.of_target`, `written_shape`),
+`typeck.instances` (`own_type_kinds`).
+
+**What it changes.** The case `cases/findings10/derive_variant_type.sisu`
+(its `.out`: it runs, interpreted and natively).
+
+- Differs: `compiler/stage1/cases/findings10/derive_variant_type.sisu`: ids, human, doc, doc-output
+
+**Decision 601**, for docs/architecture.md:
+
+601. A derive's template sees the `ty` of a variant's fields as written,
+     and the kinds of the structs and enums the module names. Stage 1
+     decides it (RULES.md, R96).
+
+## R97. `E0203` and `E0271` offer the similar name (decision 602)
+
+**The rule.** `E0203` (`resolve.unknown-module`) for an import path whose
+module is one letter off, `from atlas.geo.points import Point` beside the
+module `atlas.geo.point`, has the fix `resolve.similar-module` that writes
+the path with the similar module, as `E0220` has; and `E0271`
+(`resolve.not-a-trait-constant`) for a constant the trait does not declare,
+`WARMUP` where it declares `WARM_UP`, has the fix `resolve.similar-name`
+with the trait's constant, as `E0306` has for a parameter's name.
+
+**Why.** The manual's findings (R17), "Diagnostics without fixes".
+
+**In stage 1.** `typeck.collect` (`import_target`, the impl's check).
+
+**What it changes.** The cases `cases/findings10/similar_names.sisu` and
+`cases/packages/similar_module.pkg` (their `.diag`).
+
+- Differs: `compiler/stage1/cases/findings10/similar_names.sisu`: tree, ast, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/similar_module.pkg`: ids, human, doc, doc-output
+
+**Decision 602**, for docs/architecture.md:
+
+602. `E0203` offers the path with a module of a similar name, and `E0271`
+     the trait's constant of a similar name. Stage 1 decides it (RULES.md,
+     R97).
+
+## R98. `E0310` of two sized integers that an `int` both holds offers `.to_int()` (decision 603)
+
+**The rule.** An arithmetic or bitwise operator between two sized integer
+types neither of which widens to the other, but both to `int` (`i16` and
+`u32`), is `E0310` as before, with the fix `type.convert-to-int` ("make the
+`i16` an `int`, which holds the values of both") that writes `.to_int()`
+after the left operand (parenthesised when it is not a name, a call or a
+bracket already), beside which the right one widens (03, "Numbers").
+
+**Why.** The manual's finding (chapter 24): "E0310 for an `i16` plus a
+`u32` offers no conversion."
+
+**In stage 1.** `typeck.expr` (`binary_result`, `method_edits`).
+
+**What it changes.** The case `cases/findings10/mixed_sizes.sisu` (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/findings10/mixed_sizes.sisu`: ids, human, doc, doc-output
+
+**Decision 603**, for docs/architecture.md:
+
+603. `E0310` of two sized integers that an `int` both holds offers making
+     the left one an `int`. Stage 1 decides it (RULES.md, R98).
+
+## R99. `E0812` gives the copy that can change (decision 604)
+
+**The rule.** `E0812` (a change of a refined value through its base) has
+the note `refine.copy-as-base`: "a copy of `picks` is a `Picks` too: change
+a copy typed as the base, `var copy: list[int] = picks.copy()`, and check
+it again with `Picks.try_from(copy)`".
+
+**Why.** The manual's finding (R17): "E0812 says to "change a copy of the
+base", and the `.copy()` of a refined list is still the refinement, so the
+copy is E0812 again". The message is the catalog's (the owner's); the note
+says what the copy must be.
+
+**In stage 1.** `typeck.contracts.check_protected_place`.
+
+**What it changes.** The case `cases/findings10/refined_copy.sisu`, and the
+human form of the conformance suite's `contracts/refinement_errors`.
+
+- Differs: `compiler/stage1/cases/findings10/refined_copy.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/contracts/refinement_errors.sisu`: human, doc, doc-output
+
+**Decision 604**, for docs/architecture.md:
+
+604. `E0812` notes that the copy to change is one typed as the base. Stage
+     1 decides it (RULES.md, R99).
+
+## R100. `E0005` names a character that shows as a space or as nothing (decision 605)
+
+**The rule.** `E0005` for a character that shows as a space (a no-break
+space, the spaces of other widths, the line and paragraph separators) or as
+nothing (a zero-width space or joiner, a soft hyphen, a word joiner, the
+marks of the text's direction, a byte-order mark) writes it as its escape,
+`` `\u{a0}` cannot appear ...``, with the note `lex.invisible-character`
+naming it ("it is a no-break space, which looks like a space") and the fix
+that writes a space (`lex.write-space`) or removes it
+(`lex.remove-character`). A byte-order mark at the start of a file is named
+as one ("a byte-order mark, which UTF-8 text does not need"); it is still
+`E0005`, since 02's source is UTF-8 text and the token stream of the file
+stays the Rust lexer's.
+
+**Why.** The manual's finding (R1): "E0005 shows an invisible character as
+it is, so the message for a no-break space reads "`` ` ` `` cannot
+appear", and a byte-order mark at the start of a file is E0005".
+
+**In stage 1.** `lexer.scan` (`invisible`).
+
+**What it changes.** The cases `cases/findings10/invisible.sisu` and
+`byte_order_mark.sisu` (their `.diag`).
+
+- Differs: `compiler/stage1/cases/findings10/invisible.sisu`: tokens, tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings10/byte_order_mark.sisu`: tokens, tree, ids, human, fmt-check, doc, doc-output
+
+**Decision 605**, for docs/architecture.md:
+
+605. `E0005` writes a character that shows as a space or as nothing as its
+     escape, names it, and offers a space or its removal. Stage 1 decides
+     it (RULES.md, R100).
+
+## R101. The fixes and notes the manual's writers found missing, the tenth round (decision 606)
+
+**The rule** (the manual's "Diagnostics without fixes"):
+
+- A value given to a `ref dyn Trait` parameter it implements, `total(b)`,
+  is `E0300` with the fix `type.lend-it` that writes `ref ` (`mut ` for a
+  `mut dyn`) before it.
+- A reference to a `Copy` value of a refinement's base, a loop's `ref int`
+  where a `Percent` goes, is `E0811` with its note about `try_from`, as the
+  `int` is, where it was `E0300`.
+- An integer literal beyond `int` (`E0374`) has the note
+  `type.bigint-literal`, which names `BigInt.parse` and R78's literal
+  beside a `BigInt`.
+- `E0310` with a number on the left of a type of the program's own, `3.0 *
+  step`, has the note `type.operator-trait-left`, which names the impl the
+  operator needs (`impl Mul[Step] for f64`, the root package's alone) and
+  the order that needs none.
+- R70's fix that derives a trait for a type argument (`Plain` of
+  `Pair[Plain]`) says which type: `type.derive-trait-for`, "derive it for
+  `Plain`".
+- A type nothing declares, or that a failed import would have bound, called
+  with type arguments, `Deque[int]()`, is one `E0200`, its arguments not
+  read as values (where `int` got a second `E0200` and the note about
+  Python's conversions), in the name pass and the type checker alike.
+- Python's `f"..."` after `=`, `let s = f"n is {n}"`, gets R72's fix, which
+  only a call's argument had; a generator expression as a call's only
+  argument without its own parentheses, `sum(p * p for p in primes)`, gets
+  the note `parse.generator-parens` and the fix that adds them; `case not
+  0:` gets the note `parse.pattern-not` (a pattern says what a value is;
+  `case _:` or a guard), where R72's note said that `not` names no binding.
+- `def MAX_HEAT(self)`, a method named in capitals, is `E0268` with the
+  note `resolve.const-as-method` (a trait's constant is `const MAX_HEAT: T =
+  ...`), where its fix renamed it `max_heat` and left the constant missing.
+- `E0266` for a `@cfg` on the target, `@cfg(target.os == "linux")`, has the
+  note `resolve.cfg-target`, which names `if comptime target.os ==
+  "linux":`.
+- The fixes that named their replacement besides showing it no longer do
+  (R67's rule, for the rest the manual lists): `type.add-copy` reads "copy
+  it", `type.convert-to-float` "convert the `int`",
+  `parse.visibility-package` "make it visible to its package",
+  `resolve.add-ref-dyn` "use the trait through a reference" and
+  `borrow.declare-view` "declare it a view".
+
+**Why.** The manual's findings (chapters 2, 12, 14, 15, 16, 17, 23; R2, R3,
+R14, R17, R19, G2, G3), "Diagnostics without fixes".
+
+**In stage 1.** `typeck.expr` (`mismatch_fix`, the refinement's coercion,
+the integer literal, `binary_result`), `typeck.check.derive_fix`,
+`typeck.call` (a call of an unknown name with type arguments), `resolve`
+(`unknown_base`, `check_style`, `screaming`), `parser.habits` (`f_string`,
+the generator, `case not`), `main.built_tree`, the catalog's texts.
+
+**What it changes.** The cases `cases/findings10/fixes.sisu`,
+`f_string_let.sisu`, `generator_argument.sisu`, `case_not.sisu`,
+`constant_as_method.sisu` and `cfg_target.sisu` (their `.diag`); the human
+form of every diagnostic with one of the five fixes, the same in both
+front ends (they read the one catalog), and the conformance suite's
+`ownership/rustc/move_out_of_vec_tail.defer` and
+`overloaded_index_move.defer`, blessed again with `type.add-copy`'s text;
+and stage 1's `cases/findings7/derive_messages.diag`
+(`type.derive-trait-for`) and `cases/traits/assoc_const_refusals.diag` (no
+rename of `def SIDES`), blessed again.
+
+- Differs: `compiler/stage1/cases/findings10/fixes.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings10/f_string_let.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings10/generator_argument.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings10/case_not.sisu`: human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings10/constant_as_method.sisu`: tree, ast, names, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings10/cfg_target.sisu`: human, doc, doc-output
+
+**Documents to bring along:** the manual's transcripts that show the five
+fixes (`10-ownership/first_in_line`, `12-views/program`,
+`14-traits/not_a_type`, the reference's `e0338_move_out_of_borrow`,
+`e0373_mixed_numbers`, `e0130_pub_crate`, `e0231_trait_as_type`,
+`e0411_view_field` and the false friends' `pub_crate`).
+
+**Decision 606**, for docs/architecture.md:
+
+606. Stage 1 gives the fixes and notes the manual found missing: `ref`
+     before a value lent to a `ref dyn` parameter, `E0811` for a `ref int`
+     where a refinement goes, `BigInt` for a literal beyond `int`, the impl
+     a number on an operator's left needs, the type a derive's fix is for,
+     one `E0200` for `Deque[int]()`, the spellings of `f"..."` after `=`
+     and of a generator as a call's only argument, `case not`, a method
+     named in capitals, `@cfg` on the target; and five fixes no longer
+     name their replacement. Stage 1 decides it (RULES.md, R101).
+
+## R102. An iterator's adapter is not `pure`, whatever the function it is given (decision 607)
+
+**The rule.** Purity stays a property of a function's type (03, "Function
+types"; Q-17): `Iterator.map` takes `(T) -> U`, any function, and a
+function that takes a plain function type is impure, "since the checker
+cannot see what it will call", so `xs.iter().map(f).sum()` in a `pure`
+function is `E0333` at `map` also when `f` is `pure`. Purity is not
+computed over the monomorphised call graph: 03 and 06 keep that graph for
+the resource attributes and closure capture kinds, which "never enter
+function types", so that `pure` stays the one property a function type
+carries. What changes is the diagnostic: `E0333` at an adapter of
+`Iterator` (`map`, `filter`, `filter_map`, `flat_map`, `take_while`,
+`skip_while`, `inspect`, `map_while`, `scan`) has the note
+`type.pure-adapter`, which says why and names `fold` with a `pure`
+function, which `Iter[T]` has (decision 564), and the loop.
+
+**Why.** The stage 0 round's item (decision 564: "a `pure` chain through
+`map` needs purity over the monomorphised call graph ... stage 1's, if
+wanted"). The documents decide against it: inferring a call's purity from
+its arguments is an effect polymorphism, which Q-17 rules out, and a `pure`
+adapter in std (`map` taking `pure (T) -> U`) would refuse the impure
+functions every other caller gives it.
+
+**In stage 1.** `borrowck.purity` (`is_adapter`).
+
+**What it changes.** The case `cases/findings10/pure_adapter.sisu` (its
+`.diag`; the note is the human form's).
+
+- Differs: `compiler/stage1/cases/findings10/pure_adapter.sisu`: human
+
+**Decision 607**, for docs/architecture.md:
+
+607. Purity is not inferred over the monomorphised call graph: an
+     iterator's adapter takes any function and is not `pure`, and `E0333`
+     at one notes `fold` with a `pure` function. Stage 1 decides it
+     (RULES.md, R102).
+
+## R103. `sisu lint` leaves a refused import to its error; a worksheet shows an option or a result (decision 608)
+
+**The rule.** `sisu lint` does not report `W0027` for an import the
+resolver refused (`E0204` for a name the module lacks, `E0203` or `E0220`
+for a path): the name refused counts as used, and so does an import whose
+path was refused, so each is reported once, by its error; the other
+unused names of the import are still `W0027`. And a worksheet's top-level
+expression statement whose value is an option or a result is shown
+(`Some(1)`, `Err(Negative)`), where it was `E0318` in the worksheet as
+written: the worksheet uses the value by showing it.
+
+**Why.** The manual round's items: `sisu lint` printed `E0204` and then
+`W0027` for the same name, and a worksheet showed an option only through a
+`let`, as the Rust front end's worksheet did too.
+
+**In stage 1.** `fmt.prune` (`unused`, `lints`, `overlaps`), `main`
+(`lint`, `worksheet_command`), `session.shown_statements`.
+
+**What it changes.** The cases `cases/findings10/refused_import.sisu`
+(its `.lint`; its `fmt` differs as R87's cases do, the Rust formatter
+removing the unused import) and `cases/repl/options.ws.sisu`, which the
+Rust front end's worksheet refuses.
+
+- Differs: `compiler/stage1/cases/findings10/refused_import.sisu`: fmt, fmt-check
+- Differs: `compiler/stage1/cases/repl/options.ws.sisu`: ws
+
+**Decision 608**, for docs/architecture.md:
+
+608. `sisu lint` reports an import the resolver refused by its error
+     alone, and a worksheet shows an expression statement's option or
+     result. Stage 1 decides it (RULES.md, R103).

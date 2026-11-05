@@ -604,6 +604,21 @@ impl Checker:
                     case Some(StaticPath.Type(ty)):
                         return self.construct(cx, ty, args, trailing, at, expected)
                     case _:
+                        # `Deque[int]()` of a type nothing declares, or an
+                        # import that failed bound: the name is reported
+                        # once, and its arguments are not read as values
+                        # (RULES.md, R101).
+                        if let ExprKind.Name(n) = cx.ast.expr(inner).kind:
+                            let upper = n.byte_len() > 0
+                                and n.byte_at(0) >= 65
+                                and n.byte_at(0) <= 90
+                            if upper
+                                    and self.lookup_local(n).is_none()
+                                    and cx.prog.lookup(self.module, n).is_none():
+                                let x = self.infer_expr(cx, inner, None)
+                                if self.ty_of(x) == Ty.error():
+                                    self.check_args_loosely(cx, args)
+                                    return x
                         # `Type.function[T](...)`: an associated function with
                         # the type arguments of its own generic parameters, as
                         # `f[T](...)` gives a free function's (RULES.md, R18).

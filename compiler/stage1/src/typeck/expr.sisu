@@ -141,9 +141,15 @@ impl Checker:
                                 under.push(t)
                                 walking = True
                 var base_ok = False
+                # A reference to a `Copy` value of the base, a loop's `ref
+                # int`, is read as the value (RULES.md, R101).
+                var value = actual
+                if let TyData.Ref(inner, _) = self.types.data(actual).copy():
+                    if self.is_copy(cx, inner):
+                        value = inner
                 for b in under:
                     let snap = self.infer.snapshot()
-                    if self.infer.unify(mut self.types, actual, b):
+                    if self.infer.unify(mut self.types, value, b):
                         base_ok = True
                     self.infer.rollback(snap)
                 if base_ok or actual == Ty.never():
@@ -444,6 +450,23 @@ impl Checker:
         # that calls it with the value, `x -> f(x)` (RULES.md, R63).
         if let Some(edit) = self.by_value_closure(cx, x, actual, exp):
             return d.fix_edits(Msg.TypeCallWithValue, [edit])
+        # A value where a reference to a `dyn Trait` it implements is
+        # expected, `total(b)` for `item: ref dyn Priced`: lend it (RULES.md,
+        # R101).
+        if let TyData.Ref(target, m) = self.data(exp):
+            if let TyData.Dyn(tr) = self.data(target):
+                var plain = True
+                match self.data(actual):
+                    case TyData.Ref(_, _) | TyData.Var(_) | TyData.Dyn(_):
+                        plain = False
+                    case _:
+                        pass
+                if plain and r.start < r.end and not self.types.contains_error(actual):
+                    let concrete = self.resolved(actual)
+                    let traits = TraitRef(def_=tr.def_, args=tr.args.copy())
+                    if cx.prog.implements(mut self.types, concrete, traits, self.env) != Answer.No:
+                        let word = if m: "mut " else: "ref "
+                        return d.fix_at(Msg.TypeLendIt, r.start, r.start, word)
         # Text where a `Path` is expected: `Path.new` makes one (R16).
         if self.is_builtin(cx, exp, "Path") and self.is_text(cx, self.types.strip_ref(actual)):
             let edits = [
@@ -975,7 +998,9 @@ impl Checker:
         let min = Param(name="min".to_string(), value="-9223372036854775808".to_string())
         let max = Param(name="max".to_string(), value="9223372036854775807".to_string())
         let ty = Param(name="ty".to_string(), value="int".to_string())
-        self.report(d.note_params(Msg.TypeIntRange, [ty, min, max]))
+        # A larger integer is a `BigInt` (RULES.md, R101).
+        let noted = d.note_params(Msg.TypeIntRange, [ty, min, max])
+        self.report(noted.note_with(Msg.TypeBigIntLiteral, "text", t))
         return self.error_expr(range)
 
     ## An integer literal of the sized type `k`, checked to fit. A `u64`
@@ -1893,6 +1918,19 @@ impl Checker:
             if text_first or text_second:
                 if let Some(text) = self.interpolated(cx, l, r):
                     d = d.fix_at(Msg.TypeInterpolate, range.start, range.end, text)
+        # Two sized integers neither of which holds the other's values, an
+        # `i16` and a `u32`, which an `int` both holds: the left made an
+        # `int`, beside which the right widens (03; RULES.md, R98).
+        if let Some(a) = self.int_kind(cx, lt):
+            if let Some(b) = self.int_kind(cx, rt):
+                let arithmetic = match op:
+                    case BinOp.Add | BinOp.Sub | BinOp.Mul | BinOp.FloorDiv | BinOp.Mod: True
+                    case BinOp.BitAnd | BinOp.BitOr | BinOp.BitXor: True
+                    case _: False
+                if arithmetic and a != b and widens(a, "int") and widens(b, "int"):
+                    let edits = self.method_edits(cx, l, "to_int")
+                    let ty_param = Param(name="ty".to_string(), value=a.copy())
+                    d.fixes.push(Fix(msg=Msg.TypeConvertToInt, params=[ty_param], edits=edits))
         # An optional value used as the value it may hold.
         if self.is_option(cx, lt) or self.is_option(cx, rt):
             d = d.note(Msg.TypeOptionNotValue)
@@ -1926,6 +1964,20 @@ impl Checker:
                     ps.push(Param(name="ty".to_string(), value=shown_l.copy()))
                     ps.push(Param(name="rhs".to_string(), value=shown_r.copy()))
                     d = d.note_params(Msg.TypeOperatorTrait, ps)
+        # A number on the left of a type of the program's own, `3.0 * step`:
+        # the impl is the left type's, which only the root package may write
+        # for a type that is not its own (RULES.md, R101).
+        if let TyData.Adt(own_r, _) = self.data(rt):
+            let home = cx.prog.defs[own_r.index].module
+            if not cx.prog.modules[home.index].is_std and self.is_number(cx, lt):
+                if let Some((t, _)) = self.operator_trait(cx, op):
+                    var ps = [
+                        Param(name="op".to_string(), value=op.text().to_string()),
+                        Param(name="trait".to_string(), value=cx.prog.defs[t.index].name.copy()),
+                    ]
+                    ps.push(Param(name="ty".to_string(), value=shown_l.copy()))
+                    ps.push(Param(name="rhs".to_string(), value=shown_r.copy()))
+                    d = d.note_params(Msg.TypeOperatorTraitLeft, ps)
         self.report(d)
         return (Ty.error(), False)
 
@@ -1971,6 +2023,28 @@ impl Checker:
         return [
             Edit(start=r.start, end=r.start, text="(".to_string()),
             Edit(start=r.end, end=r.end, text=").to_{kind}()"),
+        ]
+
+    ## The edits that call `method` on an operand: after a name, a call or
+    ## a parenthesised expression, around anything else parenthesised
+    ## first.
+    pure def method_edits(self, cx: Cx, x: TExprId, method: str) -> list[Edit]:
+        let r = self.span_of(x)
+        let text = cx.source.byte_slice(r.start, r.end)
+        if enclosed(text):
+            return [Edit(start=r.end, end=r.end, text=".{method}()")]
+        var simple = not text.is_empty()
+        for b in text.bytes():
+            if not is_simple_byte(b):
+                simple = False
+        if simple:
+            let first = text.byte_at(0)
+            simple = is_alpha(first) or first == 95
+        if simple:
+            return [Edit(start=r.end, end=r.end, text=".{method}()")]
+        return [
+            Edit(start=r.start, end=r.start, text="(".to_string()),
+            Edit(start=r.end, end=r.end, text=").{method}()"),
         ]
 
     ## `"text" + x` (or `x + "text"`) as one interpolated string, when the
@@ -3739,3 +3813,19 @@ pure def params_end(text: str, from_: int) -> int?:
 ## Whether a byte is a space or a line break.
 pure def is_blank(b: u8) -> bool:
     return b == 32 or b == 10 or b == 13 or b == 9
+
+## Whether `text` is one parenthesised expression, `(a * 2)`: its first
+## bracket closes at its end.
+pure def enclosed(text: str) -> bool:
+    if not text.starts_with("(") or not text.ends_with(")"):
+        return False
+    var depth = 0
+    for i in range(text.byte_len()):
+        let b = text.byte_at(i)
+        if b == 40:
+            depth += 1
+        elif b == 41:
+            depth -= 1
+            if depth == 0:
+                return i == text.byte_len() - 1
+    return False

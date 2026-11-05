@@ -1,0 +1,8 @@
+44:17-44:18 E0300 type.mismatch expected="ref dyn Priced" found="Bun"
+  fix type.lend-it 44:17-44:17 "ref "
+46:14-46:15 E0811 refine.needs-try-from expected="Percent" found="ref int" name="Percent"
+47:15-47:45 E0374 type.literal-out-of-range text="123456789012345678901234567890" ty="int"
+49:12-49:22 E0310 type.binary-operator op="*" lhs="f64" rhs="Step"
+50:11-50:79 E0347 type.bound-not-satisfied ty="Pair[Plain]" bound="Eq"
+  fix type.derive-trait-for 39:1-39:1 "@derive(Eq)\n"
+51:13-51:18 E0200 resolve.undefined-name name="Deque"

@@ -3418,6 +3418,17 @@ impl Resolver:
                     for k in range(i + 1):
                         named.push(words[k].copy())
                     var d = Diagnostic.new(Msg.ResolveUnknownModule, at.start, at.end)
+                    # A module one letter off, `atlas.geo.points` for
+                    # `atlas.geo.point`: the path with the similar module
+                    # (RULES.md, R97), as `E0220` has it.
+                    var children: list[String] = []
+                    for (c, _) in self.prog.modules[m.index].children.items():
+                        children.push(c.copy())
+                    if let Some(similar) = self.prog.closest(seg, children):
+                        var fixed: list[String] = []
+                        for k in range(len(words)):
+                            fixed.push(if k == i: similar.copy() else: words[k].copy())
+                        d = d.fix_at(Msg.ResolveSimilarModule, at.start, at.end, fixed.join("."))
                     self.report_other(module, d.with("name", named.join(".")))
                     return (None, None)
                 m = c
@@ -4427,6 +4438,19 @@ impl Resolver:
                     let s = self.prog.defs[mdef.index].span
                     let m = if given_const: Msg.ResolveNotATraitConstant else: Msg.ResolveNotATraitMethod
                     var d = Diagnostic.new(m, s.start, s.end)
+                    # A misspelt constant, `WARMUP` for the trait's
+                    # `WARM_UP`: the trait's constant with a similar name
+                    # (RULES.md, R97).
+                    if given_const:
+                        var constants: list[String] = []
+                        if let Some(info) = self.prog.trait_info(tr):
+                            for c in info.methods:
+                                if self.is_assoc_const(c):
+                                    constants.push(self.prog.defs[c.index].name.copy())
+                        if let Some(similar) = self.prog.closest(mname, constants):
+                            d = d.fix(
+                                Msg.ResolveSimilarName, "name", similar, s.start, s.end, similar
+                            )
                     self.report_other(module, d.with("name", mname).with("trait", trait_name))
                     continue
                 # A constant is given as a constant and a method as a method

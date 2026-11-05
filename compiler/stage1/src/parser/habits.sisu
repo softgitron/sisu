@@ -76,6 +76,10 @@ impl Parser:
             # `let mut n`: `var n`.
             if self.current_text() == "mut" and prev == Some(SyntaxKind.LetKw):
                 return spelled(d, prev_start, end, "var")
+            # `case not 0:`: a pattern says what a value is, not what it is
+            # not (RULES.md, R101).
+            if k == SyntaxKind.NotKw and prev == Some(SyntaxKind.CaseKw):
+                return d.note(Msg.ParsePatternNot)
             # `let type = ...`: a keyword names no binding (RULES.md, R72).
             if let Some(word) = k.keyword_text():
                 return d.note_with(Msg.ParseKeywordName, "keyword", word)
@@ -108,16 +112,43 @@ impl Parser:
                 return spelled(d, s, e, text)
             # Python's `f"n is {n}"`: every string interpolates (RULES.md,
             # R72).
-            if k == SyntaxKind.StringStart and adjacent and prev_text == "f":
-                var i = 0
-                while self.nth(i) != SyntaxKind.Newline and self.nth(i) != SyntaxKind.Eof:
-                    if self.nth(i) == SyntaxKind.StringEnd:
-                        let (_, e) = self.nth_range(i) ?? (end, end)
-                        return spelled(d, prev_start, e, self.text.byte_slice(start, e))
-                    i += 1
+            if let Some(fixed) = self.f_string(d.copy(), prev_text, adjacent):
+                return fixed
+            # Python's `sum(p * p for p in primes)`: a generator expression
+            # keeps its parentheses as a call's argument (02; RULES.md,
+            # R101).
+            if k == SyntaxKind.ForKw:
+                if let Some((a, b)) = self.last_expr:
+                    if b <= start:
+                        var depth = 0
+                        var i = 0
+                        while self.nth(i) != SyntaxKind.Newline and self.nth(i) != SyntaxKind.Eof:
+                            let n = self.nth(i)
+                            if n == SyntaxKind.LParen
+                                    or n == SyntaxKind.LBracket
+                                    or n == SyntaxKind.LBrace:
+                                depth += 1
+                            elif n == SyntaxKind.RParen
+                                    or n == SyntaxKind.RBracket
+                                    or n == SyntaxKind.RBrace:
+                                if depth == 0:
+                                    if n != SyntaxKind.RParen:
+                                        return d
+                                    let (cs, _) = self.nth_range(i) ?? (end, end)
+                                    let inner = self.text.byte_slice(a, cs).trim_end()
+                                    let noted = d.note(Msg.ParseGeneratorParens)
+                                    return spelled(noted, a, a + inner.byte_len(), "({inner})")
+                                depth -= 1
+                            elif n == SyntaxKind.Comma and depth == 0:
+                                return d
+                            i += 1
             return d
         if d.msg != Msg.ParseTrailingTokens:
             return d
+        # Python's `let s = f"n is {n}"`, after the `=` as in a call
+        # (RULES.md, R101).
+        if let Some(fixed) = self.f_string(d.copy(), prev_text, adjacent):
+            return fixed
         # `self.save(x) else as e:` as a statement: `else` belongs to a
         # `let`, and a statement that handles only the error is `if let
         # Err(e) = ...` (RULES.md, R76).
@@ -244,6 +275,22 @@ impl Parser:
         if inclusive:
             hi = "{hi} + 1"
         return Some((a, e2, "range({lo}, {hi})"))
+
+    ## `d` with the fix of Python's `f"..."` at the current token, a
+    ## string right after an `f`: the string without it.
+    pure def f_string(self, own d: Diagnostic, prev_text: str, adjacent: bool) -> Diagnostic?:
+        let (start, end) = self.current_range()
+        if self.current() != SyntaxKind.StringStart or not adjacent or prev_text != "f":
+            return None
+        let before = self.pos - 1
+        let prev_start = self.sig[before].start
+        var i = 0
+        while self.nth(i) != SyntaxKind.Newline and self.nth(i) != SyntaxKind.Eof:
+            if self.nth(i) == SyntaxKind.StringEnd:
+                let (_, e) = self.nth_range(i) ?? (end, end)
+                return Some(spelled(d, prev_start, e, self.text.byte_slice(start, e)))
+            i += 1
+        return None
 
     ## Whether the significant token `i` is the first of its line.
     pure def starts_line(self, i: int) -> bool:

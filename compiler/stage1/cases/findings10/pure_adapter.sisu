@@ -1,0 +1,17 @@
+# An iterator's adapter is not `pure` whatever the function it is given:
+# `map` takes any function, which 03 makes the function impure, and purity
+# stays a property of a function's type rather than of a call graph
+# (RULES.md, R102). `E0333` at the adapter says so and names `fold` with a
+# `pure` function, which `Iter[T]` has (decision 564).
+pure def square(n: int) -> int:
+    return n * n
+
+pure def squares(xs: list[int]) -> int:
+    return xs.iter().map(x -> square(x)).sum()
+
+pure def folded(xs: list[int]) -> int:
+    return xs.iter().fold(0, (total, x) -> total + square(x))
+
+def main():
+    print(squares([1, 2, 3]))
+    print(folded([1, 2, 3]))

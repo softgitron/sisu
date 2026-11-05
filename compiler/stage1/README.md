@@ -2269,6 +2269,79 @@ name that interpolates, `E0132`), for the driver to route `parse --shape`
 to stage 1, and the note of a template instance's diagnostic writes the
 type arguments as the source does (`User`, not `__T0`).
 
+### The tenth round: the merge's differences, the driver's REPL, the open items, purity
+
+This round took the differences the merge of stage 0's eighth round left,
+what the driver's REPL still needed of stage 1, the ninth round's open
+items, purity through an iterator's adapters, and the manual's findings
+that were stage 1's. RULES.md has the rules (R95 to R103, decisions 600
+to 608) and their decision texts:
+
+- **The merge's differences**: the conformance suite's three new cases of
+  decision 561, `unsafe/malloc_bounds`, `unsafe/unterminated` and
+  `unsafe/free_twice`, import `std.ffi` and `std.mem` and declare an
+  `extern` block, which only stage 1 reads: their seven differences each
+  (ast, names, sir, ids, human, doc, doc-output) are R4's, listed there,
+  and their runs, interpreted and native, print the cases' `.out` and
+  `.err`. The twenty-second, `std/pure_iterators`'s `sir`, is R20's: the
+  program reaches a float's `Debug`, whose impl stage 1 writes otherwise.
+- **The driver's REPL** (R95): `sir --repl` and `sir --worksheet` take
+  `--dir DIR`, where the program stands (`embed`, the inline metadata),
+  and `--name NAME`, what its diagnostics and SIR call it; `parse
+  --bindings INPUT` gives what `:why NAME` reads of an input (each
+  statement, what it binds, its initialiser's bytes, the names that reads,
+  the names it changes), so the driver needs no parser for it. Stage 1's
+  version is 0.9.0: the driver may rely on the three (RULES.md says the
+  forms exactly).
+- **The ninth round's open items**: a variant's fields' `ty` in a derive
+  and the kinds of the program's own types there (R96); `E0203` and
+  `E0271` offer the similar name (R97); `E0310` of an `i16` and a `u32`
+  offers `.to_int()` (R98); `E0812` gives the copy typed as the base
+  (R99); `E0005` names an invisible character, a byte-order mark among
+  them (R100); and of the rest of "Diagnostics without fixes", R101.
+- **Purity** (R102): decided against computing it over the monomorphised
+  call graph (03 keeps `pure` a property of a function's type, and that
+  graph for the resource attributes and capture kinds); `E0333` at an
+  adapter notes why and names `fold` with a `pure` function.
+- **The manual round's late items** (R103): `sisu lint` leaves an import
+  the resolver refused to its error, and a worksheet shows an option or a
+  result an expression statement gives.
+
+R85's case: none still. A raised `unsafe` level needs a lockfile that
+records a lower one, and `check.sh`'s runs write each package's lockfile
+themselves, so a case would need a lockfile the run does not rewrite,
+which no class of `check.sh` provides; the line after `E1022` is the
+commands' own, as for `E1019`, and `main`'s unit test of `raised_level`
+holds the message.
+
+Decided against this round: purity over the call graph (R102); skipping a
+byte-order mark as trivia, which would change the file's tokens and the
+formatter's output (R100 names it instead); `E0241`'s wording and
+`E0117`'s "unexpected a string", which are the catalog's; a fix for
+`sorted` of a `list[f64]` in a library other than `impl Ord for f64` (03's
+`f64.total_order()` is missing, a finding of "Types and traits").
+
+Open: of "Diagnostics without fixes", `E0338` calling a local list "a
+borrowed value" (not reproduced: `let first = queue[0]` of a `list[int]`
+compiles), `sorted`'s fix in a library (above), `E0421`'s note for a lent
+capability, a `TestClock` given where a `System` goes, `E0806`'s method,
+a script's dependency by version (`E0220` before `E1010`), `E0237`'s
+cascade, `E0501`'s place, `E0301`'s float division, `E0402` in a nested
+loop, `E0258`'s associated function, a variant imported by name, the
+`[trust]` order, `E0310` of a `+=` in unrolled code and `E0333`'s `D0021`
+(stage 0's).
+
+Stage 0's side: the driver's `repl.rs` passes `--dir` and `--name` to `sir
+--repl` and `sir --worksheet`, and reads `:why NAME`'s inputs from `parse
+--bindings`; the manual's transcripts that show the five fixes R101
+renames are made again.
+
+The conformance suite's two `.defer` files that show `type.add-copy`'s fix
+are blessed again with R101: `ownership/rustc/move_out_of_vec_tail` and
+`ownership/rustc/overloaded_index_move`; and so are stage 1's
+`cases/findings7/derive_messages.diag` and
+`cases/traits/assoc_const_refusals.diag`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3101,11 +3174,14 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     lowering a variadic parameter and star unpacking (R64 refuses them
     with `E0900`, the first waiting for the owner, since 02 and 14
     disagree), explicit discriminants (R78 refuses them with `E0900`
-    until the layouts of `@repr` enums are lowered); a variant's fields'
-    `ty` in a derive and the kinds of the program's own types there (R92
-    gives a struct's fields the prelude's kinds); and the rest of
-    "Diagnostics without fixes" and "Types and traits" that the ninth
-    round left (below). The ninth round took the REPL's and the
+    until the layouts of `@repr` enums are lowered); the rest of
+    "Diagnostics without fixes" that the tenth round left (above, "The
+    tenth round") and "Types and traits". The tenth round took a variant's
+    fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
+    `E0271`'s similar names (R97), `E0310` of sized integers (R98),
+    `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of
+    "Diagnostics without fixes" (R101) and the adapters' purity (R102,
+    decided against). The ninth round took the REPL's and the
     worksheets' programs (R79), a sized integer shifted by an `int`
     (R80), `expect`'s message (R81), an assertion's call in a call
     (R82), the `@refines` test's place (R83), a hole reached at compile
@@ -3116,9 +3192,8 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     (R92) and a function named `type` (R93). Decided against: `it`
     outside a call's argument, the `own self` method and `zip`'s
     temporaries (above, "The eighth round").
-12. **The driver's `sisu repl` and `sisu ws` on stage 1** (R79), which is
-    stage 0's: the driver may route them to `sir --repl` and `sir
-    --worksheet` now; `:why NAME`'s reading of the kept inputs is still
-    the driver's own, from a parse of each input (`sisu1 parse --tree`
-    gives it), and the language server's inline values of a worksheet
+12. **The driver's `sisu repl` and `sisu ws` on stage 1** (R79, R95),
+    which is stage 0's: the driver may pass `--dir` and `--name` to `sir
+    --repl` and `sir --worksheet`, and read `:why NAME`'s inputs from
+    `parse --bindings`; the language server's inline values of a worksheet
     (`evaluate_sheet`) can take the same SIR.

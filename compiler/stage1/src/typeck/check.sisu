@@ -775,7 +775,16 @@ impl Checker:
                 for a in args:
                     if cx.prog.implements(mut self.types, a, TraitRef(def_=tr, args=[]), self.env)
                             == Answer.No:
-                        return self.derive_fix(cx, d, a, tr)
+                        # The fix names the type it derives the trait for
+                        # (RULES.md, R101).
+                        let before = len(d.fixes)
+                        let shown = self.show(cx, a)
+                        var out = self.derive_fix(cx, d, a, tr)
+                        let k = len(out.fixes) - 1
+                        if k >= before and out.fixes[k].msg == Msg.TypeDeriveTrait:
+                            out.fixes[k].msg = Msg.TypeDeriveTraitFor
+                            out.fixes[k].params = [Param(name="ty".to_string(), value=shown)]
+                        return out
             return d
         return d.fix_edits(Msg.TypeDeriveTrait, [edit])
 
