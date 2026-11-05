@@ -255,6 +255,40 @@ test "two bills together need no rounding" ... ok
   `two` does with `T.arbitrary(d)`. A type with a part that has no
   generator cannot derive it (E0820).
 
+In such generic code, `arbitrary[T]` of the type parameter is the
+generator its bound gives, the same as `Gen.of(d -> T.arbitrary(d))`:
+
+<!-- file: examples/guide-property-test/bounded.sisu -->
+```sisu
+# `arbitrary[T]` of a type parameter draws through its bound.
+
+## A sauna's heat, in whole degrees from 60 to 110.
+@derive(Debug)
+struct Heat:
+    celsius: int
+
+impl Arbitrary for Heat:
+    def arbitrary(d: Draws) -> Heat:
+        return Heat(Draws.gen_in(d, 60, 110))
+
+## The cases of any type that can be drawn, through its `Arbitrary`.
+def cases[T: Arbitrary]() -> Gen[T]:
+    return arbitrary[T]
+
+test "a heat is drawn in its range":
+    check(cases[Heat]()) do h:
+        return 60 <= h.celsius <= 110
+```
+
+<!-- output: examples/guide-property-test/bounded.test -->
+```text
+test "a heat is drawn in its range" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+Without the bound `T: Arbitrary`, `arbitrary[T]` is E0820
+(`test.no-generator`), whose message names the bound to add.
+
 **Status.** In stage 0, with a part of
 [17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
 designed and missing: the database that keeps each failing case and

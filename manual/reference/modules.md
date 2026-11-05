@@ -205,7 +205,8 @@ error[E0220]: cannot import `maps`: it names no module of this package, of a dep
 ```
 
 **Stage 0 differs.** 09 warns about an import nothing uses; stage 0
-says nothing, and `sisu fmt` removes it.
+leaves the warning to `sisu lint` (W0027), so `sisu check` and `sisu
+run` say nothing, and `sisu fmt` keeps the import.
 
 **Status.** In stage 0 (D-019).
 

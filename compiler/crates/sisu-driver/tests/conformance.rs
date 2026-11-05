@@ -528,6 +528,11 @@ fn the_repl_echoes_its_inputs_when_asked() {
     child.stdin.take().expect("its input").write_all(b"let x = 20\nx + 1\n").expect("the input written");
     let out = child.wait_with_output().expect("sisu ends");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert_eq!(stdout, "sisu> let x = 20\nsisu> x + 1\n21\nsisu> \n", "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        stdout,
+        "sisu> let x = 20\nsisu> x + 1\n21\nsisu> \n",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

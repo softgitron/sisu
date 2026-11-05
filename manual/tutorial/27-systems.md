@@ -451,7 +451,12 @@ Reading(minute=45, tenths=798, sensor=2, flags=0)
 
 > **From Python.** This is `struct.unpack` or `ctypes.Structure`, with
 > the layout checked by the compiler: a `@derive(Plain)` that does not
-> hold, such as one on a struct with a `bool` field, does not compile.
+> hold, such as one on a struct with a `bool` field, does not compile,
+> and neither does one on a struct of several fields without
+> `@repr(c)`, whose layout would be the compiler's to choose (E0608).
+> The derive does not yet refuse padding, which 22 rules out of a plain
+> type, so keep a plain struct's fields from largest to smallest, as
+> `Reading` does.
 
 ## Calling C
 

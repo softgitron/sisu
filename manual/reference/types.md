@@ -234,7 +234,7 @@ so:
 | `+`, `-`, `*`, `//`, `%`, `**` | panic ([R0003](diagnostics.md#r0003)) |
 | `+%`, `-%`, `*%` | wrap around, as two's complement does |
 | `+\|`, `-\|`, `*\|` | stay at the type's least or greatest value |
-| `checked_add`, `checked_sub`, `checked_mul`, `checked_pow` of `std.num` | give `None` |
+| `a.checked_add(b)`, `checked_sub`, `checked_mul` of `int`; `checked_pow` of `std.num` | give `None` |
 
 <!-- file: examples/reference-types/wrapping.sisu -->
 ```sisu
@@ -278,8 +278,10 @@ panic: integer overflow: 250 + 10 as u8
 
 **Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#numbers)
 spells checked arithmetic as a method, `a.checked_add(b)`, on every
-integer type; stage 0 has the functions `checked_add(a, b)` and the
-others in `std.num`, for `int` only, and the method is E0304.
+integer type; stage 0 has the methods `checked_add`, `checked_sub` and
+`checked_mul` of `int` only, so the method of a sized integer is E0304,
+and `std.num` has them as functions, `checked_add(a, b)`, with
+`checked_pow`.
 
 **Status.** In stage 0 (D-009).
 
@@ -337,6 +339,7 @@ Every other conversion is a method, whose name says what it may lose:
 | `n.to_f64()`, `n.to_f32()` | an `int` | the nearest float |
 | `x.truncate_to_int()` | a float | the whole part, toward zero; a panic (R0023) for NaN or a value beyond `int` |
 | `x.round()`, `x.floor()`, `x.ceil()` | a float | a float with no fraction |
+| `x.round_to[T]()` | a float | the nearest value of the integer type `T`, a half away from zero, made a `T` as `truncate_to` makes it; a panic for NaN or a value beyond `int` |
 | `x.to_f32()` | an `f64` | the nearest `f32`, or an infinity beyond its range |
 
 <!-- file: examples/reference-types/conversions.sisu -->
@@ -389,8 +392,7 @@ where a narrower one is expected is E0300 with no fix: the conversion is
 one of the methods in the table, chosen for what it does with a value
 that does not fit.
 
-**Stage 0 differs.** The plan's `round_to` for a float is `round()` and
-`truncate_to_int()` in stage 0. `x.into()` where no type is expected,
+**Stage 0 differs.** `x.into()` where no type is expected,
 as inside an interpolation, is accepted by the checker and stops the
 interpreter ("no impl of `Into` for `u8`"); give it a type, as in `let
 wide: u32 = small.into()`.
@@ -415,9 +417,18 @@ workers.
   nothing, itself included; `x.is_nan()` tests for it.
 - A float has a partial order: `f64` and `f32` implement `PartialOrd`
   but not `Ord` or `Hash`, so `sorted` of floats and a float as a key of
-  a `dict` or `set` are E0347. `x.partial_cmp(y)` gives `None` for NaN,
-  and `x.cmp(y)` panics on it (R0017), so `sort_by` with either sorts
+  a `dict` or `set` are E0347, whose note for `Ord` names
+  `total_order()`. `x.partial_cmp(y)` gives `None` for NaN, and
+  `x.cmp(y)` panics on it (R0017), so `sort_by` with either sorts
   floats, with what NaN does written out.
+- `x.total_order()` is a `TotalF64`, which is `Eq` and `Ord`: the
+  numbers in order, `-0.0` before `0.0`, and NaN after every number,
+  every NaN equal to every other; its field `value` is the float. So
+  `sorted(xs.iter().map(x -> x.total_order()))` sorts floats
+  ([chapter 24](../tutorial/24-numbers.md#nan-and-the-order-of-floats)).
+- `max_by` and `min_by` take a key that is only partially ordered, a
+  float among them, and panic on two keys that are not ordered, a NaN
+  and another.
 - An `f32` is computed as an `f32`, rounded once from the exact result,
   and printed as the shortest text that reads back as the same `f32`.
 
@@ -472,14 +483,12 @@ error[D0006]: the program was not run: errors found (1)
 inside it, which strict floating point satisfies, so it may be no
 faster ([R14](attributes.md#fast-floating-point)).
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#numbers)
-has `x.total_order()`, a wrapper with a total order for keys and
-sorting, which stage 0 lacks (E0304); and stage 0 keeps a `@float(fast)`
-function strict. 03 lets `max_by` and `min_by` take a key with a
-partial order and panic on an unordered comparison; stage 0's take an
-`Ord` key only, so floats need `sort_by`.
+**Stage 0 differs.** Stage 0 keeps a `@float(fast)` function strict,
+which the permission allows. `TotalF64` is `Ord` but not `Hash`, so it
+sorts floats and is not yet the key of a `dict` that
+[03](../../proposal/03-types-and-generics.md#numbers) makes it.
 
-**Status.** In stage 0 (D-074), except `total_order`.
+**Status.** In stage 0 (D-074), with the differences noted.
 
 ## Exact numbers
 
@@ -994,8 +1003,10 @@ error[E0900]: an explicit discriminant of an enum's variant is not implemented i
 error[D0006]: the program was not run: errors found (2)
 ```
 
-**Stage 0 differs.** Stage 0 accepts `@repr(u8)` on an enum and changes
-nothing, and an explicit discriminant, `Red = 1`, is E0900
+**Stage 0 differs.** Stage 0 keeps `@repr(u8)` on an enum, which names
+the layout of its tag; nothing a safe program does can observe that
+layout until the layouts of `@repr` enums are lowered. An explicit
+discriminant, `Red = 1`, is E0900
 ([R17](diagnostics.md#e0900)), the code of what stage 0 does not
 implement yet.
 
@@ -1777,11 +1788,36 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 - an effect system: `pure` is the one property a function type
   carries (Q-17);
 - higher-kinded types; the syntax `F[_]` is reserved for them (Q-10),
-  and stage 0 reports it as E0100;
+  and stage 0 reports it as E0100 with the note `parse.higher-kinded`,
+  which says that the syntax is reserved and that a generic parameter
+  is a type, `F`;
 - dependent types: refinements and contracts cover the common cases,
   and a verifier comes after 1.0 (Q-16);
 - computation on types beyond constant parameters and `comptime`
   functions that make types ([R12](compile-time.md#reflection)).
+
+<!-- file: examples/reference-types/higher_kinded.sisu -->
+```sisu
+# `F[_]`, the syntax that 03 reserves for higher-kinded types.
+def count[F[_]](items: F[int]) -> int:
+    return 0
+
+def main():
+    print(count([1, 2]))
+```
+
+<!-- output: examples/reference-types/higher_kinded.console -->
+```console
+$ sisu run higher_kinded.sisu
+error[E0100]: expected `]`, found `[`
+  --> higher_kinded.sisu:2:12
+  |
+2 | def count[F[_]](items: F[int]) -> int:
+  |            ^
+  = note: `F[_]` is reserved for higher-kinded types, which Sisu does not have in its first version (03): a generic parameter is a type, `F`
+
+error[D0006]: the program was not run: errors found (1)
+```
 
 **Status.** Decided (D-002, D-017).
 

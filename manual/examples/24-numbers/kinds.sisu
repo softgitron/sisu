@@ -1,11 +1,9 @@
 # Arithmetic that traps, wraps, saturates or asks first.
-from std.num import checked_add, checked_mul
-
 def main():
     let volume: u8 = 250
     print("{volume +| 10} {volume -| 251} {volume *| 2}")
     let counter: u16 = 65535
     print("{counter +% 1} {counter *% 2}")
-    print(checked_add(9_223_372_036_854_775_807, 1))
-    print(checked_mul(3_037_000_499, 3_037_000_499))
+    print(9_223_372_036_854_775_807.checked_add(1))
+    print(3_037_000_499.checked_mul(3_037_000_499))
     print(volume + 10)

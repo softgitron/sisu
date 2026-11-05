@@ -1,0 +1,9 @@
+$ sisu run higher_kinded.sisu
+error[E0100]: expected `]`, found `[`
+  --> higher_kinded.sisu:2:12
+  |
+2 | def count[F[_]](items: F[int]) -> int:
+  |            ^
+  = note: `F[_]` is reserved for higher-kinded types, which Sisu does not have in its first version (03): a generic parameter is a type, `F`
+
+error[D0006]: the program was not run: errors found (1)

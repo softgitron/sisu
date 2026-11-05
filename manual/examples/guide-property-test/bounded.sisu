@@ -1,0 +1,18 @@
+# `arbitrary[T]` of a type parameter draws through its bound.
+
+## A sauna's heat, in whole degrees from 60 to 110.
+@derive(Debug)
+struct Heat:
+    celsius: int
+
+impl Arbitrary for Heat:
+    def arbitrary(d: Draws) -> Heat:
+        return Heat(Draws.gen_in(d, 60, 110))
+
+## The cases of any type that can be drawn, through its `Arbitrary`.
+def cases[T: Arbitrary]() -> Gen[T]:
+    return arbitrary[T]
+
+test "a heat is drawn in its range":
+    check(cases[Heat]()) do h:
+        return 60 <= h.celsius <= 110

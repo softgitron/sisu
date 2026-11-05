@@ -1,0 +1,5 @@
+$ sisu run total.sisu
+[19.0, 21.5, 23.25, NaN]
+Some(19.0) Some(23.25)
+panic: max_by or min_by compared two keys that are not ordered, such as a NaN
+  at main (total.sisu:8:11)

@@ -349,6 +349,8 @@ for spruce, pine, birch, alder, oak and rowan.
   `join(" ")` writes them with spaces between.
 - `find`, `any`, `all` and `max_by` take closures that judge an item;
   `find` and `max_by` give an optional value, since there may be none.
+  The key of `max_by` and `min_by` may be a float, which chapter 24
+  shows.
 
 `iter()` borrows each element, so the closures see `ref str` items, and
 the list stays as it is. In stage 0, `collect()` always makes a list: a

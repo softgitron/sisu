@@ -527,7 +527,11 @@ The fix writes the missing token where the parser expected it, the `:`
 that opens the body here. A generator expression as a call's only
 argument without parentheses of its own, Python's `sum(p * p for p in
 primes)`, gets the note `parse.generator-parens` and the fix that adds
-them ([chapter 16](../tutorial/16-closures-and-iterators.md)).
+them ([chapter 16](../tutorial/16-closures-and-iterators.md)). `F[_]`
+in a generic parameter list, the syntax that 03 reserves for
+higher-kinded types, gets the note `parse.higher-kinded`, which says
+that a generic parameter is a type, `F`
+([R2](types.md#what-the-type-system-leaves-out)).
 
 <!-- file: examples/reference-diagnostics/e0100_no_colon_fixed.sisu -->
 ```sisu
@@ -2493,8 +2497,10 @@ error[D0006]: the program was not run: errors found (1)
 Keep one impl. For a second way to show the value, write a method, or
 wrap the value in a type of its own. An impl written beside a derive of
 the same trait is E0235 at the derive's argument, `Eq` in
-`@derive(Eq)`, with the note `type.derived-code`, which quotes the
-derived impl's first line ([R14](attributes.md#deriving-traits)).
+`@derive(Eq)`, with the label `resolve.first-impl` at the written impl,
+as for two written impls, and the note `type.derived-code`, which
+quotes the derived impl's first line
+([R14](attributes.md#deriving-traits)): keep the derive or the impl.
 
 <!-- file: examples/reference-diagnostics/e0235_overlap_fixed.sisu -->
 ```sisu
@@ -5411,7 +5417,12 @@ is not in the program ([chapter 25](../tutorial/25-compile-time.md)
 shows it). Where a derived impl needs the trait of a type argument,
 `==` of a `Pair[Plain]` whose `Pair` derives `Eq`, the fix
 `type.derive-trait-for` derives it for that type: "derive it for
-`Plain`".
+`Plain`". For an `f64` that is not `Ord`, `sorted` of a `list[f64]`,
+the note `type.total-order` names `x.total_order()`, a value in a total
+order, and `max_by` and `min_by`, which take the `f64` itself
+([chapter 24](../tutorial/24-numbers.md#nan-and-the-order-of-floats));
+no fix writes an `impl Ord for f64`, which only the root package may
+write.
 
 <!-- file: examples/reference-diagnostics/e0347_bound_fixed.sisu -->
 ```sisu

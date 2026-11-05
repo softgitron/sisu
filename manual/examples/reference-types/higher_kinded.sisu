@@ -1,0 +1,6 @@
+# `F[_]`, the syntax that 03 reserves for higher-kinded types.
+def count[F[_]](items: F[int]) -> int:
+    return 0
+
+def main():
+    print(count([1, 2]))

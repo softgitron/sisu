@@ -1,0 +1,2 @@
+panic: max_by or min_by compared two keys that are not ordered, such as a NaN
+  at main (total.sisu:8:11)

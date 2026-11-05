@@ -760,11 +760,16 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   same, one layout.
 - **Foreign calls**: a C function's signature is taken from the call's
   operands and result, `@blocking` does not move a call off the task's
-  thread, there is no header import (`import c`) and no `@export`, and a
-  struct is not passed by value. `rt.switch` has instructions for x86-64
+  thread, there is no header import (`import c`), and a struct is not
+  passed by value; `@export("name")` gives the function the global
+  symbol `name` of Sisu's convention, over addresses (decision 683),
+  from SIR that the Rust front end writes and stage 1 does not yet.
+  `rt.switch` has instructions for x86-64
   and AArch64 Linux only, and nothing makes a context for a new stack yet
   (the stack pool's `Context.start`). *Pay*: 22's `@blocking`, header
-  import and `@export`; the runtime in Sisu (D-086) over the switch.
+  import, and `@export` of C's own convention over plain values, with
+  stage 1's line in the SIR and its `@repr(c)` check at the boundary;
+  the runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
 decisions 207 to 211) leaves:
@@ -964,7 +969,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645 and 646): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680 and 681): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -987,14 +992,15 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   of the runtime in Rust (decision 625), `in` as an operator, a table's
   literal and the generated code's inline lookups (decision 646), and the
   scheduler's queues: the run queue, the waiters and the timers
-  (decision 645). Still `sisu-rt`'s: the decoding of every other
+  (decision 645), the channels' buffers (decision 680) and `d{k}`'s
+  slot (decision 681). Still `sisu-rt`'s: the decoding of every other
   intrinsic's call (four words and two slices) and the other checks,
   whose panics its messages name (a missing key), an iterator of a
-  borrowed value reached by `iter`, `d{k}`'s slot, a generator's items
+  borrowed value reached by `iter`, a generator's items
   and a receiver's values (the iterators themselves are made by the
   runtime in Sisu's exports, decision 542), the scheduler's choice of
-  the next task, a task's parking and waking and its records, the
-  channels' buffers and mutexes, capabilities and the
+  the next task, a task's parking and waking and its records,
+  mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of an arena, and
   the type table's words themselves (`desc.rs`), which the
@@ -1010,9 +1016,10 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
   Rust counterpart: the rest of the scheduler next (a task's record,
-  parking and waking, the choice of the next task by the seeded
-  generator, and the channels' buffers, whose values have a size of
-  their own; then the dispatch of the other intrinsics follows its
+  parking and waking, and the choice of the next task by the seeded
+  generator, whose records hold the coroutine and its context, which
+  the runtime in Rust keeps; then an iterator of a borrowed value
+  reached by `iter`; then the dispatch of the other intrinsics follows its
   objects, each family's descriptor read by Sisu code as decision 625
   reads a collection's); text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
@@ -1057,7 +1064,7 @@ Nothing here switches the default.
   its place's frame, stripped at each access and at a foreign call, where
   decision 560's addresses miss a returned frame that a call of the same
   depth covers and a shared pointer to a place a mutable one also
-  reaches: a week, both lowerings and the C calls; stage 0's tenth round
+  reaches: a week, both lowerings and the C calls; stage 0's tenth and eleventh rounds
   did not start it, for the size of what each lowering must change in
   the debug profile at once: `ptr.of` and `ptr.of_mut` give a tagged word
   (a call of the runtime where they are a copy of an address now), and

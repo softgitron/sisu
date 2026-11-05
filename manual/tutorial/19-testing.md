@@ -519,13 +519,13 @@ replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sort
 - The second fails, and `check` shrinks the case that failed, removing
   and lowering what it can while the property still fails: the case it
   reports, `[0, 0]`, is the smallest list that shows the bug, two equal
-  numbers. The report says that it was the third case tried, and that
-  shrinking took ten steps.
+  numbers, the third case tried, shrunk in ten steps.
 
-`arbitrary` makes cases of the program's own types too, structs and
-enums included: the compiler writes the generator from the type's
-fields and variants. Saving each failing case to try it first on the
-next run, as Python's Hypothesis does, is designed in
+`arbitrary` makes cases of the program's own types too: the compiler
+writes the generator from the type's fields and variants, and draws a
+`T: Arbitrary` of generic code through the bound
+([G11](../guides/property-test.md)). Saving each failing case to try it
+first on the next run, as Python's Hypothesis does, is designed in
 [17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
 and not in the compiler.
 

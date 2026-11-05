@@ -1026,6 +1026,7 @@ sir 0
 source 0 "wordcount.sisu"
 source 1 "<std>/prelude.sisu"
 entry main system result          -- `system`: main takes System; `result`: it returns T ! E
+export "sauna_heat" heat          -- `@export("sauna_heat")` on `heat` (decision 683)
 test "counts case-insensitively" test#0
 test "parse/rejects empty input" test#1 tags "slow" "io"   -- its `@tag`s, when it has any
 bench "wordcount" bench#0          -- a benchmark: its name and the function that runs it
@@ -3617,7 +3618,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645 and 646). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680 and 681). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3649,8 +3650,9 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
 | the intrinsics of lists, dicts, sets and slices, their descriptors decoded (`sisu_rt_collection`), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups (`sisu_rt_table_literal`, `_inline_find`) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625 and 646) |
 | the scheduler's queues: the run queue, the waiters under their keys and the timers (`sisu_rt_queue_*`) | `queue.sisu` over `list.sisu` | the runtime in Rust's scheduler (`sched.rs`), which keeps their addresses (decision 645) |
+| the channels' buffers: the values sent and not received, in a ring of slots of the value's size (`sisu_rt_channel_*`) | `channel.sisu` | the runtime in Rust's channels (`tasks.rs`, `queue::ChanBuf`), which keep their addresses (decision 680) |
 | a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | `dispatch.sisu`, the runtime in Rust for every list it builds, `sorted`, `reversed` and a slice's copies, and the generated code's `sisu_rt_list_reserve` (decision 385) |
-| the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out, and a whole table copied, compared, shown and dropped (`sisu_rt_table_lookup`, `_push`) | `table.sisu` | `dispatch.sisu`, the runtime in Rust for an iterator and `d{k}` (`sisu_rt_dict_slot`), and `value.sisu` and `show.sisu` (decision 422) |
+| the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out, and a whole table copied, compared, shown and dropped; `d{k}`'s slot (`sisu_rt_table_slot`) | `table.sisu`, `dispatch.sisu` | `dispatch.sisu`, the runtime in Rust's `sisu_rt_dict_slot`, which the generated code calls for `d{k}` (decision 681), and `value.sisu` and `show.sisu` (decision 422) |
 | iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, the drop, a new iterator of each of the eleven kinds and what one may wait for (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`, `_range` and its kin, `_waits`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait, every iterator it takes items from or makes, and `value.sisu` (decisions 423 and 542) |
 
 The structural operations walk a value by the program's type table, which
@@ -3885,9 +3887,11 @@ path is given to `cc` explicitly, since the conformance runner runs `sisu`
 in an empty environment (decision 198). The runtime is the
 `libsisu_rt.a` cargo built beside the `sisu` executable, or the newest
 `deps/libsisu_rt-*.a` there, which a `cargo test` leaves without copying
-it up; without one the build is `D0104` (decision 199). An executable is
-mostly the runtime: 6 MB for a small program with the release runtime, 9
-MB with the debug one.
+it up; without one the build is `D0104` (decision 199). The link leaves
+out the sections nothing reaches from `main` (`--gc-sections`), and the
+runtime in Sisu's object has one for each function (decision 682). An
+executable is mostly the runtime: 6.25 MB for a ten-line program with the
+release runtime, 1.74 MB of it stripped, 21 MB with the debug one.
 
 ### Debug information
 
@@ -10170,4 +10174,4 @@ standard library")
      of the first two is that runtime, and `"freestanding"` is refused
      until there is a runtime without the scheduler. Reading the key, and
      `target.runtime` naming the profile, are stage 1's manifest and
-     compile-time facts. This changes no rule of the language.
+     compile-time facts. It names the key 12 leaves unnamed.

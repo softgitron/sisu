@@ -1,2 +1,2 @@
 panic: cannot convert 1e30 to `int`
-  at main (lossy.sisu:10:11)
+  at main (lossy.sisu:12:11)

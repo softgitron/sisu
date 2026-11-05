@@ -1,2 +1,2 @@
 panic: integer overflow: 250 + 10 as u8
-  at main (kinds.sisu:11:11)
+  at main (kinds.sisu:9:11)

@@ -176,22 +176,19 @@ def main():
 Every integer type has four kinds of arithmetic, and you write the one
 you mean. `+`, `-` and `*` trap: a result that does not fit stops the
 program. `+%`, `-%` and `*%` wrap around, `+|`, `-|` and `*|` stop at
-the type's limits, and the functions `checked_add`, `checked_sub`,
-`checked_mul` and `checked_pow` of `std.num` give `None` where the
-operator would trap:
+the type's limits, and the methods `checked_add`, `checked_sub` and
+`checked_mul` give `None` where the operator would trap:
 
 <!-- file: examples/24-numbers/kinds.sisu -->
 ```sisu
 # Arithmetic that traps, wraps, saturates or asks first.
-from std.num import checked_add, checked_mul
-
 def main():
     let volume: u8 = 250
     print("{volume +| 10} {volume -| 251} {volume *| 2}")
     let counter: u16 = 65535
     print("{counter +% 1} {counter *% 2}")
-    print(checked_add(9_223_372_036_854_775_807, 1))
-    print(checked_mul(3_037_000_499, 3_037_000_499))
+    print(9_223_372_036_854_775_807.checked_add(1))
+    print(3_037_000_499.checked_mul(3_037_000_499))
     print(volume + 10)
 ```
 
@@ -203,7 +200,7 @@ $ sisu run kinds.sisu
 None
 Some(9223372030926249001)
 panic: integer overflow: 250 + 10 as u8
-  at main (kinds.sisu:11:11)
+  at main (kinds.sisu:9:11)
 ```
 
 - A volume control saturates: 250 and 10 is 255, and the volume never
@@ -212,10 +209,10 @@ panic: integer overflow: 250 + 10 as u8
   sequence number of a protocol does.
 - `checked_mul` tells the caller that 3037000499 squared fits and
   `checked_add` that the largest `int` plus one does not, without a
-  panic. They take `int`s; methods such as `a.checked_add(b)` on every
-  integer type are designed in
-  [03](../../proposal/03-types-and-generics.md#numbers) and not in the
-  compiler yet.
+  panic. The methods are `int`'s; `std.num` has them as functions too,
+  `checked_add(a, b)`, with `checked_pow`. The sized types' methods
+  that [03](../../proposal/03-types-and-generics.md#numbers) gives are
+  not in the compiler yet.
 - The panic names the type, `as u8`: overflow traps for every size, in
   every build. So does a division by zero, and the smallest `int`
   divided by -1, whose result is one more than the largest.
@@ -236,6 +233,8 @@ def main():
     let odd = 9_007_199_254_740_993
     print(odd.to_f64())
     print("{2.9.truncate_to_int()} {(-2.9).truncate_to_int()}")
+    print("{2.5.round_to[int]()} {(-2.5).round_to[int]()}")
+    print(200.4.round_to[u8]())
     print(1e30.truncate_to_int())
 ```
 
@@ -246,8 +245,10 @@ None 251
 None 4294967295
 9007199254740992.0
 2 -2
+3 -3
+200
 panic: cannot convert 1e30 to `int`
-  at main (lossy.sisu:10:11)
+  at main (lossy.sisu:12:11)
 ```
 
 - `to_u8()` and its siblings give `None` for a value that does not fit,
@@ -267,6 +268,10 @@ panic: cannot convert 1e30 to `int`
   neighbour.
 - `truncate_to_int()` drops a float's fraction, toward zero, and panics
   for a NaN or a number beyond `int`, such as 10 to the power 30.
+- `round_to[int]()` gives the nearest integer, a half away from zero,
+  so 2.5 becomes 3 and -2.5 becomes -3. `round_to[u8]()` makes the
+  rounded value a `u8` as `truncate_to[u8]()` does, keeping its lowest
+  bits.
 
 > **From Python.** Python's `int(x)` of a float grows to any size, and
 > `x & 0xFF` is how a Python program keeps a byte. In Sisu a float
@@ -358,13 +363,46 @@ panic: NaN has no order
   is ordered: `inf` is greater than every number.
 - Because NaN has no place in an order, `f64` is not `Ord`, and
   `sorted(temps)` or `temps.sort()` gets E0347
-  (`type.bound-not-satisfied`). `sort_by` with `a.cmp(b)` sorts floats,
-  and `cmp` panics on a NaN rather than leave the list in an order that
-  depends on where the NaN was.
+  (`type.bound-not-satisfied`), whose note names `total_order()`.
+  `sort_by` with `a.cmp(b)` sorts floats, and `cmp` panics on a NaN
+  rather than leave the list in an order that depends on where the NaN
+  was.
 
-Remove NaNs, or replace them, before you sort. An order that puts NaN
-in a fixed place, `f64.total_order()`, is designed in 03 and not in the
-compiler yet.
+Remove NaNs, or replace them, before you sort, or sort in an order
+that has a place for them. `x.total_order()` wraps a float in a
+`TotalF64`, which is `Ord`: the numbers in order, `-0.0` before `0.0`,
+and NaN after every number. Its field `value` gives the float back.
+`max_by` and `min_by` take a key that is only partially ordered, such
+as a float, and panic on two keys that are not ordered:
+
+<!-- file: examples/24-numbers/total.sisu -->
+```sisu
+# `total_order()` gives floats an order with a place for NaN.
+def main():
+    let temps = [21.5, 0.0 / 0.0, 19.0, 23.25]
+    let ordered = sorted(temps.iter().map(t -> t.total_order()))
+    print([t.value for t in ordered])
+    let dry = [21.5, 19.0, 23.25]
+    print("{dry.iter().min_by(it).copied()} {dry.iter().max_by(it).copied()}")
+    print(temps.iter().max_by(it))
+```
+
+<!-- output: examples/24-numbers/total.console -->
+```console
+$ sisu run total.sisu
+[19.0, 21.5, 23.25, NaN]
+Some(19.0) Some(23.25)
+panic: max_by or min_by compared two keys that are not ordered, such as a NaN
+  at main (total.sisu:8:11)
+```
+
+- `sorted(temps.iter().map(t -> t.total_order()))` sorts the wrapped
+  values, and the NaN comes last, wherever it was. This is the spelling
+  that E0347's note names for `sorted(temps)`.
+- `min_by(it)` and `max_by(it)` use each reading as its own key, and
+  `.copied()` turns the optional borrow into an optional `f64`.
+- With the NaN among the keys, `max_by` panics, as `cmp` does, rather
+  than give an answer that depends on where the NaN was.
 
 ## Integers of any size
 

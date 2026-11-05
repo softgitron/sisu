@@ -288,6 +288,10 @@ def main():
 24
 ```
 
+Whether such a method should check the invariant on what it returns,
+as construction does, is the owner's open question
+[Q-78](../../open-questions.md#q-78-does-a-method-that-returns-self-check-the-types-invariant).
+
 **Status.** In stage 0 (D-028, D-077).
 
 ## Refinement types

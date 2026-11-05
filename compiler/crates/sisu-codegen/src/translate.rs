@@ -25,7 +25,11 @@ use std::collections::HashMap;
 /// with debug information saying where the sources are.
 pub fn compile_lir(text: &str, sources: &debug::Sources) -> Result<Compiled, Error> {
     let lir = lir::read(text)?;
-    let mut tr = Tr::new(lir.release)?;
+    // A runtime library has no C `main`, the one function that needs the
+    // probe reserve: its functions are a section each, as
+    // `compile_library` makes them (decision 682).
+    let library = !lir.items.iter().any(|i| matches!(i, Item::Function(f) if f.reserve));
+    let mut tr = Tr::new(lir.release, library)?;
     // The functions before the first that needs the probe reserve (C's
     // `main`) are compiled on threads; that one is written once they are
     // placed, as `sisu-codegen` writes it (decision 234).
@@ -114,7 +118,7 @@ struct Tr {
 }
 
 impl Tr {
-    fn new(release: bool) -> Result<Tr, Error> {
+    fn new(release: bool, library: bool) -> Result<Tr, Error> {
         let mut flags = settings::builder();
         let set = |f: &mut settings::Builder, k: &str, v: &str| {
             f.set(k, v).map_err(|e| Error::internal(format!("the setting `{k}`: {e}")))
@@ -131,8 +135,9 @@ impl Tr {
             .map_err(|e| Error::internal(format!("this machine: {e}")))?;
         let call_conv = isa.default_call_conv();
         let shared = isa.clone();
-        let builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
+        let mut builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
             .map_err(|e| Error::internal(format!("the object file: {e}")))?;
+        builder.per_function_section(library);
         Ok(Tr {
             module: ObjectModule::new(builder),
             isa: shared,

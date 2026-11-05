@@ -365,8 +365,10 @@ Without the import, `@derive(Encode)` is E0243 (`resolve.not-derivable`),
 whose note names the import. A diagnostic in a derived impl is placed at the
 derive's argument that asked for the impl, with a note that quotes the
 impl's line, and without the labels and fixes that would point into
-code the program does not have: E0235 for an impl written beside
-`@derive(Eq)` stands at the `Eq` of the derive. E0347's fix "derive
+code the program does not have; a label that points into the
+program's own files stays: E0235 for an impl written beside
+`@derive(Eq)` stands at the `Eq` of the derive and labels the written
+impl, "the other impl is here". E0347's fix "derive
 it", for a generic type that derives the trait and a type argument
 that does not, `Pair[Plain]`, goes to the argument, `Plain`.
 
@@ -747,9 +749,13 @@ variants' values, its discriminants; an enum with only unit variants is
 a C enum ([03](../../proposal/03-types-and-generics.md#algebraic-data-types)).
 
 **Stage 0 differs.** Stage 0 lays out every struct as C does, with or
-without `@repr(c)`, and `Plain`'s derive accepts a struct with any
-`@repr`, `@repr(python)` included. `@repr(u8)` changes nothing, and a
-variant's value, `Red = 1`, is E0900 ([R2](types.md#structs-and-enums)).
+without `@repr(c)`. `Plain`'s derive asks for `@repr(c)` itself, so
+`@repr(python)` is refused as a struct without it (E0608), but it does
+not check for padding, which 22 allows no plain type: a `@repr(c)`
+struct of a `u8` and a `u32` derives `Plain`, and its `as_bytes` reads
+the padding. `@repr(u8)` on an enum is kept and changes nothing a safe
+program can see, and a variant's value, `Red = 1`, is E0900
+([R2](types.md#structs-and-enums)).
 
 **Status.** `@repr(c)` on a struct in stage 0 for `std.mem`'s `Plain`
 (D-081; Q-71 open), with the differences noted; on an enum, and

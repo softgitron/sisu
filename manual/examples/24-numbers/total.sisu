@@ -1,0 +1,8 @@
+# `total_order()` gives floats an order with a place for NaN.
+def main():
+    let temps = [21.5, 0.0 / 0.0, 19.0, 23.25]
+    let ordered = sorted(temps.iter().map(t -> t.total_order()))
+    print([t.value for t in ordered])
+    let dry = [21.5, 19.0, 23.25]
+    print("{dry.iter().min_by(it).copied()} {dry.iter().max_by(it).copied()}")
+    print(temps.iter().max_by(it))

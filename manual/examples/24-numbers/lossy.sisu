@@ -7,4 +7,6 @@ def main():
     let odd = 9_007_199_254_740_993
     print(odd.to_f64())
     print("{2.9.truncate_to_int()} {(-2.9).truncate_to_int()}")
+    print("{2.5.round_to[int]()} {(-2.5).round_to[int]()}")
+    print(200.4.round_to[u8]())
     print(1e30.truncate_to_int())
