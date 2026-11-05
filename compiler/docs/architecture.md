@@ -10052,8 +10052,12 @@ standard library")
      information of the runtime left out, the runtime's code per program
      rather than whole) are not this round's. The runtime in Sisu's
      object grows from 727 264 to 776 576 bytes with its sections; the
-     fixed point's, which stage 2's backend writes as one section, is
-     unchanged in form. This changes no rule of the language.
+     fixed point's, which stage 2's backend writes as one section, from
+     1 335 224 to 1 361 088 with 680 and 681. The fixed point holds
+     (rt-A.o and rt-B.o the same bytes, as sisu2-A and sisu2-B, 31 093 256
+     where they were 32 351 432, and stage1-A and stage1-B, 62 792 672
+     where they were 63 271 168, both smaller for the sections left out).
+     This changes no rule of the language.
 
 683. `@export("name")` makes the function the global symbol `name` in a
      native build, in both lowerings (`Codegen::export_instance`,
