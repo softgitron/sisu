@@ -486,7 +486,9 @@ impl Checker:
                     let t = ops else:
                         continue
                     let tr = TraitRef(def_=t, args=[])
-                    if let Answer.Yes(_) = cx.prog.implements(mut self.types, concrete, tr, self.env):
+                    if let Answer.Yes(_) = cx.prog.implements(
+                        mut self.types, concrete, tr, self.env
+                    ):
                         let ps = [
                             Param(name="found".to_string(), value=self.show(cx, concrete)),
                             Param(name="cap".to_string(), value=cap.to_string()),

@@ -1038,7 +1038,9 @@ impl Resolver:
         let m = self.sources[module.index].ast.add_expr(method)
         let d = self.add_name_expr(module, node, at, "__draws")
         let arg = Arg(node=node, range=at, name=None, mutable=False, value=d)
-        let drawn = Expr(node=node, range=at, kind=ExprKind.Call(callee=m, args=[arg], trailing=None))
+        let drawn = Expr(
+            node=node, range=at, kind=ExprKind.Call(callee=m, args=[arg], trailing=None)
+        )
         let body = self.sources[module.index].ast.add_expr(drawn)
         let param = ClosureParam(name=Name(text="__draws".to_string(), range=at), ty=None)
         let closure = Closure(
@@ -1060,7 +1062,9 @@ impl Resolver:
         )
         let f = self.sources[module.index].ast.add_expr(field)
         let made_arg = Arg(node=node, range=at, name=None, mutable=False, value=c)
-        let call = Expr(node=node, range=at, kind=ExprKind.Call(callee=f, args=[made_arg], trailing=None))
+        let call = Expr(
+            node=node, range=at, kind=ExprKind.Call(callee=f, args=[made_arg], trailing=None)
+        )
         let made = self.sources[module.index].ast.add_expr(call)
         _ = self.prog.generator_bounds.insert((module.index, e.index), made)
 

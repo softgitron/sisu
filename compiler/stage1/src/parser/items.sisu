@@ -365,7 +365,8 @@ impl Parser:
                 var d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", expected)
                 self.report(d.with("found", self.found()).note(Msg.ParseHigherKinded))
                 self.bump()
-                while not self.at(SyntaxKind.RBracket) and not self.at(SyntaxKind.Newline)
+                while not self.at(SyntaxKind.RBracket)
+                        and not self.at(SyntaxKind.Newline)
                         and not self.at(SyntaxKind.Eof):
                     self.bump()
                 _ = self.eat(SyntaxKind.RBracket)

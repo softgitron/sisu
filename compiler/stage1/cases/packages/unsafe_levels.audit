@@ -17,10 +17,8 @@ sneaky 0.1.0   no `unsafe`   not trusted: `[trust] unsafe` does not list it
 lints:
   src/main.sisu:9:49-9:64 E0981 unsafe.call name="twice"
     label src/main.sisu:9:49-9:64 unsafe.its-obligation obligations="`small`"
-  ../cbind/src/lib.sisu:2:1-2:7 E0703 cap.untrusted package="cbind" what="`extern`"
   ../cbind/src/lib.sisu:2:1-2:7 E1020 package.unsafe-level package="cbind" what="foreign code (an `extern` block or a header import)"
   ../cbind/src/lib.sisu:6:9-6:19 W0014 unsafe.ambient-authority name="pid_parity" callee="getpid"
-  ../cbind/src/lib.sisu:8:12-8:18 E0703 cap.untrusted package="cbind" what="`unsafe`"
   ../sneaky/src/lib.sisu:5:5-5:11 E0703 cap.untrusted package="sneaky" what="`unsafe`"
   ../sneaky/src/lib.sisu:5:5-5:11 E1019 package.unsafe-undeclared package="sneaky" what="unsafe code" level="memory"
   ../cbind/sisu.toml:4:10-4:18 E1021 package.unsafe-untrusted name="cbind" level="memory"

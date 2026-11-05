@@ -553,7 +553,8 @@ pub trait Plain(Copy):
             pure def plain_size(self) -> int:
                 if comptime reflect.is_struct(T):
                     if comptime len(reflect.fields_of(T)) != 1
-                            and len([a for a in reflect.attributes_of(T) if a.name == "repr" and a.args == ["c"]]) == 0:
+                            and [a.args for a in reflect.attributes_of(T) if a.name == "repr"]
+                                    != [["c"]]:
                         comptime panic(
                             "`{reflect.name_of(T)}` has no `@repr(c)`: the order of its fields, and so its bytes, are the compiler's to choose"
                         )

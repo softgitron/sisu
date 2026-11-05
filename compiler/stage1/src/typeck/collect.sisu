@@ -518,6 +518,11 @@ impl Resolver:
                 _ = r.std_texts.insert(name.to_string(), text.to_string())
             if text.contains("unsafe "):
                 _ = safety_texts.insert(name.to_string(), text.to_string())
+        # The prelude's text too, for the instances of its generic methods
+        # that ask `reflect` of their type parameters: the base keeps no
+        # std module's syntax (RULES.md, R110).
+        let prelude_name = r.prog.modules[r.prog.prelude.index].name.copy()
+        _ = r.std_texts.insert(prelude_name, prelude_text.copy())
         r.std_safety_texts = Shared(safety_texts)
         return (r, templates)
 
@@ -4472,11 +4477,15 @@ impl Resolver:
                 var type_pkg = -1
                 if let TyData.Adt(d, _) = self.types.data(self_ty):
                     type_pkg = self.prog.package_of(self.prog.defs[d.index].module)
-                if trait_pkg != package and type_pkg != package and not self.local_argument(package, self_ty, trait_args):
+                if trait_pkg != package
+                        and type_pkg != package
+                        and not self.local_argument(package, self_ty, trait_args):
                     var d = Diagnostic.new(Msg.ResolveOrphanImpl, span.start, span.end)
                     d = d.with("trait", trait_name).with("ty", ty_name)
                     let ps = [
-                        MsgParam(name="trait".to_string(), value=self.prog.defs[tr.index].name.copy()),
+                        MsgParam(
+                            name="trait".to_string(), value=self.prog.defs[tr.index].name.copy()
+                        ),
                         MsgParam(name="ty".to_string(), value=ty_name.copy()),
                     ]
                     self.report_other(module, d.note_params(Msg.ResolveOrphanLocalType, ps))

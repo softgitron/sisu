@@ -5459,3 +5459,371 @@ Rust front end's worksheet refuses.
 608. `sisu lint` reports an import the resolver refused by its error
      alone, and a worksheet shows an expression statement's option or
      result. Stage 1 decides it (RULES.md, R103).
+
+## R104. The fixes and notes the manual's writers found missing, the eleventh round (decision 660)
+
+**The rule** (the manual's "Diagnostics without fixes", the tenth round's
+open items, each checked against the manual's own program first):
+
+- `E0338` for an item of a list the function owns, `let first = queue[0]`
+  with `queue` a local `list[String]`, has the note
+  `type.item-stays-in-list`: the list keeps the item and only lends it, so
+  it is copied or taken out (the fix `type.take-out` of R45 where the list
+  is a `var`). The message is the catalog's, shared with the case the
+  words fit, a move out of a reference.
+- `E0421` for a `Lent[Fs]` kept in a field has the note
+  `borrow.lent-capability`, which names the capability itself or the work
+  done inside the call, where the note about text (`.to_string()`) stood.
+- A capability where a whole `System` is taken, a test's `TestClock`, is
+  `E0300` with the note `type.narrow-capability`: the parameter narrowed
+  to `Clock` (`clock: Clock`), and `sys.clock` passed where a `System` is
+  at hand.
+- `E0806` names the type's methods that take `mut self`
+  (`contract.invariant-methods`), or, for a type with none, the method to
+  write (`contract.invariant-method`).
+- A script or a package whose manifest names a dependency by version is
+  `E1010` alone: the `E0220` of its import, which names a `sisu.toml` a
+  script does not have, is left out.
+- An impl without an associated type the trait declares is `E0237` alone:
+  the type is the error's from there on, so a use of it is not `E0347`
+  again.
+- `E0301` for `/` between two `int`s offers, besides `//`, the float
+  division 03 and chapter 2 spell: the fix `type.float-division`, which
+  makes both sides `f64` (`.to_f64()`, or `.0` after a literal).
+- `E0402` at a binding the loop makes anew (its variable, `for turn in
+  turns:`), while a borrow of the one before is still used (`who =
+  turn.name`), has the note `borrow.bound-anew`, which names the copy that
+  owns its value, where R77's note said to change the variable after the
+  loop.
+- `E0258` for a struct built from another module names an associated
+  function of the type that gives one and that module may call
+  (`resolve.made-by`: `Point.on_meridian(lat)`, `new` first).
+- `E0204` for a variant imported by name, `from ledger import Taken`, has
+  the note `resolve.variant-of-type`: a variant is reached through its
+  type, `BookingError.Taken`.
+- A dependency that declares its unsafe level and that `[trust]` leaves
+  out is `E1021` alone, which names the fix: the `E0703`s at its `extern`
+  and `unsafe` blocks are left out.
+- `E0310` of a compound assignment names the operator written, `+=`, in
+  code `comptime for` unrolls and elsewhere.
+
+**Decided against:** `E0501` (`sir.invalid`) in `sisu check`: it is the
+SIR verifier's, an internal error of lowering that stage 0's driver
+reports when it reads SIR, which no source position names; a program that
+reaches it is a compiler bug, reported as one. `E0333`'s `D0021` line is
+stage 0's driver's.
+
+**Why.** The manual's findings (chapters 10, 18 and 23; R17, G2, G19, G26,
+G29, G32, X7, X8), "Diagnostics without fixes".
+
+**In stage 1.** `typeck.expr` (`check_movable`, `mismatch_fix`,
+`float_operand_edits`), `typeck.tasks.check_owners`,
+`typeck.contracts.invariant_field`, `main` (`without_unreachable`, the
+`[trust]` order in `layout_input`), `typeck.collect` (`check_traits`,
+`variant_owner`), `typeck.check.check_assign`,
+`borrowck.loans.conflict`, `typeck.call.maker_of`; the catalog's texts.
+
+**What it changes.** The cases `cases/findings11/item_in_list.sisu`,
+`lent_capability.sisu`, `narrow_clock.sisu`, `invariant_methods.sisu`,
+`script_registry.sisu`, `assoc_cascade.sisu`, `float_division.sisu`,
+`bound_anew.sisu` and `compound_operator.sisu`, and
+`cases/packages/variant_import.pkg` and `trust_order.pkg`, each with its
+`.diag` (the notes are the human form's; `variant_import`'s `fmt` differs
+as R87's cases do, the Rust formatter removing the unused import); the
+human form of the conformance suite's cases the notes reach. Blessed
+again: the conformance suite's `types/integer_division.diag`,
+`run/stopped_by_errors.diag` and `.err` (the float division's fix), and
+stage 1's `cases/run/build_stopped.release` (the same) and
+`cases/packages/unsafe_levels.diag` and `.audit` (no `E0703` beside
+`cbind`'s `E1021`).
+
+**Documents to bring along:** the manual's transcripts that show the
+diagnostics this rule changes (`10-ownership/first_in_line`,
+`18-capabilities/keep_lent`, `solutions/18-capabilities/days_left`,
+`23-contracts/outside`, `guide-script/registry`,
+`guide-c-library/untrusted`, `explanation-compile-time/total`,
+`02-values/average`, the reference's `e0338_move_out_of_borrow`,
+`e0301_division`, `e0806_invariant_field` and `e0258_private_field`, and
+the false friends' `int_division`).
+
+- Differs: `compiler/conformance/cases/capabilities/lent_rejected.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/ownership/rustc/overloaded_index_move.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/wrong/move_out_of_index.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/run/stopped_by_errors.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/types/integer_division.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/item_in_list.sisu`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/lent_capability.sisu`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/narrow_clock.sisu`: human
+- Differs: `compiler/stage1/cases/findings11/invariant_methods.sisu`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/script_registry.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/assoc_cascade.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/float_division.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/bound_anew.sisu`: human
+- Differs: `compiler/stage1/cases/findings11/compound_operator.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/variant_import.pkg`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/variant_import.pkg/src/main.sisu`: fmt, fmt-check
+- Differs: `compiler/stage1/cases/packages/trust_order.pkg`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/trust_order.pkg/cenv/src/lib.sisu`: ast
+- Differs: `compiler/stage1/cases/run/build_stopped.sisu`: ids, human, doc, doc-output
+
+**Decision 660**, for docs/architecture.md:
+
+660. Stage 1 gives the fixes and notes the manual found missing in its
+     eleventh round: a local list's item for `E0338`, a lent capability
+     for `E0421`, the parameter narrowed to the capability a test gives,
+     the methods `E0806` points to, `E1010` without `E0220`, `E0237`
+     without its `E0347`s, the float division for `E0301`, a binding a
+     loop makes anew for `E0402`, the associated function for `E0258`,
+     a variant reached through its type for `E0204`, `E1021` without the
+     `E0703`s, and `+=` named by `E0310`. Stage 1 decides it (RULES.md,
+     R104).
+
+## R105. An impl is the package's own when a type argument of its trait is (decision 661)
+
+**The rule.** An impl of a trait of another package for a type of
+another package, outside the root package, is coherent when one of the
+trait's type arguments is a type of the package's own, and no type
+parameter of the impl stands bare before it (the type implementing the
+trait first, then the trait's arguments in order): `impl Mul[Vector] for
+f64` in the package that declares `Vector`, which R43 lets `2.0 * v`
+reach, so that a library gives the operator to its users. Any other is
+`E0236` as before, with the note `resolve.orphan-local-type`, which says
+which type would make the impl the package's. R101's note for `3.0 *
+step` now names the package that declares the type on the right.
+
+**Why.** Chapter 14's finding ("A library cannot give `2.0 * v` to its
+users"). 03's coherence asks for at most one impl of a trait for a type,
+globally, and gives the orphan rule for it; the first-local-type form is
+Rust's own and keeps it: no other package can write `Mul[Vector] for
+f64`, since only `Vector`'s package has `Vector`, and a bare parameter
+before the local type (`impl[T] Mul[Vector] for T`) is refused, since
+another package's impl of `Mul[Vector]` for its own type would overlap
+it.
+
+**In stage 1.** `typeck.collect.check_traits`, `local_argument`.
+
+**What it changes.** The cases `cases/packages/coherence_operator.pkg`
+(its `.out`, which the Rust front end refuses) and
+`coherence_refused.pkg` (its `.diag`).
+
+- Differs: `compiler/conformance/cases/packages/orphan.pkg/app`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/coherence_operator.pkg`: types, sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/coherence_refused.pkg`: human, doc, doc-output
+
+**Decision 661**, for docs/architecture.md:
+
+661. An impl of a foreign trait for a foreign type is the package's own
+     when one of the trait's type arguments is a type of the package and
+     no type parameter of the impl stands bare before it, `impl
+     Mul[Vector] for f64` beside `Vector`; any other is `E0236`, whose
+     note says which type would make it the package's. Stage 1 decides
+     it (RULES.md, R105).
+
+## R106. An import may test the target; an import in a body is `E0277` (decision 662)
+
+**The rule.** 09 gives a dependency that only some targets build (`when
+= { os = "windows" }`) and says nothing of how code that builds on every
+target reaches it: `@cfg(...)` on the target was `E0266`, an import stands
+outside `if comptime`, and an import of the excluded dependency is
+`E0275`. Now:
+
+- An import's `@cfg` may test a fact of the target, `@cfg(target.os ==
+  "windows")` (`==` or `!=` on `os`, `arch` or `runtime`, under `not`,
+  `all` and `any` as the other conditions). Where it holds, the import is
+  as written; where it does not, it is left out of the build, as any item
+  whose `@cfg` does not hold, and binds nothing (so no `E0275`). On any
+  other item a condition on the target is `E0266` still, with R101's note
+  that a body tests the target with `if comptime`.
+- A name such an import would have bound is not reported inside an `if
+  comptime` branch on the target that the build leaves out (the branch
+  of a condition `target.FACT == "VALUE"` that does not hold, and those
+  after one that does), where nothing could check it; anywhere else it is
+  `E0200` with the note `resolve.cfg-import-absent`, which names the
+  `@cfg` and the `if comptime` that keeps the use where the import is.
+  08's rule that both branches type-check holds for everything else in
+  them. Stage 1 checked a branch the build leaves out like any other,
+  before resolution; this is the one exception, for the names the build
+  does not have.
+- An import inside a function's body, `E0900` ("a nested declaration")
+  with an `E0200` at each use, is `E0277` (`resolve.import-in-body`):
+  imports stand at the top level, and their names are the module's, with
+  the fix `resolve.move-import` that moves it before the first line that
+  is not a comment; the names it binds are not reported again.
+
+**Why.** The manual's findings (R13, R17 under "Tooling and the driver";
+R14's `E0266`; "An import inside a function is E0900").
+
+**In stage 1.** `cfg` (`Filter.import_`, `target_condition`,
+`import_names`, `discarded_branches`), `main` (`target_absences`,
+`with_absences`, `NamedModule.absent` and `discarded`),
+`typeck.collect` (the absent names are poisoned), `typeck.check`
+(`move_import_edits`), `resolve.statement`.
+
+**What it changes.** The cases `cases/packages/conditional_import.pkg`
+(its `.out`), `conditional_import_use.pkg` and
+`cases/findings11/import_in_body.sisu` (their `.diag`).
+
+- Differs: `compiler/stage1/cases/packages/conditional_import.pkg`: sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/conditional_import_use.pkg`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/import_in_body.sisu`: names, ids, human, doc, doc-output
+
+**Decision 662**, for docs/architecture.md:
+
+662. An import's `@cfg` may test the target, `@cfg(target.os ==
+     "windows")`, and binds its names only where the condition holds; a
+     use of one is not reported in an `if comptime` branch on the target
+     the build leaves out, and is `E0200` naming the `@cfg` elsewhere.
+     An import in a function's body is `E0277`, with the fix that moves
+     it to the top of the module. Stage 1 decides it (RULES.md, R106).
+
+## R107. `arbitrary[T]` of a type parameter draws through its bound (decision 663)
+
+**The rule.** `arbitrary[T]`, `T` a type parameter of the function bounded
+by `Arbitrary`, is `Gen.of(d -> T.arbitrary(d))`, the generator the bound
+gives, where it was `E0820`. Without the bound it is `E0820` still, whose
+reason now names the bound (`a type parameter has the generator of its
+bound, `T: Arbitrary``), where the message said twice that `T` has no
+generator. `exhaustive[T]` of a type parameter is `E0820` as before:
+`Arbitrary` gives random cases, not every one.
+
+**Why.** G11's finding under "Testing" (17: a type with an `Arbitrary`
+impl is drawn through it).
+
+**In stage 1.** `typeck.arbitrary` (`write_bound_call`,
+`Program.generator_bounds`), `typeck.contracts.generator_site`
+(`bounded_by_arbitrary`, `is_type_param`).
+
+**What it changes.** The cases `cases/findings11/arbitrary_bound.sisu`
+(its `.out`; its test passes) and `arbitrary_unbounded.sisu` (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/findings11/arbitrary_bound.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/arbitrary_unbounded.sisu`: ids, human, doc, doc-output
+
+**Decision 663**, for docs/architecture.md:
+
+663. `arbitrary[T]` of a type parameter bounded by `Arbitrary` is the
+     generator its bound gives; without the bound `E0820` names it.
+     Stage 1 decides it (RULES.md, R107).
+
+## R108. Types and traits: `F[_]`, a float's total order, the methods of 03, `@repr(c)` for `Plain` (decision 664)
+
+**The rule.**
+
+- `F[_]` in a generic parameter list is `E0100` with the note
+  `parse.higher-kinded`: 03 reserves the syntax for higher-kinded types,
+  which the first version does not have; the bracket is passed over, so
+  the declaration is read on.
+- The standard library has, of the methods the manual found missing beside
+  03: `int.checked_add`, `checked_sub` and `checked_mul`, which give `None`
+  on overflow; `f64.round_to[T]()`, the nearest value of an integer type
+  (halves away from zero, made a `T` as `truncate_to` makes it);
+  `f64.total_order()`, a `TotalF64` that is `Eq` and `Ord` (the numbers in
+  order, `-0.0` before `0.0`, NaN after every number); and `max_by` and
+  `min_by` over a `PartialOrd` key, which panic on two keys that are not
+  ordered, as 03 asks. `E0347` for an `f64` that is not `Ord` has the note
+  `type.total-order`, which names `total_order()`, where its fix wrote an
+  `impl Ord for f64` that only the root package may write.
+- `@derive(Plain)` of a struct of several fields asks for `@repr(c)`
+  itself: an attribute named `repr` with another argument,
+  `@repr(python)`, is refused as one without it.
+- `@repr(u8)` on an enum without discriminants is kept: it names the
+  tag's layout, which nothing a safe program does can observe until the
+  layouts are lowered (R78 refuses the discriminants that would).
+
+**Decided against, or left:** a padded `@repr(c)` struct under
+`@derive(Plain)` (22 allows no padding): the derive's template has no
+compile-time size of a field until the layouts are lowered, so it is
+left open; `ptrsize`, `Sized`, `Decimal`'s `/`, `graphemes`,
+`@derive(Into, From)`, the `Array` literal and `FromLiteral` for `Url`,
+which are the runtime's, the design's or wait for the owner. A method
+that takes `own self` and returns `Self` (`Gauge(level=4).filled(20)`) is
+no exit that checks the invariant (R11's finding; 07 checks construction
+and `mut self` methods): a question for the owner, with the lean that a
+method of the type that returns `Self` checks the invariant on what it
+returns, as construction does.
+
+**Why.** The manual's "Types and traits" (R2, chapters 2, 14 and 27, R14).
+
+**In stage 1.** `parser.items.generic_params`, `typeck.check.missing_impl_fix`;
+`std/prelude.sisu` (each addition with its doc example), `std/mem.sisu`'s
+derive of `Plain`.
+
+**What it changes.** The cases `cases/findings11/higher_kinded.sisu`,
+`float_order.sisu` and `plain_repr.sisu` (their `.diag`) and
+`std_methods.sisu` (its `.out`); `cases/unsafe/plain_refusals.diag` is
+blessed again, the derive's lines in `std/mem.sisu` one further down,
+and so is the conformance suite's `std/doc_examples.select`, which runs
+the seven new doc examples.
+
+- Differs: `compiler/stage1/cases/findings11/higher_kinded.sisu`: tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/float_order.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings11/plain_repr.sisu`: names, ids, human, doc, doc-output
+
+**Decision 664**, for docs/architecture.md:
+
+664. `F[_]` is `E0100` with a note that 03 reserves it; the standard
+     library has checked arithmetic as methods, `round_to`,
+     `f64.total_order()` and `max_by` and `min_by` over a partially
+     ordered key, which `E0347` for a float names; `@derive(Plain)` asks
+     for `@repr(c)` itself; `@repr(u8)` without discriminants is kept.
+     Stage 1 decides it (RULES.md, R108).
+
+## R109. `E0235` at a derive labels the impl written beside it (decision 665)
+
+**The rule.** `E0235` for an impl written beside `@derive(Eq)`, which
+stands at the derive's `Eq`, labels the written impl (`resolve.first-impl`),
+as `E0235` for two written impls labels the other one: a label of a
+derived impl's diagnostic that points into a file of the program stays
+when the diagnostic moves to the derive (R70 dropped every label).
+
+**Left open:** a label at the line of the template that `comptime for`
+unrolled (X7; the instance's text is not mapped back to its template's
+lines); `@preview("...")`, which compiles without a word (the lean: a use
+of a preview item warns as a deprecated one does, R30, with its text);
+statements before a derive's `return impl` (E0607), which 08 neither
+gives nor rules out.
+
+**Why.** The manual's "Metaprogramming" (R14, R17).
+
+**In stage 1.** `typeck.placed_at_derive`.
+
+**What it changes.** The case `cases/findings11/derive_overlap.sisu` (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/findings11/derive_overlap.sisu`: ids, human, doc, doc-output
+
+**Decision 665**, for docs/architecture.md:
+
+665. `E0235` at a derive labels the impl written beside it. Stage 1
+     decides it (RULES.md, R109).
+
+## R110. A std template that asks `reflect` of its type parameters; `json.decode`'s expected type without an article (decision 666)
+
+**The rule.** A generic method of the prelude whose body asks `reflect`
+of its type parameters, `reflect.name_of(T)`, is unfolded for its
+instances as a template of the program's own is, where stage 1 stopped
+with an index out of bounds: the base keeps no std module's syntax, so
+the instance reads the module's text parsed again (the prelude's text is
+kept with the importable modules' for it), which gives the nodes the
+base's parse gave. And `json.decode`'s `Mismatch` writes the expected type
+without an article, ``expected="`Hour`"``, as R68 took the article out of
+the compiler's messages.
+
+**Why.** The stage 0 round's items: its `truncate_to` to the 128-bit
+types, at the prelude's end, asks for the name of its type parameter;
+and the manual's finding under "The standard library" (G7).
+
+**In stage 1.** `typeck.instances` (`std_syntax`, `named_types` and
+`value_types`, which pass by a body whose syntax is missing),
+`typeck.collect` (the prelude's text in `std_texts`); `std/json.sisu`.
+
+**What it changes.** `cases/json/decode_validates.out`, blessed again; no
+case of stage 1's reaches the template yet (the prelude has no generic
+method that asks `reflect`), which stage 0's `truncate_to` will be.
+
+**Decision 666**, for docs/architecture.md:
+
+666. A generic method of the standard library may ask `reflect` of its
+     type parameters; `json.decode`'s `Mismatch` names the expected type
+     without an article. Stage 1 decides it (RULES.md, R110).

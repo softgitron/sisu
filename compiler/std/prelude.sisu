@@ -1023,7 +1023,7 @@ trait Iterator:
     ## keys that are not ordered, a NaN and another, panic.
     ##
     ## ```
-    ## assert [2.5, 9.0, 4.0].iter().max_by(it) == Some(9.0)
+    ## assert [2.5, 9.0, 4.0].iter().max_by(it).copied() == Some(9.0)
     ## ```
     def max_by[K: PartialOrd](own self, key: (ref Item) -> K) -> Item?:
         var best: Item? = None
@@ -1041,7 +1041,7 @@ trait Iterator:
     ## that is only partially ordered is taken too, as `max_by` takes it.
     ##
     ## ```
-    ## assert [2.5, 9.0, 4.0].iter().min_by(it) == Some(2.5)
+    ## assert [2.5, 9.0, 4.0].iter().min_by(it).copied() == Some(2.5)
     ## ```
     def min_by[K: PartialOrd](own self, key: (ref Item) -> K) -> Item?:
         var best: Item? = None

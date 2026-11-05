@@ -875,7 +875,9 @@ impl Checker:
                     if let Some(maker) = self.maker_of(cx, def_):
                         let ps = [
                             Param(name="maker".to_string(), value=maker),
-                            Param(name="ty".to_string(), value=cx.prog.defs[def_.index].name.copy()),
+                            Param(
+                                name="ty".to_string(), value=cx.prog.defs[def_.index].name.copy()
+                            ),
                         ]
                         let k = len(self.diags) - 1
                         self.diags[k] = self.diags[k].copy().note_params(Msg.ResolveMadeBy, ps)

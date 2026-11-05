@@ -28,7 +28,7 @@
 ##! attributes of a std type, which the base does not keep the text of, are
 ##! none to `reflect.attributes_of`.
 
-from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.diag import Catalog, Diagnostic, Msg, TextRange
 from stage1.diag import Param as MsgParam
 from stage1.parser import parse
 from stage1.syntax.ast import (
@@ -618,6 +618,19 @@ impl Resolver:
             self.resolve_pending()
             self.record_method_instances()
 
+    ## The syntax of a std module whose template is unfolded, which the
+    ## base keeps no copy of: its text parsed again, which gives the nodes
+    ## the base's parse gave (RULES.md, R110). `None` for a module whose
+    ## syntax the program has.
+    pure def std_syntax(self, module: ModuleId) -> Ast?:
+        if not self.is_std(module) or module.index >= len(self.sources):
+            return None
+        if not self.sources[module.index].ast.exprs.is_empty():
+            return None
+        let text = self.std_texts.get(self.prog.modules[module.index].name) else:
+            return None
+        return Some(build.module(parse(text, Catalog.parse("")).tree).ast)
+
     ## The instance declared for a template and type arguments.
     pub pure def instance_of(self, def_: DefId, args: list[Ty]) -> DefId?:
         for (d, a, inst) in self.prog.instances:
@@ -711,7 +724,14 @@ impl Resolver:
         # (`reflect.methods_of(Store)`, decision 251).
         var types: list[(String, TypeShape)] = []
         var named_at = 0
-        for n in named_types(self.ast(module), f):
+        let reparsed = self.std_syntax(module)
+        var names_found: list[String] = []
+        match reparsed:
+            case Some(a):
+                names_found = named_types(a, f)
+            case None:
+                names_found = named_types(self.ast(module), f)
+        for n in names_found:
             var taken = False
             for (p, _) in params:
                 if p == n:
@@ -735,13 +755,22 @@ impl Resolver:
         var unfolded: String? = None
         var failed: (TextRange, String)? = None
         if module.index < len(self.sources):
-            let src = Src(ast=ref self.sources[module.index].ast, source=source)
             let head: str? = match within:
                 case Some(h): Some(h)
                 case None: None
-            match unfold_fn(src, f, params, types, inst, head, generic):
+            var result: String ! Unfolding = Err(
+                Unfolding.Failed(at=TextRange.empty(0), why=String.new())
+            )
+            match reparsed:
+                case Some(a):
+                    let src = Src(ast=ref a, source=source)
+                    result = unfold_fn(src, f, params, types, inst, head, generic)
+                case None:
+                    let src = Src(ast=ref self.sources[module.index].ast, source=source)
+                    result = unfold_fn(src, f, params, types, inst, head, generic)
+            match result:
                 case Ok(x):
-                    unfolded = Some(x)
+                    unfolded = Some(x.copy())
                 case Err(Unfolding.Failed(at, why)):
                     failed = Some((at, why.copy()))
         let text = unfolded else:
@@ -1218,6 +1247,8 @@ pure def mode_text(m: Mode) -> str:
 ## The names a value passes to `reflect`'s queries: the types it may name.
 pure def value_types(ast: Ast, e: ExprId) -> list[String]:
     var out: list[String] = []
+    if e.index >= len(ast.exprs):
+        return out
     for x in visit.exprs_of(ast, e):
         if let ExprKind.Call(callee, args, _) = ast.expr(x).kind:
             if let ExprKind.Field(base, _) = ast.expr(callee).kind:
@@ -1274,6 +1305,11 @@ pure def named_types(ast: Ast, f: FnDef) -> list[String]:
         stmts = Some(b.copy())
     let body = stmts else:
         return out
+    # A std template's body, whose syntax a program checked against the
+    # cached base does not have: its type parameters are named already.
+    for st in body.stmts:
+        if st.index >= len(ast.stmts):
+            return out
     for e in visit.exprs_in_block(ast, body):
         var roots: list[ExprId] = []
         match ast.expr(e).kind:

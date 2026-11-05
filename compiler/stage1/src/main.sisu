@@ -1107,7 +1107,9 @@ def held_layout_input(
     # `extern` in a dependency `[trust]` does not list (`cap.untrusted`).
     var other = layout.has_errors(catalog)
     let found = modules_with_absences(
-        without_unreachable(resolve.resolve_program(named, packages_of(layout), env, catalog), layout),
+        without_unreachable(
+            resolve.resolve_program(named, packages_of(layout), env, catalog), layout
+        ),
         named,
     )
     var name_errors: list[(int, int)] = []
@@ -1212,7 +1214,9 @@ def held_layout_input(
 ## reach, one that is not a `path` dependency (`E1010`): the manifest's error
 ## is the one that says what to write, so `E0220` does not precede it
 ## (RULES.md, R104).
-pure def without_unreachable(own found: list[list[Diagnostic]], layout: Layout) -> list[list[Diagnostic]]:
+pure def without_unreachable(
+    own found: list[list[Diagnostic]], layout: Layout
+) -> list[list[Diagnostic]]:
     var refused: list[String] = []
     for p in layout.problems:
         if p.diag.msg == Msg.PackageNotAPath:
@@ -1287,7 +1291,9 @@ pure def with_absences(
     return out
 
 ## Each module's name diagnostics `with_absences`.
-pure def modules_with_absences(own found: list[list[Diagnostic]], named: list[NamedModule]) -> list[list[Diagnostic]]:
+pure def modules_with_absences(
+    own found: list[list[Diagnostic]], named: list[NamedModule]
+) -> list[list[Diagnostic]]:
     var out: list[list[Diagnostic]] = []
     for i in range(len(found)):
         if i < len(named):
@@ -3560,7 +3566,9 @@ def name_diagnostics(
             let names = ModuleNames.of(source, parse(source, catalog).tree)
             _ = env.std.insert(module.copy(), names)
     let (absent, discarded) = target_absences(text, parsed.tree)
-    let found = with_absences(resolve.resolve(text, tree, parsed.diagnostics, env, catalog), absent, discarded)
+    let found = with_absences(
+        resolve.resolve(text, tree, parsed.diagnostics, env, catalog), absent, discarded
+    )
     return Ok((parsed.diagnostics.copy(), found, cfg_diags))
 
 ## A module's syntax tree as a build with or without its tests compiles it
@@ -3761,7 +3769,9 @@ def names_of(
     for layout in layouts:
         let (modules, _) = named_modules(sys, home, layout, True, mut env, catalog)?
         let found = modules_with_absences(
-            without_unreachable(resolve.resolve_program(modules, packages_of(layout), env, catalog), layout),
+            without_unreachable(
+                resolve.resolve_program(modules, packages_of(layout), env, catalog), layout
+            ),
             modules,
         )
         for i in range(len(found)):

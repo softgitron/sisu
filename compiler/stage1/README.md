@@ -2342,6 +2342,61 @@ are blessed again with R101: `ownership/rustc/move_out_of_vec_tail` and
 `cases/findings7/derive_messages.diag` and
 `cases/traits/assoc_const_refusals.diag`.
 
+### The eleventh round: the manual's findings, coherence, conditional imports
+
+This round took what the manual's findings left to stage 1: the tenth
+round's open items of "Diagnostics without fixes", coherence for a
+library's operators, conditional imports, `arbitrary[T]` under a bound,
+"Types and traits" and part of "Metaprogramming", the compile-time
+evaluator's speed, and two items of the stage 0 round. RULES.md has the
+rules (R104 to R110, decisions 660 to 666) and their decision texts:
+
+- **Diagnostics without fixes** (R104): `E0338` of a local list's item,
+  `E0421` of a lent capability, a `TestClock` where a `System` is taken,
+  `E0806`'s methods, `E1010` without `E0220`, `E0237` without its
+  `E0347`s, `E0301`'s float division, `E0402` at a binding the loop makes
+  anew, `E0258`'s associated function, a variant imported by name,
+  `E1021` without the `E0703`s, and `E0310` naming `+=`. `E0501` is
+  decided against: it is the SIR verifier's, an internal error.
+- **Coherence** (R105): an impl of a foreign trait for a foreign type is
+  the package's own when one of the trait's type arguments is its type,
+  `impl Mul[Vector] for f64` beside `Vector`, Rust's first-local-type
+  form.
+- **Conditional imports** (R106): an import's `@cfg` may test the target;
+  a name it would bind is not reported in an `if comptime` branch on the
+  target that the build leaves out, and is `E0200` naming the `@cfg`
+  elsewhere. Stage 1 checked such a branch before; the exception is for
+  the names the build does not have. An import in a body is `E0277`, with
+  the fix that moves it.
+- **`arbitrary[T]` under a bound** (R107): drawn through the bound's impl.
+- **Types and traits** (R108): `F[_]`'s note; `checked_add`,
+  `checked_sub`, `checked_mul`, `round_to`, `f64.total_order()` and
+  `max_by` and `min_by` over a `PartialOrd` key in the prelude, which
+  `E0347` for a float names; `@derive(Plain)` asks for `@repr(c)` itself.
+- **Metaprogramming** (R109): `E0235` at a derive labels the written impl.
+- **The stage 0 round's items** (R110): a generic method of the prelude
+  may ask `reflect` of its type parameters, and `json.decode`'s
+  `Mismatch` has no article.
+- **The evaluator's speed**: the finding is stale (below, "The
+  compile-time evaluator").
+
+Decided against or left: `E0501` in `sisu check`; a padded `@repr(c)`
+struct under `Plain`, which waits for the layouts; `ptrsize`, `Sized`,
+`Decimal`'s `/`, `graphemes`, `@derive(Into, From)`, the `Array` literal
+and `FromLiteral` for `Url`; the label at the template line `comptime
+for` unrolled, `@preview`'s warning and statements before `return impl`;
+and the invariant of a method that takes `own self` and returns `Self`,
+the owner's question (RULES.md, R108).
+
+Stage 1's version stays 0.9.0: no form the driver relies on changed. The
+package cases of the round are in `cases/packages/`, where `check.sh`
+reads package cases. Blessed again: `cases/json/decode_validates.out`
+(R110), `cases/run/build_stopped.release`,
+`cases/packages/unsafe_levels.diag` and `.audit` (R104),
+`cases/unsafe/plain_refusals.diag` (R108), and the conformance suite's
+`types/integer_division.diag`, `run/stopped_by_errors.diag` and `.err`
+(R104) and `std/doc_examples.select` (R108's doc examples).
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3070,6 +3125,15 @@ quadratic: a read through a reference of a whole value (`target`, which
 an intrinsic's argument goes through), and the values themselves, trees
 a copy of which is a copy of every node.
 
+The eleventh round measured the chapter's programs again (`sisu1 sir`,
+native, on a machine other work kept busy): `table.sisu`, the sieve of
+100, 1.2 s, the sieve of 4,000 1.2 s and of 20,000 1.8 s, where the Rust
+front end takes 0.5, 0.8 and 1.4 s. The manual's 3.7 s and 90 s were the
+ninth round's; the sieve's evaluation is now below the start-up's
+noise for 4,000 numbers and about 0.6 s for 20,000, so nothing
+dominates that a change of the evaluator would remove without the base
+cache of item 8 below, and the round changed nothing there.
+
 ## What is next
 
 Every part of 18's stage table for stage 1 exists, `sisu doc` the last
@@ -3176,7 +3240,15 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     disagree), explicit discriminants (R78 refuses them with `E0900`
     until the layouts of `@repr` enums are lowered); the rest of
     "Diagnostics without fixes" that the tenth round left (above, "The
-    tenth round") and "Types and traits". The tenth round took a variant's
+    tenth round") and "Types and traits". The eleventh round took the
+    rest of "Diagnostics without fixes" (R104, `E0501` decided against),
+    coherence through a trait's arguments (R105), conditional imports
+    and an import in a body (R106), `arbitrary[T]` under a bound
+    (R107), most of "Types and traits" (R108) and `E0235` at a derive
+    (R109); left: a padded `@repr(c)` struct under `Plain`, the label at
+    an unrolled template's line, `@preview`'s warning, statements before
+    `return impl`, and the invariant of a method that returns `Self`,
+    the owner's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of
