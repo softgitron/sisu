@@ -762,6 +762,7 @@ impl Resolver<'_> {
             structural: None,
             keeps: Vec::new(),
             internal: false,
+            export: None,
             quiet: false,
             template: false,
             instance_of: None,
@@ -2029,6 +2030,7 @@ impl Resolver<'_> {
         info.intrinsic = Self::builtin_attr(&f.attrs, "intrinsic");
         info.structural = Self::builtin_attr(&f.attrs, "structural");
         info.internal = f.attrs.iter().any(|a| a.name == "internal");
+        info.export = Self::builtin_attr(&f.attrs, "export");
         let mut seen_default = false;
         for (i, p) in f.params.iter().enumerate() {
             let ctx = TyCtx {

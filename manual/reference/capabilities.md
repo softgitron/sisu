@@ -252,13 +252,14 @@ error[E0421]: `Lent[Fs]` borrows, so it cannot be put in `Fs`, which can outlive
   |
 6 |     return Report(fs)
   |                   ^^
-  = note: put an owned value in it instead, such as a `String` made with `.to_string()`
+  = note: `Lent[Fs]` lasts for the call it is lent to, so nothing keeps it: keep the `Fs` itself, taken as a parameter of type `Fs`, or do the work inside the call
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The note's advice is written for text; for a lent capability the fixes
-are a parameter of type `Fs`, or doing the work inside the call.
+The note (`borrow.lent-capability`) names the two fixes: a parameter
+of type `Fs`, which a function may keep, or doing the work inside the
+call.
 
 **Status.** In stage 0 (leaning, Q-51).
 

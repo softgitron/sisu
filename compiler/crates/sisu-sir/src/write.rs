@@ -20,6 +20,9 @@ pub fn write(p: &Program) -> String {
         }
         out.push('\n');
     }
+    for (symbol, f) in &p.exports {
+        let _ = writeln!(out, "export {} {f}", quote(symbol));
+    }
     for (k, (name, f)) in p.tests.iter().enumerate() {
         let _ = write!(out, "test {} {f}", quote(name));
         // The test's `@tag`s, when it has any (decision 285).

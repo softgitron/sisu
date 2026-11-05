@@ -1,0 +1,9 @@
+# The import tests the target, and so does the code that uses it.
+@cfg(target.os == "windows")
+import winlog
+
+def main():
+    if comptime target.os == "windows":
+        winlog.record("the stove is on")
+    else:
+        print("the stove is on")

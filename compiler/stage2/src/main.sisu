@@ -144,15 +144,23 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Err(Failed)
     let Ok(read_prog) = r else:
         return Err(Failed)
+    # The `@export`s, which stage 1's `sir.Program` has no place for
+    # (decision 683).
+    let ex = read.exports(text)
+    if let Err(ReadError.Bad(line, message)) = ex:
+        print_err("{path}:{line}: {message}")
+        return Err(Failed)
+    let Ok(exports) = ex else:
+        return Err(Failed)
     if command == "sir":
-        emit(write.write(read_prog))
+        emit(read.export_lines(write.write(read_prog), exports))
         return Ok(())
     var prog = read_prog
     # The library has no std.par to give its native body (decision 353).
     if not library:
         gen.native_bodies(mut prog)
     let lowered = if library: gen.lower_library_spanned(prog, release) else: gen.lower_spanned(
-        prog, release
+        prog, exports, release
     )
     let lowered_at = sys.clock.now().unix_nanos()
     if let Err(e) = lowered:

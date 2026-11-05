@@ -1,10 +1,4 @@
 $ sisu run app
-error[E0703]: the package `readings` is not trusted with `unsafe`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
-  --> ../readings/src/lib.sisu:10:12
-   |
-10 |     return unsafe first.offset(len(temps) - 1).read()
-   |            ^^^^^^
-
 error[E1021]: the dependency `readings` declares `unsafe = "memory"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
   --> ../readings/sisu.toml:5:10
   |
@@ -12,4 +6,4 @@ error[E1021]: the dependency `readings` declares `unsafe = "memory"`, and `[trus
   |          ^^^^^^^^
   = note: the root package consents by listing it: `[trust] unsafe = ["readings"]`
 
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)

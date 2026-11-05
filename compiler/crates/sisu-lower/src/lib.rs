@@ -492,8 +492,23 @@ fn lower_reaching(
     }
     let benches: Vec<(String, String)> =
         prog.benches.iter().filter(has_body).map(|d| (prog.def(*d).name.clone(), ctx.fn_name(*d))).collect();
-    // Keep what the entry, the tests and the root module's functions reach.
+    // The functions `@export("name")` gives a global symbol (decision
+    // 683), in the order of their bodies.
+    let mut exports: Vec<(String, String)> = Vec::new();
+    for b in &typed.bodies {
+        if matches!(b.kind, BodyKind::Fn)
+            && let Some(symbol) = prog.fn_info(b.def).and_then(|f| f.export.clone())
+        {
+            let name = ctx.body_name(b);
+            if !exports.iter().any(|(_, f)| *f == name) {
+                exports.push((symbol, name));
+            }
+        }
+    }
+    // Keep what the entry, the exports, the tests and the root module's
+    // functions reach.
     let mut roots: Vec<String> = entry.iter().map(|e| e.function.clone()).collect();
+    roots.extend(exports.iter().map(|(_, f)| f.clone()));
     roots.extend(tests.iter().map(|(_, f)| f.clone()));
     roots.extend(extra.iter().map(|s| s.to_string()));
     // A test that declares a `System` gets `System.sim` in the `sim`
@@ -528,6 +543,7 @@ fn lower_reaching(
     sir::Program {
         sources,
         entry,
+        exports,
         types,
         intrinsics,
         functions,

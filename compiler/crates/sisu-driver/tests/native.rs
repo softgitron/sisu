@@ -1150,3 +1150,111 @@ fn the_release_profile_leaves_out_the_checks_it_proves() {
     assert_eq!((out, err, status), (expected("out"), expected("err"), Some(101)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `@export("name")` (decision 683): a native build gives the function the
+/// global symbol `name`, of Sisu's convention, in both profiles, where it
+/// was a local one named by the lowering (`sisu$heat$2`), and C calls it so.
+/// Stage 1 does not write the SIR's `export` line yet, so the program is
+/// the Rust front end's, and the C caller's SIR is stage 1's with the line
+/// the Rust front end writes added; the executable that calls C is linked
+/// here, as the driver links one, with the C caller beside it.
+#[test]
+fn an_exported_function_is_a_global_symbol_that_c_calls() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let have = |tool: &str| {
+        std::process::Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success())
+    };
+    if !cfg!(target_os = "linux") || !have("nm") || !have("cc") {
+        return;
+    }
+    let dir = scratch("export");
+    let sisu_in = |args: &[&str], envs: &[(&str, &str)]| {
+        let mut cmd = std::process::Command::new(&sisu);
+        cmd.args(args).current_dir(&dir);
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("sisu runs")
+    };
+    std::fs::write(
+        dir.join("heat.sisu"),
+        "@export(\"sauna_heat\")\ndef heat(level: i32) -> i32:\n    return level * 2\n\ndef main():\n    print(heat(21))\n",
+    )
+    .expect("the program");
+    for (exe, profile) in [("heat", "--native"), ("heat-release", "--release")] {
+        let mut args = vec!["build", "--native", "--output", exe, "heat.sisu"];
+        if profile == "--release" {
+            args.insert(2, "--release");
+        }
+        let built = sisu_in(&args, &[("SISU_FRONT_END", "rust")]);
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let symbols = std::process::Command::new("nm").arg(dir.join(exe)).output().expect("nm runs");
+        let symbols = String::from_utf8_lossy(&symbols.stdout).into_owned();
+        assert!(symbols.lines().any(|l| l.ends_with(" T sauna_heat")), "{exe}: {symbols}");
+        let ran = std::process::Command::new(dir.join(exe)).output().expect("it runs");
+        assert_eq!(String::from_utf8_lossy(&ran.stdout), "42\n");
+    }
+    // A C caller, called from `main` through an `extern` block; the
+    // arguments of Sisu's convention are each a word in memory.
+    let src = dir.join("pkg/src");
+    std::fs::create_dir_all(&src).expect("a package");
+    std::fs::write(
+        dir.join("pkg/sisu.toml"),
+        "[package]\nname = \"sauna\"\nversion = \"0.1.0\"\nunsafe = \"extern\"\n",
+    )
+    .expect("the manifest");
+    std::fs::write(
+        src.join("main.sisu"),
+        "@export(\"sauna_heat\")\ndef heat(level: i32) -> i32:\n    return level * 2\n\n\
+         # safety: `call_heat` is the C caller's; it returns promptly.\nextern \"C\":\n    \
+         def call_heat(level: i32) -> i32\n\ndef main():\n    \
+         # safety: the C caller takes and gives plain integers.\n    print(unsafe call_heat(21))\n",
+    )
+    .expect("the program");
+    std::fs::write(
+        dir.join("caller.c"),
+        "#include <stdint.h>\n#include <stdlib.h>\n\
+         extern uint8_t sauna_heat(int64_t *result, const int64_t *level);\n\
+         int32_t call_heat(int32_t level) {\n    int64_t result = 0, arg = level;\n    \
+         if (sauna_heat(&result, &arg) != 0) abort();\n    return (int32_t)result;\n}\n",
+    )
+    .expect("the caller");
+    let sir = std::process::Command::new(&sisu)
+        .arg("sir")
+        .current_dir(dir.join("pkg"))
+        .output()
+        .expect("sisu runs");
+    assert!(sir.status.success(), "{}", String::from_utf8_lossy(&sir.stderr));
+    let sir = String::from_utf8_lossy(&sir.stdout).replacen(
+        "entry main\n",
+        "entry main\nexport \"sauna_heat\" heat\n",
+        1,
+    );
+    std::fs::write(dir.join("sauna.sir"), sir).expect("the SIR");
+    // The driver's link has no C caller: it fails, keeping the object.
+    let built = sisu_in(
+        &["build", "--native", "--from-sir", "sauna.sir", "--output", "sauna"],
+        &[("SISU_NATIVE_KEEP", "1")],
+    );
+    assert!(
+        String::from_utf8_lossy(&built.stderr).contains("call_heat"),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let target = sisu.parent().and_then(|d| d.parent()).expect("the target directory").to_path_buf();
+    let runtime = sisu_codegen::find_runtime(&sisu).expect("the runtime in Rust");
+    let linked = std::process::Command::new("cc")
+        .arg("-o")
+        .arg(dir.join("sauna"))
+        .arg(dir.join("sauna.o"))
+        .arg(dir.join("caller.c"))
+        .arg(target.join("rt/rt.o"))
+        .arg(runtime)
+        .args(["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"])
+        .output()
+        .expect("cc runs");
+    assert!(linked.status.success(), "{}", String::from_utf8_lossy(&linked.stderr));
+    let ran = std::process::Command::new(dir.join("sauna")).output().expect("it runs");
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "42\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

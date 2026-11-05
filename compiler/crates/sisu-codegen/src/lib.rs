@@ -148,7 +148,7 @@ pub fn compile_with_options(prog: &sir::Program, options: &Options) -> Result<Co
 /// by the program's type table, which the library has none of (a construct
 /// that would is `Unsupported`). There is no C `main` and no type table.
 pub fn compile_library(prog: &sir::Program, options: &Options) -> Result<Compiled, Error> {
-    let mut cg = Codegen::new(prog, 1, options.release)?;
+    let mut cg = Codegen::new(prog, 1, options.release, true)?;
     cg.library = true;
     let mut exports: Vec<(&str, String)> = Vec::new();
     for f in &prog.functions {
@@ -234,7 +234,7 @@ fn compile_once(
         return Err(Error::unsupported("a program without `main`"));
     };
     let mut tt = std::time::Instant::now();
-    let mut cg = Codegen::new(prog, env_words, options.release)?;
+    let mut cg = Codegen::new(prog, env_words, options.release, false)?;
     cg.survey = survey;
     let threads = workers::count();
     let (main_id, flags, ret_ty) = if threads > 1 {
@@ -368,6 +368,10 @@ pub fn link(object: &[u8], runtime: &Path, rt: &Path, output: &Path) -> Result<(
     if find_program("ld.lld").is_some() {
         cmd.arg("-fuse-ld=lld");
     }
+    // The sections nothing reaches from `main` are left out (decision
+    // 682): the runtime in Rust's functions the program does not call, and
+    // the runtime in Sisu's, one section a function.
+    cmd.arg(if cfg!(target_os = "macos") { "-Wl,-dead_strip" } else { "-Wl,--gc-sections" });
     // The runtime in Sisu's object, then the runtime in Rust (decision 336).
     let out = cmd.arg("-o").arg(output).arg(&obj).arg(rt).arg(runtime).args(native_libs()).output();
     // `SISU_NATIVE_KEEP=1` keeps the object file beside the executable.
@@ -546,7 +550,15 @@ struct Dispatcher {
 }
 
 impl<'p> Codegen<'p> {
-    fn new(prog: &'p sir::Program, env_words: u32, release: bool) -> Result<Codegen<'p>, Error> {
+    /// `library`: the runtime in Sisu, each of whose functions is a section
+    /// of its own, so that a program's link leaves out those it does not
+    /// reach (decision 682).
+    fn new(
+        prog: &'p sir::Program,
+        env_words: u32,
+        release: bool,
+        library: bool,
+    ) -> Result<Codegen<'p>, Error> {
         let mut flags = settings::builder();
         let set = |f: &mut settings::Builder, k: &str, v: &str| {
             f.set(k, v).map_err(|e| Error::internal(format!("the setting `{k}`: {e}")))
@@ -564,8 +576,9 @@ impl<'p> Codegen<'p> {
             .map_err(|e| Error::internal(format!("this machine: {e}")))?;
         let call_conv = isa.default_call_conv();
         let shared = isa.clone();
-        let builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
+        let mut builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
             .map_err(|e| Error::internal(format!("the object file: {e}")))?;
+        builder.per_function_section(library);
         let mut module = ObjectModule::new(builder);
         // Each thread keeps its own count of nested calls, budget, stack
         // limits and site (decision 332).
@@ -642,11 +655,12 @@ impl<'p> Codegen<'p> {
     }
 
     /// The function `name`, without type arguments, under the global symbol
-    /// `symbol` of a runtime library (decision 336).
+    /// `symbol` of a runtime library (decision 336), or of a program's
+    /// `@export` (decision 683).
     fn export_instance(&mut self, name: &str, symbol: &str) -> Result<FuncId, Error> {
         let f = self
             .function(name)
-            .ok_or_else(|| Error::internal(format!("the library has no function `{name}`")))?;
+            .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
         let sig = sisu_signature(self.call_conv, f.param_count);
         let id = self
             .module
@@ -1028,6 +1042,12 @@ impl<'p> Codegen<'p> {
     /// dispatchers and the drop glue; the entry's id, `main`'s flags and
     /// the number of the entry's result type.
     fn generate(&mut self, entry: &sir::Entry) -> Result<(FuncId, u32, u32), Error> {
+        // Each `@export("name")` function under its global symbol, of
+        // Sisu's convention (decision 683), first, so that `main`'s calls of
+        // it call that symbol.
+        for (symbol, function) in &self.prog.exports {
+            self.export_instance(function, symbol)?;
+        }
         let main_id = self.instance(&entry.function, Vec::new())?;
         self.complete()?;
         let ret = self.function(&entry.function).map(|f| f.ret().clone()).unwrap_or(Type::Unit);

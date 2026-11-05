@@ -518,10 +518,13 @@ test "sorts the sample" ... ok
 
 Anything else is E0266 (`resolve.bad-cfg`), and its declaration is kept;
 a feature that the package does not declare is W0006
-(`resolve.unknown-feature`). A condition on the target is written in a
-body with `if comptime target.os == "linux":`, whose branches are both
-checked ([R12](compile-time.md#the-facts-of-the-target)), and E0266's
-note `resolve.cfg-target` names that form:
+(`resolve.unknown-feature`). An import is the one item whose `@cfg`
+may test the target, `@cfg(target.os == "windows")`, for a dependency
+that only some targets build ([R13](modules.md#target-conditions)).
+Anywhere else a condition on the target is written in a body with `if
+comptime target.os == "linux":`, whose branches are both checked
+([R12](compile-time.md#the-facts-of-the-target)), and E0266's note
+`resolve.cfg-target` names that form:
 
 <!-- file: examples/reference-attributes/cfg_condition.sisu -->
 ```sisu

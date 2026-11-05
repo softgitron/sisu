@@ -307,16 +307,15 @@ error[E0421]: `Lent[Fs]` borrows, so it cannot be put in `Fs`, which can outlive
   |
 6 |     return Reader(fs=fs)
   |                      ^^
-  = note: put an owned value in it instead, such as a `String` made with `.to_string()`
+  = note: `Lent[Fs]` lasts for the call it is lent to, so nothing keeps it: keep the `Fs` itself, taken as a parameter of type `Fs`, or do the work inside the call
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0421 (`borrow.view-in-owner`) is the error of chapter 12 for a view
-kept in a value that can outlive it. Its note is written for text and
-does not fit a capability. The two fixes are a parameter of type `Fs`,
-for a function that must keep what it is given, or doing the work
-inside the call, without the struct.
+kept in a value that can outlive it. Its note names the two fixes: a
+parameter of type `Fs`, for a function that must keep what it is
+given, or doing the work inside the call, without the struct.
 
 </details>
 
@@ -820,25 +819,29 @@ error[E0300]: expected `System`, found `TestClock`
    |
 24 |     assert days_left(clock, at("2026-11-06T12:00:00Z")) == 3
    |                      ^^^^^
+  = note: a `TestClock` is a `Clock`, which a parameter `clock: Clock` takes where a whole `System` is taken now; a caller that has a `System` passes `sys.clock`
 
 error[E0300]: expected `System`, found `TestClock`
   --> days_left.sisu:25:22
    |
 25 |     assert days_left(clock, at("2026-11-06T11:00:00Z")) == 2
    |                      ^^^^^
+  = note: a `TestClock` is a `Clock`, which a parameter `clock: Clock` takes where a whole `System` is taken now; a caller that has a `System` passes `sys.clock`
 
 error[E0300]: expected `System`, found `TestClock`
   --> days_left.sisu:29:22
    |
 29 |     assert days_left(clock, at("2026-11-06T12:00:00Z")) == 0
    |                      ^^^^^
+  = note: a `TestClock` is a `Clock`, which a parameter `clock: Clock` takes where a whole `System` is taken now; a caller that has a `System` passes `sys.clock`
 
 error[D0006]: the program was not run: errors found (3)
 ```
 
 E0300 (`type.mismatch`) says that the tests pass a test clock where
-`days_left` expects a whole `System`. It offers no fix, since the
-change that helps is to the signature.
+`days_left` expects a whole `System`. It offers no fix line, since the
+change that helps is to the signature, and its note
+(`type.narrow-capability`) names that change.
 
 <details>
 <summary>Hint 1</summary>

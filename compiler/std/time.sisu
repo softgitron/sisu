@@ -216,7 +216,7 @@ struct Change:
 ## assert helsinki.local(summer).hour() == 15
 ## assert Zone.named("Mars/Olympus").is_err()
 ## ```
-@derive(Eq, Debug)
+@derive(Eq)
 pub struct Zone:
     ## The zone's name, as `Europe/Helsinki`, or `UTC+05:30` for a fixed one.
     pub name: String
@@ -299,6 +299,21 @@ pub struct Zone:
         if on < off:
             return at >= on and at < off
         return at >= on or at < off
+
+## A zone as the code that makes it writes it (decision 684):
+## `Zone.named("Europe/Helsinki")`, `Zone.utc()` or `Zone.fixed(19800)`,
+## and not its private fields, its rules among them.
+impl Debug for Zone:
+    def fmt_debug(self, mut f: Formatter):
+        if self.rules == None
+                and self.name == self.standard
+                and self.daylight_offset == self.standard_offset:
+            if self.standard_offset == 0:
+                f.write("Zone.utc()")
+            else:
+                f.write("Zone.fixed({self.standard_offset})")
+            return
+        f.write("Zone.named({self.name:?})")
 
 ## The seconds since the epoch, as if UTC, of the local time a change gives
 ## in `year`.

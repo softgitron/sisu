@@ -96,7 +96,7 @@ first digits the stage that reports it:
 | E02xx | names and declarations: scopes, imports, visibility, derives, traits and impls |
 | E03xx | types: expressions, calls, operators, `match`, mutability, traits and generics |
 | E04xx | ownership: moves, borrows, views, tasks, must-consume values; and, from E0445, types again: holes in a release build, parallel loops, `@float` |
-| E05xx | lowering to SIR |
+| E05xx | lowering to SIR: errors of the compiler's own, which a run reports and `sisu check` never does |
 | E06xx | compile-time evaluation |
 | E07xx | capabilities and `[trust]` |
 | E08xx | contracts and refinement types |
@@ -1586,7 +1586,7 @@ Shown in [chapter 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
 
 ## Names and declarations
 
-Codes E0200 to E0276. Name resolution finds what each name means and
+Codes E0200 to E0277. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -1635,6 +1635,38 @@ def main():
 ```text
 Hei, maailma!
 ```
+
+A name that an import under a `@cfg` on the target binds is missing
+from a build the condition leaves out, and a use of it outside an `if
+comptime` branch on the same fact is E0200 with the note
+`resolve.cfg-import-absent`, which names the `@cfg` and the branch that
+keeps the use where the import is
+([R13](modules.md#target-conditions)):
+
+<!-- file: examples/reference-diagnostics/e0200_cfg_import.files/sauna/src/main.sisu -->
+```sisu
+# A name that a `@cfg` import binds, used where the build may lack it.
+@cfg(target.os == "windows")
+import winlog
+
+def main():
+    winlog.record("the stove is on")
+```
+
+<!-- output: examples/reference-diagnostics/e0200_cfg_import.console -->
+```console
+$ sisu run sauna
+error[E0200]: cannot find `winlog` in this scope
+  --> src/main.sisu:6:5
+  |
+6 |     winlog.record("the stove is on")
+  |     ^^^^^^
+  = note: `winlog` is imported under `@cfg(target.os == "windows")`, which this build leaves out: use it inside `if comptime target.os == "windows":`, a branch that is built only where the import is
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The use inside the branch is the fix, as [E0275](#e0275) shows.
 
 Shown in [chapter 1](../tutorial/01-hello.md).
 
@@ -1816,7 +1848,9 @@ Shown in [R13](modules.md#imports).
 `from MODULE import NAME` names an item that the module declares `pub`:
 a type, a function, a constant or an error set. A variant is reached
 through its type, as `BookingError.Taken`, and is not an item of the
-module. When the module has the item and a `@cfg` of it leaves the
+module: an import of a variant by its name, `from ledger import Taken`,
+has the note `resolve.variant-of-type`, which names the type to import
+and the variant through it ([G32](../guides/library-api.md)). When the module has the item and a `@cfg` of it leaves the
 item out of this build, the note `resolve.cfg-left-out` names the
 condition, `@cfg(feature="vat")` or `@cfg(test)`
 ([chapter 17](../tutorial/17-modules-and-packages.md#features)).
@@ -2489,10 +2523,11 @@ Shown in [chapter 14](../tutorial/14-traits.md).
 in the package of the trait or of the type, or in the root package.
 
 A type implements a trait at most once in a program, so an impl stands
-in the package that declares the trait or the type (D-013); the root
-package of a build, which nothing depends on, may implement any trait
-for any type. Here the library `digits` implements the prelude's
-`Len` for `int`, and the program `year` depends on it:
+in the package that declares the trait, the type, or one of the
+trait's type arguments (D-013), as `Vector` in `impl Mul[Vector] for
+f64`; the root package of a build, which nothing depends on, may
+implement any trait for any type. Here the library `digits` implements
+the prelude's `Len` for `int`, and the program `year` depends on it:
 
 <!-- file: examples/reference-diagnostics/e0236_orphan.files/digits/src/lib.sisu -->
 ```sisu
@@ -2512,12 +2547,14 @@ error[E0236]: `Len` for `int` can be implemented only in the package of the trai
   |
 4 | impl Len for int:
   | ^^^^^^^^^^^^^^^^
+  = note: the impl is this package's when `int` is a type of this package, `Len` a trait of it, or one of the trait's type arguments a type of its own, as `Vector` in `impl Mul[Vector] for f64`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Wrap the value in a type of the library's own, and implement the trait
-for that.
+The note (`resolve.orphan-local-type`) names the three ways an impl
+is the package's own. `Len` has no type argument, so wrap the value in
+a type of the library's own, and implement the trait for that.
 
 <!-- file: examples/reference-diagnostics/e0236_orphan_fixed.files/digits/src/lib.sisu -->
 ```sisu
@@ -2572,8 +2609,7 @@ impl Source for Bench:
         return self.sitters[0].copy()
 
 def main():
-    let bench = Bench(["Aino"])
-    print(len(bench.sitters))
+    print(Bench(["Aino"]).first())
 ```
 
 <!-- output: examples/reference-diagnostics/e0237_missing_assoc_type.console -->
@@ -2588,7 +2624,10 @@ error[E0237]: the impl of `Source` for `Bench` does not say what `Item` is; add 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Add the line the message gives.
+The impl's associated type is the error's from there on, so a use of
+it, the `print` of what `first()` returns, is not reported again as a
+type without `Display` (E0347): E0237 stands alone. Add the line the
+message gives.
 
 <!-- file: examples/reference-diagnostics/e0237_missing_assoc_type_fixed.sisu -->
 ```sisu
@@ -3166,6 +3205,10 @@ error[D0006]: the program was not run: errors found (1)
 The fix declares the field `pub`, which makes it part of the module's
 API. Where the field should stay private, an associated function of
 the type, such as `Point.new(lat, lon)`, builds the value instead.
+When the type has such a function that this module may call, the note
+`resolve.made-by` names it, `new` first: with `pub def
+on_meridian(lat: f64) -> Point` in `point.sisu`, it reads
+"`Point.on_meridian(lat)` makes a `Point` from another module".
 
 <!-- file: examples/reference-diagnostics/e0258_private_field_fixed.files/src/geo/point.sisu -->
 ```sisu
@@ -3258,8 +3301,10 @@ Shown in [R13](modules.md#visibility).
 is none of them.
 
 `@cfg` reads conditions on the build, not expressions, and keeps its
-declaration when the condition is none of those. A test of the target
-is written in a body, with `if comptime`, which the note
+declaration when the condition is none of those. On an import, a
+condition may test the target, `@cfg(target.os == "windows")`
+([R13](modules.md#target-conditions)); on any other item a test of the
+target is written in a body, with `if comptime`, which the note
 `resolve.cfg-target` names.
 
 <!-- file: examples/reference-diagnostics/e0266_bad_cfg.sisu -->
@@ -3569,9 +3614,33 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 A dependency that every target can build, as `winlog` can, has no
-`when`. One that only some targets build cannot be imported by code
-that builds on the others: an import takes no condition on the target
-in stage 0.
+`when`. One that only some targets build is imported under the same
+condition, `@cfg(target.os == "windows")`, which binds `winlog` only
+where it is built, and its uses stand in an `if comptime` branch on the
+same fact, which the build leaves out elsewhere:
+
+<!-- file: examples/reference-diagnostics/e0275_excluded_cfg.files/sauna/src/main.sisu -->
+```sisu
+# The import tests the target, and so does the code that uses it.
+@cfg(target.os == "windows")
+import winlog
+
+def main():
+    if comptime target.os == "windows":
+        winlog.record("the stove is on")
+    else:
+        print("the stove is on")
+```
+
+<!-- output: examples/reference-diagnostics/e0275_excluded_cfg.console -->
+```console
+$ sisu run sauna
+the stove is on
+```
+
+A use outside such a branch is [E0200](#e0200), whose note names the
+`@cfg`. Where the program does not need the dependency to stay
+Windows-only, drop its `when`:
 
 <!-- file: examples/reference-diagnostics/e0275_excluded_fixed.files/sauna/sisu.toml -->
 ```toml
@@ -3673,6 +3742,59 @@ test "three bookings" ... ok
 
 [R13](modules.md#dependencies-and-dev-dependencies) states the rule.
 
+### E0277
+
+`resolve.import-in-body`: an import stands at the top level of a
+module, before its declarations, and its names are the whole module's;
+a function's body holds none.
+
+An import binds names for the whole module, so it is written at the
+top level, as Python allows inside a function and Sisu does not. The
+names it would bind are not reported again where the body uses them.
+
+<!-- file: examples/reference-diagnostics/e0277_import_in_body.sisu -->
+```sisu
+# An import inside a function's body.
+def main():
+    let side = 9.0
+    import std.math
+    print(math.sqrt(side))
+```
+
+<!-- output: examples/reference-diagnostics/e0277_import_in_body.console -->
+```console
+$ sisu run e0277_import_in_body.sisu
+error[E0277]: an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none
+  --> e0277_import_in_body.sisu:4:5
+  |
+4 |     import std.math
+  |     ^^^^^^^^^^^^^^^
+  = fix: move it to the top of the module: `import std.math`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix, `resolve.move-import`, moves the import before the module's
+first line that is not a comment, and the body keeps its use of the
+name.
+
+<!-- file: examples/reference-diagnostics/e0277_import_in_body_fixed.sisu -->
+```sisu
+# The import at the top of the module, where its name is the module's.
+import std.math
+
+def main():
+    let side = 9.0
+    print(math.sqrt(side))
+```
+
+<!-- output: examples/reference-diagnostics/e0277_import_in_body_fixed.out -->
+```text
+3.0
+```
+
+[R13](modules.md#imports) states the rule.
+
 ## Types
 
 Codes E0300 to E0399. The type checker checks every expression's type:
@@ -3713,7 +3835,11 @@ quotes. Where text must become a number, `parse_int()` converts it and
 says when it cannot. A value given to a `ref dyn Trait` parameter whose
 trait its type implements, `total(bun)`, gets the fix `type.lend-it`,
 which writes `ref ` before it (`mut ` for a `mut dyn` parameter)
-([chapter 15](../tutorial/15-generics.md)).
+([chapter 15](../tutorial/15-generics.md)). A capability given where a
+whole `System` is taken, a test's `TestClock`, has the note
+`type.narrow-capability`: narrow the parameter to the capability,
+`clock: Clock`, and let a caller that has a `System` pass `sys.clock`
+([chapter 18](../tutorial/18-capabilities.md#exercise-182-a-clock-to-test-with)).
 
 <!-- file: examples/reference-diagnostics/e0300_mismatch_fixed.sisu -->
 ```sisu
@@ -3755,12 +3881,15 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 4 |     print(pieces / 2)
   |           ^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.0`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The fix writes `//`. To divide with a fraction, convert first:
-`pieces.to_f64() / 2.0`.
+The first fix, `type.use-floor-division`, writes `//`, which keeps the
+division in whole numbers. The second, `type.float-division`, divides
+with a fraction: it makes both sides `f64`, with `.to_f64()` after a
+name and `.0` after a literal, `pieces.to_f64() / 2.0`.
 
 <!-- file: examples/reference-diagnostics/e0301_division_fixed.sisu -->
 ```sisu
@@ -4048,9 +4177,11 @@ makes the left one an `int`, beside which the other widens
 ([chapter 24](../tutorial/24-numbers.md#integers-of-every-size)). A
 number on the left of a type of the program's own, `3.0 * step`, gets
 the note `type.operator-trait-left`, which names the impl the operator
-needs, `impl Mul[Step] for f64`, which only the root package may write,
-and the order that needs none, `step * 3.0`
-([chapter 14](../tutorial/14-traits.md)).
+needs, `impl Mul[Step] for f64`, which the package that declares `Step`
+may write ([E0236](#e0236)), and the order that needs none, `step * 3.0`
+([chapter 14](../tutorial/14-traits.md)). A compound assignment is
+named as written: `total += name` with an `int` and a `String` is
+"`+=` cannot be applied", in code that `comptime for` unrolls too.
 
 <!-- file: examples/reference-diagnostics/e0310_operator_fixed.sisu -->
 ```sisu
@@ -4905,14 +5036,18 @@ error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.cop
   |
 4 |     let first = queue[0]
   |                 ^^^^^^^^
+  = note: `queue` owns its list, which keeps the item `queue[0]` reads and only lends it: copy the item, or take it out of the list
   = fix: copy it: `.copy()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The fix copies the element, which costs a copy. To take it out instead,
-use a method that removes it, such as `pop` or `remove`, on a `var`
-collection.
+For an item of a list the function owns, as here, the note
+`type.item-stays-in-list` says that the list keeps the item and only
+lends it. The fix copies the element, which costs a copy. To take it
+out instead, use a method that removes it, such as `pop` or `remove`,
+on a `var` collection: where `queue` is a `var`, a second fix,
+`type.take-out`, writes `queue.remove(0)`.
 
 <!-- file: examples/reference-diagnostics/e0338_move_out_of_borrow_fixed.sisu -->
 ```sisu
@@ -6020,6 +6155,11 @@ error[D0021]: the program was not run: the ownership checker found errors (1); `
 ```
 
 Move the change after the line the note names, or work on a copy.
+Where the binding is one a loop makes anew, its variable in `for turn
+in turns:` while `who = turn.name` still borrows the one before, the
+note is `borrow.bound-anew`: moving the change is no way out, so it
+says to keep a copy that owns its value, `turn.name.copy()` in a
+`String`.
 
 <!-- file: examples/reference-diagnostics/e0402_modify_while_borrowed_fixed.sisu -->
 ```sisu
@@ -6727,8 +6867,10 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Put an owned value in it, such as a `String` made with `.to_string()`,
-as the note says. For a lent capability, take the capability itself as a
-parameter, or do the work inside the call that lends it.
+as the note says. For a lent capability the note is another,
+`borrow.lent-capability`, which says what to do instead: take the
+capability itself as a parameter, or do the work inside the call that
+lends it ([R10](capabilities.md#lending)).
 
 <!-- file: examples/reference-diagnostics/e0421_view_in_owner_fixed.sisu -->
 ```sisu
@@ -8374,13 +8516,17 @@ error[E0806]: `today.closes` is part of a value of `Schedule`, whose invariant o
   |
 9 |     today.closes = 25
   |     ^^^^^^^^^^^^
+  = note: give `Schedule` a method that makes the change, `def NAME(mut self, ...)`, which checks the invariant when it returns, and call it
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 Give the type a method that makes the change, as `close_at` does; the
 invariant is checked when it returns, so `close_at(25)` panics there.
-The diagnostic offers no fix.
+The diagnostic offers no fix line, since the method is the author's to
+write; its note says so (`contract.invariant-method`), or, for a type
+that has methods taking `mut self`, lists them
+(`contract.invariant-methods`).
 
 <!-- file: examples/reference-diagnostics/e0806_invariant_field_fixed.sisu -->
 ```sisu
@@ -9154,8 +9300,10 @@ dependency; stage 0 has no registry, so a dependency is `{name} = { path
 
 Stage 0 has no registry, so a dependency is a package in a directory,
 named by its path; a version, as `stones = "0.4"`, waits for the
-registry (D-031). The import of the dependency then names nothing, so it
-is E0220 too ([R13](modules.md#dependencies-and-dev-dependencies)).
+registry (D-031). E1010 stands alone: the import of the dependency,
+which then names nothing, is not reported as E0220 too
+([R13](modules.md#dependencies-and-dev-dependencies)); so it is in a
+script's inline metadata ([G29](../guides/script.md)).
 
 <!-- file: examples/reference-diagnostics/e1010_not_a_path.files/app/sisu.toml -->
 ```toml
@@ -9171,19 +9319,13 @@ stones = "0.4"
 <!-- output: examples/reference-diagnostics/e1010_not_a_path.console -->
 ```console
 $ sisu run app
-error[E0220]: cannot import `stones`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
-  --> src/main.sisu:2:8
-  |
-2 | import stones
-  |        ^^^^^^
-
 error[E1010]: the dependency `stones` is not a `path` dependency; stage 0 has no registry, so a dependency is `stones = { path = "../stones" }`
   --> sisu.toml:7:10
   |
 7 | stones = "0.4"
   |          ^^^^^
 
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)
 ```
 
 Write the dependency as the message does, with the path of its directory
@@ -9381,8 +9523,9 @@ not list it.
 
 A dependency that declares an unsafe level asks the root package for
 consent, which `[trust] unsafe` in the root's `sisu.toml` gives by
-naming it ([R13](modules.md#trust)). The unsafe blocks of a dependency
-without it are E0703 too.
+naming it ([R13](modules.md#trust)). E1021 stands alone, since it names
+the fix: the dependency's `unsafe` blocks and `extern` blocks, which
+would be E0703 without the declared level, are not reported again.
 
 <!-- file: examples/reference-diagnostics/e1021_unsafe_untrusted.files/app/sisu.toml -->
 ```toml
@@ -9407,12 +9550,6 @@ unsafe = "memory"
 <!-- output: examples/reference-diagnostics/e1021_unsafe_untrusted.console -->
 ```console
 $ sisu run app
-error[E0703]: the package `readings` is not trusted with `unsafe`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
-  --> ../readings/src/lib.sisu:10:12
-   |
-10 |     return unsafe first.offset(len(temps) - 1).read()
-   |            ^^^^^^
-
 error[E1021]: the dependency `readings` declares `unsafe = "memory"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
   --> ../readings/sisu.toml:5:10
   |
@@ -9420,7 +9557,7 @@ error[E1021]: the dependency `readings` declares `unsafe = "memory"`, and `[trus
   |          ^^^^^^^^
   = note: the root package consents by listing it: `[trust] unsafe = ["readings"]`
 
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)
 ```
 
 List the dependency in `[trust] unsafe`, as the note says, once you have
@@ -11739,6 +11876,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0274](#e0274) | `resolve.const-not-type` | `{name}` is a constant of `{trait}`, which bounds `{ty}`, not a type |
 | [E0275](#e0275) | `resolve.dependency-excluded` | cannot import `{name}`: the dependency `{package}` of `{this}` is not built for this target, which its `when` in that package's `sisu.toml` excludes |
 | [E0276](#e0276) | `resolve.dev-dependency` | cannot import `{name}` here: `{package}` is a dev-dependency of `{this}`, which its tests import and its code does not |
+| [E0277](#e0277) | `resolve.import-in-body` | an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none |
 
 ### Types, every code
 

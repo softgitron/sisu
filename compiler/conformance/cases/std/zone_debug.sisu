@@ -1,0 +1,10 @@
+# A zone's `Debug` form is the code that makes it (decision 684), not
+# its private fields: what a worksheet shows for a `let`.
+from std.time import Zone
+
+def main():
+    let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+    print("{helsinki:?}")
+    print("{Zone.utc():?}")
+    print("{Zone.fixed(19800):?}")
+    print("{Zone.named("UTC").expect("utc"):?}")

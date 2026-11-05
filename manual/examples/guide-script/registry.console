@@ -1,14 +1,8 @@
 $ sisu registry.sisu
-error[E0220]: cannot import `stove`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
-  --> registry.sisu:7:8
-  |
-7 | import stove
-  |        ^^^^^
-
 error[E1010]: the dependency `stove` is not a `path` dependency; stage 0 has no registry, so a dependency is `stove = { path = "../stove" }`
   --> registry.sisu:4:11
   |
 4 |   stove = "1.2"
   |           ^^^^^
 
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)

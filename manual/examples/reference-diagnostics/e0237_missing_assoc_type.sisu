@@ -11,5 +11,4 @@ impl Source for Bench:
         return self.sitters[0].copy()
 
 def main():
-    let bench = Bench(["Aino"])
-    print(len(bench.sitters))
+    print(Bench(["Aino"]).first())

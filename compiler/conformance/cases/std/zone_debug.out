@@ -1,0 +1,4 @@
+Zone.named("Europe/Helsinki")
+Zone.utc()
+Zone.fixed(19800)
+Zone.utc()

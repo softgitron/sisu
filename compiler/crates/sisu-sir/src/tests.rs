@@ -5,6 +5,7 @@ fn sample() -> Program {
     Program {
         sources: vec!["t.sisu".into()],
         entry: Some(Entry { function: "main".into(), takes_system: false, returns_result: false }),
+        exports: Vec::new(),
         types: vec![
             TypeDecl::Struct {
                 name: "Point".into(),

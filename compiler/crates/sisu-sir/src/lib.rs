@@ -42,6 +42,11 @@ pub struct Program {
     pub sources: Vec<String>,
     /// The entry function and whether it takes `System`.
     pub entry: Option<Entry>,
+    /// The functions `@export("name")` gives a global symbol (12, "C
+    /// interop"; decision 683): the symbol, then the function, in the
+    /// order the program declares them. A native build compiles each, as
+    /// it compiles what `main` reaches, under that symbol.
+    pub exports: Vec<(String, String)>,
     pub types: Vec<TypeDecl>,
     /// The host intrinsics the functions call, with the facts the SIR
     /// checkers need about each (purity, which arguments the result

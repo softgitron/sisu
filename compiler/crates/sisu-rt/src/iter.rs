@@ -24,11 +24,11 @@ fn made(kind: NewIter<'_>) -> *mut IterObj {
 }
 
 /// The iterators whose `Iter.next` may wait: a generator's (its task and
-/// the size of an item) and a receiver's (its channel and the size of a
-/// value).
+/// the size of an item) and a receiver's (its channel, whose buffer knows
+/// the size of its values, decision 680).
 pub(crate) enum Waits {
     Gen(u32, u32),
-    Recv(u32, u32),
+    Recv(u32),
 }
 
 /// Whether `Iter.next` on the iterator may wait.
@@ -39,7 +39,7 @@ pub(crate) unsafe fn waits(obj: *mut IterObj) -> Option<Waits> {
     // SAFETY: as the caller guarantees.
     match unsafe { bridge::iter_waits(obj.cast()) } {
         (1, t, size) => Some(Waits::Gen(t as u32, size as u32)),
-        (2, ch, size) => Some(Waits::Recv(ch as u32, size as u32)),
+        (2, ch, _) => Some(Waits::Recv(ch as u32)),
         _ => None,
     }
 }

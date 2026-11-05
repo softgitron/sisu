@@ -185,7 +185,7 @@ def main():
 <!-- output: examples/explanation-compile-time/total.console -->
 ```console
 $ sisu check total.sisu
-error[E0310]: `+` cannot be applied to `int` and `String`
+error[E0310]: `+=` cannot be applied to `int` and `String`
   --> total.sisu:19:11
    |
 19 |     print(total(Team(name="Owls", points=7)))
@@ -198,9 +198,9 @@ E0310 (`type.binary-operator`) is right that a `String` cannot be added
 to an `int`. It stands at line 19, the call that asked for `Team`, and
 its note quotes the line that the compiler wrote by unrolling the loop
 for `Team`, since that line exists only in the instance. Nothing points
-at line 6, the loop in the template that adds the fields, and the
-message says `+` where the template wrote `+=`: the reader works back
-from the instance's line to the template. That is the price of checking
+at line 6, the loop in the template that adds the fields: the reader
+works back from the instance's line, whose `+=` the message names, to
+the template. That is the price of checking
 at instantiation, and the plan's findings record what is still missing.
 
 There are other costs. Compile-time code runs at every build that needs

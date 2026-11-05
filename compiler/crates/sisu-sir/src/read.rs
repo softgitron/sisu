@@ -519,6 +519,7 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
     let mut p = Program {
         sources: Vec::new(),
         entry: None,
+        exports: Vec::new(),
         types: Vec::new(),
         intrinsics: Vec::new(),
         functions: Vec::new(),
@@ -565,6 +566,14 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                     }
                 }
                 p.entry = Some(e);
+            } else if c.eat("export ") {
+                // `@export("name")` (decision 683).
+                let symbol = c.string()?;
+                let f = c.name()?;
+                if !c.at_end() {
+                    return Err(format!("unexpected `{}`", c.rest()));
+                }
+                p.exports.push((symbol, f));
             } else if c.eat("test ") {
                 let name = c.string()?;
                 let f = c.name()?;

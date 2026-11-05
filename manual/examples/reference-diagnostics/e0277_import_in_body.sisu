@@ -1,0 +1,5 @@
+# An import inside a function's body.
+def main():
+    let side = 9.0
+    import std.math
+    print(math.sqrt(side))

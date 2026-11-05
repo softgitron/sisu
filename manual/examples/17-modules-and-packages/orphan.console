@@ -4,5 +4,6 @@ error[E0236]: `Ord` for `f64` can be implemented only in the package of the trai
    |
 22 | impl Ord for f64:
    | ^^^^^^^^^^^^^^^^
+  = note: the impl is this package's when `f64` is a type of this package, `Ord` a trait of it, or one of the trait's type arguments a type of its own, as `Vector` in `impl Mul[Vector] for f64`
 
 error[D0006]: the program was not run: errors found (1)

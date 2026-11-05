@@ -4,5 +4,6 @@ error[E0806]: `stove.celsius` is part of a value of `Stove`, whose invariant onl
    |
 24 |     stove.celsius = max(stove.celsius - 15, 0)
    |     ^^^^^^^^^^^^^
+  = note: the methods of `Stove` that take `mut self` change it and check the invariant again: `heat`
 
 error[D0006]: the program was not run: errors found (1)

@@ -951,6 +951,11 @@ fn run(
 
 /// `sisu repl [DIR | FILE]`.
 pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
+    // `--echo` writes each input after its prompt, so that a session read
+    // from a pipe is captured as a terminal shows it (decision 685).
+    let echo = args.iter().any(|a| a == "--echo");
+    let args: Vec<String> = args.iter().filter(|a| *a != "--echo").cloned().collect();
+    let args = args.as_slice();
     if let Some(bad) = args.iter().find(|a| a.starts_with("--")).or(args.get(1)) {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
@@ -1021,6 +1026,9 @@ pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32
             return exit::OK;
         };
         let first = first.trim_end().to_string();
+        if echo {
+            host.stdout(&format!("{first}\n"));
+        }
         let trimmed = first.trim();
         if trimmed.is_empty() {
             continue;
@@ -1062,7 +1070,11 @@ pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32
         if needs_more(&input) {
             loop {
                 host.stdout(&more);
-                match host.read_line() {
+                let next = host.read_line();
+                if echo {
+                    host.stdout(&format!("{}\n", next.as_deref().unwrap_or_default().trim_end()));
+                }
+                match next {
                     Some(l) if !l.trim().is_empty() => {
                         input.push('\n');
                         input.push_str(l.trim_end());

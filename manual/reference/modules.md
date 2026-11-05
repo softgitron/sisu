@@ -142,8 +142,9 @@ An import binds names in the module that writes it:
   them and keeps each. One whose name the file does not use is W0027
   (`lint.unused-import`) of [`sisu lint`](sisu-command.md#sisu-lint),
   whose fix removes it; `sisu check` does not report it, so a file may
-  import what it does not use yet. An import inside a function is E0900
-  in stage 0.
+  import what it does not use yet. An import inside a function's body
+  is E0277 ([R17](diagnostics.md#e0277)), whose fix moves it to the top
+  of the module; the names it would bind are not reported again.
 - A child module is a name in its parent without a declaration, and it
   gives way to an import of the same name there: the root module of
   `bookings` may write `from bookings.clean import clean`, and `clean`
@@ -370,7 +371,7 @@ on unless a build says otherwise ([Features](#features)).
 `unsafe = ["NAME", ...]` lists the dependencies that may contain
 `unsafe` and `extern` code; every name must be a dependency (E1015). A
 dependency with such code that the root package does not list is E0703,
-or E1021 when it declares its level; a package that holds unsafe code
+or E1021 alone when it declares its level; a package that holds unsafe code
 declares `unsafe` in its `[package]` (E1019, E1020), and a level that
 rises from the one `sisu.lock` records needs `--accept-unsafe` (E1022),
 which the commands that build a package take and which records the new
@@ -472,7 +473,42 @@ in the lockfile, which is the same on every target.
 
 An import of a dependency whose condition does not hold on this target
 is E0275 ([R17](diagnostics.md#e0275)), which says that the `when`
-excludes it.
+excludes it. Code that builds on every target reaches such a dependency
+in two steps:
+
+- The import takes the same condition, `@cfg(target.os == "windows")`
+  before `import winlog`. An import's `@cfg` may test a fact of the
+  target, `os`, `arch` or `runtime`, with `==` or `!=`, under `not`,
+  `all` and `any` as the other conditions; on any other item a test of
+  the target is E0266 ([R14](attributes.md#conditional-compilation)).
+  Where the condition holds, the import is as written; elsewhere it is
+  left out of the build and binds nothing, so it is not E0275.
+- The uses stand in an `if comptime` branch on the same fact,
+  `if comptime target.os == "windows":`. A name the import would have
+  bound is not reported inside a branch on the target that the build
+  leaves out, where nothing could check it; anywhere else it is E0200
+  with the note `resolve.cfg-import-absent`, which names the `@cfg`
+  ([R17](diagnostics.md#e0200)). The rest of both branches is checked
+  as always ([R12](compile-time.md#the-facts-of-the-target)).
+
+<!-- file: examples/reference-diagnostics/e0275_excluded_cfg.files/sauna/src/main.sisu -->
+```sisu
+# The import tests the target, and so does the code that uses it.
+@cfg(target.os == "windows")
+import winlog
+
+def main():
+    if comptime target.os == "windows":
+        winlog.record("the stove is on")
+    else:
+        print("the stove is on")
+```
+
+<!-- output: examples/reference-diagnostics/e0275_excluded_cfg.console -->
+```console
+$ sisu run sauna
+the stove is on
+```
 
 **Status.** In stage 0 (D-063).
 
@@ -788,14 +824,14 @@ C++ interop (Q-24).
 | Code | Identifier | Section |
 |---|---|---|
 | E1008, E1009, E1012 | `package.no-root-module`, `package.two-root-modules`, `package.module-name` | [The module tree](#the-module-tree) |
-| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), [E0223](diagnostics.md#e0223), E0260, [W0027](diagnostics.md#w0027) | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-module`, `resolve.not-a-dependency`, `lint.unused-import` | [Imports](#imports) |
+| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), [E0223](diagnostics.md#e0223), E0260, [E0277](diagnostics.md#e0277), [W0027](diagnostics.md#w0027) | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-module`, `resolve.not-a-dependency`, `resolve.import-in-body`, `lint.unused-import` | [Imports](#imports) |
 | W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
 | [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
 | E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
 | [E0276](diagnostics.md#e0276) | `resolve.dev-dependency` | [`[dependencies]` and `[dev-dependencies]`](#dependencies-and-dev-dependencies) |
 | [E1015](diagnostics.md#e1015), [E0703](diagnostics.md#e0703), [E1019](diagnostics.md#e1019), E1020, [E1021](diagnostics.md#e1021), E1022 | `package.trust-unknown`, `cap.untrusted`, `package.unsafe-undeclared`, `package.unsafe-level`, `package.unsafe-untrusted`, `package.unsafe-raised` | [`[trust]`](#trust) |
-| E1011, [E0275](diagnostics.md#e0275) | `package.bad-when`, `resolve.dependency-excluded` | [Target conditions](#target-conditions) |
+| E1011, [E0275](diagnostics.md#e0275), [E0200](diagnostics.md#e0200) | `package.bad-when`, `resolve.dependency-excluded`, `resolve.undefined-name` | [Target conditions](#target-conditions) |
 | W0006, E1018 | `resolve.unknown-feature`, `package.unknown-feature` | [Features](#features) |
 | [E1007](diagnostics.md#e1007) | `package.cycle` | [Dependencies](#dependencies) |
 | E1013, E1016 | `package.no-member`, `package.no-package` | [Workspaces](#workspaces) |

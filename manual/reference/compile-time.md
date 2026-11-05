@@ -540,7 +540,11 @@ refused ([guide](../guides/embed.md#4-know-what-the-build-records)).
 `target.os`, `target.arch` and `target.runtime` are compile-time
 constants that describe what the program is compiled for, so `if
 comptime target.os == "windows":` chooses code for a system while both
-branches are checked ([R22](targets.md#the-facts-of-the-target)).
+branches are checked ([R22](targets.md#the-facts-of-the-target)). The
+one exception is a name that an import under `@cfg(target.os ==
+"windows")` binds: the branch that the build leaves out may use it, and
+is not checked for it, since the build has no such name
+([R13](modules.md#target-conditions)).
 
 **Status.** In stage 0; `target.runtime` is `interpreter` in every
 build.

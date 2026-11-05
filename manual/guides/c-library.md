@@ -134,25 +134,14 @@ test "getenv reads the process's variables, whatever the Env":
     assert cenv.lookup(env, "PATH") != None
 ```
 
-Without `[trust]`, the build refuses the wrapper: E0703 at each unsafe
-part of it, and E1021 (`package.unsafe-untrusted`) at its manifest's
-level, with the line to add:
+Without `[trust]`, the build refuses the wrapper with E1021
+(`package.unsafe-untrusted`) at its manifest's level, which gives the
+line to add; the `extern` and `unsafe` blocks it declares are not
+reported one by one:
 
 <!-- output: examples/guide-c-library/untrusted.console -->
 ```console
 $ sisu run
-error[E0703]: the package `cenv` is not trusted with `extern`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
-  --> cenv/src/lib.sisu:6:1
-  |
-6 | extern "C":
-  | ^^^^^^
-
-error[E0703]: the package `cenv` is not trusted with `unsafe`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
-  --> cenv/src/lib.sisu:20:5
-   |
-20 |     unsafe:
-   |     ^^^^^^
-
 error[E1021]: the dependency `cenv` declares `unsafe = "extern"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
   --> cenv/sisu.toml:5:10
   |
@@ -160,7 +149,7 @@ error[E1021]: the dependency `cenv` declares `unsafe = "extern"`, and `[trust] u
   |          ^^^^^^^^
   = note: the root package consents by listing it: `[trust] unsafe = ["cenv"]`
 
-error[D0006]: the program was not run: errors found (3)
+error[D0006]: the program was not run: errors found (1)
 ```
 
 The lockfile records the level too, so that an update of the wrapper

@@ -1,0 +1,9 @@
+$ sisu run sauna
+error[E0200]: cannot find `winlog` in this scope
+  --> src/main.sisu:6:5
+  |
+6 |     winlog.record("the stove is on")
+  |     ^^^^^^
+  = note: `winlog` is imported under `@cfg(target.os == "windows")`, which this build leaves out: use it inside `if comptime target.os == "windows":`, a branch that is built only where the import is
+
+error[D0006]: the program was not run: errors found (1)

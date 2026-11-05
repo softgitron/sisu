@@ -238,6 +238,7 @@ std/sort
 std/text_math
 std/time_parts
 std/time_zones
+std/zone_debug
 syntax/comments
 syntax/continuation
 syntax/option_nested

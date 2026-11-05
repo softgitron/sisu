@@ -104,25 +104,18 @@ published package would be named, is E1010:
 <!-- output: examples/guide-script/registry.console -->
 ```console
 $ sisu registry.sisu
-error[E0220]: cannot import `stove`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
-  --> registry.sisu:7:8
-  |
-7 | import stove
-  |        ^^^^^
-
 error[E1010]: the dependency `stove` is not a `path` dependency; stage 0 has no registry, so a dependency is `stove = { path = "../stove" }`
   --> registry.sisu:4:11
   |
 4 |   stove = "1.2"
   |           ^^^^^
 
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)
 ```
 
-E1010 (`package.not-a-path`) says what to write instead. E0220, which
-comes first, is the import that the missing dependency left without a
-module; it names `sisu.toml`, where a script's dependencies are in its
-inline metadata.
+E1010 (`package.not-a-path`) says what to write instead, and stands
+alone: the import of `stove`, which the dependency left without a
+module, is not reported again.
 
 A script that grows past one file, or that others will depend on,
 becomes a package: `sisu new NAME` makes one, and the inline table moves

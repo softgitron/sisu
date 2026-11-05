@@ -4,5 +4,6 @@ error[E0806]: `today.closes` is part of a value of `Schedule`, whose invariant o
    |
 11 |     today.closes = 25
    |     ^^^^^^^^^^^^
+  = note: give `Schedule` a method that makes the change, `def NAME(mut self, ...)`, which checks the invariant when it returns, and call it
 
 error[D0006]: the program was not run: errors found (1)

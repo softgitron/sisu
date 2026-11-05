@@ -849,7 +849,7 @@ test "a line that is not a number":
 <!-- output: solutions/08-errors/scoreboard.console -->
 ```console
 $ sisu test scoreboard.sisu
-error[E0310]: `+` cannot be applied to `int` and `int?`
+error[E0310]: `+=` cannot be applied to `int` and `int?`
   --> scoreboard.sisu:15:9
    |
 15 |         sum_so_far += line.trim().parse_int()

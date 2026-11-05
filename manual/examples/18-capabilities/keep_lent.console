@@ -4,6 +4,6 @@ error[E0421]: `Lent[Fs]` borrows, so it cannot be put in `Fs`, which can outlive
   |
 6 |     return Reader(fs=fs)
   |                      ^^
-  = note: put an owned value in it instead, such as a `String` made with `.to_string()`
+  = note: `Lent[Fs]` lasts for the call it is lent to, so nothing keeps it: keep the `Fs` itself, taken as a parameter of type `Fs`, or do the work inside the call
 
 error[D0006]: the program was not run: errors found (1)

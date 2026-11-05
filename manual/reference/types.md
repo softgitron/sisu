@@ -1220,9 +1220,16 @@ A type implements a trait at most once in the whole program, so
   is E0235 ([R17](diagnostics.md#e0235)) at the second. A `where`
   clause never chooses between impls.
 - The orphan rule: an impl stands in the package that declares the
-  trait or in the package that declares the type, E0236 otherwise. The
-  root package of a build, which nothing depends on, may implement any
-  trait for any type (Q-11).
+  trait, in the package that declares the type, or in a package that
+  declares one of the trait's type arguments, E0236 otherwise, whose
+  note says which type would make the impl the package's. So the
+  package that declares `Vector` may write `impl Mul[Vector] for f64`,
+  which gives its users `2.0 * v` ([chapter 14](../tutorial/14-traits.md#one-impl-for-each-type-and-trait)),
+  and no other package can write it. A type parameter of the impl may
+  not stand bare before that type: `impl[T] Mul[Vector] for T` is
+  E0236, since another package's impl of `Mul[Vector]` for its own type
+  would overlap it. The root package of a build, which nothing depends
+  on, may implement any trait for any type (Q-11).
 - A trait that only the standard library implements, such as `Num`, is
   E0240 for any other type.
 - To give a trait to another package's type, wrap the type in a struct

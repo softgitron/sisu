@@ -1,0 +1,6 @@
+# The import at the top of the module, where its name is the module's.
+import std.math
+
+def main():
+    let side = 9.0
+    print(math.sqrt(side))

@@ -1,12 +1,12 @@
 $ sisu test training.sisu
-error[E0310]: `+` cannot be applied to `Metres` and `Metres`
+error[E0310]: `+=` cannot be applied to `Metres` and `Metres`
   --> training.sisu:28:9
    |
 28 |         total += run.distance
    |         ^^^^^^^^^^^^^^^^^^^^^
   = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Metres] for Metres` gives it one
 
-error[E0310]: `+` cannot be applied to `Seconds` and `Metres`
+error[E0310]: `+=` cannot be applied to `Seconds` and `Metres`
   --> training.sisu:35:9
    |
 35 |         total += run.distance

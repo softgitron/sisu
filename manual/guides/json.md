@@ -181,8 +181,8 @@ def main():
 <!-- output: examples/guide-json/refined.out -->
 ```text
 Ok(Turn(name="Aino", first=18, last=19))
-Err(Mismatch(path="$.last", expected="a `Hour`"))
-Err(Mismatch(path="$", expected="a `Turn` whose invariant holds"))
+Err(Mismatch(path="$.last", expected="`Hour`"))
+Err(Mismatch(path="$", expected="`Turn` whose invariant holds"))
 ```
 
 The rest of the program then receives a `Turn` whose hours are hours of

@@ -453,8 +453,9 @@ The left operand decides which impl runs, so `3.0 * step` asks `f64`
 for a `*` that takes a vector, which no impl gives here: it is E0310
 (`type.binary-operator`), whose note names both ways out. Write the
 vector first, or give `f64` the
-operator with `impl Mul[Vector] for f64:`, which only the root package
-may write, as the section "One impl for each type and trait" explains.
+operator with `impl Mul[Vector] for f64:`, which the package that
+declares `Vector` may write, as the section "One impl for each type and
+trait" shows.
 
 The set of operators is fixed: a type can give a meaning to `+`, but a
 program cannot make up a new operator or change the precedence of one
@@ -882,14 +883,61 @@ def main():
 True
 ```
 
-`sorted` needs `Ord`, which `f64` lacks, and without the impl it gets
-E0347, whose fix offers this impl. Inside it, `self.cmp(other)`
-calls the method that every `f64` has, which panics on a NaN, so a NaN
-in `times` is a bug that stops the program. That is a choice this
-program makes for itself. A library cannot make it for every program
-that uses it, and gets E0236 (`resolve.orphan-impl`) for the same impl;
-chapter 17 shows a library. If the standard library adds the impl one
-day, the program gets E0235, and the fix is to delete its own.
+`sorted` needs `Ord`, which `f64` lacks. Inside the impl,
+`self.cmp(other)` calls the method that every `f64` has, which panics on
+a NaN, so a NaN in `times` is a bug that stops the program. That is a
+choice this program makes for itself. A library cannot make it for every
+program that uses it, and gets E0236 (`resolve.orphan-impl`) for the
+same impl, whose note says which type would make the impl its own. If
+the standard library adds the impl one day, the program gets E0235, and
+the fix is to delete its own. Without the impl, `sorted(times)` is
+E0347, whose note names the way that needs no impl at all:
+`f64.total_order()`, which chapter 24 explains.
+
+A trait's type argument counts as well: an impl is the package's own
+when one of the trait's type arguments is a type of the package. So the
+library that declares `Vector` may write `impl Mul[Vector] for f64`,
+and its users get `2.0 * v`. No other package can write that impl,
+since only this one has `Vector`. Here is such a library, `plane`:
+
+<!-- file: examples/14-traits/scale.pkg/plane/src/lib.sisu -->
+```sisu
+# A library may give `f64` an operator that takes its own type.
+
+## A vector in the plane.
+@derive(Copy, Debug, Eq)
+pub struct Vector:
+    pub x: f64
+    pub y: f64
+
+impl Mul[f64] for Vector:
+    def mul(self, k: f64) -> Vector:
+        return Vector(self.x * k, self.y * k)
+
+impl Mul[Vector] for f64:
+    type Output = Vector
+
+    def mul(self, v: Vector) -> Vector:
+        return Vector(self * v.x, self * v.y)
+```
+
+A program that depends on `plane` uses both orders; chapter 17 shows
+how a program names the libraries it depends on:
+
+<!-- file: examples/14-traits/scale.pkg/src/main.sisu -->
+```sisu
+# A program uses the operators that its library gives.
+from plane import Vector
+
+def main():
+    let step = Vector(1.0, 2.0)
+    print("{2.0 * step:?} {step * 3.0:?}")
+```
+
+<!-- output: examples/14-traits/scale.out -->
+```text
+Vector(x=2.0, y=4.0) Vector(x=3.0, y=6.0)
+```
 
 ## A new type for an old value
 
@@ -1561,14 +1609,14 @@ test "a summary":
 <!-- output: solutions/14-traits/training.console -->
 ```console
 $ sisu test training.sisu
-error[E0310]: `+` cannot be applied to `Metres` and `Metres`
+error[E0310]: `+=` cannot be applied to `Metres` and `Metres`
   --> training.sisu:28:9
    |
 28 |         total += run.distance
    |         ^^^^^^^^^^^^^^^^^^^^^
   = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Metres] for Metres` gives it one
 
-error[E0310]: `+` cannot be applied to `Seconds` and `Metres`
+error[E0310]: `+=` cannot be applied to `Seconds` and `Metres`
   --> training.sisu:35:9
    |
 35 |         total += run.distance

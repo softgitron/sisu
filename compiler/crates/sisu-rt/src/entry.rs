@@ -728,27 +728,18 @@ unsafe extern "C" fn sisu_rt_dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mo
 unsafe fn dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
     unsafe {
-        let t = crate::dict::table(d);
-        let at = match t.position(key, key_ty) {
-            Some(i) => t.val_at(i),
-            None if mode == abi::SLOT_WRITE => {
-                let mut k = vec![0u64; (t.ksize() as usize).div_ceil(8)];
-                let kp = k.as_mut_ptr() as *mut u8;
-                crate::dict::copy_key(kp, key, key_ty);
-                let i = t.push_key(kp);
-                t.val_at(i)
-            }
-            None if mode == abi::SLOT_DROP => std::ptr::null_mut(),
-            None => {
-                let mut shown = Vec::new();
-                let (p, kt) = value::target(key, key_ty);
-                value::debug(&mut shown, p, kt);
-                return rt::raise_msg(
-                    msg::PANIC_MISSING_KEY,
-                    &[("key", String::from_utf8_lossy(&shown).into_owned())],
-                );
-            }
-        };
+        // The runtime in Sisu finds or makes the slot (decision 681); a
+        // missing key's panic names it, in the catalog's words.
+        let at = crate::bridge::table_slot(d, key, key_ty, mode);
+        if at == -1 {
+            let mut shown = Vec::new();
+            let (p, kt) = value::target(key, key_ty);
+            value::debug(&mut shown, p, kt);
+            return rt::raise_msg(
+                msg::PANIC_MISSING_KEY,
+                &[("key", String::from_utf8_lossy(&shown).into_owned())],
+            );
+        }
         mem::set_word(out, 0, at as u64);
     }
     abi::OK

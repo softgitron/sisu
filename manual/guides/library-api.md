@@ -66,8 +66,9 @@ impl Len for Ledger:
 - **Give values out, and keep their parts private.** `Ledger`'s list is
   private, so only `book` adds to it, and `book` checks the hour. A
   private field cannot be set from another module, even through a
-  default (E0258), so the library gives `Ledger.new()`: a caller who
-  cannot build a value by hand cannot build a wrong one.
+  default (E0258, whose note then names `Ledger.new()`), so the library
+  gives `Ledger.new()`: a caller who cannot build a value by hand cannot
+  build a wrong one.
 - **Make allocation visible.** Take views where the library only reads,
   `name: str`, and return owned types where it makes something, so that
   a signature shows what a call allocates.
@@ -188,8 +189,9 @@ only `save` and `load` of the library do, each through one `Fs` operation,
 and `depth=-` says that a library has no `main` to reach them from.
 
 From another module a variant is named through its error set,
-`BookingError.Taken(18)`; `from ledger import Taken` is E0204, since a
-module's items are its types and functions, not their variants. If a
+`BookingError.Taken(18)`; `from ledger import Taken` is E0204, whose
+note says so: a module's items are its types and functions, not their
+variants. If a
 test needs what the module keeps private, the API probably lacks
 something its users will need too.
 

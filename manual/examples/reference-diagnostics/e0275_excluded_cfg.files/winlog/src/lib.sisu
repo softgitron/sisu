@@ -1,0 +1,5 @@
+##! Writes to the Windows event log.
+
+## Records `message` in the event log.
+pub def record(message: str):
+    print("event log: {message}")

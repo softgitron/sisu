@@ -1,4 +1,5 @@
 5:16-5:41 E0301 type.integer-division
   fix type.use-floor-division 5:28-5:29 "//"
+  fix type.float-division 5:27-5:27 ".to_f64()" 5:41-5:41 ".to_f64()"
 6:38-6:40 E0344 type.constant-negative-index fix="scores[^1]"
   fix type.from-end-index 6:38-6:40 "^1"

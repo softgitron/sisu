@@ -5,5 +5,6 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 5 |     print("average: {total / count}")
   |                      ^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)

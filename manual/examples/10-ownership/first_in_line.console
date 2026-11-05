@@ -4,6 +4,7 @@ error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.cop
   |
 4 |     let first = queue[0]
   |                 ^^^^^^^^
+  = note: `queue` owns its list, which keeps the item `queue[0]` reads and only lends it: copy the item, or take it out of the list
   = fix: copy it: `.copy()`
 
 error[D0006]: the program was not run: errors found (1)

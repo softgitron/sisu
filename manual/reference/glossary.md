@@ -750,8 +750,8 @@ A `T?`: `Some(x)` or `None`, the value or its absence. Sisu has no
 
 ### Orphan rule
 
-An impl stands in the package of its trait or of its type, except in
-the root package. [Chapter 14](../tutorial/14-traits.md);
+An impl stands in the package of its trait, of its type or of one of
+the trait's type arguments, except in the root package. [Chapter 14](../tutorial/14-traits.md);
 [R2](types.md#one-impl-for-each-type-and-trait).
 
 ### Overflow

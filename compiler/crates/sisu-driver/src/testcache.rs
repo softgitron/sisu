@@ -164,6 +164,7 @@ pub fn key(prog: &Program, index: usize, salt: &str) -> Option<u64> {
     let decls = Program {
         sources: Vec::new(),
         entry: None,
+        exports: Vec::new(),
         types: prog.types.clone(),
         intrinsics: prog.intrinsics.clone(),
         functions: Vec::new(),

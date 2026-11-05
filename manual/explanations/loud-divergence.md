@@ -92,6 +92,7 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 5 |     let mean = sum(scores) / len(scores)
   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.to_f64()`
 
 error[E0344]: a constant negative index does not compile; count from the end with `^`: `scores[^1]`
   --> habits.sisu:6:38
@@ -106,10 +107,11 @@ E0344 (`type.constant-negative-index`) refuses `scores[-1]` and writes
 the Sisu spelling, `scores[^1]`, "the last element of scores". E0301
 (`type.integer-division`) refuses `/` between integers, because in Sisu
 `/` divides floats only, and its message names both ways on: `//` for
-integer division, or a conversion to `f64` first. Its fix writes `//`,
-which for a mean gives 6, not Python 3's 6.67. The rule makes the
-difference visible, and it puts the decision in front of the reader,
-where a silent change would have made it for them.
+integer division, or a conversion to `f64` first. It offers a fix for
+each: `//`, which for a mean gives 6, and the float division, which
+gives Python 3's 6.67. The rule makes the difference visible, and it
+puts the decision in front of the reader, where a silent change would
+have made it for them.
 
 ## How the rule shaped the language
 

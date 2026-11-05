@@ -359,15 +359,17 @@ error[E0806]: `today.closes` is part of a value of `Schedule`, whose invariant o
    |
 11 |     today.closes = 25
    |     ^^^^^^^^^^^^
+  = note: give `Schedule` a method that makes the change, `def NAME(mut self, ...)`, which checks the invariant when it returns, and call it
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0806 (`contract.invariant-field`) says that `closes` belongs to a
 `Schedule`, whose own methods must make the change, so that they check
-the invariant again. Give the type a method that does what the
-assignment meant, such as `close_later(mut self, hours: int)`, and call
-it. Building a value by its fields is allowed everywhere, since
+the invariant again, and its note says what to write. Give the type a
+method that does what the assignment meant, such as
+`close_later(mut self, hours: int)`, and call it; for a type that has
+such methods already, the note lists them. Building a value by its fields is allowed everywhere, since
 construction checks the invariant too.
 
 > **From Python.** A Python class keeps its invariant by convention: an
@@ -927,6 +929,7 @@ error[E0806]: `stove.celsius` is part of a value of `Stove`, whose invariant onl
    |
 24 |     stove.celsius = max(stove.celsius - 15, 0)
    |     ^^^^^^^^^^^^^
+  = note: the methods of `Stove` that take `mut self` change it and check the invariant again: `heat`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -934,8 +937,9 @@ error[D0006]: the program was not run: errors found (1)
 <details>
 <summary>Hint 1</summary>
 
-E0806 says who may change `celsius`: the methods of `Stove`. The tests
-call `throw_water` and need not know how it cools the stove.
+E0806 says who may change `celsius`, the methods of `Stove`, and its
+note names the one that does so now, `heat`. The tests call
+`throw_water` and need not know how it cools the stove.
 
 </details>
 

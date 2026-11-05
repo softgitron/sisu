@@ -239,6 +239,7 @@ impl<'p> Interp<'p, '_> {
         let mut merged = sir::Program {
             sources: old.sources.clone(),
             entry: old.entry.clone(),
+            exports: old.exports.clone(),
             types: old.types.clone(),
             intrinsics: old.intrinsics.clone(),
             functions: Vec::new(),

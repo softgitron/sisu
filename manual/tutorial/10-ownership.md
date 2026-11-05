@@ -406,6 +406,7 @@ error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.cop
   |
 4 |     let first = queue[0]
   |                 ^^^^^^^^
+  = note: `queue` owns its list, which keeps the item `queue[0]` reads and only lends it: copy the item, or take it out of the list
   = fix: copy it: `.copy()`
 
 error[D0006]: the program was not run: errors found (1)
@@ -413,9 +414,10 @@ error[D0006]: the program was not run: errors found (1)
 
 `queue[0]` borrows the element from the list, which is why E0338
 (`type.move-out-of-borrow`) speaks of a borrowed value: moving it out
-would leave a hole in the list. The fix copies the element. To take an
-element out instead, ask the list: `remove(i)` and `pop()` move an
-element out and make the list shorter.
+would leave a hole in the list. Its note says the same in the words of
+this program: `queue` keeps the item and only lends it. The fix copies
+the element. To take an element out instead, ask the list: `remove(i)`
+and `pop()` move an element out and make the list shorter.
 
 <!-- file: examples/10-ownership/queue.sisu -->
 ```sisu

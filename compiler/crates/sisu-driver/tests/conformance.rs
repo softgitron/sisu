@@ -505,3 +505,29 @@ fn repl_and_worksheets_run_on_stage_1() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `sisu repl --echo` writes each input after its prompt (decision 685), so
+/// that a session read from a pipe reads as one at a terminal; without it
+/// the suite's sessions are captured as they were.
+#[test]
+fn the_repl_echoes_its_inputs_when_asked() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = std::env::temp_dir().join(format!("sisu-repl-echo-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let mut child = std::process::Command::new(&sisu)
+        .args(["repl", "--echo"])
+        .current_dir(&dir)
+        .env("SISU_STAGE1_REPL", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("sisu runs");
+    use std::io::Write;
+    child.stdin.take().expect("its input").write_all(b"let x = 20\nx + 1\n").expect("the input written");
+    let out = child.wait_with_output().expect("sisu ends");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_eq!(stdout, "sisu> let x = 20\nsisu> x + 1\n21\nsisu> \n", "{}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
+}

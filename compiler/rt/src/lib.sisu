@@ -325,46 +325,12 @@ def export_list_sort(types: ptr[int], l: ptr mut u8, e: int) -> bool:
 def export_collection(types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8) -> int:
     return dispatch.collection(types, desc, ret, args)
 
-## The position of the entry of the table at `tb` whose key is the key at
-## `k` of type `kt`, or -1 (`table.find`): every lookup of a dict or a set.
-##
-## Requires:
-## - `typed`: `types` is the program's table, `tb` the address of a live
-##   table, and `k` holds a live value of type `kt`
-def export_table_lookup(types: ptr[int], tb: ptr mut u8, k: ptr mut u8, kt: int) -> int:
-    return table.find(Types(words=types), tb, k, kt)
-
-## Appends to the table at `tb` an entry whose key moves in from `k`, which
-## it does not hold yet: its position, where the caller writes its value
-## (`table.push`).
-##
-## Requires:
-## - `typed`: `types` is the program's table, `tb` the address of a live
-##   table, and `k` holds a live key of its key type, which moves in
-def export_table_push(types: ptr[int], tb: ptr mut u8, k: ptr mut u8) -> int:
-    return table.push(Types(words=types), tb, k)
-
 ## The number of entries of the table at `tb` (`table.length`).
 ##
 ## Requires:
 ## - `table`: `tb` is the address of a live table
 def export_table_len(tb: ptr mut u8) -> int:
     return table.length(tb)
-
-## The bytes of a key of the table at `tb` (`table.key_size`).
-##
-## Requires:
-## - `table`: `tb` is the address of a live table
-def export_table_key_bytes(tb: ptr mut u8) -> int:
-    return table.key_size(tb)
-
-## The address of the value of entry `i` of the table at `tb`
-## (`table.value_at`).
-##
-## Requires:
-## - `table`: `tb` is the address of a live table of more than `i` entries
-def export_table_value_at(tb: ptr mut u8, i: int) -> ptr mut u8:
-    return table.value_at(tb, i)
 
 ## Writes the next item of the iterator at `it` as an option at `out`
 ## (`iter.next`, decision 423): `Iter.next` of one that does not wait, and

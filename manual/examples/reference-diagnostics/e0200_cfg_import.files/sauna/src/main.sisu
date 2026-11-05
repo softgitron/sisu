@@ -1,0 +1,6 @@
+# A name that a `@cfg` import binds, used where the build may lack it.
+@cfg(target.os == "windows")
+import winlog
+
+def main():
+    winlog.record("the stove is on")

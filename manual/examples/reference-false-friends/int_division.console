@@ -5,4 +5,5 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 3 |     print(7 / 2)
   |           ^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.0`, `.0`
 

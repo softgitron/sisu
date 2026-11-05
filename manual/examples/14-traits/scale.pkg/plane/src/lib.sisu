@@ -1,0 +1,17 @@
+# A library may give `f64` an operator that takes its own type.
+
+## A vector in the plane.
+@derive(Copy, Debug, Eq)
+pub struct Vector:
+    pub x: f64
+    pub y: f64
+
+impl Mul[f64] for Vector:
+    def mul(self, k: f64) -> Vector:
+        return Vector(self.x * k, self.y * k)
+
+impl Mul[Vector] for f64:
+    type Output = Vector
+
+    def mul(self, v: Vector) -> Vector:
+        return Vector(self * v.x, self * v.y)

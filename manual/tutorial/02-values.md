@@ -198,12 +198,13 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 5 |     print("average: {total / count}")
   |                      ^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-E0301 (`type.integer-division`) names two ways out, and the fix line
-offers the first. Which one is right depends on what the program means:
+E0301 (`type.integer-division`) names two ways out, and a fix line
+offers each. Which one is right depends on what the program means:
 
 - `//` keeps the division in whole numbers and drops the fraction, and
   `%` gives what is left over. Choose it for things that come whole: 17
@@ -1117,6 +1118,7 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 13 |     return total / people
    |            ^^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.to_f64()`
 
 error[E0300]: expected `f64`, found `int`
   --> split_bill.sisu:18:12
@@ -1131,29 +1133,30 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 18 |     return total / count
    |            ^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.to_f64()`
 
 error[D0006]: the program was not run: errors found (3)
 ```
 
-`mean_rating` has two diagnostics on one line. Read both fixes before
-you apply either: together they change the line to
+`mean_rating` has two diagnostics on one line. Read every fix before
+you apply one: E0300's and E0301's first together change the line to
 `(total // count).to_f64()`.
 
 <details>
 <summary>Hint 1</summary>
 
-The two functions divide for different reasons. Decide for each one
-whether the answer is a whole number or a measurement with a fraction.
+Decide for each function whether its answer is a whole number or a
+measurement with a fraction.
 
 </details>
 
 <details>
 <summary>Hint 2</summary>
 
-`share` wants the division in whole numbers, which is what E0301's fix
-gives. In `mean_rating`, that fix throws the fraction away before
-anything converts the result, so the test with 9 and 2 fails. Convert
-before you divide.
+`share` wants the division in whole numbers, which is what E0301's
+first fix gives. In `mean_rating`, that fix throws the fraction away
+before anything converts the result, so the test with 9 and 2 fails.
+Convert before you divide.
 
 </details>
 

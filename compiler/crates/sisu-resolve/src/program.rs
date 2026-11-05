@@ -253,6 +253,9 @@ pub struct FnInfo {
     /// it (the forwarding of lent capabilities, the assembling of a
     /// `System`).
     pub internal: bool,
+    /// `@export("name")` (12, "C interop"): the global symbol a native
+    /// build gives the function (decision 683).
+    pub export: Option<String>,
     pub body: Option<std::sync::Arc<ast::Block>>,
     pub kind: FnKind,
     pub file: FileId,

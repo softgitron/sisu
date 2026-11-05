@@ -1,0 +1,9 @@
+$ sisu run e0277_import_in_body.sisu
+error[E0277]: an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none
+  --> e0277_import_in_body.sisu:4:5
+  |
+4 |     import std.math
+  |     ^^^^^^^^^^^^^^^
+  = fix: move it to the top of the module: `import std.math`
+
+error[D0006]: the program was not run: errors found (1)

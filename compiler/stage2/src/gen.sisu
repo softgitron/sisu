@@ -351,10 +351,11 @@ impl Cg:
         return Ok(symbol)
 
     ## The function `name`, without type arguments, under the global symbol
-    ## `symbol` of a runtime library (decision 336), declared and queued.
+    ## `symbol` of a runtime library (decision 336), or of a program's
+    ## `@export` (decision 683), declared and queued.
     pub pure def export_instance(mut self, p: Program, name: str, symbol: str) -> () ! LirError:
         let fi = self.function(name) else:
-            return internal("the library has no function `{name}`")
+            return internal("the program has no function `{name}`")
         let params = p.functions[fi].param_count
         self.items.push(Item.Line("declare {symbol} export sisu {params}"))
         _ = self.instances.insert(instance_key(name, []), symbol.to_string())
@@ -607,7 +608,14 @@ impl Cg:
     ## Everything but `main`: the instances the entry reaches, the
     ## dispatchers and the drop glue; the entry's symbol, `main`'s flags
     ## and the number of the entry's result type.
-    pub pure def generate(mut self, p: Program, entry: Entry) -> (String, int, int) ! LirError:
+    pub pure def generate(
+        mut self, p: Program, entry: Entry, exports: list[(String, String)]
+    ) -> (String, int, int) ! LirError:
+        # Each `@export("name")` function under its global symbol, of Sisu's
+        # convention (decision 683), first, so that `main`'s calls of it call
+        # that symbol.
+        for (symbol, function) in exports:
+            self.export_instance(p, function, symbol)?
         let main = self.instance(p, entry.function, [])?
         self.complete(p)?
         var ret = Type.Unit
@@ -977,20 +985,23 @@ impl Cg:
 
 ## The LIR of a program: lowered with function values of one word of
 ## environment, and again with more when an `own` closure needs them
-## (decision 224).
-pub pure def lower(p: Program, release: bool) -> String ! LirError:
-    let (text, _) = lower_spanned(p, release)?
+## (decision 224); `exports` its `@export`s, each a symbol and a function
+## (`read.exports`, decision 683).
+pub pure def lower(p: Program, exports: list[(String, String)], release: bool) -> String ! LirError:
+    let (text, _) = lower_spanned(p, exports, release)?
     return Ok(text)
 
 ## The LIR of a program, and where each function is in it: the start of
 ## its head's line, the end of its `end` line, and its lines.
-pub pure def lower_spanned(p: Program, release: bool) -> (String, list[(int, int, int)]) ! LirError:
+pub pure def lower_spanned(
+    p: Program, exports: list[(String, String)], release: bool
+) -> (String, list[(int, int, int)]) ! LirError:
     let entry = p.entry.copy() else:
         return unsupported("a program without `main`")
     var env_words = 1
     while True:
         var cg = Cg.new(p, env_words, release)
-        let (main, flags, ret_ty) = cg.generate(p, entry)?
+        let (main, flags, ret_ty) = cg.generate(p, entry, exports.copy())?
         if cg.env_needed > env_words:
             env_words = cg.env_needed
             continue

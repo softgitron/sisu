@@ -1,17 +1,18 @@
 sir 0
 source 0 "src/lib.sisu"
-source 1 "src/dispatch.sisu"
-source 2 "src/floats.sisu"
-source 3 "src/iter.sisu"
-source 4 "src/list.sisu"
-source 5 "src/queue.sisu"
-source 6 "src/search.sisu"
-source 7 "src/show.sisu"
-source 8 "src/table.sisu"
-source 9 "src/text.sisu"
-source 10 "src/time.sisu"
-source 11 "src/value.sisu"
-source 12 "src/types.sisu"
+source 1 "src/channel.sisu"
+source 2 "src/dispatch.sisu"
+source 3 "src/floats.sisu"
+source 4 "src/iter.sisu"
+source 5 "src/list.sisu"
+source 6 "src/queue.sisu"
+source 7 "src/search.sisu"
+source 8 "src/show.sisu"
+source 9 "src/table.sisu"
+source 10 "src/text.sisu"
+source 11 "src/time.sisu"
+source 12 "src/value.sisu"
+source 13 "src/types.sisu"
 
 struct u8 {  }
 
@@ -64,168 +65,168 @@ intrinsic min pure inner 0 1
 intrinsic u8.to_int pure
 intrinsic u8.wrapping_from pure
 
-fn export_bytes_eq(3) source 0 @36:5-36:20 {
+fn export_bytes_eq(3) source 0 @37:5-37:20 {
     let _0: bool
-    let _1: ptr[u8] "a" @36:21-36:31
-    let _2: ptr[u8] "b" @36:33-36:43
-    let _3: int "n" @36:45-36:51
+    let _1: ptr[u8] "a" @37:21-37:31
+    let _2: ptr[u8] "b" @37:33-37:43
+    let _3: int "n" @37:45-37:51
     let _4: bool
     let _5: i32
   bb0:
-    _4 = eq copy _3, const 0 @37:8-37:14
-    switch copy _4 [0: bb1, else: bb2] @37:8-37:14
+    _4 = eq copy _3, const 0 @38:8-38:14
+    switch copy _4 [0: bb1, else: bb2] @38:8-38:14
   bb1:
-    _5 = call intrinsic extern.c.memcmp(copy _1, copy _2, copy _3) @41:19-41:34
-    _0 = eq copy _5, const 0 @41:12-41:39
-    return @41:5-41:39
+    _5 = call intrinsic extern.c.memcmp(copy _1, copy _2, copy _3) @42:19-42:34
+    _0 = eq copy _5, const 0 @42:12-42:39
+    return @42:5-42:39
   bb2:
-    _0 = const true @38:16-38:20
-    return @38:9-38:20
+    _0 = const true @39:16-39:20
+    return @39:9-39:20
 }
 
-fn export_value_eq(5) source 0 @49:5-49:20 {
+fn export_value_eq(5) source 0 @50:5-50:20 {
     let _0: bool
-    let _1: ptr[int] "types" @49:21-49:36
-    let _2: ptr_mut[u8] "a" @49:38-49:51
-    let _3: int "ta" @49:53-49:60
-    let _4: ptr_mut[u8] "b" @49:62-49:75
-    let _5: int "tb" @49:77-49:84
+    let _1: ptr[int] "types" @50:21-50:36
+    let _2: ptr_mut[u8] "a" @50:38-50:51
+    let _3: int "ta" @50:53-50:60
+    let _4: ptr_mut[u8] "b" @50:62-50:75
+    let _5: int "tb" @50:77-50:84
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @50:24-50:42
-    _0 = call fn rt.value.equal(copy _6, copy _2, copy _3, copy _4, copy _5) @50:12-50:57
-    return @50:5-50:57
+    _6 = struct rt.types.Types(copy _1) @51:24-51:42
+    _0 = call fn rt.value.equal(copy _6, copy _2, copy _3, copy _4, copy _5) @51:12-51:57
+    return @51:5-51:57
 }
 
-fn export_value_cmp(5) source 0 @58:5-58:21 {
+fn export_value_cmp(5) source 0 @59:5-59:21 {
     let _0: int
-    let _1: ptr[int] "types" @58:22-58:37
-    let _2: ptr_mut[u8] "a" @58:39-58:52
-    let _3: int "ta" @58:54-58:61
-    let _4: ptr_mut[u8] "b" @58:63-58:76
-    let _5: int "tb" @58:78-58:85
+    let _1: ptr[int] "types" @59:22-59:37
+    let _2: ptr_mut[u8] "a" @59:39-59:52
+    let _3: int "ta" @59:54-59:61
+    let _4: ptr_mut[u8] "b" @59:63-59:76
+    let _5: int "tb" @59:78-59:85
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @59:24-59:42
-    _0 = call fn rt.value.order(copy _6, copy _2, copy _3, copy _4, copy _5) @59:12-59:57
-    return @59:5-59:57
+    _6 = struct rt.types.Types(copy _1) @60:24-60:42
+    _0 = call fn rt.value.order(copy _6, copy _2, copy _3, copy _4, copy _5) @60:12-60:57
+    return @60:5-60:57
 }
 
-fn export_value_hash(4) source 0 @67:5-67:22 {
+fn export_value_hash(4) source 0 @68:5-68:22 {
     let _0: int
-    let _1: ptr[int] "types" @67:23-67:38
-    let _2: int "state" @67:40-67:50
-    let _3: ptr_mut[u8] "p" @67:52-67:65
-    let _4: int "t" @67:67-67:73
+    let _1: ptr[int] "types" @68:23-68:38
+    let _2: int "state" @68:40-68:50
+    let _3: ptr_mut[u8] "p" @68:52-68:65
+    let _4: int "t" @68:67-68:73
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @68:23-68:41
-    _0 = call fn rt.value.hash(copy _5, copy _2, copy _3, copy _4) @68:12-68:55
-    return @68:5-68:55
+    _5 = struct rt.types.Types(copy _1) @69:23-69:41
+    _0 = call fn rt.value.hash(copy _5, copy _2, copy _3, copy _4) @69:12-69:55
+    return @69:5-69:55
 }
 
-fn export_value_copy(4) source 0 @76:5-76:22 {
+fn export_value_copy(4) source 0 @77:5-77:22 {
     let _0: ()
-    let _1: ptr[int] "types" @76:23-76:38
-    let _2: ptr_mut[u8] "dst" @76:40-76:55
-    let _3: ptr_mut[u8] "src" @76:57-76:72
-    let _4: int "t" @76:74-76:80
+    let _1: ptr[int] "types" @77:23-77:38
+    let _2: ptr_mut[u8] "dst" @77:40-77:55
+    let _3: ptr_mut[u8] "src" @77:57-77:72
+    let _4: int "t" @77:74-77:80
     let _5: ()
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @77:16-77:34
-    _5 = call fn rt.value.copy(copy _6, copy _2, copy _3, copy _4) @77:5-77:48
+    _6 = struct rt.types.Types(copy _1) @78:16-78:34
+    _5 = call fn rt.value.copy(copy _6, copy _2, copy _3, copy _4) @78:5-78:48
     _0 = const ()
     return
 }
 
-fn export_value_drop(4) source 0 @85:5-85:22 {
+fn export_value_drop(4) source 0 @86:5-86:22 {
     let _0: int
-    let _1: ptr[int] "types" @85:23-85:38
-    let _2: ptr_mut[u8] "p" @85:40-85:53
-    let _3: int "t" @85:55-85:61
-    let _4: int "mode" @85:63-85:72
+    let _1: ptr[int] "types" @86:23-86:38
+    let _2: ptr_mut[u8] "p" @86:40-86:53
+    let _3: int "t" @86:55-86:61
+    let _4: int "mode" @86:63-86:72
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @86:23-86:41
-    _0 = call fn rt.value.drop(copy _5, copy _2, copy _3, copy _4) @86:12-86:54
-    return @86:5-86:54
+    _5 = struct rt.types.Types(copy _1) @87:23-87:41
+    _0 = call fn rt.value.drop(copy _5, copy _2, copy _3, copy _4) @87:12-87:54
+    return @87:5-87:54
 }
 
-fn export_value_drop_rest(4) source 0 @94:5-94:27 {
+fn export_value_drop_rest(4) source 0 @95:5-95:27 {
     let _0: int
-    let _1: ptr[int] "types" @94:28-94:43
-    let _2: ptr_mut[u8] "p" @94:45-94:58
-    let _3: int "t" @94:60-94:66
-    let _4: int "mode" @94:68-94:77
+    let _1: ptr[int] "types" @95:28-95:43
+    let _2: ptr_mut[u8] "p" @95:45-95:58
+    let _3: int "t" @95:60-95:66
+    let _4: int "mode" @95:68-95:77
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @95:28-95:46
-    _0 = call fn rt.value.drop_rest(copy _5, copy _2, copy _3, copy _4) @95:12-95:59
-    return @95:5-95:59
+    _5 = struct rt.types.Types(copy _1) @96:28-96:46
+    _0 = call fn rt.value.drop_rest(copy _5, copy _2, copy _3, copy _4) @96:12-96:59
+    return @96:5-96:59
 }
 
-fn export_value_retain(3) source 0 @103:5-103:24 {
+fn export_value_retain(3) source 0 @104:5-104:24 {
     let _0: ()
-    let _1: ptr[int] "types" @103:25-103:40
-    let _2: ptr_mut[u8] "p" @103:42-103:55
-    let _3: int "t" @103:57-103:63
+    let _1: ptr[int] "types" @104:25-104:40
+    let _2: ptr_mut[u8] "p" @104:42-104:55
+    let _3: int "t" @104:57-104:63
     let _4: ()
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @104:18-104:36
-    _4 = call fn rt.value.retain(copy _5, copy _2, copy _3) @104:5-104:43
+    _5 = struct rt.types.Types(copy _1) @105:18-105:36
+    _4 = call fn rt.value.retain(copy _5, copy _2, copy _3) @105:5-105:43
     _0 = const ()
     return
 }
 
-fn export_value_display(4) source 0 @113:5-113:25 {
+fn export_value_display(4) source 0 @114:5-114:25 {
     let _0: ()
-    let _1: ptr[int] "types" @113:26-113:41
-    let _2: ptr_mut[u8] "out" @113:43-113:58
-    let _3: ptr_mut[u8] "p" @113:60-113:73
-    let _4: int "t" @113:75-113:81
+    let _1: ptr[int] "types" @114:26-114:41
+    let _2: ptr_mut[u8] "out" @114:43-114:58
+    let _3: ptr_mut[u8] "p" @114:60-114:73
+    let _4: int "t" @114:75-114:81
     let _5: ()
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @114:18-114:36
-    _5 = call fn rt.show.display(copy _6, copy _2, copy _3, copy _4) @114:5-114:48
+    _6 = struct rt.types.Types(copy _1) @115:18-115:36
+    _5 = call fn rt.show.display(copy _6, copy _2, copy _3, copy _4) @115:5-115:48
     _0 = const ()
     return
 }
 
-fn export_value_debug(4) source 0 @123:5-123:23 {
+fn export_value_debug(4) source 0 @124:5-124:23 {
     let _0: ()
-    let _1: ptr[int] "types" @123:24-123:39
-    let _2: ptr_mut[u8] "out" @123:41-123:56
-    let _3: ptr_mut[u8] "p" @123:58-123:71
-    let _4: int "t" @123:73-123:79
+    let _1: ptr[int] "types" @124:24-124:39
+    let _2: ptr_mut[u8] "out" @124:41-124:56
+    let _3: ptr_mut[u8] "p" @124:58-124:71
+    let _4: int "t" @124:73-124:79
     let _5: ()
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @124:16-124:34
-    _5 = call fn rt.show.debug(copy _6, copy _2, copy _3, copy _4) @124:5-124:46
+    _6 = struct rt.types.Types(copy _1) @125:16-125:34
+    _5 = call fn rt.show.debug(copy _6, copy _2, copy _3, copy _4) @125:5-125:46
     _0 = const ()
     return
 }
 
-fn export_text_push(3) source 0 @131:5-131:21 {
+fn export_text_push(3) source 0 @132:5-132:21 {
     let _0: ()
-    let _1: ptr_mut[u8] "t" @131:22-131:35
-    let _2: ptr_mut[u8] "b" @131:37-131:50
-    let _3: int "n" @131:52-131:58
+    let _1: ptr_mut[u8] "t" @132:22-132:35
+    let _2: ptr_mut[u8] "b" @132:37-132:50
+    let _3: int "n" @132:52-132:58
     let _4: bool
-    let _5: ptr_mut[int] "words" @138:13-138:18
-    let _6: int "len" @139:13-139:16
+    let _5: ptr_mut[int] "words" @139:13-139:18
+    let _6: int "len" @140:13-140:16
     let _7: ptr_mut[int]
-    let _8: ptr_mut[u8] "source" @140:13-140:19
+    let _8: ptr_mut[u8] "source" @141:13-141:19
     let _9: bool
     let _10: int
     let _11: int
     let _12: ptr_mut[int]
     let _13: ptr_mut[u8]
     let _14: int
-    let _15: ptr_mut[u8] "bytes" @143:13-143:18
+    let _15: ptr_mut[u8] "bytes" @144:13-144:18
     let _16: ptr[u8]
     let _17: ptr_mut[ptr[u8]]
     let _18: ptr_mut[u8]
@@ -235,57 +236,57 @@ fn export_text_push(3) source 0 @131:5-131:21 {
     let _22: ptr_mut[int]
     let _23: int
   bb0:
-    _4 = le copy _3, const 0 @132:8-132:14
-    switch copy _4 [0: bb1, else: bb2] @132:8-132:14
+    _4 = le copy _3, const 0 @133:8-133:14
+    switch copy _4 [0: bb1, else: bb2] @133:8-133:14
   bb1:
-    _5 = call intrinsic mem.ptr.cast[u8, int](copy _1) @138:21-138:34
-    _7 = call intrinsic mem.ptr.offset(copy _5, const 1) @139:19-139:34
-    _6 = call intrinsic mem.ptr.read(copy _7) @139:19-139:41
-    _8 = copy _2 @140:22-140:23
-    _10 = add copy _6, copy _3 @141:12-141:19
-    _12 = call intrinsic mem.ptr.offset(copy _5, const 2) @141:22-141:37
-    _11 = call intrinsic mem.ptr.read(copy _12) @141:22-141:44
-    _9 = gt copy _10, copy _11 @141:12-141:44
-    switch copy _9 [0: bb3, else: bb4] @141:12-141:44
+    _5 = call intrinsic mem.ptr.cast[u8, int](copy _1) @139:21-139:34
+    _7 = call intrinsic mem.ptr.offset(copy _5, const 1) @140:19-140:34
+    _6 = call intrinsic mem.ptr.read(copy _7) @140:19-140:41
+    _8 = copy _2 @141:22-141:23
+    _10 = add copy _6, copy _3 @142:12-142:19
+    _12 = call intrinsic mem.ptr.offset(copy _5, const 2) @142:22-142:37
+    _11 = call intrinsic mem.ptr.read(copy _12) @142:22-142:44
+    _9 = gt copy _10, copy _11 @142:12-142:44
+    switch copy _9 [0: bb3, else: bb4] @142:12-142:44
   bb2:
-    _0 = const () @133:9-133:15
-    return @133:9-133:15
+    _0 = const () @134:9-134:15
+    return @134:9-134:15
   bb3:
-    _17 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _5) @143:21-143:42
-    _16 = call intrinsic mem.ptr.read(copy _17) @143:21-143:49
-    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @143:21-143:60
-    _19 = call intrinsic mem.ptr.offset(copy _15, copy _6) @144:21-144:38
-    _20 = call intrinsic mem.ptr.as_const(copy _8) @144:40-144:57
-    _18 = call intrinsic extern.c.memmove(copy _19, copy _20, copy _3) @144:13-144:61
-    _22 = call intrinsic mem.ptr.offset(copy _5, const 1) @145:9-145:24
-    _23 = add copy _6, copy _3 @145:31-145:38
-    _21 = call intrinsic mem.ptr.write(copy _22, copy _23) @145:9-145:39
+    _17 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _5) @144:21-144:42
+    _16 = call intrinsic mem.ptr.read(copy _17) @144:21-144:49
+    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @144:21-144:60
+    _19 = call intrinsic mem.ptr.offset(copy _15, copy _6) @145:21-145:38
+    _20 = call intrinsic mem.ptr.as_const(copy _8) @145:40-145:57
+    _18 = call intrinsic extern.c.memmove(copy _19, copy _20, copy _3) @145:13-145:61
+    _22 = call intrinsic mem.ptr.offset(copy _5, const 1) @146:9-146:24
+    _23 = add copy _6, copy _3 @146:31-146:38
+    _21 = call intrinsic mem.ptr.write(copy _22, copy _23) @146:9-146:39
     _0 = const ()
     return
   bb4:
-    _14 = add copy _6, copy _3 @142:35-142:42
-    _13 = call fn rt.text.grow(copy _1, copy _14, copy _2) @142:22-142:46
-    _8 = copy _13 @142:13-142:46
+    _14 = add copy _6, copy _3 @143:35-143:42
+    _13 = call fn rt.text.grow(copy _1, copy _14, copy _2) @143:22-143:46
+    _8 = copy _13 @143:13-143:46
     goto bb3
 }
 
-fn export_text_push_int(2) source 0 @155:5-155:25 {
+fn export_text_push_int(2) source 0 @156:5-156:25 {
     let _0: ()
-    let _1: ptr_mut[u8] "t" @155:26-155:39
-    let _2: int "n" @155:41-155:47
-    let _3: int "m" @156:9-156:10
+    let _1: ptr_mut[u8] "t" @156:26-156:39
+    let _2: int "n" @156:41-156:47
+    let _3: int "m" @157:9-157:10
     let _4: bool
-    let _5: int "digits" @157:9-157:15
-    let _6: int "x" @158:9-158:10
+    let _5: int "digits" @158:9-158:15
+    let _6: int "x" @159:9-159:10
     let _7: bool
     let _8: int
     let _9: int
     let _10: int
-    let _11: int "total" @162:9-162:14
+    let _11: int "total" @163:9-163:14
     let _12: int
     let _13: bool
-    let _14: ptr_mut[int] "words" @167:13-167:18
-    let _15: int "len" @168:13-168:16
+    let _14: ptr_mut[int] "words" @168:13-168:18
+    let _15: int "len" @169:13-169:16
     let _16: ptr_mut[int]
     let _17: bool
     let _18: int
@@ -293,15 +294,15 @@ fn export_text_push_int(2) source 0 @155:5-155:25 {
     let _20: ptr_mut[int]
     let _21: ptr_mut[u8]
     let _22: int
-    let _23: ptr_mut[u8] "bytes" @171:13-171:18
+    let _23: ptr_mut[u8] "bytes" @172:13-172:18
     let _24: ptr_mut[u8]
     let _25: ptr[u8]
     let _26: ptr_mut[ptr[u8]]
     let _27: bool
     let _28: ()
     let _29: u8
-    let _30: int "pos" @174:13-174:16
-    let _31: int "q" @177:17-177:18
+    let _30: int "pos" @175:13-175:16
+    let _31: int "q" @178:17-178:18
     let _32: int
     let _33: ()
     let _34: ptr_mut[u8]
@@ -315,588 +316,853 @@ fn export_text_push_int(2) source 0 @155:5-155:25 {
     let _42: ptr_mut[int]
     let _43: int
   bb0:
-    _4 = lt copy _2, const 0 @156:16-156:21
-    switch copy _4 [0: bb2, else: bb1] @156:13-156:33
+    _4 = lt copy _2, const 0 @157:16-157:21
+    switch copy _4 [0: bb2, else: bb1] @157:13-157:33
   bb1:
-    _3 = copy _2 @156:23-156:24
+    _3 = copy _2 @157:23-157:24
     goto bb3
   bb2:
-    _3 = neg copy _2 @156:31-156:33
+    _3 = neg copy _2 @157:31-157:33
     goto bb3
   bb3:
-    _5 = const 1 @157:18-157:19
-    _6 = copy _3 @158:13-158:14
+    _5 = const 1 @158:18-158:19
+    _6 = copy _3 @159:13-159:14
     goto bb4
   bb4:
-    _7 = le copy _6, const -10 @159:11-159:19
-    switch copy _7 [0: bb5, else: bb6] @159:11-159:19
+    _7 = le copy _6, const -10 @160:11-160:19
+    switch copy _7 [0: bb5, else: bb6] @160:11-160:19
   bb5:
-    _13 = lt copy _2, const 0 @162:30-162:35
-    switch copy _13 [0: bb8, else: bb7] @162:26-162:47
+    _13 = lt copy _2, const 0 @163:30-163:35
+    switch copy _13 [0: bb8, else: bb7] @163:26-163:47
   bb6:
-    _9 = add copy _6, const 9 @160:13-160:20
-    _8 = floordiv copy _9, const 10 @160:13-160:26
-    _6 = copy _8 @160:9-160:26
-    _10 = add copy _5, const 1 @161:9-161:20
-    _5 = move _10 @161:9-161:20
+    _9 = add copy _6, const 9 @161:13-161:20
+    _8 = floordiv copy _9, const 10 @161:13-161:26
+    _6 = copy _8 @161:9-161:26
+    _10 = add copy _5, const 1 @162:9-162:20
+    _5 = move _10 @162:9-162:20
     goto bb4
   bb7:
-    _12 = const 1 @162:37-162:38
+    _12 = const 1 @163:37-163:38
     goto bb9
   bb8:
-    _12 = const 0 @162:45-162:46
+    _12 = const 0 @163:45-163:46
     goto bb9
   bb9:
-    _11 = add copy _5, copy _12 @162:17-162:47
-    _14 = call intrinsic mem.ptr.cast[u8, int](copy _1) @167:21-167:34
-    _16 = call intrinsic mem.ptr.offset(copy _14, const 1) @168:19-168:34
-    _15 = call intrinsic mem.ptr.read(copy _16) @168:19-168:41
-    _18 = add copy _15, copy _11 @169:12-169:23
-    _20 = call intrinsic mem.ptr.offset(copy _14, const 2) @169:26-169:41
-    _19 = call intrinsic mem.ptr.read(copy _20) @169:26-169:48
-    _17 = gt copy _18, copy _19 @169:12-169:48
-    switch copy _17 [0: bb10, else: bb11] @169:12-169:48
+    _11 = add copy _5, copy _12 @163:17-163:47
+    _14 = call intrinsic mem.ptr.cast[u8, int](copy _1) @168:21-168:34
+    _16 = call intrinsic mem.ptr.offset(copy _14, const 1) @169:19-169:34
+    _15 = call intrinsic mem.ptr.read(copy _16) @169:19-169:41
+    _18 = add copy _15, copy _11 @170:12-170:23
+    _20 = call intrinsic mem.ptr.offset(copy _14, const 2) @170:26-170:41
+    _19 = call intrinsic mem.ptr.read(copy _20) @170:26-170:48
+    _17 = gt copy _18, copy _19 @170:12-170:48
+    switch copy _17 [0: bb10, else: bb11] @170:12-170:48
   bb10:
-    _26 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _14) @171:21-171:42
-    _25 = call intrinsic mem.ptr.read(copy _26) @171:21-171:49
-    _24 = call intrinsic mem.ptr.cast_mut(copy _25) @171:21-171:60
-    _23 = call intrinsic mem.ptr.offset(copy _24, copy _15) @171:21-171:72
-    _27 = lt copy _2, const 0 @172:12-172:17
-    switch copy _27 [0: bb12, else: bb13] @172:12-172:17
+    _26 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _14) @172:21-172:42
+    _25 = call intrinsic mem.ptr.read(copy _26) @172:21-172:49
+    _24 = call intrinsic mem.ptr.cast_mut(copy _25) @172:21-172:60
+    _23 = call intrinsic mem.ptr.offset(copy _24, copy _15) @172:21-172:72
+    _27 = lt copy _2, const 0 @173:12-173:17
+    switch copy _27 [0: bb12, else: bb13] @173:12-173:17
   bb11:
-    _22 = add copy _15, copy _11 @170:30-170:41
-    _21 = call fn rt.text.grow(copy _1, copy _22, copy _1) @170:17-170:45
+    _22 = add copy _15, copy _11 @171:30-171:41
+    _21 = call fn rt.text.grow(copy _1, copy _22, copy _1) @171:17-171:45
     goto bb10
   bb12:
-    _30 = sub copy _11, const 1 @174:19-174:28
-    _6 = copy _3 @175:9-175:14
-    switch const true [0: bb15, else: bb16] @176:15-176:19
+    _30 = sub copy _11, const 1 @175:19-175:28
+    _6 = copy _3 @176:9-176:14
+    switch const true [0: bb15, else: bb16] @177:15-177:19
   bb13:
-    _29 = call intrinsic u8.wrapping_from(const 45) @173:25-173:45
-    _28 = call intrinsic mem.ptr.write(copy _23, copy _29) @173:13-173:46
+    _29 = call intrinsic u8.wrapping_from(const 45) @174:25-174:45
+    _28 = call intrinsic mem.ptr.write(copy _23, copy _29) @174:13-174:46
     goto bb12
   bb14:
-    switch const true [0: bb15, else: bb16] @176:15-176:19
+    switch const true [0: bb15, else: bb16] @177:15-177:19
   bb15:
-    _42 = call intrinsic mem.ptr.offset(copy _14, const 1) @183:9-183:24
-    _43 = add copy _15, copy _11 @183:31-183:42
-    _41 = call intrinsic mem.ptr.write(copy _42, copy _43) @183:9-183:43
+    _42 = call intrinsic mem.ptr.offset(copy _14, const 1) @184:9-184:24
+    _43 = add copy _15, copy _11 @184:31-184:42
+    _41 = call intrinsic mem.ptr.write(copy _42, copy _43) @184:9-184:43
     _0 = const ()
     return
   bb16:
-    _32 = add copy _6, const 9 @177:21-177:28
-    _31 = floordiv copy _32, const 10 @177:21-177:34
-    _34 = call intrinsic mem.ptr.offset(copy _23, copy _30) @178:13-178:30
-    _38 = mul copy _31, const 10 @178:59-178:65
-    _37 = add const 48, copy _38 @178:54-178:65
-    _36 = sub copy _37, copy _6 @178:54-178:69
-    _35 = call intrinsic u8.wrapping_from(copy _36) @178:37-178:70
-    _33 = call intrinsic mem.ptr.write(copy _34, copy _35) @178:13-178:71
-    _39 = sub copy _30, const 1 @179:13-179:21
-    _30 = move _39 @179:13-179:21
-    _6 = copy _31 @180:13-180:18
-    _40 = eq copy _6, const 0 @181:16-181:22
-    switch copy _40 [0: bb14, else: bb15] @181:16-181:22
+    _32 = add copy _6, const 9 @178:21-178:28
+    _31 = floordiv copy _32, const 10 @178:21-178:34
+    _34 = call intrinsic mem.ptr.offset(copy _23, copy _30) @179:13-179:30
+    _38 = mul copy _31, const 10 @179:59-179:65
+    _37 = add const 48, copy _38 @179:54-179:65
+    _36 = sub copy _37, copy _6 @179:54-179:69
+    _35 = call intrinsic u8.wrapping_from(copy _36) @179:37-179:70
+    _33 = call intrinsic mem.ptr.write(copy _34, copy _35) @179:13-179:71
+    _39 = sub copy _30, const 1 @180:13-180:21
+    _30 = move _39 @180:13-180:21
+    _6 = copy _31 @181:13-181:18
+    _40 = eq copy _6, const 0 @182:16-182:22
+    switch copy _40 [0: bb14, else: bb15] @182:16-182:22
 }
 
-fn export_text_from(3) source 0 @191:5-191:21 {
+fn export_text_from(3) source 0 @192:5-192:21 {
     let _0: ()
-    let _1: ptr_mut[u8] "dst" @191:22-191:37
-    let _2: ptr_mut[u8] "b" @191:39-191:52
-    let _3: int "n" @191:54-191:60
+    let _1: ptr_mut[u8] "dst" @192:22-192:37
+    let _2: ptr_mut[u8] "b" @192:39-192:52
+    let _3: int "n" @192:54-192:60
     let _4: ()
   bb0:
-    _4 = call fn rt.text.from_bytes(copy _1, copy _2, copy _3) @192:5-192:31
+    _4 = call fn rt.text.from_bytes(copy _1, copy _2, copy _3) @193:5-193:31
     _0 = const ()
     return
 }
 
-fn export_int_digits(5) source 0 @200:5-200:22 {
+fn export_int_digits(5) source 0 @201:5-201:22 {
     let _0: ()
-    let _1: ptr_mut[u8] "dst" @200:23-200:38
-    let _2: int "low" @200:40-200:48
-    let _3: int "high" @200:50-200:59
-    let _4: int "base" @200:61-200:70
-    let _5: bool "upper" @200:72-200:83
+    let _1: ptr_mut[u8] "dst" @201:23-201:38
+    let _2: int "low" @201:40-201:48
+    let _3: int "high" @201:50-201:59
+    let _4: int "base" @201:61-201:70
+    let _5: bool "upper" @201:72-201:83
     let _6: ()
   bb0:
-    _6 = call fn rt.text.digits(copy _1, copy _2, copy _3, copy _4, copy _5) @201:5-201:45
+    _6 = call fn rt.text.digits(copy _1, copy _2, copy _3, copy _4, copy _5) @202:5-202:45
     _0 = const ()
     return
 }
 
-fn export_float_digits(4) source 0 @210:5-210:24 {
+fn export_float_digits(4) source 0 @211:5-211:24 {
     let _0: ()
-    let _1: ptr_mut[u8] "dst" @210:25-210:40
-    let _2: int "bits" @210:42-210:51
-    let _3: int "mode" @210:53-210:62
-    let _4: int "precision" @210:64-210:78
+    let _1: ptr_mut[u8] "dst" @211:25-211:40
+    let _2: int "bits" @211:42-211:51
+    let _3: int "mode" @211:53-211:62
+    let _4: int "precision" @211:64-211:78
     let _5: ()
   bb0:
-    _5 = call fn rt.floats.write(copy _1, copy _2, copy _3, copy _4) @211:5-211:45
+    _5 = call fn rt.floats.write(copy _1, copy _2, copy _3, copy _4) @212:5-212:45
     _0 = const ()
     return
 }
 
-fn export_time_text(4) source 0 @220:5-220:21 {
+fn export_time_text(4) source 0 @221:5-221:21 {
     let _0: ()
-    let _1: ptr_mut[u8] "out" @220:22-220:37
-    let _2: int "nanos" @220:39-220:49
-    let _3: ptr_mut[u8] "pat" @220:51-220:66
-    let _4: int "n" @220:68-220:74
+    let _1: ptr_mut[u8] "out" @221:22-221:37
+    let _2: int "nanos" @221:39-221:49
+    let _3: ptr_mut[u8] "pat" @221:51-221:66
+    let _4: int "n" @221:68-221:74
     let _5: bool
     let _6: ()
     let _7: ()
   bb0:
-    _5 = lt copy _4, const 0 @221:8-221:13
-    switch copy _5 [0: bb2, else: bb3] @221:8-221:13
+    _5 = lt copy _4, const 0 @222:8-222:13
+    switch copy _5 [0: bb2, else: bb3] @222:8-222:13
   bb1:
     _0 = const ()
     return
   bb2:
-    _7 = call fn rt.time.strftime(copy _1, copy _2, copy _3, copy _4) @224:9-224:42
+    _7 = call fn rt.time.strftime(copy _1, copy _2, copy _3, copy _4) @225:9-225:42
     goto bb1
   bb3:
-    _6 = call fn rt.time.rfc3339(copy _1, copy _2) @222:9-222:33
+    _6 = call fn rt.time.rfc3339(copy _1, copy _2) @223:9-223:33
     goto bb1
 }
 
-fn export_quote(3) source 0 @233:5-233:17 {
+fn export_quote(3) source 0 @234:5-234:17 {
     let _0: ()
-    let _1: ptr_mut[u8] "out" @233:18-233:33
-    let _2: ptr_mut[u8] "b" @233:35-233:48
-    let _3: int "n" @233:50-233:56
+    let _1: ptr_mut[u8] "out" @234:18-234:33
+    let _2: ptr_mut[u8] "b" @234:35-234:48
+    let _3: int "n" @234:50-234:56
     let _4: ()
   bb0:
-    _4 = call fn rt.show.quote_str(copy _1, copy _2, copy _3) @234:5-234:30
+    _4 = call fn rt.show.quote_str(copy _1, copy _2, copy _3) @235:5-235:30
     _0 = const ()
     return
 }
 
-fn export_find(4) source 0 @242:5-242:16 {
+fn export_find(4) source 0 @243:5-243:16 {
     let _0: int
-    let _1: ptr[u8] "text" @242:17-242:30
-    let _2: int "n" @242:32-242:38
-    let _3: ptr[u8] "part" @242:40-242:53
-    let _4: int "m" @242:55-242:61
+    let _1: ptr[u8] "text" @243:17-243:30
+    let _2: int "n" @243:32-243:38
+    let _3: ptr[u8] "part" @243:40-243:53
+    let _4: int "m" @243:55-243:61
   bb0:
-    _0 = call fn rt.search.find(copy _1, copy _2, copy _3, copy _4) @243:12-243:41
-    return @243:5-243:41
+    _0 = call fn rt.search.find(copy _1, copy _2, copy _3, copy _4) @244:12-244:41
+    return @244:5-244:41
 }
 
-fn export_has_edge(5) source 0 @250:5-250:20 {
+fn export_has_edge(5) source 0 @251:5-251:20 {
     let _0: bool
-    let _1: ptr[u8] "text" @250:21-250:34
-    let _2: int "n" @250:36-250:42
-    let _3: ptr[u8] "part" @250:44-250:57
-    let _4: int "m" @250:59-250:65
-    let _5: bool "at_end" @250:67-250:79
+    let _1: ptr[u8] "text" @251:21-251:34
+    let _2: int "n" @251:36-251:42
+    let _3: ptr[u8] "part" @251:44-251:57
+    let _4: int "m" @251:59-251:65
+    let _5: bool "at_end" @251:67-251:79
   bb0:
-    _0 = call fn rt.search.has_edge(copy _1, copy _2, copy _3, copy _4, copy _5) @251:12-251:53
-    return @251:5-251:53
+    _0 = call fn rt.search.has_edge(copy _1, copy _2, copy _3, copy _4, copy _5) @252:12-252:53
+    return @252:5-252:53
 }
 
-fn export_list_grow(3) source 0 @259:5-259:21 {
+fn export_list_grow(3) source 0 @260:5-260:21 {
     let _0: ()
-    let _1: ptr_mut[u8] "l" @259:22-259:35
-    let _2: int "extra" @259:37-259:47
-    let _3: int "size" @259:49-259:58
+    let _1: ptr_mut[u8] "l" @260:22-260:35
+    let _2: int "extra" @260:37-260:47
+    let _3: int "size" @260:49-260:58
     let _4: ()
   bb0:
-    _4 = call fn rt.list.reserve(copy _1, copy _2, copy _3) @260:5-260:33
+    _4 = call fn rt.list.reserve(copy _1, copy _2, copy _3) @261:5-261:33
     _0 = const ()
     return
 }
 
-fn export_list_reverse(2) source 0 @266:5-266:24 {
+fn export_list_reverse(2) source 0 @267:5-267:24 {
     let _0: ()
-    let _1: ptr_mut[u8] "l" @266:25-266:38
-    let _2: int "size" @266:40-266:49
+    let _1: ptr_mut[u8] "l" @267:25-267:38
+    let _2: int "size" @267:40-267:49
     let _3: ()
   bb0:
-    _3 = call fn rt.list.reverse(copy _1, copy _2) @267:5-267:26
+    _3 = call fn rt.list.reverse(copy _1, copy _2) @268:5-268:26
     _0 = const ()
     return
 }
 
-fn export_table_literal(5) source 0 @277:5-277:25 {
+fn export_table_literal(5) source 0 @278:5-278:25 {
     let _0: int
-    let _1: ptr[int] "types" @278:5-278:20
-    let _2: int "t" @278:22-278:28
-    let _3: ptr_mut[u8] "items" @278:30-278:47
-    let _4: int "n" @278:49-278:55
-    let _5: ptr_mut[u8] "out" @278:57-278:72
+    let _1: ptr[int] "types" @279:5-279:20
+    let _2: int "t" @279:22-279:28
+    let _3: ptr_mut[u8] "items" @279:30-279:47
+    let _4: int "n" @279:49-279:55
+    let _5: ptr_mut[u8] "out" @279:57-279:72
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @280:29-280:47
-    _0 = call fn rt.dispatch.literal(copy _6, copy _2, copy _3, copy _4, copy _5) @280:12-280:66
-    return @280:5-280:66
+    _6 = struct rt.types.Types(copy _1) @281:29-281:47
+    _0 = call fn rt.dispatch.literal(copy _6, copy _2, copy _3, copy _4, copy _5) @281:12-281:66
+    return @281:5-281:66
 }
 
-fn export_table_inline_find(5) source 0 @288:5-288:29 {
+fn export_table_inline_find(5) source 0 @289:5-289:29 {
     let _0: int
-    let _1: ptr[int] "types" @289:5-289:20
-    let _2: ptr_mut[u8] "p" @289:22-289:35
-    let _3: ptr_mut[u8] "key" @289:37-289:52
-    let _4: int "kt" @289:54-289:61
-    let _5: bool "want_value" @289:63-289:79
+    let _1: ptr[int] "types" @290:5-290:20
+    let _2: ptr_mut[u8] "p" @290:22-290:35
+    let _3: ptr_mut[u8] "key" @290:37-290:52
+    let _4: int "kt" @290:54-290:61
+    let _5: bool "want_value" @290:63-290:79
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @291:26-291:44
-    _0 = call fn rt.dispatch.find(copy _6, copy _2, copy _3, copy _4, copy _5) @291:12-291:69
-    return @291:5-291:69
+    _6 = struct rt.types.Types(copy _1) @292:26-292:44
+    _0 = call fn rt.dispatch.find(copy _6, copy _2, copy _3, copy _4, copy _5) @292:12-292:69
+    return @292:5-292:69
 }
 
-fn export_contains(5) source 0 @301:5-301:20 {
+fn export_contains(5) source 0 @302:5-302:20 {
     let _0: bool
-    let _1: ptr[int] "types" @301:21-301:36
-    let _2: ptr_mut[u8] "c" @301:38-301:51
-    let _3: int "ct" @301:53-301:60
-    let _4: ptr_mut[u8] "x" @301:62-301:75
-    let _5: int "xt" @301:77-301:84
+    let _1: ptr[int] "types" @302:21-302:36
+    let _2: ptr_mut[u8] "c" @302:38-302:51
+    let _3: int "ct" @302:53-302:60
+    let _4: ptr_mut[u8] "x" @302:62-302:75
+    let _5: int "xt" @302:77-302:84
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @302:30-302:48
-    _0 = call fn rt.dispatch.contains(copy _6, copy _2, copy _3, copy _4, copy _5) @302:12-302:63
-    return @302:5-302:63
+    _6 = struct rt.types.Types(copy _1) @303:30-303:48
+    _0 = call fn rt.dispatch.contains(copy _6, copy _2, copy _3, copy _4, copy _5) @303:12-303:63
+    return @303:5-303:63
 }
 
-fn export_list_sort(3) source 0 @311:5-311:21 {
+fn export_list_sort(3) source 0 @312:5-312:21 {
     let _0: bool
-    let _1: ptr[int] "types" @311:22-311:37
-    let _2: ptr_mut[u8] "l" @311:39-311:52
-    let _3: int "e" @311:54-311:60
+    let _1: ptr[int] "types" @312:22-312:37
+    let _2: ptr_mut[u8] "l" @312:39-312:52
+    let _3: int "e" @312:54-312:60
     let _4: rt.types.Types
   bb0:
-    _4 = struct rt.types.Types(copy _1) @312:22-312:40
-    _0 = call fn rt.list.sort(copy _4, copy _2, copy _3) @312:12-312:47
-    return @312:5-312:47
+    _4 = struct rt.types.Types(copy _1) @313:22-313:40
+    _0 = call fn rt.list.sort(copy _4, copy _2, copy _3) @313:12-313:47
+    return @313:5-313:47
 }
 
-fn export_collection(4) source 0 @324:5-324:22 {
+fn export_collection(4) source 0 @325:5-325:22 {
     let _0: int
-    let _1: ptr[int] "types" @324:23-324:38
-    let _2: ptr[u8] "desc" @324:40-324:53
-    let _3: ptr_mut[u8] "ret" @324:55-324:70
-    let _4: ptr_mut[u8] "args" @324:72-324:88
+    let _1: ptr[int] "types" @325:23-325:38
+    let _2: ptr[u8] "desc" @325:40-325:53
+    let _3: ptr_mut[u8] "ret" @325:55-325:70
+    let _4: ptr_mut[u8] "args" @325:72-325:88
   bb0:
-    _0 = call fn rt.dispatch.collection(copy _1, copy _2, copy _3, copy _4) @325:12-325:55
-    return @325:5-325:55
+    _0 = call fn rt.dispatch.collection(copy _1, copy _2, copy _3, copy _4) @326:12-326:55
+    return @326:5-326:55
 }
 
-fn export_table_lookup(4) source 0 @333:5-333:24 {
+fn export_table_len(1) source 0 @332:5-332:21 {
     let _0: int
-    let _1: ptr[int] "types" @333:25-333:40
-    let _2: ptr_mut[u8] "tb" @333:42-333:56
-    let _3: ptr_mut[u8] "k" @333:58-333:71
-    let _4: int "kt" @333:73-333:80
+    let _1: ptr_mut[u8] "tb" @332:22-332:36
+  bb0:
+    _0 = call fn rt.table.length(copy _1) @333:12-333:28
+    return @333:5-333:28
+}
+
+fn export_iter_next(4) source 0 @343:5-343:21 {
+    let _0: int
+    let _1: ptr[int] "types" @343:22-343:37
+    let _2: ptr_mut[u8] "it" @343:39-343:53
+    let _3: ptr_mut[u8] "out" @343:55-343:70
+    let _4: int "mode" @343:72-343:81
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @334:23-334:41
-    _0 = call fn rt.table.find(copy _5, copy _2, copy _3, copy _4) @334:12-334:53
-    return @334:5-334:53
+    _5 = struct rt.types.Types(copy _1) @344:22-344:40
+    _0 = call fn rt.iter.next(copy _5, copy _2, copy _3, copy _4) @344:12-344:56
+    return @344:5-344:56
 }
 
-fn export_table_push(3) source 0 @343:5-343:22 {
+fn export_iter_drop(3) source 0 @352:5-352:21 {
     let _0: int
-    let _1: ptr[int] "types" @343:23-343:38
-    let _2: ptr_mut[u8] "tb" @343:40-343:54
-    let _3: ptr_mut[u8] "k" @343:56-343:69
+    let _1: ptr[int] "types" @352:22-352:37
+    let _2: ptr_mut[u8] "it" @352:39-352:53
+    let _3: int "mode" @352:55-352:64
     let _4: rt.types.Types
   bb0:
-    _4 = struct rt.types.Types(copy _1) @344:23-344:41
-    _0 = call fn rt.table.push(copy _4, copy _2, copy _3) @344:12-344:49
-    return @344:5-344:49
+    _4 = struct rt.types.Types(copy _1) @353:22-353:40
+    _0 = call fn rt.iter.drop(copy _4, copy _2, copy _3) @353:12-353:51
+    return @353:5-353:51
 }
 
-fn export_table_len(1) source 0 @350:5-350:21 {
-    let _0: int
-    let _1: ptr_mut[u8] "tb" @350:22-350:36
-  bb0:
-    _0 = call fn rt.table.length(copy _1) @351:12-351:28
-    return @351:5-351:28
-}
-
-fn export_table_key_bytes(1) source 0 @357:5-357:27 {
-    let _0: int
-    let _1: ptr_mut[u8] "tb" @357:28-357:42
-  bb0:
-    _0 = call fn rt.table.key_size(copy _1) @358:12-358:30
-    return @358:5-358:30
-}
-
-fn export_table_value_at(2) source 0 @365:5-365:26 {
+fn export_iter_iterable(4) source 0 @362:5-362:25 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "tb" @365:27-365:41
-    let _2: int "i" @365:43-365:49
-  bb0:
-    _0 = call fn rt.table.value_at(copy _1, copy _2) @366:12-366:33
-    return @366:5-366:33
-}
-
-fn export_iter_next(4) source 0 @376:5-376:21 {
-    let _0: int
-    let _1: ptr[int] "types" @376:22-376:37
-    let _2: ptr_mut[u8] "it" @376:39-376:53
-    let _3: ptr_mut[u8] "out" @376:55-376:70
-    let _4: int "mode" @376:72-376:81
+    let _1: ptr[int] "types" @362:26-362:41
+    let _2: ptr_mut[u8] "p" @362:43-362:56
+    let _3: int "arg" @362:58-362:66
+    let _4: int "item" @362:68-362:77
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @377:22-377:40
-    _0 = call fn rt.iter.next(copy _5, copy _2, copy _3, copy _4) @377:12-377:56
-    return @377:5-377:56
+    _5 = struct rt.types.Types(copy _1) @363:26-363:44
+    _0 = call fn rt.iter.iterable(copy _5, copy _2, copy _3, copy _4) @363:12-363:59
+    return @363:5-363:59
 }
 
-fn export_iter_drop(3) source 0 @385:5-385:21 {
-    let _0: int
-    let _1: ptr[int] "types" @385:22-385:37
-    let _2: ptr_mut[u8] "it" @385:39-385:53
-    let _3: int "mode" @385:55-385:64
+fn export_iter_range(3) source 0 @368:5-368:22 {
+    let _0: ptr_mut[u8]
+    let _1: int "cur" @368:23-368:31
+    let _2: int "stop" @368:33-368:42
+    let _3: int "step" @368:44-368:53
+  bb0:
+    _0 = call fn rt.iter.new_range(copy _1, copy _2, copy _3) @369:12-369:43
+    return @369:5-369:43
+}
+
+fn export_iter_list_ref(2) source 0 @373:5-373:25 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "xs" @373:26-373:40
+    let _2: int "size" @373:42-373:51
+  bb0:
+    _0 = call fn rt.iter.new_list_ref(copy _1, copy _2) @374:12-374:39
+    return @374:5-374:39
+}
+
+fn export_iter_items(3) source 0 @382:5-382:22 {
+    let _0: ptr_mut[u8]
+    let _1: ptr[int] "types" @382:23-382:38
+    let _2: ptr_mut[u8] "xs" @382:40-382:54
+    let _3: int "elem" @382:56-382:65
     let _4: rt.types.Types
   bb0:
-    _4 = struct rt.types.Types(copy _1) @386:22-386:40
-    _0 = call fn rt.iter.drop(copy _4, copy _2, copy _3) @386:12-386:51
-    return @386:5-386:51
+    _4 = struct rt.types.Types(copy _1) @383:27-383:45
+    _0 = call fn rt.iter.new_items(copy _4, copy _2, copy _3) @383:12-383:56
+    return @383:5-383:56
 }
 
-fn export_iter_iterable(4) source 0 @395:5-395:25 {
+fn export_iter_chars(2) source 0 @387:5-387:22 {
     let _0: ptr_mut[u8]
-    let _1: ptr[int] "types" @395:26-395:41
-    let _2: ptr_mut[u8] "p" @395:43-395:56
-    let _3: int "arg" @395:58-395:66
-    let _4: int "item" @395:68-395:77
-    let _5: rt.types.Types
+    let _1: ptr_mut[u8] "b" @387:23-387:36
+    let _2: int "n" @387:38-387:44
   bb0:
-    _5 = struct rt.types.Types(copy _1) @396:26-396:44
-    _0 = call fn rt.iter.iterable(copy _5, copy _2, copy _3, copy _4) @396:12-396:59
-    return @396:5-396:59
+    _0 = call fn rt.iter.new_text(copy _1, copy _2, const true) @388:12-388:37
+    return @388:5-388:37
 }
 
-fn export_iter_range(3) source 0 @401:5-401:22 {
+fn export_iter_bytes(2) source 0 @391:5-391:22 {
     let _0: ptr_mut[u8]
-    let _1: int "cur" @401:23-401:31
-    let _2: int "stop" @401:33-401:42
-    let _3: int "step" @401:44-401:53
+    let _1: ptr_mut[u8] "b" @391:23-391:36
+    let _2: int "n" @391:38-391:44
   bb0:
-    _0 = call fn rt.iter.new_range(copy _1, copy _2, copy _3) @402:12-402:43
-    return @402:5-402:43
+    _0 = call fn rt.iter.new_text(copy _1, copy _2, const false) @392:12-392:38
+    return @392:5-392:38
 }
 
-fn export_iter_list_ref(2) source 0 @406:5-406:25 {
+fn export_iter_owned_bytes(2) source 0 @399:5-399:28 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "xs" @406:26-406:40
-    let _2: int "size" @406:42-406:51
+    let _1: ptr[u8] "b" @399:29-399:39
+    let _2: int "n" @399:41-399:47
   bb0:
-    _0 = call fn rt.iter.new_list_ref(copy _1, copy _2) @407:12-407:39
-    return @407:5-407:39
+    _0 = call fn rt.iter.new_owned_bytes(copy _1, copy _2) @400:12-400:38
+    return @400:5-400:38
 }
 
-fn export_iter_items(3) source 0 @415:5-415:22 {
+fn export_iter_enumerate(1) source 0 @407:5-407:26 {
     let _0: ptr_mut[u8]
-    let _1: ptr[int] "types" @415:23-415:38
-    let _2: ptr_mut[u8] "xs" @415:40-415:54
-    let _3: int "elem" @415:56-415:65
-    let _4: rt.types.Types
+    let _1: ptr_mut[u8] "inner" @407:27-407:44
   bb0:
-    _4 = struct rt.types.Types(copy _1) @416:27-416:45
-    _0 = call fn rt.iter.new_items(copy _4, copy _2, copy _3) @416:12-416:56
-    return @416:5-416:56
+    _0 = call fn rt.iter.new_enumerate(copy _1) @408:12-408:37
+    return @408:5-408:37
 }
 
-fn export_iter_chars(2) source 0 @420:5-420:22 {
+fn export_iter_zip(5) source 0 @416:5-416:20 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "b" @420:23-420:36
-    let _2: int "n" @420:38-420:44
+    let _1: ptr_mut[u8] "a" @416:21-416:34
+    let _2: ptr_mut[u8] "b" @416:36-416:49
+    let _3: bool "strict" @416:51-416:63
+    let _4: int "ta" @416:65-416:72
+    let _5: int "tb" @416:74-416:81
   bb0:
-    _0 = call fn rt.iter.new_text(copy _1, copy _2, const true) @421:12-421:37
-    return @421:5-421:37
+    _0 = call fn rt.iter.new_zip(copy _1, copy _2, copy _3, copy _4, copy _5) @417:12-417:46
+    return @417:5-417:46
 }
 
-fn export_iter_bytes(2) source 0 @424:5-424:22 {
+fn export_iter_table_ref(2) source 0 @424:5-424:26 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "b" @424:23-424:36
-    let _2: int "n" @424:38-424:44
+    let _1: ptr_mut[u8] "tb" @424:27-424:41
+    let _2: int "part" @424:43-424:52
   bb0:
-    _0 = call fn rt.iter.new_text(copy _1, copy _2, const false) @425:12-425:38
-    return @425:5-425:38
+    _0 = call fn rt.iter.table_part(copy _1, copy _2) @425:12-425:37
+    return @425:5-425:37
 }
 
-fn export_iter_owned_bytes(2) source 0 @432:5-432:28 {
+fn export_iter_generator(2) source 0 @429:5-429:26 {
     let _0: ptr_mut[u8]
-    let _1: ptr[u8] "b" @432:29-432:39
-    let _2: int "n" @432:41-432:47
+    let _1: int "task" @429:27-429:36
+    let _2: int "size" @429:38-429:47
   bb0:
-    _0 = call fn rt.iter.new_owned_bytes(copy _1, copy _2) @433:12-433:38
-    return @433:5-433:38
+    _0 = call fn rt.iter.new_waiting(copy _1, copy _2, const true) @430:12-430:46
+    return @430:5-430:46
 }
 
-fn export_iter_enumerate(1) source 0 @440:5-440:26 {
+fn export_iter_receiver(2) source 0 @434:5-434:25 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "inner" @440:27-440:44
+    let _1: int "chan" @434:26-434:35
+    let _2: int "size" @434:37-434:46
   bb0:
-    _0 = call fn rt.iter.new_enumerate(copy _1) @441:12-441:37
-    return @441:5-441:37
+    _0 = call fn rt.iter.new_waiting(copy _1, copy _2, const false) @435:12-435:47
+    return @435:5-435:47
 }
 
-fn export_iter_zip(5) source 0 @449:5-449:20 {
-    let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "a" @449:21-449:34
-    let _2: ptr_mut[u8] "b" @449:36-449:49
-    let _3: bool "strict" @449:51-449:63
-    let _4: int "ta" @449:65-449:72
-    let _5: int "tb" @449:74-449:81
-  bb0:
-    _0 = call fn rt.iter.new_zip(copy _1, copy _2, copy _3, copy _4, copy _5) @450:12-450:46
-    return @450:5-450:46
-}
-
-fn export_iter_table_ref(2) source 0 @457:5-457:26 {
-    let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "tb" @457:27-457:41
-    let _2: int "part" @457:43-457:52
-  bb0:
-    _0 = call fn rt.iter.table_part(copy _1, copy _2) @458:12-458:37
-    return @458:5-458:37
-}
-
-fn export_iter_generator(2) source 0 @462:5-462:26 {
-    let _0: ptr_mut[u8]
-    let _1: int "task" @462:27-462:36
-    let _2: int "size" @462:38-462:47
-  bb0:
-    _0 = call fn rt.iter.new_waiting(copy _1, copy _2, const true) @463:12-463:46
-    return @463:5-463:46
-}
-
-fn export_iter_receiver(2) source 0 @467:5-467:25 {
-    let _0: ptr_mut[u8]
-    let _1: int "chan" @467:26-467:35
-    let _2: int "size" @467:37-467:46
-  bb0:
-    _0 = call fn rt.iter.new_waiting(copy _1, copy _2, const false) @468:12-468:47
-    return @468:5-468:47
-}
-
-fn export_iter_waits(2) source 0 @477:5-477:22 {
+fn export_iter_waits(2) source 0 @444:5-444:22 {
     let _0: int
-    let _1: ptr_mut[u8] "it" @477:23-477:37
-    let _2: ptr_mut[u8] "out" @477:39-477:54
+    let _1: ptr_mut[u8] "it" @444:23-444:37
+    let _2: ptr_mut[u8] "out" @444:39-444:54
   bb0:
-    _0 = call fn rt.iter.waits(copy _1, copy _2) @478:12-478:31
-    return @478:5-478:31
+    _0 = call fn rt.iter.waits(copy _1, copy _2) @445:12-445:31
+    return @445:5-445:31
 }
 
-fn export_iter_collect(5) source 0 @487:5-487:24 {
+fn export_iter_collect(5) source 0 @454:5-454:24 {
     let _0: int
-    let _1: ptr[int] "types" @488:5-488:20
-    let _2: ptr_mut[u8] "it" @488:22-488:36
-    let _3: int "item" @488:38-488:47
-    let _4: ptr_mut[u8] "out" @488:49-488:64
-    let _5: int "mode" @488:66-488:75
+    let _1: ptr[int] "types" @455:5-455:20
+    let _2: ptr_mut[u8] "it" @455:22-455:36
+    let _3: int "item" @455:38-455:47
+    let _4: ptr_mut[u8] "out" @455:49-455:64
+    let _5: int "mode" @455:66-455:75
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @490:25-490:43
-    _0 = call fn rt.iter.collect(copy _6, copy _2, copy _3, copy _4, copy _5) @490:12-490:65
-    return @490:5-490:65
+    _6 = struct rt.types.Types(copy _1) @457:25-457:43
+    _0 = call fn rt.iter.collect(copy _6, copy _2, copy _3, copy _4, copy _5) @457:12-457:65
+    return @457:5-457:65
 }
 
-fn export_queue_init(4) source 0 @499:5-499:22 {
+fn export_queue_init(4) source 0 @466:5-466:22 {
     let _0: ()
-    let _1: ptr_mut[u8] "q" @499:23-499:36
-    let _2: ptr_mut[u8] "buffer" @499:38-499:56
-    let _3: int "capacity" @499:58-499:71
-    let _4: int "width" @499:73-499:83
+    let _1: ptr_mut[u8] "q" @466:23-466:36
+    let _2: ptr_mut[u8] "buffer" @466:38-466:56
+    let _3: int "capacity" @466:58-466:71
+    let _4: int "width" @466:73-466:83
     let _5: ()
   bb0:
-    _5 = call fn rt.queue.init(copy _1, copy _2, copy _3, copy _4) @500:5-500:43
+    _5 = call fn rt.queue.init(copy _1, copy _2, copy _3, copy _4) @467:5-467:43
     _0 = const ()
     return
 }
 
-fn export_queue_len(1) source 0 @506:5-506:21 {
+fn export_queue_len(1) source 0 @473:5-473:21 {
     let _0: int
-    let _1: ptr_mut[u8] "q" @506:22-506:35
+    let _1: ptr_mut[u8] "q" @473:22-473:35
   bb0:
-    _0 = call fn rt.queue.count(copy _1) @507:12-507:26
-    return @507:5-507:26
+    _0 = call fn rt.queue.count(copy _1) @474:12-474:26
+    return @474:5-474:26
 }
 
-fn export_queue_clear(1) source 0 @513:5-513:23 {
+fn export_queue_clear(1) source 0 @480:5-480:23 {
     let _0: ()
-    let _1: ptr_mut[u8] "q" @513:24-513:37
+    let _1: ptr_mut[u8] "q" @480:24-480:37
     let _2: ()
   bb0:
-    _2 = call fn rt.queue.clear(copy _1) @514:5-514:19
+    _2 = call fn rt.queue.clear(copy _1) @481:5-481:19
     _0 = const ()
     return
 }
 
-fn export_queue_push(4) source 0 @520:5-520:22 {
+fn export_queue_push(4) source 0 @487:5-487:22 {
     let _0: ()
-    let _1: ptr_mut[u8] "q" @520:23-520:36
-    let _2: int "a" @520:38-520:44
-    let _3: int "b" @520:46-520:52
-    let _4: int "c" @520:54-520:60
+    let _1: ptr_mut[u8] "q" @487:23-487:36
+    let _2: int "a" @487:38-487:44
+    let _3: int "b" @487:46-487:52
+    let _4: int "c" @487:54-487:60
     let _5: ()
   bb0:
-    _5 = call fn rt.queue.push(copy _1, copy _2, copy _3, copy _4) @521:5-521:27
+    _5 = call fn rt.queue.push(copy _1, copy _2, copy _3, copy _4) @488:5-488:27
     _0 = const ()
     return
 }
 
-fn export_queue_word(3) source 0 @527:5-527:22 {
+fn export_queue_word(3) source 0 @494:5-494:22 {
     let _0: int
-    let _1: ptr_mut[u8] "q" @527:23-527:36
-    let _2: int "i" @527:38-527:44
-    let _3: int "j" @527:46-527:52
+    let _1: ptr_mut[u8] "q" @494:23-494:36
+    let _2: int "i" @494:38-494:44
+    let _3: int "j" @494:46-494:52
   bb0:
-    _0 = call fn rt.queue.word(copy _1, copy _2, copy _3) @528:12-528:31
-    return @528:5-528:31
+    _0 = call fn rt.queue.word(copy _1, copy _2, copy _3) @495:12-495:31
+    return @495:5-495:31
 }
 
-fn export_queue_swap_remove(2) source 0 @534:5-534:29 {
+fn export_queue_swap_remove(2) source 0 @501:5-501:29 {
     let _0: int
-    let _1: ptr_mut[u8] "q" @534:30-534:43
-    let _2: int "i" @534:45-534:51
+    let _1: ptr_mut[u8] "q" @501:30-501:43
+    let _2: int "i" @501:45-501:51
   bb0:
-    _0 = call fn rt.queue.swap_remove(copy _1, copy _2) @535:12-535:35
-    return @535:5-535:35
+    _0 = call fn rt.queue.swap_remove(copy _1, copy _2) @502:12-502:35
+    return @502:5-502:35
 }
 
-fn export_queue_remove(2) source 0 @541:5-541:24 {
+fn export_queue_remove(2) source 0 @508:5-508:24 {
     let _0: ()
-    let _1: ptr_mut[u8] "q" @541:25-541:38
-    let _2: int "i" @541:40-541:46
+    let _1: ptr_mut[u8] "q" @508:25-508:38
+    let _2: int "i" @508:40-508:46
     let _3: ()
   bb0:
-    _3 = call fn rt.queue.remove(copy _1, copy _2) @542:5-542:23
+    _3 = call fn rt.queue.remove(copy _1, copy _2) @509:5-509:23
     _0 = const ()
     return
 }
 
-fn export_queue_position(3) source 0 @548:5-548:26 {
+fn export_queue_position(3) source 0 @515:5-515:26 {
     let _0: int
-    let _1: ptr_mut[u8] "q" @548:27-548:40
-    let _2: int "j" @548:42-548:48
-    let _3: int "x" @548:50-548:56
+    let _1: ptr_mut[u8] "q" @515:27-515:40
+    let _2: int "j" @515:42-515:48
+    let _3: int "x" @515:50-515:56
   bb0:
-    _0 = call fn rt.queue.position(copy _1, copy _2, copy _3) @549:12-549:35
-    return @549:5-549:35
+    _0 = call fn rt.queue.position(copy _1, copy _2, copy _3) @516:12-516:35
+    return @516:5-516:35
 }
 
-fn export_queue_take_key(3) source 0 @557:5-557:26 {
+fn export_queue_take_key(3) source 0 @524:5-524:26 {
     let _0: ()
-    let _1: ptr_mut[u8] "q" @557:27-557:40
-    let _2: int "key" @557:42-557:50
-    let _3: ptr_mut[u8] "out" @557:52-557:67
+    let _1: ptr_mut[u8] "q" @524:27-524:40
+    let _2: int "key" @524:42-524:50
+    let _3: ptr_mut[u8] "out" @524:52-524:67
     let _4: ()
   bb0:
-    _4 = call fn rt.queue.take_key(copy _1, copy _2, copy _3) @558:5-558:32
+    _4 = call fn rt.queue.take_key(copy _1, copy _2, copy _3) @525:5-525:32
     _0 = const ()
     return
 }
 
-fn rt.dispatch.dropped(2) source 1 @241:5-241:12 {
+fn export_channel_init(4) source 0 @534:5-534:24 {
+    let _0: ()
+    let _1: ptr_mut[u8] "c" @534:25-534:38
+    let _2: ptr_mut[u8] "slots" @534:40-534:57
+    let _3: int "room" @534:59-534:68
+    let _4: int "size" @534:70-534:79
+    let _5: ()
+  bb0:
+    _5 = call fn rt.channel.init(copy _1, copy _2, copy _3, copy _4) @535:5-535:39
+    _0 = const ()
+    return
+}
+
+fn export_channel_len(1) source 0 @541:5-541:23 {
+    let _0: int
+    let _1: ptr_mut[u8] "c" @541:24-541:37
+  bb0:
+    _0 = call fn rt.channel.count(copy _1) @542:12-542:28
+    return @542:5-542:28
+}
+
+fn export_channel_push(3) source 0 @550:5-550:24 {
+    let _0: ()
+    let _1: ptr_mut[u8] "c" @550:25-550:38
+    let _2: ptr[u8] "src" @550:40-550:52
+    let _3: int "size" @550:54-550:63
+    let _4: ()
+  bb0:
+    _4 = call fn rt.channel.push(copy _1, copy _2, copy _3) @551:5-551:31
+    _0 = const ()
+    return
+}
+
+fn export_channel_pop(3) source 0 @559:5-559:23 {
+    let _0: bool
+    let _1: ptr_mut[u8] "c" @559:24-559:37
+    let _2: ptr_mut[u8] "dst" @559:39-559:54
+    let _3: int "size" @559:56-559:65
+  bb0:
+    _0 = call fn rt.channel.pop(copy _1, copy _2, copy _3) @560:12-560:37
+    return @560:5-560:37
+}
+
+fn export_table_slot(5) source 0 @569:5-569:22 {
+    let _0: int
+    let _1: ptr[int] "types" @569:23-569:38
+    let _2: ptr_mut[u8] "d" @569:40-569:53
+    let _3: ptr_mut[u8] "key" @569:55-569:70
+    let _4: int "kt" @569:72-569:79
+    let _5: int "mode" @569:81-569:90
+    let _6: rt.types.Types
+  bb0:
+    _6 = struct rt.types.Types(copy _1) @570:26-570:44
+    _0 = call fn rt.dispatch.slot(copy _6, copy _2, copy _3, copy _4, copy _5) @570:12-570:63
+    return @570:5-570:63
+}
+
+fn rt.channel.header(1) source 1 @24:5-24:11 {
+    let _0: ptr_mut[int]
+    let _1: ptr_mut[u8] "c" @24:12-24:25
+  bb0:
+    _0 = call intrinsic mem.ptr.cast[u8, int](copy _1) @25:12-25:25
+    return @25:5-25:25
+}
+
+fn rt.channel.init(4) source 1 @34:18-34:22 {
+    let _0: ()
+    let _1: ptr_mut[u8] "c" @34:23-34:36
+    let _2: ptr_mut[u8] "slots" @34:38-34:55
+    let _3: int "room" @34:57-34:66
+    let _4: int "size" @34:68-34:77
+    let _5: ptr_mut[int] "w" @38:13-38:14
+    let _6: ()
+    let _7: int
+    let _8: ()
+    let _9: ptr_mut[int]
+    let _10: ()
+    let _11: ptr_mut[int]
+    let _12: ()
+    let _13: ptr_mut[int]
+    let _14: ()
+    let _15: ptr_mut[int]
+    let _16: int
+    let _17: int
+    let _18: int
+    let _19: int
+    let _20: ref int
+    let _21: int
+    let _22: ref int
+  bb0:
+    _5 = call fn rt.channel.header(copy _1) @38:17-38:26
+    _7 = call intrinsic mem.ptr.addr(copy _2) @39:17-39:29
+    _6 = call intrinsic mem.ptr.write(copy _5, copy _7) @39:9-39:30
+    _9 = call intrinsic mem.ptr.offset(copy _5, const 1) @40:9-40:20
+    _8 = call intrinsic mem.ptr.write(copy _9, const 0) @40:9-40:29
+    _11 = call intrinsic mem.ptr.offset(copy _5, const 2) @41:9-41:20
+    _10 = call intrinsic mem.ptr.write(copy _11, const 0) @41:9-41:29
+    _13 = call intrinsic mem.ptr.offset(copy _5, const 3) @42:9-42:20
+    _12 = call intrinsic mem.ptr.write(copy _13, copy _3) @42:9-42:32
+    _15 = call intrinsic mem.ptr.offset(copy _5, const 4) @43:9-43:20
+    _19 = add copy _4, const 7 @43:31-43:41
+    _18 = floordiv copy _19, const 8 @43:31-43:46
+    _20 = ref _18 @43:31-43:46
+    _21 = const 1 @43:48-43:49
+    _22 = ref _21 @43:48-43:49
+    _17 = call intrinsic max(copy _20, copy _22) @43:27-43:50
+    _16 = mul copy _17, const 8 @43:27-43:54
+    _14 = call intrinsic mem.ptr.write(copy _15, copy _16) @43:9-43:55
+    dead _21 @43:55-43:55
+    dead _18 @43:55-43:55
+    _0 = const ()
+    return
+}
+
+fn rt.channel.count(1) source 1 @49:18-49:23 {
+    let _0: int
+    let _1: ptr_mut[u8] "c" @49:24-49:37
+    let _2: ptr_mut[int]
+    let _3: ptr_mut[int]
+  bb0:
+    _3 = call fn rt.channel.header(copy _1) @52:19-52:28
+    _2 = call intrinsic mem.ptr.offset(copy _3, const 2) @52:19-52:38
+    _0 = call intrinsic mem.ptr.read(copy _2) @52:19-52:45
+    return @52:5-52:45
+}
+
+fn rt.channel.grow(1) source 1 @60:5-60:9 {
+    let _0: ()
+    let _1: ptr_mut[u8] "c" @60:10-60:23
+    let _2: ptr_mut[int] "h" @68:13-68:14
+    let _3: int "first" @69:13-69:18
+    let _4: ptr_mut[int]
+    let _5: int "room" @70:13-70:17
+    let _6: ptr_mut[int]
+    let _7: int "size" @71:13-71:17
+    let _8: ptr_mut[int]
+    let _9: ptr_mut[u8] "slots" @72:13-72:18
+    let _10: ptr_mut[u8]
+    let _11: ptr[u8]
+    let _12: ptr_mut[ptr[u8]]
+    let _13: int
+    let _14: int
+    let _15: ()
+    let _16: int
+    let _17: ()
+    let _18: ptr_mut[int]
+    let _19: int
+    let _20: bool
+    let _21: ptr_mut[u8]
+    let _22: ptr_mut[u8]
+    let _23: int
+    let _24: ptr[u8]
+    let _25: int
+  bb0:
+    _2 = call fn rt.channel.header(copy _1) @68:17-68:26
+    _4 = call intrinsic mem.ptr.offset(copy _2, const 1) @69:21-69:32
+    _3 = call intrinsic mem.ptr.read(copy _4) @69:21-69:39
+    _6 = call intrinsic mem.ptr.offset(copy _2, const 3) @70:20-70:31
+    _5 = call intrinsic mem.ptr.read(copy _6) @70:20-70:38
+    _8 = call intrinsic mem.ptr.offset(copy _2, const 4) @71:20-71:31
+    _7 = call intrinsic mem.ptr.read(copy _8) @71:20-71:38
+    _12 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @72:34-72:51
+    _11 = call intrinsic mem.ptr.read(copy _12) @72:34-72:58
+    _10 = call intrinsic mem.ptr.cast_mut(copy _11) @72:34-72:69
+    _14 = mul copy _5, const 2 @72:71-72:79
+    _13 = mul copy _14, copy _7 @72:71-72:86
+    _9 = call intrinsic extern.c.sisu_rt_grow(copy _10, copy _13) @72:21-72:87
+    _16 = call intrinsic mem.ptr.addr(copy _9) @73:17-73:29
+    _15 = call intrinsic mem.ptr.write(copy _2, copy _16) @73:9-73:30
+    _18 = call intrinsic mem.ptr.offset(copy _2, const 3) @74:9-74:20
+    _19 = mul copy _5, const 2 @74:27-74:35
+    _17 = call intrinsic mem.ptr.write(copy _18, copy _19) @74:9-74:36
+    _20 = gt copy _3, const 0 @75:12-75:21
+    switch copy _20 [0: bb1, else: bb2] @75:12-75:21
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _23 = mul copy _5, copy _7 @76:38-76:49
+    _22 = call intrinsic mem.ptr.offset(copy _9, copy _23) @76:25-76:50
+    _24 = call intrinsic mem.ptr.as_const(copy _9) @76:52-76:68
+    _25 = mul copy _3, copy _7 @76:70-76:82
+    _21 = call intrinsic extern.c.memmove(copy _22, copy _24, copy _25) @76:17-76:83
+    goto bb1
+}
+
+fn rt.channel.push(3) source 1 @83:18-83:22 {
+    let _0: ()
+    let _1: ptr_mut[u8] "c" @83:23-83:36
+    let _2: ptr[u8] "src" @83:38-83:50
+    let _3: int "size" @83:52-83:61
+    let _4: ptr_mut[int] "h" @88:13-88:14
+    let _5: int "n" @89:13-89:14
+    let _6: ptr_mut[int]
+    let _7: bool
+    let _8: int
+    let _9: ptr_mut[int]
+    let _10: ()
+    let _11: int "room" @92:13-92:17
+    let _12: ptr_mut[int]
+    let _13: int "at" @93:13-93:15
+    let _14: int
+    let _15: int
+    let _16: ptr_mut[int]
+    let _17: ptr_mut[u8] "slots" @94:13-94:18
+    let _18: ptr[u8]
+    let _19: ptr_mut[ptr[u8]]
+    let _20: ptr_mut[u8]
+    let _21: ptr_mut[u8]
+    let _22: int
+    let _23: int
+    let _24: ptr_mut[int]
+    let _25: ()
+    let _26: ptr_mut[int]
+    let _27: int
+  bb0:
+    _4 = call fn rt.channel.header(copy _1) @88:17-88:26
+    _6 = call intrinsic mem.ptr.offset(copy _4, const 2) @89:17-89:28
+    _5 = call intrinsic mem.ptr.read(copy _6) @89:17-89:35
+    _9 = call intrinsic mem.ptr.offset(copy _4, const 3) @90:17-90:28
+    _8 = call intrinsic mem.ptr.read(copy _9) @90:17-90:35
+    _7 = eq copy _5, copy _8 @90:12-90:35
+    switch copy _7 [0: bb1, else: bb2] @90:12-90:35
+  bb1:
+    _12 = call intrinsic mem.ptr.offset(copy _4, const 3) @92:20-92:31
+    _11 = call intrinsic mem.ptr.read(copy _12) @92:20-92:38
+    _16 = call intrinsic mem.ptr.offset(copy _4, const 1) @93:19-93:30
+    _15 = call intrinsic mem.ptr.read(copy _16) @93:19-93:37
+    _14 = add copy _15, copy _5 @93:18-93:42
+    _13 = mod copy _14, copy _11 @93:18-93:49
+    _19 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @94:21-94:38
+    _18 = call intrinsic mem.ptr.read(copy _19) @94:21-94:45
+    _17 = call intrinsic mem.ptr.cast_mut(copy _18) @94:21-94:56
+    _24 = call intrinsic mem.ptr.offset(copy _4, const 4) @95:39-95:50
+    _23 = call intrinsic mem.ptr.read(copy _24) @95:39-95:57
+    _22 = mul copy _13, copy _23 @95:34-95:57
+    _21 = call intrinsic mem.ptr.offset(copy _17, copy _22) @95:21-95:58
+    _20 = call intrinsic extern.c.memmove(copy _21, copy _2, copy _3) @95:13-95:70
+    _26 = call intrinsic mem.ptr.offset(copy _4, const 2) @96:9-96:20
+    _27 = add copy _5, const 1 @96:27-96:32
+    _25 = call intrinsic mem.ptr.write(copy _26, copy _27) @96:9-96:33
+    _0 = const ()
+    return
+  bb2:
+    _10 = call fn rt.channel.grow(copy _1) @91:13-91:20
+    goto bb1
+}
+
+fn rt.channel.pop(3) source 1 @104:18-104:21 {
+    let _0: bool
+    let _1: ptr_mut[u8] "c" @104:22-104:35
+    let _2: ptr_mut[u8] "dst" @104:37-104:52
+    let _3: int "size" @104:54-104:63
+    let _4: ptr_mut[int] "h" @109:13-109:14
+    let _5: int "n" @110:13-110:14
+    let _6: ptr_mut[int]
+    let _7: bool
+    let _8: int "first" @113:13-113:18
+    let _9: ptr_mut[int]
+    let _10: ptr[u8] "slots" @114:13-114:18
+    let _11: ptr_mut[ptr[u8]]
+    let _12: ptr_mut[u8]
+    let _13: ptr[u8]
+    let _14: int
+    let _15: int
+    let _16: ptr_mut[int]
+    let _17: ()
+    let _18: ptr_mut[int]
+    let _19: int
+    let _20: int
+    let _21: int
+    let _22: ptr_mut[int]
+    let _23: ()
+    let _24: ptr_mut[int]
+    let _25: int
+  bb0:
+    _4 = call fn rt.channel.header(copy _1) @109:17-109:26
+    _6 = call intrinsic mem.ptr.offset(copy _4, const 2) @110:17-110:28
+    _5 = call intrinsic mem.ptr.read(copy _6) @110:17-110:35
+    _7 = eq copy _5, const 0 @111:12-111:18
+    switch copy _7 [0: bb1, else: bb2] @111:12-111:18
+  bb1:
+    _9 = call intrinsic mem.ptr.offset(copy _4, const 1) @113:21-113:32
+    _8 = call intrinsic mem.ptr.read(copy _9) @113:21-113:39
+    _11 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @114:21-114:38
+    _10 = call intrinsic mem.ptr.read(copy _11) @114:21-114:45
+    _16 = call intrinsic mem.ptr.offset(copy _4, const 4) @115:47-115:58
+    _15 = call intrinsic mem.ptr.read(copy _16) @115:47-115:65
+    _14 = mul copy _8, copy _15 @115:39-115:65
+    _13 = call intrinsic mem.ptr.offset(copy _10, copy _14) @115:26-115:66
+    _12 = call intrinsic extern.c.memmove(copy _2, copy _13, copy _3) @115:13-115:73
+    _18 = call intrinsic mem.ptr.offset(copy _4, const 1) @116:9-116:20
+    _20 = add copy _8, const 1 @116:27-116:38
+    _22 = call intrinsic mem.ptr.offset(copy _4, const 3) @116:41-116:52
+    _21 = call intrinsic mem.ptr.read(copy _22) @116:41-116:59
+    _19 = mod copy _20, copy _21 @116:27-116:59
+    _17 = call intrinsic mem.ptr.write(copy _18, copy _19) @116:9-116:60
+    _24 = call intrinsic mem.ptr.offset(copy _4, const 2) @117:9-117:20
+    _25 = sub copy _5, const 1 @117:27-117:32
+    _23 = call intrinsic mem.ptr.write(copy _24, copy _25) @117:9-117:33
+    _0 = const true @118:16-118:20
+    return @118:9-118:20
+  bb2:
+    _0 = const false @112:20-112:25
+    return @112:13-112:25
+}
+
+fn rt.dispatch.dropped(2) source 2 @241:5-241:12 {
     let _0: int
     let _1: ptr_mut[u8] "p" @241:13-241:26
     let _2: int "t" @241:28-241:34
@@ -907,7 +1173,7 @@ fn rt.dispatch.dropped(2) source 1 @241:5-241:12 {
     return @244:5-244:52
 }
 
-fn rt.dispatch.scratch(1) source 1 @247:5-247:12 {
+fn rt.dispatch.scratch(1) source 2 @247:5-247:12 {
     let _0: ptr_mut[u8]
     let _1: int "n" @247:13-247:19
     let _2: int
@@ -923,7 +1189,7 @@ fn rt.dispatch.scratch(1) source 1 @247:5-247:12 {
     return @249:5-249:43
 }
 
-fn rt.dispatch.free(1) source 1 @252:5-252:9 {
+fn rt.dispatch.free(1) source 2 @252:5-252:9 {
     let _0: ()
     let _1: ptr_mut[u8] "p" @252:10-252:23
     let _2: ()
@@ -933,7 +1199,7 @@ fn rt.dispatch.free(1) source 1 @252:5-252:9 {
     return
 }
 
-fn rt.dispatch.empty(1) source 1 @260:5-260:10 {
+fn rt.dispatch.empty(1) source 2 @260:5-260:10 {
     let _0: ()
     let _1: ptr_mut[u8] "p" @260:11-260:24
     let _2: ptr_mut[int] "w" @263:13-263:14
@@ -953,7 +1219,7 @@ fn rt.dispatch.empty(1) source 1 @260:5-260:10 {
     return
 }
 
-fn rt.dispatch.text_of(3) source 1 @273:5-273:12 {
+fn rt.dispatch.text_of(3) source 2 @273:5-273:12 {
     let _0: (ptr_mut[u8], int)
     let _1: rt.types.Types "ts" @273:13-273:22
     let _2: ptr_mut[u8] "p" @273:24-273:37
@@ -1006,7 +1272,7 @@ fn rt.dispatch.text_of(3) source 1 @273:5-273:12 {
     return @277:9-277:22
 }
 
-fn rt.dispatch.utf8(2) source 1 @287:5-287:9 {
+fn rt.dispatch.utf8(2) source 2 @287:5-287:9 {
     let _0: int
     let _1: int "c" @287:10-287:16
     let _2: ptr_mut[u8] "out" @287:18-287:33
@@ -1130,7 +1396,7 @@ fn rt.dispatch.utf8(2) source 1 @287:5-287:9 {
     return @301:13-301:21
 }
 
-fn rt.dispatch.contains(5) source 1 @314:18-314:26 {
+fn rt.dispatch.contains(5) source 2 @314:18-314:26 {
     let _0: bool
     let _1: rt.types.Types "ts" @314:27-314:36
     let _2: ptr_mut[u8] "c" @314:38-314:51
@@ -1261,7 +1527,7 @@ fn rt.dispatch.contains(5) source 1 @314:18-314:26 {
     return @333:9-333:21
 }
 
-fn rt.dispatch.list_call(2) source 1 @341:5-341:14 {
+fn rt.dispatch.list_call(2) source 2 @341:5-341:14 {
     let _0: int
     let _1: rt.dispatch.Call "c" @341:15-341:22
     let _2: int "id" @341:24-341:31
@@ -1822,7 +2088,7 @@ fn rt.dispatch.list_call(2) source 1 @341:5-341:14 {
     return @462:13-462:55
 }
 
-fn rt.dispatch.entry_table(1) source 1 @470:5-470:16 {
+fn rt.dispatch.entry_table(1) source 2 @470:5-470:16 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "e" @470:17-470:30
     let _2: ptr[u8]
@@ -1834,7 +2100,7 @@ fn rt.dispatch.entry_table(1) source 1 @470:5-470:16 {
     return @472:5-472:54
 }
 
-fn rt.dispatch.entry_key(1) source 1 @478:5-478:14 {
+fn rt.dispatch.entry_key(1) source 2 @478:5-478:14 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "e" @478:15-478:28
   bb0:
@@ -1842,7 +2108,7 @@ fn rt.dispatch.entry_key(1) source 1 @478:5-478:14 {
     return @480:5-480:30
 }
 
-fn rt.dispatch.table_call(2) source 1 @486:5-486:15 {
+fn rt.dispatch.table_call(2) source 2 @486:5-486:15 {
     let _0: int
     let _1: rt.dispatch.Call "c" @486:16-486:23
     let _2: int "id" @486:25-486:32
@@ -2291,7 +2557,7 @@ fn rt.dispatch.table_call(2) source 1 @486:5-486:15 {
     return @585:13-585:46
 }
 
-fn rt.dispatch.slice_call(2) source 1 @603:5-603:15 {
+fn rt.dispatch.slice_call(2) source 2 @603:5-603:15 {
     let _0: int
     let _1: rt.dispatch.Call "c" @603:16-603:23
     let _2: int "id" @603:25-603:32
@@ -2499,7 +2765,7 @@ fn rt.dispatch.slice_call(2) source 1 @603:5-603:15 {
     goto bb38
 }
 
-fn rt.dispatch.literal(5) source 1 @656:18-656:25 {
+fn rt.dispatch.literal(5) source 2 @656:18-656:25 {
     let _0: int
     let _1: rt.types.Types "ts" @656:26-656:35
     let _2: int "t" @656:37-656:43
@@ -2613,7 +2879,7 @@ fn rt.dispatch.literal(5) source 1 @656:18-656:25 {
     goto bb9
 }
 
-fn rt.dispatch.find(5) source 1 @696:18-696:22 {
+fn rt.dispatch.find(5) source 2 @696:18-696:22 {
     let _0: int
     let _1: rt.types.Types "ts" @696:23-696:32
     let _2: ptr_mut[u8] "p" @696:34-696:47
@@ -2647,15 +2913,66 @@ fn rt.dispatch.find(5) source 1 @696:18-696:22 {
     return @704:9-704:44
 }
 
-fn rt.dispatch.collection(4) source 1 @716:18-716:28 {
+fn rt.dispatch.slot(5) source 2 @720:18-720:22 {
     let _0: int
-    let _1: ptr[int] "types" @717:5-717:20
-    let _2: ptr[u8] "desc" @717:22-717:35
-    let _3: ptr_mut[u8] "ret" @717:37-717:52
-    let _4: ptr_mut[u8] "args" @717:54-717:70
-    let _5: rt.dispatch.Call "c" @719:9-719:10
+    let _1: rt.types.Types "ts" @720:23-720:32
+    let _2: ptr_mut[u8] "p" @720:34-720:47
+    let _3: ptr_mut[u8] "key" @720:49-720:64
+    let _4: int "kt" @720:66-720:73
+    let _5: int "mode" @720:75-720:84
+    let _6: ptr_mut[u8] "tb" @723:9-723:11
+    let _7: ptr[u8]
+    let _8: ptr_mut[ptr[u8]]
+    let _9: int "i" @724:9-724:10
+    let _10: bool
+    let _11: ptr_mut[u8]
+    let _12: bool
+    let _13: int
+    let _14: ptr_mut[u8]
+    let _15: int
+    let _16: bool
+    let _17: int
+  bb0:
+    _8 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _2) @723:21-723:38
+    _7 = call intrinsic mem.ptr.read(copy _8) @723:21-723:45
+    _6 = call intrinsic mem.ptr.cast_mut(copy _7) @723:21-723:56
+    _9 = call fn rt.table.find(copy _1, copy _6, copy _3, copy _4) @724:13-724:40
+    _10 = ge copy _9, const 0 @725:8-725:14
+    switch copy _10 [0: bb1, else: bb2] @725:8-725:14
+  bb1:
+    _13 = call fn rt.dispatch.SLOT_WRITE() @727:16-727:26
+    _12 = eq copy _5, copy _13 @727:8-727:26
+    switch copy _12 [0: bb3, else: bb4] @727:8-727:26
+  bb2:
+    _11 = call fn rt.table.value_at(copy _6, copy _9) @726:16-726:37
+    _0 = call intrinsic mem.ptr.addr(copy _11) @726:16-726:44
+    return @726:9-726:44
+  bb3:
+    _17 = call fn rt.dispatch.SLOT_DROP() @729:16-729:25
+    _16 = eq copy _5, copy _17 @729:8-729:25
+    switch copy _16 [0: bb5, else: bb6] @729:8-729:25
+  bb4:
+    _15 = call fn rt.table.push_copy(copy _1, copy _6, copy _3, copy _4) @728:35-728:67
+    _14 = call fn rt.table.value_at(copy _6, copy _15) @728:16-728:68
+    _0 = call intrinsic mem.ptr.addr(copy _14) @728:16-728:75
+    return @728:9-728:75
+  bb5:
+    _0 = const -1 @731:12-731:14
+    return @731:5-731:14
+  bb6:
+    _0 = const 0 @730:16-730:17
+    return @730:9-730:17
+}
+
+fn rt.dispatch.collection(4) source 2 @742:18-742:28 {
+    let _0: int
+    let _1: ptr[int] "types" @743:5-743:20
+    let _2: ptr[u8] "desc" @743:22-743:35
+    let _3: ptr_mut[u8] "ret" @743:37-743:52
+    let _4: ptr_mut[u8] "args" @743:54-743:70
+    let _5: rt.dispatch.Call "c" @745:9-745:10
     let _6: rt.types.Types
-    let _7: int "id" @720:9-720:11
+    let _7: int "id" @746:9-746:11
     let _8: bool
     let _9: int
     let _10: int
@@ -2663,40 +2980,40 @@ fn rt.dispatch.collection(4) source 1 @716:18-716:28 {
     let _12: int
     let _13: int
   bb0:
-    _6 = struct rt.types.Types(copy _1) @719:21-719:39
-    _5 = struct rt.dispatch.Call(copy _6, copy _2, copy _3, copy _4) @719:13-719:71
-    _7 = call fn rt.dispatch.Call.word(copy _5, const 0) @720:14-720:23
-    _9 = call fn rt.dispatch.LIST_NEW() @721:14-721:22
-    _8 = ge copy _7, copy _9 @721:8-721:22
-    switch copy _8 [0: bb3, else: bb2] @721:8-721:42
+    _6 = struct rt.types.Types(copy _1) @745:21-745:39
+    _5 = struct rt.dispatch.Call(copy _6, copy _2, copy _3, copy _4) @745:13-745:71
+    _7 = call fn rt.dispatch.Call.word(copy _5, const 0) @746:14-746:23
+    _9 = call fn rt.dispatch.LIST_NEW() @747:14-747:22
+    _8 = ge copy _7, copy _9 @747:8-747:22
+    switch copy _8 [0: bb3, else: bb2] @747:8-747:42
   bb1:
-    _12 = call fn rt.dispatch.LIST_AS_SLICE() @723:14-723:27
-    _11 = ge copy _7, copy _12 @723:8-723:27
-    switch copy _11 [0: bb7, else: bb6] @723:8-723:48
+    _12 = call fn rt.dispatch.LIST_AS_SLICE() @749:14-749:27
+    _11 = ge copy _7, copy _12 @749:8-749:27
+    switch copy _11 [0: bb7, else: bb6] @749:8-749:48
   bb2:
-    _10 = call fn rt.dispatch.LIST_SORT() @721:33-721:42
-    _8 = le copy _7, copy _10 @721:27-721:42
-    switch copy _8 [0: bb1, else: bb4] @721:8-721:42
+    _10 = call fn rt.dispatch.LIST_SORT() @747:33-747:42
+    _8 = le copy _7, copy _10 @747:27-747:42
+    switch copy _8 [0: bb1, else: bb4] @747:8-747:42
   bb3:
-    switch copy _8 [0: bb1, else: bb4] @721:8-721:42
+    switch copy _8 [0: bb1, else: bb4] @747:8-747:42
   bb4:
-    _0 = call fn rt.dispatch.list_call(copy _5, copy _7) @722:16-722:32
-    return @722:9-722:32
+    _0 = call fn rt.dispatch.list_call(copy _5, copy _7) @748:16-748:32
+    return @748:9-748:32
   bb5:
-    _0 = call fn rt.dispatch.table_call(copy _5, copy _7) @725:12-725:29
-    return @725:5-725:29
+    _0 = call fn rt.dispatch.table_call(copy _5, copy _7) @751:12-751:29
+    return @751:5-751:29
   bb6:
-    _13 = call fn rt.dispatch.SLICE_ITER() @723:38-723:48
-    _11 = le copy _7, copy _13 @723:32-723:48
-    switch copy _11 [0: bb5, else: bb8] @723:8-723:48
+    _13 = call fn rt.dispatch.SLICE_ITER() @749:38-749:48
+    _11 = le copy _7, copy _13 @749:32-749:48
+    switch copy _11 [0: bb5, else: bb8] @749:8-749:48
   bb7:
-    switch copy _11 [0: bb5, else: bb8] @723:8-723:48
+    switch copy _11 [0: bb5, else: bb8] @749:8-749:48
   bb8:
-    _0 = call fn rt.dispatch.slice_call(copy _5, copy _7) @724:16-724:33
-    return @724:9-724:33
+    _0 = call fn rt.dispatch.slice_call(copy _5, copy _7) @750:16-750:33
+    return @750:9-750:33
 }
 
-fn rt.floats.set(2) source 2 @48:5-48:8 {
+fn rt.floats.set(2) source 3 @48:5-48:8 {
     let _0: ()
     let _1: ptr_mut[int] "a" @48:9-48:23
     let _2: int "x" @48:25-48:31
@@ -2741,7 +3058,7 @@ fn rt.floats.set(2) source 2 @48:5-48:8 {
     goto bb1
 }
 
-fn rt.floats.mul_small(2) source 2 @65:5-65:14 {
+fn rt.floats.mul_small(2) source 3 @65:5-65:14 {
     let _0: ()
     let _1: ptr_mut[int] "a" @65:15-65:29
     let _2: int "m" @65:31-65:37
@@ -2802,7 +3119,7 @@ fn rt.floats.mul_small(2) source 2 @65:5-65:14 {
     goto bb4
 }
 
-fn rt.floats.mul_pow10(2) source 2 @85:5-85:14 {
+fn rt.floats.mul_pow10(2) source 3 @85:5-85:14 {
     let _0: ()
     let _1: ptr_mut[int] "a" @85:15-85:29
     let _2: int "n" @85:31-85:37
@@ -2850,7 +3167,7 @@ fn rt.floats.mul_pow10(2) source 2 @85:5-85:14 {
     goto bb7
 }
 
-fn rt.floats.shift(2) source 2 @101:5-101:10 {
+fn rt.floats.shift(2) source 3 @101:5-101:10 {
     let _0: ()
     let _1: ptr_mut[int] "a" @101:11-101:25
     let _2: int "n" @101:27-101:33
@@ -3012,7 +3329,7 @@ fn rt.floats.shift(2) source 2 @101:5-101:10 {
     goto bb13
 }
 
-fn rt.floats.order(2) source 2 @139:5-139:10 {
+fn rt.floats.order(2) source 3 @139:5-139:10 {
     let _0: int
     let _1: ptr_mut[int] "a" @139:11-139:25
     let _2: ptr_mut[int] "b" @139:27-139:41
@@ -3074,7 +3391,7 @@ fn rt.floats.order(2) source 2 @139:5-139:10 {
     return @152:17-152:44
 }
 
-fn rt.floats.subtract(2) source 2 @161:5-161:13 {
+fn rt.floats.subtract(2) source 3 @161:5-161:13 {
     let _0: ()
     let _1: ptr_mut[int] "a" @161:14-161:28
     let _2: ptr_mut[int] "b" @161:30-161:44
@@ -3162,7 +3479,7 @@ fn rt.floats.subtract(2) source 2 @161:5-161:13 {
     goto bb9
 }
 
-fn rt.floats.add(3) source 2 @190:5-190:8 {
+fn rt.floats.add(3) source 3 @190:5-190:8 {
     let _0: ()
     let _1: ptr_mut[int] "dst" @190:9-190:25
     let _2: ptr_mut[int] "a" @190:27-190:41
@@ -3261,7 +3578,7 @@ fn rt.floats.add(3) source 2 @190:5-190:8 {
     goto bb11
 }
 
-fn rt.floats.div_small(2) source 2 @218:5-218:14 {
+fn rt.floats.div_small(2) source 3 @218:5-218:14 {
     let _0: int
     let _1: ptr_mut[int] "a" @218:15-218:29
     let _2: int "m" @218:31-218:37
@@ -3328,7 +3645,7 @@ fn rt.floats.div_small(2) source 2 @218:5-218:14 {
     goto bb4
 }
 
-fn rt.floats.next_digit(2) source 2 @241:5-241:15 {
+fn rt.floats.next_digit(2) source 3 @241:5-241:15 {
     let _0: int
     let _1: ptr_mut[int] "r" @241:16-241:30
     let _2: ptr_mut[int] "s" @241:32-241:46
@@ -3356,7 +3673,7 @@ fn rt.floats.next_digit(2) source 2 @241:5-241:15 {
     goto bb1
 }
 
-fn rt.floats.put_digit(3) source 2 @253:5-253:14 {
+fn rt.floats.put_digit(3) source 3 @253:5-253:14 {
     let _0: ()
     let _1: ptr_mut[u8] "b" @253:15-253:28
     let _2: int "i" @253:30-253:36
@@ -3374,7 +3691,7 @@ fn rt.floats.put_digit(3) source 2 @253:5-253:14 {
     return
 }
 
-fn rt.floats.shortest_small(6) source 2 @265:5-265:19 {
+fn rt.floats.shortest_small(6) source 3 @265:5-265:19 {
     let _0: (int, int)
     let _1: int "f" @265:20-265:26
     let _2: int "e" @265:28-265:34
@@ -3594,7 +3911,7 @@ fn rt.floats.shortest_small(6) source 2 @265:5-265:19 {
     return @313:13-313:26
 }
 
-fn rt.floats.shortest(6) source 2 @325:5-325:13 {
+fn rt.floats.shortest(6) source 3 @325:5-325:13 {
     let _0: (int, int)
     let _1: int "f" @325:14-325:20
     let _2: int "e" @325:22-325:28
@@ -3850,7 +4167,7 @@ fn rt.floats.shortest(6) source 2 @325:5-325:13 {
     switch copy _84 [0: bb18, else: bb19] @391:16-391:27
 }
 
-fn rt.floats.scaled_small(3) pure source 2 @399:10-399:22 {
+fn rt.floats.scaled_small(3) pure source 3 @399:10-399:22 {
     let _0: (bool, int, int, int)
     let _1: int "f" @399:23-399:29
     let _2: int "e" @399:31-399:37
@@ -3963,7 +4280,7 @@ fn rt.floats.scaled_small(3) pure source 2 @399:10-399:22 {
     return @424:13-424:36
 }
 
-fn rt.floats.scaled(5) source 2 @433:5-433:11 {
+fn rt.floats.scaled(5) source 3 @433:5-433:11 {
     let _0: int
     let _1: ptr_mut[int] "r" @433:12-433:26
     let _2: ptr_mut[int] "s" @433:28-433:42
@@ -4022,7 +4339,7 @@ fn rt.floats.scaled(5) source 2 @433:5-433:11 {
     goto bb6
 }
 
-fn rt.floats.round_up(2) source 2 @455:5-455:13 {
+fn rt.floats.round_up(2) source 3 @455:5-455:13 {
     let _0: bool
     let _1: ptr_mut[u8] "b" @455:14-455:27
     let _2: int "n" @455:29-455:35
@@ -4075,7 +4392,7 @@ fn rt.floats.round_up(2) source 2 @455:5-455:13 {
     return @464:17-464:29
 }
 
-fn rt.floats.odd_last(2) source 2 @474:5-474:13 {
+fn rt.floats.odd_last(2) source 3 @474:5-474:13 {
     let _0: bool
     let _1: ptr_mut[u8] "b" @474:14-474:27
     let _2: int "n" @474:29-474:35
@@ -4094,7 +4411,7 @@ fn rt.floats.odd_last(2) source 2 @474:5-474:13 {
     return @477:5-477:59
 }
 
-fn rt.floats.is_zero(1) source 2 @483:5-483:12 {
+fn rt.floats.is_zero(1) source 3 @483:5-483:12 {
     let _0: bool
     let _1: ptr_mut[int] "a" @483:13-483:27
     let _2: int
@@ -4104,7 +4421,7 @@ fn rt.floats.is_zero(1) source 2 @483:5-483:12 {
     return @485:5-485:32
 }
 
-fn rt.floats.half_order(4) source 2 @493:5-493:15 {
+fn rt.floats.half_order(4) source 3 @493:5-493:15 {
     let _0: int
     let _1: bool "small" @493:16-493:27
     let _2: int "r" @493:29-493:35
@@ -4156,7 +4473,7 @@ fn rt.floats.half_order(4) source 2 @493:5-493:15 {
     return @498:13-498:21
 }
 
-fn rt.floats.exact_digits(6) source 2 @515:5-515:17 {
+fn rt.floats.exact_digits(6) source 3 @515:5-515:17 {
     let _0: bool
     let _1: bool "small" @515:18-515:29
     let _2: int "r0" @515:31-515:38
@@ -4256,7 +4573,7 @@ fn rt.floats.exact_digits(6) source 2 @515:5-515:17 {
     return @537:9-537:34
 }
 
-fn rt.floats.char_at(2) source 2 @544:5-544:12 {
+fn rt.floats.char_at(2) source 3 @544:5-544:12 {
     let _0: int
     let _1: ptr_mut[u8] "b" @544:13-544:26
     let _2: int "i" @544:28-544:34
@@ -4269,7 +4586,7 @@ fn rt.floats.char_at(2) source 2 @544:5-544:12 {
     return @547:5-547:46
 }
 
-fn rt.floats.integer_digits(4) source 2 @557:5-557:19 {
+fn rt.floats.integer_digits(4) source 3 @557:5-557:19 {
     let _0: int
     let _1: ptr_mut[int] "a" @557:20-557:34
     let _2: int "f" @557:36-557:42
@@ -4334,7 +4651,7 @@ fn rt.floats.integer_digits(4) source 2 @557:5-557:19 {
     goto bb5
 }
 
-fn rt.floats.write_integer(6) source 2 @581:5-581:18 {
+fn rt.floats.write_integer(6) source 3 @581:5-581:18 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @581:19-581:34
     let _2: int "sign" @581:36-581:45
@@ -4500,7 +4817,7 @@ fn rt.floats.write_integer(6) source 2 @581:5-581:18 {
     goto bb21
 }
 
-fn rt.floats.at(3) source 2 @632:5-632:7 {
+fn rt.floats.at(3) source 3 @632:5-632:7 {
     let _0: int
     let _1: ptr_mut[u8] "b" @632:8-632:21
     let _2: int "i" @632:23-632:29
@@ -4516,7 +4833,7 @@ fn rt.floats.at(3) source 2 @632:5-632:7 {
     return @636:5-636:17
 }
 
-fn rt.floats.move_digits(5) source 2 @644:5-644:16 {
+fn rt.floats.move_digits(5) source 3 @644:5-644:16 {
     let _0: int
     let _1: ptr_mut[u8] "b" @644:17-644:30
     let _2: int "i" @644:32-644:38
@@ -4556,7 +4873,7 @@ fn rt.floats.move_digits(5) source 2 @644:5-644:16 {
     goto bb1
 }
 
-fn rt.floats.zeros(3) source 2 @661:5-661:10 {
+fn rt.floats.zeros(3) source 3 @661:5-661:10 {
     let _0: int
     let _1: ptr_mut[u8] "b" @661:11-661:24
     let _2: int "i" @661:26-661:32
@@ -4581,7 +4898,7 @@ fn rt.floats.zeros(3) source 2 @661:5-661:10 {
     goto bb1
 }
 
-fn rt.floats.small_number(4) source 2 @672:5-672:17 {
+fn rt.floats.small_number(4) source 3 @672:5-672:17 {
     let _0: int
     let _1: ptr_mut[u8] "b" @672:18-672:31
     let _2: int "i" @672:33-672:39
@@ -4636,7 +4953,7 @@ fn rt.floats.small_number(4) source 2 @672:5-672:17 {
     goto bb5
 }
 
-fn rt.floats.room(2) source 2 @685:5-685:9 {
+fn rt.floats.room(2) source 3 @685:5-685:9 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "t" @685:10-685:23
     let _2: int "bytes" @685:25-685:35
@@ -4651,7 +4968,7 @@ fn rt.floats.room(2) source 2 @685:5-685:9 {
     return @689:5-689:54
 }
 
-fn rt.floats.set_len(2) source 2 @695:5-695:12 {
+fn rt.floats.set_len(2) source 3 @695:5-695:12 {
     let _0: ()
     let _1: ptr_mut[u8] "t" @695:13-695:26
     let _2: int "len" @695:28-695:36
@@ -4666,7 +4983,7 @@ fn rt.floats.set_len(2) source 2 @695:5-695:12 {
     return
 }
 
-fn rt.floats.write(4) source 2 @711:18-711:23 {
+fn rt.floats.write(4) source 3 @711:18-711:23 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @711:24-711:39
     let _2: int "bits" @711:41-711:50
@@ -5288,7 +5605,7 @@ fn rt.floats.write(4) source 2 @711:18-711:23 {
     goto bb78
 }
 
-fn rt.iter.get(2) source 3 @95:5-95:8 {
+fn rt.iter.get(2) source 4 @95:5-95:8 {
     let _0: int
     let _1: ptr_mut[u8] "it" @95:9-95:23
     let _2: int "k" @95:25-95:31
@@ -5301,7 +5618,7 @@ fn rt.iter.get(2) source 3 @95:5-95:8 {
     return @98:5-98:50
 }
 
-fn rt.iter.set(3) source 3 @104:5-104:8 {
+fn rt.iter.set(3) source 4 @104:5-104:8 {
     let _0: ()
     let _1: ptr_mut[u8] "it" @104:9-104:23
     let _2: int "k" @104:25-104:31
@@ -5317,7 +5634,7 @@ fn rt.iter.set(3) source 3 @104:5-104:8 {
     return
 }
 
-fn rt.iter.get_ptr(2) source 3 @113:5-113:12 {
+fn rt.iter.get_ptr(2) source 4 @113:5-113:12 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "it" @113:13-113:27
     let _2: int "k" @113:29-113:35
@@ -5332,7 +5649,7 @@ fn rt.iter.get_ptr(2) source 3 @113:5-113:12 {
     return @116:5-116:65
 }
 
-fn rt.iter.make(2) source 3 @120:5-120:9 {
+fn rt.iter.make(2) source 4 @120:5-120:9 {
     let _0: ptr_mut[u8]
     let _1: int "state" @120:10-120:20
     let _2: int "size" @120:22-120:31
@@ -5372,7 +5689,7 @@ fn rt.iter.make(2) source 3 @120:5-120:9 {
     goto bb1
 }
 
-fn rt.iter.none(1) source 3 @136:5-136:9 {
+fn rt.iter.none(1) source 4 @136:5-136:9 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @136:10-136:25
     let _2: ()
@@ -5384,7 +5701,7 @@ fn rt.iter.none(1) source 3 @136:5-136:9 {
     return
 }
 
-fn rt.iter.some(1) source 3 @146:5-146:9 {
+fn rt.iter.some(1) source 4 @146:5-146:9 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @146:10-146:25
     let _2: ()
@@ -5396,7 +5713,7 @@ fn rt.iter.some(1) source 3 @146:5-146:9 {
     return
 }
 
-fn rt.iter.next_char(3) source 3 @157:5-157:14 {
+fn rt.iter.next_char(3) source 4 @157:5-157:14 {
     let _0: (int, int)
     let _1: ptr[u8] "b" @157:15-157:25
     let _2: int "n" @157:27-157:33
@@ -5552,7 +5869,7 @@ fn rt.iter.next_char(3) source 3 @157:5-157:14 {
     return @190:13-190:26
 }
 
-fn rt.iter.next(4) source 3 @200:18-200:22 {
+fn rt.iter.next(4) source 4 @200:18-200:22 {
     let _0: int
     let _1: rt.types.Types "ts" @200:23-200:32
     let _2: ptr_mut[u8] "it" @200:34-200:48
@@ -6237,7 +6554,7 @@ fn rt.iter.next(4) source 3 @200:18-200:22 {
     return @336:17-336:32
 }
 
-fn rt.iter.next_pair(4) source 3 @350:5-350:14 {
+fn rt.iter.next_pair(4) source 4 @350:5-350:14 {
     let _0: int
     let _1: rt.types.Types "ts" @350:15-350:24
     let _2: ptr_mut[u8] "it" @350:26-350:40
@@ -6424,7 +6741,7 @@ fn rt.iter.next_pair(4) source 3 @350:5-350:14 {
     goto bb23
 }
 
-fn rt.iter.drop(3) source 3 @395:18-395:22 {
+fn rt.iter.drop(3) source 4 @395:18-395:22 {
     let _0: int
     let _1: rt.types.Types "ts" @395:23-395:32
     let _2: ptr_mut[u8] "it" @395:34-395:48
@@ -6447,7 +6764,7 @@ fn rt.iter.drop(3) source 3 @395:18-395:22 {
     return @397:9-397:24
 }
 
-fn rt.iter.drop_state(3) source 3 @407:5-407:15 {
+fn rt.iter.drop_state(3) source 4 @407:5-407:15 {
     let _0: int
     let _1: rt.types.Types "ts" @407:16-407:25
     let _2: ptr_mut[u8] "it" @407:27-407:41
@@ -6638,7 +6955,7 @@ fn rt.iter.drop_state(3) source 3 @407:5-407:15 {
     return @439:13-439:60
 }
 
-fn rt.iter.referent(2) source 3 @443:5-443:13 {
+fn rt.iter.referent(2) source 4 @443:5-443:13 {
     let _0: int
     let _1: rt.types.Types "ts" @443:14-443:23
     let _2: int "t" @443:25-443:31
@@ -6658,7 +6975,7 @@ fn rt.iter.referent(2) source 3 @443:5-443:13 {
     return @445:9-445:23
 }
 
-fn rt.iter.take(1) source 3 @453:5-453:9 {
+fn rt.iter.take(1) source 4 @453:5-453:9 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "it" @453:10-453:24
     let _2: ptr_mut[u8] "out" @454:9-454:12
@@ -6701,7 +7018,7 @@ fn rt.iter.take(1) source 3 @453:5-453:9 {
     goto bb1
 }
 
-fn rt.iter.iterable(4) source 3 @471:18-471:26 {
+fn rt.iter.iterable(4) source 4 @471:18-471:26 {
     let _0: ptr_mut[u8]
     let _1: rt.types.Types "ts" @471:27-471:36
     let _2: ptr_mut[u8] "p" @471:38-471:51
@@ -7166,7 +7483,7 @@ fn rt.iter.iterable(4) source 3 @471:18-471:26 {
     return @555:9-555:19
 }
 
-fn rt.iter.table_part(2) source 3 @563:18-563:28 {
+fn rt.iter.table_part(2) source 4 @563:18-563:28 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "tb" @563:29-563:43
     let _2: int "part" @563:45-563:54
@@ -7202,7 +7519,7 @@ fn rt.iter.table_part(2) source 3 @563:18-563:28 {
     return @567:5-567:14
 }
 
-fn rt.iter.new_range(3) source 3 @571:18-571:27 {
+fn rt.iter.new_range(3) source 4 @571:18-571:27 {
     let _0: ptr_mut[u8]
     let _1: int "cur" @571:28-571:36
     let _2: int "stop" @571:38-571:47
@@ -7234,7 +7551,7 @@ fn rt.iter.new_range(3) source 3 @571:18-571:27 {
     return @577:5-577:14
 }
 
-fn rt.iter.new_list_ref(2) source 3 @581:18-581:30 {
+fn rt.iter.new_list_ref(2) source 4 @581:18-581:30 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "xs" @581:31-581:45
     let _2: int "size" @581:47-581:56
@@ -7263,7 +7580,7 @@ fn rt.iter.new_list_ref(2) source 3 @581:18-581:30 {
     return @586:5-586:14
 }
 
-fn rt.iter.new_items(3) source 3 @594:18-594:27 {
+fn rt.iter.new_items(3) source 4 @594:18-594:27 {
     let _0: ptr_mut[u8]
     let _1: rt.types.Types "ts" @594:28-594:37
     let _2: ptr_mut[u8] "xs" @594:39-594:53
@@ -7295,7 +7612,7 @@ fn rt.iter.new_items(3) source 3 @594:18-594:27 {
     return @602:5-602:14
 }
 
-fn rt.iter.new_text(3) source 3 @606:18-606:26 {
+fn rt.iter.new_text(3) source 4 @606:18-606:26 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "b" @606:27-606:40
     let _2: int "n" @606:42-606:48
@@ -7328,7 +7645,7 @@ fn rt.iter.new_text(3) source 3 @606:18-606:26 {
     return @610:5-610:14
 }
 
-fn rt.iter.new_owned_bytes(2) source 3 @616:18-616:33 {
+fn rt.iter.new_owned_bytes(2) source 4 @616:18-616:33 {
     let _0: ptr_mut[u8]
     let _1: ptr[u8] "b" @616:34-616:44
     let _2: int "n" @616:46-616:52
@@ -7363,7 +7680,7 @@ fn rt.iter.new_owned_bytes(2) source 3 @616:18-616:33 {
     goto bb1
 }
 
-fn rt.iter.new_enumerate(1) source 3 @633:18-633:31 {
+fn rt.iter.new_enumerate(1) source 4 @633:18-633:31 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "inner" @633:32-633:49
     let _2: ptr_mut[u8] "it" @634:9-634:11
@@ -7387,7 +7704,7 @@ fn rt.iter.new_enumerate(1) source 3 @633:18-633:31 {
     return @636:5-636:14
 }
 
-fn rt.iter.new_zip(5) source 3 @644:18-644:25 {
+fn rt.iter.new_zip(5) source 4 @644:18-644:25 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "a" @645:5-645:18
     let _2: ptr_mut[u8] "b" @645:20-645:33
@@ -7454,7 +7771,7 @@ fn rt.iter.new_zip(5) source 3 @644:18-644:25 {
     return @653:5-653:14
 }
 
-fn rt.iter.new_waiting(3) source 3 @658:18-658:29 {
+fn rt.iter.new_waiting(3) source 4 @658:18-658:29 {
     let _0: ptr_mut[u8]
     let _1: int "id" @658:30-658:37
     let _2: int "size" @658:39-658:48
@@ -7479,7 +7796,7 @@ fn rt.iter.new_waiting(3) source 3 @658:18-658:29 {
     return @661:5-661:14
 }
 
-fn rt.iter.waits(2) source 3 @670:18-670:23 {
+fn rt.iter.waits(2) source 4 @670:18-670:23 {
     let _0: int
     let _1: ptr_mut[u8] "it" @670:24-670:38
     let _2: ptr_mut[u8] "out" @670:40-670:55
@@ -7529,7 +7846,7 @@ fn rt.iter.waits(2) source 3 @670:18-670:23 {
     return @676:5-676:40
 }
 
-fn rt.iter.collect(5) source 3 @686:18-686:25 {
+fn rt.iter.collect(5) source 4 @686:18-686:25 {
     let _0: int
     let _1: rt.types.Types "ts" @686:26-686:35
     let _2: ptr_mut[u8] "it" @686:37-686:51
@@ -7685,7 +8002,7 @@ fn rt.iter.collect(5) source 3 @686:18-686:25 {
     goto bb16
 }
 
-fn rt.list.buffer(1) source 4 @31:18-31:24 {
+fn rt.list.buffer(1) source 5 @31:18-31:24 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "l" @31:25-31:38
     let _2: ptr[u8]
@@ -7697,7 +8014,7 @@ fn rt.list.buffer(1) source 4 @31:18-31:24 {
     return @34:5-34:54
 }
 
-fn rt.list.length(1) source 4 @40:18-40:24 {
+fn rt.list.length(1) source 5 @40:18-40:24 {
     let _0: int
     let _1: ptr_mut[u8] "l" @40:25-40:38
     let _2: ptr_mut[int]
@@ -7709,7 +8026,7 @@ fn rt.list.length(1) source 4 @40:18-40:24 {
     return @43:5-43:49
 }
 
-fn rt.list.set_length(2) source 4 @49:18-49:28 {
+fn rt.list.set_length(2) source 5 @49:18-49:28 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @49:29-49:42
     let _2: int "n" @49:44-49:50
@@ -7724,7 +8041,7 @@ fn rt.list.set_length(2) source 4 @49:18-49:28 {
     return
 }
 
-fn rt.list.reserve(3) source 4 @60:18-60:25 {
+fn rt.list.reserve(3) source 5 @60:18-60:25 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @60:26-60:39
     let _2: int "extra" @60:41-60:51
@@ -7793,7 +8110,7 @@ fn rt.list.reserve(3) source 4 @60:18-60:25 {
     goto bb3
 }
 
-fn rt.list.pop(4) source 4 @83:18-83:21 {
+fn rt.list.pop(4) source 5 @83:18-83:21 {
     let _0: ()
     let _1: rt.types.Types "ts" @83:22-83:31
     let _2: ptr_mut[u8] "l" @83:33-83:46
@@ -7841,7 +8158,7 @@ fn rt.list.pop(4) source 4 @83:18-83:21 {
     return @91:13-91:19
 }
 
-fn rt.list.insert(4) source 4 @103:18-103:24 {
+fn rt.list.insert(4) source 5 @103:18-103:24 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @103:25-103:38
     let _2: int "k" @103:40-103:46
@@ -7880,7 +8197,7 @@ fn rt.list.insert(4) source 4 @103:18-103:24 {
     return
 }
 
-fn rt.list.remove(4) source 4 @121:18-121:24 {
+fn rt.list.remove(4) source 5 @121:18-121:24 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @121:25-121:38
     let _2: int "k" @121:40-121:46
@@ -7919,7 +8236,7 @@ fn rt.list.remove(4) source 4 @121:18-121:24 {
     return
 }
 
-fn rt.list.extend(3) source 4 @137:18-137:24 {
+fn rt.list.extend(3) source 5 @137:18-137:24 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @137:25-137:38
     let _2: ptr_mut[u8] "other" @137:40-137:57
@@ -7963,7 +8280,7 @@ fn rt.list.extend(3) source 4 @137:18-137:24 {
     goto bb1
 }
 
-fn rt.list.swap_bytes(4) source 4 @156:5-156:15 {
+fn rt.list.swap_bytes(4) source 5 @156:5-156:15 {
     let _0: ()
     let _1: ptr_mut[u8] "a" @156:16-156:29
     let _2: ptr_mut[u8] "b" @156:31-156:44
@@ -7986,7 +8303,7 @@ fn rt.list.swap_bytes(4) source 4 @156:5-156:15 {
     return
 }
 
-fn rt.list.reverse(2) source 4 @168:18-168:25 {
+fn rt.list.reverse(2) source 5 @168:18-168:25 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @168:26-168:39
     let _2: int "size" @168:41-168:50
@@ -8043,7 +8360,7 @@ fn rt.list.reverse(2) source 4 @168:18-168:25 {
     goto bb5
 }
 
-fn rt.list.swap(4) source 4 @191:18-191:22 {
+fn rt.list.swap(4) source 5 @191:18-191:22 {
     let _0: ()
     let _1: ptr_mut[u8] "l" @191:23-191:36
     let _2: int "i" @191:38-191:44
@@ -8082,7 +8399,7 @@ fn rt.list.swap(4) source 4 @191:18-191:22 {
     return @193:9-193:15
 }
 
-fn rt.list.copies(6) source 4 @209:18-209:24 {
+fn rt.list.copies(6) source 5 @209:18-209:24 {
     let _0: ()
     let _1: rt.types.Types "ts" @209:25-209:34
     let _2: ptr_mut[u8] "dst" @209:36-209:51
@@ -8148,7 +8465,7 @@ fn rt.list.copies(6) source 4 @209:18-209:24 {
     goto bb1
 }
 
-fn rt.list.contains(5) source 4 @233:18-233:26 {
+fn rt.list.contains(5) source 5 @233:18-233:26 {
     let _0: bool
     let _1: rt.types.Types "ts" @233:27-233:36
     let _2: ptr_mut[u8] "l" @233:38-233:51
@@ -8190,7 +8507,7 @@ fn rt.list.contains(5) source 4 @233:18-233:26 {
     return @240:13-240:24
 }
 
-fn rt.list.join(6) source 4 @250:18-250:22 {
+fn rt.list.join(6) source 5 @250:18-250:22 {
     let _0: ()
     let _1: rt.types.Types "ts" @250:23-250:32
     let _2: ptr_mut[u8] "out" @250:34-250:49
@@ -8236,7 +8553,7 @@ fn rt.list.join(6) source 4 @250:18-250:22 {
     goto bb4
 }
 
-fn rt.list.sort(3) source 4 @267:18-267:22 {
+fn rt.list.sort(3) source 5 @267:18-267:22 {
     let _0: bool
     let _1: rt.types.Types "ts" @267:23-267:32
     let _2: ptr_mut[u8] "l" @267:34-267:47
@@ -8349,7 +8666,7 @@ fn rt.list.sort(3) source 4 @267:18-267:22 {
     goto bb10
 }
 
-fn rt.list.merge(8) source 4 @308:5-308:10 {
+fn rt.list.merge(8) source 5 @308:5-308:10 {
     let _0: bool
     let _1: rt.types.Types "ts" @309:5-309:14
     let _2: ptr_mut[u8] "items" @310:5-310:22
@@ -8532,7 +8849,7 @@ fn rt.list.merge(8) source 4 @308:5-308:10 {
     goto bb18
 }
 
-fn rt.queue.header(1) source 5 @26:5-26:11 {
+fn rt.queue.header(1) source 6 @26:5-26:11 {
     let _0: ptr_mut[int]
     let _1: ptr_mut[u8] "q" @26:12-26:25
   bb0:
@@ -8540,7 +8857,7 @@ fn rt.queue.header(1) source 5 @26:5-26:11 {
     return @27:5-27:25
 }
 
-fn rt.queue.init(4) source 5 @39:18-39:22 {
+fn rt.queue.init(4) source 6 @39:18-39:22 {
     let _0: ()
     let _1: ptr_mut[u8] "q" @39:23-39:36
     let _2: ptr_mut[u8] "buffer" @39:38-39:56
@@ -8569,7 +8886,7 @@ fn rt.queue.init(4) source 5 @39:18-39:22 {
     return
 }
 
-fn rt.queue.count(1) source 5 @53:18-53:23 {
+fn rt.queue.count(1) source 6 @53:18-53:23 {
     let _0: int
     let _1: ptr_mut[u8] "q" @53:24-53:37
     let _2: ptr_mut[int]
@@ -8581,7 +8898,7 @@ fn rt.queue.count(1) source 5 @53:18-53:23 {
     return @56:5-56:45
 }
 
-fn rt.queue.clear(1) source 5 @62:18-62:23 {
+fn rt.queue.clear(1) source 6 @62:18-62:23 {
     let _0: ()
     let _1: ptr_mut[u8] "q" @62:24-62:37
     let _2: ()
@@ -8595,7 +8912,7 @@ fn rt.queue.clear(1) source 5 @62:18-62:23 {
     return
 }
 
-fn rt.queue.push(4) source 5 @70:18-70:22 {
+fn rt.queue.push(4) source 6 @70:18-70:22 {
     let _0: ()
     let _1: ptr_mut[u8] "q" @70:23-70:36
     let _2: int "a" @70:38-70:44
@@ -8668,7 +8985,7 @@ fn rt.queue.push(4) source 5 @70:18-70:22 {
     goto bb5
 }
 
-fn rt.queue.word(3) source 5 @94:18-94:22 {
+fn rt.queue.word(3) source 6 @94:18-94:22 {
     let _0: int
     let _1: ptr_mut[u8] "q" @94:23-94:36
     let _2: int "i" @94:38-94:44
@@ -8694,7 +9011,7 @@ fn rt.queue.word(3) source 5 @94:18-94:22 {
     return @99:9-99:83
 }
 
-fn rt.queue.swap_remove(2) source 5 @105:18-105:29 {
+fn rt.queue.swap_remove(2) source 6 @105:18-105:29 {
     let _0: int
     let _1: ptr_mut[u8] "q" @105:30-105:43
     let _2: int "i" @105:45-105:51
@@ -8757,7 +9074,7 @@ fn rt.queue.swap_remove(2) source 5 @105:18-105:29 {
     goto bb1
 }
 
-fn rt.queue.remove(2) source 5 @124:18-124:24 {
+fn rt.queue.remove(2) source 6 @124:18-124:24 {
     let _0: ()
     let _1: ptr_mut[u8] "q" @124:25-124:38
     let _2: int "i" @124:40-124:46
@@ -8806,7 +9123,7 @@ fn rt.queue.remove(2) source 5 @124:18-124:24 {
     return
 }
 
-fn rt.queue.position(3) source 5 @140:18-140:26 {
+fn rt.queue.position(3) source 6 @140:18-140:26 {
     let _0: int
     let _1: ptr_mut[u8] "q" @140:27-140:40
     let _2: int "j" @140:42-140:48
@@ -8858,7 +9175,7 @@ fn rt.queue.position(3) source 5 @140:18-140:26 {
     return @151:17-151:25
 }
 
-fn rt.queue.take_key(3) source 5 @162:18-162:26 {
+fn rt.queue.take_key(3) source 6 @162:18-162:26 {
     let _0: ()
     let _1: ptr_mut[u8] "q" @162:27-162:40
     let _2: int "key" @162:42-162:50
@@ -8955,7 +9272,7 @@ fn rt.queue.take_key(3) source 5 @162:18-162:26 {
     goto bb9
 }
 
-fn rt.search.maximal_suffix(3) source 6 @16:5-16:19 {
+fn rt.search.maximal_suffix(3) source 7 @16:5-16:19 {
     let _0: (int, int)
     let _1: ptr[u8] "part" @16:20-16:33
     let _2: int "m" @16:35-16:41
@@ -9041,7 +9358,7 @@ fn rt.search.maximal_suffix(3) source 6 @16:5-16:19 {
     goto bb1
 }
 
-fn rt.search.same_run(4) source 6 @47:5-47:13 {
+fn rt.search.same_run(4) source 7 @47:5-47:13 {
     let _0: bool
     let _1: ptr[u8] "part" @47:14-47:27
     let _2: int "a" @47:29-47:35
@@ -9084,7 +9401,7 @@ fn rt.search.same_run(4) source 6 @47:5-47:13 {
     return @54:17-54:29
 }
 
-fn rt.search.find(4) source 6 @63:18-63:22 {
+fn rt.search.find(4) source 7 @63:18-63:22 {
     let _0: int
     let _1: ptr[u8] "text" @63:23-63:36
     let _2: int "n" @63:38-63:44
@@ -9380,7 +9697,7 @@ fn rt.search.find(4) source 6 @63:18-63:22 {
     return @121:21-121:29
 }
 
-fn rt.search.has_edge(5) source 6 @132:18-132:26 {
+fn rt.search.has_edge(5) source 7 @132:18-132:26 {
     let _0: bool
     let _1: ptr[u8] "text" @132:27-132:40
     let _2: int "n" @132:42-132:48
@@ -9438,7 +9755,7 @@ fn rt.search.has_edge(5) source 6 @132:18-132:26 {
     return @142:17-142:29
 }
 
-fn rt.show.display(4) source 7 @131:18-131:25 {
+fn rt.show.display(4) source 8 @131:18-131:25 {
     let _0: ()
     let _1: rt.types.Types "ts" @131:26-131:35
     let _2: ptr_mut[u8] "out" @131:37-131:52
@@ -9642,7 +9959,7 @@ fn rt.show.display(4) source 7 @131:18-131:25 {
     return @162:21-162:27
 }
 
-fn rt.show.debug(4) source 7 @171:18-171:23 {
+fn rt.show.debug(4) source 8 @171:18-171:23 {
     let _0: ()
     let _1: rt.types.Types "ts" @171:24-171:33
     let _2: ptr_mut[u8] "out" @171:35-171:50
@@ -10795,7 +11112,7 @@ fn rt.show.debug(4) source 7 @171:18-171:23 {
     goto bb1
 }
 
-fn rt.show.put_name(3) source 7 @380:5-380:13 {
+fn rt.show.put_name(3) source 8 @380:5-380:13 {
     let _0: ()
     let _1: rt.types.Types "ts" @380:14-380:23
     let _2: ptr_mut[u8] "out" @380:25-380:40
@@ -10825,7 +11142,7 @@ fn rt.show.put_name(3) source 7 @380:5-380:13 {
     goto bb1
 }
 
-fn rt.show.put_fields(5) source 7 @397:5-397:15 {
+fn rt.show.put_fields(5) source 8 @397:5-397:15 {
     let _0: ()
     let _1: rt.types.Types "ts" @397:16-397:25
     let _2: ptr_mut[u8] "out" @397:27-397:42
@@ -10906,7 +11223,7 @@ fn rt.show.put_fields(5) source 7 @397:5-397:15 {
     goto bb6
 }
 
-fn rt.show.put_float(3) source 7 @418:5-418:14 {
+fn rt.show.put_float(3) source 8 @418:5-418:14 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @418:15-418:30
     let _2: int "bits" @418:32-418:41
@@ -10946,7 +11263,7 @@ fn rt.show.put_float(3) source 7 @418:5-418:14 {
     goto bb1
 }
 
-fn rt.show.put_char(2) source 7 @436:5-436:13 {
+fn rt.show.put_char(2) source 8 @436:5-436:13 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @436:14-436:29
     let _2: int "c" @436:31-436:37
@@ -11037,7 +11354,7 @@ fn rt.show.put_char(2) source 7 @436:5-436:13 {
     goto bb1
 }
 
-fn rt.show.put_escape(2) source 7 @456:5-456:15 {
+fn rt.show.put_escape(2) source 8 @456:5-456:15 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @456:16-456:31
     let _2: int "c" @456:33-456:39
@@ -11056,7 +11373,7 @@ fn rt.show.put_escape(2) source 7 @456:5-456:15 {
     return
 }
 
-fn rt.show.short_escape(1) pure source 7 @465:10-465:22 {
+fn rt.show.short_escape(1) pure source 8 @465:10-465:22 {
     let _0: int
     let _1: int "c" @465:23-465:29
     let _2: bool
@@ -11085,7 +11402,7 @@ fn rt.show.short_escape(1) pure source 7 @465:10-465:22 {
     return @471:9-471:19
 }
 
-fn rt.show.control(1) pure source 7 @476:10-476:17 {
+fn rt.show.control(1) pure source 8 @476:10-476:17 {
     let _0: bool
     let _1: int "c" @476:18-476:24
   bb0:
@@ -11101,7 +11418,7 @@ fn rt.show.control(1) pure source 7 @476:10-476:17 {
     return @477:5-477:44
 }
 
-fn rt.show.quote_str(3) source 7 @485:18-485:27 {
+fn rt.show.quote_str(3) source 8 @485:18-485:27 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @485:28-485:43
     let _2: ptr_mut[u8] "b" @485:45-485:58
@@ -11217,7 +11534,7 @@ fn rt.show.quote_str(3) source 7 @485:18-485:27 {
     goto bb4
 }
 
-fn rt.show.quote_char(2) source 7 @516:5-516:15 {
+fn rt.show.quote_char(2) source 8 @516:5-516:15 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @516:16-516:31
     let _2: int "c" @516:33-516:39
@@ -11269,7 +11586,7 @@ fn rt.show.quote_char(2) source 7 @516:5-516:15 {
     goto bb1
 }
 
-fn rt.show.quote_bytes(3) source 7 @536:5-536:16 {
+fn rt.show.quote_bytes(3) source 8 @536:5-536:16 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @536:17-536:32
     let _2: ptr_mut[u8] "b" @536:34-536:47
@@ -11360,7 +11677,7 @@ fn rt.show.quote_bytes(3) source 7 @536:5-536:16 {
     goto bb15
 }
 
-fn rt.table.word(2) source 8 @58:5-58:9 {
+fn rt.table.word(2) source 9 @58:5-58:9 {
     let _0: int
     let _1: ptr_mut[u8] "tb" @58:10-58:24
     let _2: int "k" @58:26-58:32
@@ -11373,7 +11690,7 @@ fn rt.table.word(2) source 8 @58:5-58:9 {
     return @61:5-61:50
 }
 
-fn rt.table.set_word(3) source 8 @67:5-67:13 {
+fn rt.table.set_word(3) source 9 @67:5-67:13 {
     let _0: ()
     let _1: ptr_mut[u8] "tb" @67:14-67:28
     let _2: int "k" @67:30-67:36
@@ -11389,7 +11706,7 @@ fn rt.table.set_word(3) source 8 @67:5-67:13 {
     return
 }
 
-fn rt.table.length(1) source 8 @76:18-76:24 {
+fn rt.table.length(1) source 9 @76:18-76:24 {
     let _0: int
     let _1: ptr_mut[u8] "tb" @76:25-76:39
     let _2: int
@@ -11399,7 +11716,7 @@ fn rt.table.length(1) source 8 @76:18-76:24 {
     return @77:5-77:25
 }
 
-fn rt.table.key_type(1) source 8 @83:18-83:26 {
+fn rt.table.key_type(1) source 9 @83:18-83:26 {
     let _0: int
     let _1: ptr_mut[u8] "tb" @83:27-83:41
     let _2: int
@@ -11409,7 +11726,7 @@ fn rt.table.key_type(1) source 8 @83:18-83:26 {
     return @84:5-84:25
 }
 
-fn rt.table.key_size(1) source 8 @90:18-90:26 {
+fn rt.table.key_size(1) source 9 @90:18-90:26 {
     let _0: int
     let _1: ptr_mut[u8] "tb" @90:27-90:41
     let _2: int
@@ -11419,7 +11736,7 @@ fn rt.table.key_size(1) source 8 @90:18-90:26 {
     return @91:5-91:30
 }
 
-fn rt.table.value_size(1) source 8 @97:18-97:28 {
+fn rt.table.value_size(1) source 9 @97:18-97:28 {
     let _0: int
     let _1: ptr_mut[u8] "tb" @97:29-97:43
     let _2: int
@@ -11429,7 +11746,7 @@ fn rt.table.value_size(1) source 8 @97:18-97:28 {
     return @98:5-98:32
 }
 
-fn rt.table.entry_size(1) source 8 @105:18-105:28 {
+fn rt.table.entry_size(1) source 9 @105:18-105:28 {
     let _0: int
     let _1: ptr_mut[u8] "tb" @105:29-105:43
     let _2: int
@@ -11447,7 +11764,7 @@ fn rt.table.entry_size(1) source 8 @105:18-105:28 {
     return @106:5-106:57
 }
 
-fn rt.table.entry(2) source 8 @114:5-114:10 {
+fn rt.table.entry(2) source 9 @114:5-114:10 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "tb" @114:11-114:25
     let _2: int "i" @114:27-114:33
@@ -11470,7 +11787,7 @@ fn rt.table.entry(2) source 8 @114:5-114:10 {
     return @119:9-119:50
 }
 
-fn rt.table.key_at(2) source 8 @125:18-125:24 {
+fn rt.table.key_at(2) source 9 @125:18-125:24 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "tb" @125:25-125:39
     let _2: int "i" @125:41-125:47
@@ -11481,7 +11798,7 @@ fn rt.table.key_at(2) source 8 @125:18-125:24 {
     return @127:5-127:41
 }
 
-fn rt.table.value_at(2) source 8 @133:18-133:26 {
+fn rt.table.value_at(2) source 9 @133:18-133:26 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "tb" @133:27-133:41
     let _2: int "i" @133:43-133:49
@@ -11498,7 +11815,7 @@ fn rt.table.value_at(2) source 8 @133:18-133:26 {
     return @135:5-135:62
 }
 
-fn rt.table.new(3) source 8 @143:18-143:21 {
+fn rt.table.new(3) source 9 @143:18-143:21 {
     let _0: ptr_mut[u8]
     let _1: rt.types.Types "ts" @143:22-143:31
     let _2: int "key" @143:33-143:41
@@ -11563,7 +11880,7 @@ fn rt.table.new(3) source 8 @143:18-143:21 {
     return @156:5-156:14
 }
 
-fn rt.table.hash_key(3) source 8 @164:5-164:13 {
+fn rt.table.hash_key(3) source 9 @164:5-164:13 {
     let _0: int
     let _1: rt.types.Types "ts" @164:14-164:23
     let _2: ptr_mut[u8] "p" @164:25-164:38
@@ -11609,7 +11926,7 @@ fn rt.table.hash_key(3) source 8 @164:5-164:13 {
     return @168:5-168:36
 }
 
-fn rt.table.same_key(5) source 8 @175:5-175:13 {
+fn rt.table.same_key(5) source 9 @175:5-175:13 {
     let _0: bool
     let _1: rt.types.Types "ts" @175:14-175:23
     let _2: ptr_mut[u8] "a" @175:25-175:38
@@ -11648,7 +11965,7 @@ fn rt.table.same_key(5) source 8 @175:5-175:13 {
     return @179:9-179:21
 }
 
-fn rt.table.place(4) source 8 @188:5-188:10 {
+fn rt.table.place(4) source 9 @188:5-188:10 {
     let _0: ()
     let _1: ptr_mut[int] "index" @188:11-188:29
     let _2: int "mask" @188:31-188:40
@@ -11684,7 +12001,7 @@ fn rt.table.place(4) source 8 @188:5-188:10 {
     goto bb1
 }
 
-fn rt.table.reindex(2) source 8 @203:5-203:12 {
+fn rt.table.reindex(2) source 9 @203:5-203:12 {
     let _0: ()
     let _1: ptr_mut[u8] "tb" @203:13-203:27
     let _2: int "slots" @203:29-203:39
@@ -11777,7 +12094,7 @@ fn rt.table.reindex(2) source 8 @203:5-203:12 {
     goto bb6
 }
 
-fn rt.table.reserve(2) source 8 @231:5-231:12 {
+fn rt.table.reserve(2) source 9 @231:5-231:12 {
     let _0: ()
     let _1: ptr_mut[u8] "tb" @231:13-231:27
     let _2: int "extra" @231:29-231:39
@@ -11862,7 +12179,7 @@ fn rt.table.reserve(2) source 8 @231:5-231:12 {
     goto bb5
 }
 
-fn rt.table.find(4) source 8 @260:18-260:22 {
+fn rt.table.find(4) source 9 @260:18-260:22 {
     let _0: int
     let _1: rt.types.Types "ts" @260:23-260:32
     let _2: ptr_mut[u8] "tb" @260:34-260:48
@@ -12025,7 +12342,7 @@ fn rt.table.find(4) source 8 @260:18-260:22 {
     return @293:21-293:33
 }
 
-fn rt.table.push(3) source 8 @303:18-303:22 {
+fn rt.table.push(3) source 9 @303:18-303:22 {
     let _0: int
     let _1: rt.types.Types "ts" @303:23-303:32
     let _2: ptr_mut[u8] "tb" @303:34-303:48
@@ -12085,15 +12402,76 @@ fn rt.table.push(3) source 8 @303:18-303:22 {
     return @317:5-317:13
 }
 
-fn rt.table.remove(3) source 8 @325:18-325:24 {
+fn rt.table.push_copy(4) source 9 @327:18-327:27 {
+    let _0: int
+    let _1: rt.types.Types "ts" @327:28-327:37
+    let _2: ptr_mut[u8] "tb" @327:39-327:53
+    let _3: ptr_mut[u8] "k" @327:55-327:68
+    let _4: int "kt" @327:70-327:77
+    let _5: ()
+    let _6: int "n" @329:9-329:10
+    let _7: int
+    let _8: ptr_mut[u8] "e" @330:9-330:10
+    let _9: (ptr_mut[u8], int)
+    let _10: ptr_mut[u8] "q" @331:10-331:11
+    let _11: int "t" @331:13-331:14
+    let _12: ptr_mut[u8] "key" @335:13-335:16
+    let _13: ()
+    let _14: int "h" @337:13-337:14
+    let _15: int
+    let _16: int
+    let _17: ()
+    let _18: ptr_mut[int]
+    let _19: ()
+    let _20: ptr_mut[int]
+    let _21: ptr[int]
+    let _22: ptr_mut[ptr[int]]
+    let _23: ptr_mut[ptr[int]]
+    let _24: int
+    let _25: int
+    let _26: int
+    let _27: ()
+    let _28: int
+    let _29: int
+  bb0:
+    _5 = call fn rt.table.reserve(copy _2, const 1) @328:5-328:19
+    _7 = call fn rt.table.LEN() @329:22-329:25
+    _6 = call fn rt.table.word(copy _2, copy _7) @329:13-329:26
+    _8 = call fn rt.table.entry(copy _2, copy _6) @330:13-330:25
+    _9 = call fn rt.value.target(copy _1, copy _3, copy _4) @331:18-331:41
+    _10 = copy _9.0 @331:10-331:11
+    _11 = copy _9.1 @331:13-331:14
+    _12 = call intrinsic mem.ptr.offset(copy _8, const 8) @335:19-335:30
+    _13 = call fn rt.value.copy(copy _1, copy _12, copy _10, copy _11) @336:9-336:34
+    _16 = call fn rt.table.KEY() @337:44-337:47
+    _15 = call fn rt.table.word(copy _2, copy _16) @337:35-337:48
+    _14 = call fn rt.table.hash_key(copy _1, copy _12, copy _15) @337:17-337:49
+    _18 = call intrinsic mem.ptr.cast[u8, int](copy _8) @338:9-338:22
+    _17 = call intrinsic mem.ptr.write(copy _18, copy _14) @338:9-338:31
+    _23 = call intrinsic mem.ptr.cast[u8, ptr[int]](copy _2) @339:15-339:34
+    _24 = call fn rt.table.INDEX() @339:42-339:47
+    _22 = call intrinsic mem.ptr.offset(copy _23, copy _24) @339:15-339:48
+    _21 = call intrinsic mem.ptr.read(copy _22) @339:15-339:55
+    _20 = call intrinsic mem.ptr.cast_mut(copy _21) @339:15-339:66
+    _26 = call fn rt.table.MASK() @339:77-339:81
+    _25 = call fn rt.table.word(copy _2, copy _26) @339:68-339:82
+    _19 = call fn rt.table.place(copy _20, copy _25, copy _14, copy _6) @339:9-339:89
+    _28 = call fn rt.table.LEN() @340:18-340:21
+    _29 = add copy _6, const 1 @340:23-340:28
+    _27 = call fn rt.table.set_word(copy _2, copy _28, copy _29) @340:5-340:29
+    _0 = copy _6 @341:12-341:13
+    return @341:5-341:13
+}
+
+fn rt.table.remove(3) source 9 @349:18-349:24 {
     let _0: ()
-    let _1: ptr_mut[u8] "tb" @325:25-325:39
-    let _2: int "i" @325:41-325:47
-    let _3: ptr_mut[u8] "out" @325:49-325:64
-    let _4: int "n" @326:9-326:10
+    let _1: ptr_mut[u8] "tb" @349:25-349:39
+    let _2: int "i" @349:41-349:47
+    let _3: ptr_mut[u8] "out" @349:49-349:64
+    let _4: int "n" @350:9-350:10
     let _5: int
-    let _6: int "size" @327:9-327:13
-    let _7: ptr_mut[u8] "e" @331:13-331:14
+    let _6: int "size" @351:9-351:13
+    let _7: ptr_mut[u8] "e" @355:13-355:14
     let _8: ptr_mut[u8]
     let _9: ptr[u8]
     let _10: ptr_mut[u8]
@@ -12112,54 +12490,54 @@ fn rt.table.remove(3) source 8 @325:18-325:24 {
     let _23: int
     let _24: int
   bb0:
-    _5 = call fn rt.table.LEN() @326:22-326:25
-    _4 = call fn rt.table.word(copy _1, copy _5) @326:13-326:26
-    _6 = call fn rt.table.entry_size(copy _1) @327:16-327:30
-    _7 = call fn rt.table.entry(copy _1, copy _2) @331:17-331:29
-    _10 = call intrinsic mem.ptr.offset(copy _7, const 8) @332:26-332:37
-    _9 = call intrinsic mem.ptr.as_const(copy _10) @332:26-332:48
-    _11 = sub copy _6, const 8 @332:50-332:58
-    _8 = call intrinsic extern.c.memmove(copy _3, copy _9, copy _11) @332:13-332:59
-    _14 = call intrinsic mem.ptr.offset(copy _7, copy _6) @333:24-333:38
-    _13 = call intrinsic mem.ptr.as_const(copy _14) @333:24-333:49
-    _17 = sub copy _4, copy _2 @333:52-333:57
-    _16 = sub copy _17, const 1 @333:51-333:62
-    _15 = mul copy _16, copy _6 @333:51-333:69
-    _12 = call intrinsic extern.c.memmove(copy _7, copy _13, copy _15) @333:13-333:70
-    _19 = call fn rt.table.LEN() @334:18-334:21
-    _20 = sub copy _4, const 1 @334:23-334:28
-    _18 = call fn rt.table.set_word(copy _1, copy _19, copy _20) @334:5-334:29
-    _24 = call fn rt.table.MASK() @335:26-335:30
-    _23 = call fn rt.table.word(copy _1, copy _24) @335:17-335:31
-    _22 = add copy _23, const 1 @335:17-335:35
-    _21 = call fn rt.table.reindex(copy _1, copy _22) @335:5-335:36
+    _5 = call fn rt.table.LEN() @350:22-350:25
+    _4 = call fn rt.table.word(copy _1, copy _5) @350:13-350:26
+    _6 = call fn rt.table.entry_size(copy _1) @351:16-351:30
+    _7 = call fn rt.table.entry(copy _1, copy _2) @355:17-355:29
+    _10 = call intrinsic mem.ptr.offset(copy _7, const 8) @356:26-356:37
+    _9 = call intrinsic mem.ptr.as_const(copy _10) @356:26-356:48
+    _11 = sub copy _6, const 8 @356:50-356:58
+    _8 = call intrinsic extern.c.memmove(copy _3, copy _9, copy _11) @356:13-356:59
+    _14 = call intrinsic mem.ptr.offset(copy _7, copy _6) @357:24-357:38
+    _13 = call intrinsic mem.ptr.as_const(copy _14) @357:24-357:49
+    _17 = sub copy _4, copy _2 @357:52-357:57
+    _16 = sub copy _17, const 1 @357:51-357:62
+    _15 = mul copy _16, copy _6 @357:51-357:69
+    _12 = call intrinsic extern.c.memmove(copy _7, copy _13, copy _15) @357:13-357:70
+    _19 = call fn rt.table.LEN() @358:18-358:21
+    _20 = sub copy _4, const 1 @358:23-358:28
+    _18 = call fn rt.table.set_word(copy _1, copy _19, copy _20) @358:5-358:29
+    _24 = call fn rt.table.MASK() @359:26-359:30
+    _23 = call fn rt.table.word(copy _1, copy _24) @359:17-359:31
+    _22 = add copy _23, const 1 @359:17-359:35
+    _21 = call fn rt.table.reindex(copy _1, copy _22) @359:5-359:36
     _0 = const ()
     return
 }
 
-fn rt.table.copy(2) source 8 @343:18-343:22 {
+fn rt.table.copy(2) source 9 @367:18-367:22 {
     let _0: ptr_mut[u8]
-    let _1: rt.types.Types "ts" @343:23-343:32
-    let _2: ptr_mut[u8] "tb" @343:34-343:48
+    let _1: rt.types.Types "ts" @367:23-367:32
+    let _2: ptr_mut[u8] "tb" @367:34-367:48
     let _3: (int, int)
     let _4: int
     let _5: int
     let _6: int
     let _7: int
-    let _8: int "key" @344:10-344:13
-    let _9: int "val" @344:15-344:18
-    let _10: ptr_mut[u8] "out" @345:9-345:12
-    let _11: int "n" @346:9-346:10
+    let _8: int "key" @368:10-368:13
+    let _9: int "val" @368:15-368:18
+    let _10: ptr_mut[u8] "out" @369:9-369:12
+    let _11: int "n" @370:9-370:10
     let _12: int
     let _13: bool
     let _14: ()
-    let _15: int "i" @350:9-350:10
+    let _15: int "i" @374:9-374:10
     let _16: bool
     let _17: (ptr_mut[u8], ptr_mut[u8])
     let _18: ptr_mut[u8]
     let _19: ptr_mut[u8]
-    let _20: ptr_mut[u8] "src" @355:18-355:21
-    let _21: ptr_mut[u8] "dst" @355:23-355:26
+    let _20: ptr_mut[u8] "src" @379:18-379:21
+    let _21: ptr_mut[u8] "dst" @379:23-379:26
     let _22: ()
     let _23: ptr_mut[int]
     let _24: int
@@ -12179,66 +12557,66 @@ fn rt.table.copy(2) source 8 @343:18-343:22 {
     let _38: int
     let _39: int
   bb0:
-    _5 = call fn rt.table.KEY() @344:32-344:35
-    _4 = call fn rt.table.word(copy _2, copy _5) @344:23-344:36
-    _7 = call fn rt.table.VALUE() @344:47-344:52
-    _6 = call fn rt.table.word(copy _2, copy _7) @344:38-344:53
-    _3 = tuple(copy _4, copy _6) @344:22-344:54
-    _8 = copy _3.0 @344:10-344:13
-    _9 = copy _3.1 @344:15-344:18
-    _10 = call fn rt.table.new(copy _1, copy _8, copy _9) @345:15-345:32
-    _12 = call fn rt.table.LEN() @346:22-346:25
-    _11 = call fn rt.table.word(copy _2, copy _12) @346:13-346:26
-    _13 = eq copy _11, const 0 @347:8-347:14
-    switch copy _13 [0: bb1, else: bb2] @347:8-347:14
+    _5 = call fn rt.table.KEY() @368:32-368:35
+    _4 = call fn rt.table.word(copy _2, copy _5) @368:23-368:36
+    _7 = call fn rt.table.VALUE() @368:47-368:52
+    _6 = call fn rt.table.word(copy _2, copy _7) @368:38-368:53
+    _3 = tuple(copy _4, copy _6) @368:22-368:54
+    _8 = copy _3.0 @368:10-368:13
+    _9 = copy _3.1 @368:15-368:18
+    _10 = call fn rt.table.new(copy _1, copy _8, copy _9) @369:15-369:32
+    _12 = call fn rt.table.LEN() @370:22-370:25
+    _11 = call fn rt.table.word(copy _2, copy _12) @370:13-370:26
+    _13 = eq copy _11, const 0 @371:8-371:14
+    switch copy _13 [0: bb1, else: bb2] @371:8-371:14
   bb1:
-    _14 = call fn rt.table.reserve(copy _10, copy _11) @349:5-349:20
-    _15 = const 0 @350:13-350:14
+    _14 = call fn rt.table.reserve(copy _10, copy _11) @373:5-373:20
+    _15 = const 0 @374:13-374:14
     goto bb3
   bb2:
-    _0 = copy _10 @348:16-348:19
-    return @348:9-348:19
+    _0 = copy _10 @372:16-372:19
+    return @372:9-372:19
   bb3:
-    _16 = lt copy _15, copy _11 @354:15-354:20
-    switch copy _16 [0: bb4, else: bb5] @354:15-354:20
+    _16 = lt copy _15, copy _11 @378:15-378:20
+    switch copy _16 [0: bb4, else: bb5] @378:15-378:20
   bb4:
-    _35 = call fn rt.table.LEN() @361:19-361:22
-    _34 = call fn rt.table.set_word(copy _10, copy _35, copy _11) @361:5-361:26
-    _39 = call fn rt.table.MASK() @362:28-362:32
-    _38 = call fn rt.table.word(copy _10, copy _39) @362:18-362:33
-    _37 = add copy _38, const 1 @362:18-362:37
-    _36 = call fn rt.table.reindex(copy _10, copy _37) @362:5-362:38
-    _0 = copy _10 @363:12-363:15
-    return @363:5-363:15
+    _35 = call fn rt.table.LEN() @385:19-385:22
+    _34 = call fn rt.table.set_word(copy _10, copy _35, copy _11) @385:5-385:26
+    _39 = call fn rt.table.MASK() @386:28-386:32
+    _38 = call fn rt.table.word(copy _10, copy _39) @386:18-386:33
+    _37 = add copy _38, const 1 @386:18-386:37
+    _36 = call fn rt.table.reindex(copy _10, copy _37) @386:5-386:38
+    _0 = copy _10 @387:12-387:15
+    return @387:5-387:15
   bb5:
-    _18 = call fn rt.table.entry(copy _2, copy _15) @355:31-355:43
-    _19 = call fn rt.table.entry(copy _10, copy _15) @355:45-355:58
-    _17 = tuple(copy _18, copy _19) @355:30-355:59
-    _20 = copy _17.0 @355:18-355:21
-    _21 = copy _17.1 @355:23-355:26
-    _23 = call intrinsic mem.ptr.cast[u8, int](copy _21) @356:13-356:28
-    _25 = call intrinsic mem.ptr.cast[u8, int](copy _20) @356:35-356:50
-    _24 = call intrinsic mem.ptr.read(copy _25) @356:35-356:57
-    _22 = call intrinsic mem.ptr.write(copy _23, copy _24) @356:13-356:58
-    _27 = call intrinsic mem.ptr.offset(copy _21, const 8) @357:28-357:41
-    _28 = call intrinsic mem.ptr.offset(copy _20, const 8) @357:43-357:56
-    _26 = call fn rt.value.copy(copy _1, copy _27, copy _28, copy _8) @357:13-357:62
-    _29 = ge copy _9, const 0 @358:16-358:24
-    switch copy _29 [0: bb6, else: bb7] @358:16-358:24
+    _18 = call fn rt.table.entry(copy _2, copy _15) @379:31-379:43
+    _19 = call fn rt.table.entry(copy _10, copy _15) @379:45-379:58
+    _17 = tuple(copy _18, copy _19) @379:30-379:59
+    _20 = copy _17.0 @379:18-379:21
+    _21 = copy _17.1 @379:23-379:26
+    _23 = call intrinsic mem.ptr.cast[u8, int](copy _21) @380:13-380:28
+    _25 = call intrinsic mem.ptr.cast[u8, int](copy _20) @380:35-380:50
+    _24 = call intrinsic mem.ptr.read(copy _25) @380:35-380:57
+    _22 = call intrinsic mem.ptr.write(copy _23, copy _24) @380:13-380:58
+    _27 = call intrinsic mem.ptr.offset(copy _21, const 8) @381:28-381:41
+    _28 = call intrinsic mem.ptr.offset(copy _20, const 8) @381:43-381:56
+    _26 = call fn rt.value.copy(copy _1, copy _27, copy _28, copy _8) @381:13-381:62
+    _29 = ge copy _9, const 0 @382:16-382:24
+    switch copy _29 [0: bb6, else: bb7] @382:16-382:24
   bb6:
-    _33 = add copy _15, const 1 @360:13-360:19
-    _15 = move _33 @360:13-360:19
+    _33 = add copy _15, const 1 @384:13-384:19
+    _15 = move _33 @384:13-384:19
     goto bb3
   bb7:
-    _31 = call fn rt.table.value_at(copy _10, copy _15) @359:32-359:48
-    _32 = call fn rt.table.value_at(copy _2, copy _15) @359:50-359:65
-    _30 = call fn rt.value.copy(copy _1, copy _31, copy _32, copy _9) @359:17-359:71
+    _31 = call fn rt.table.value_at(copy _10, copy _15) @383:32-383:48
+    _32 = call fn rt.table.value_at(copy _2, copy _15) @383:50-383:65
+    _30 = call fn rt.value.copy(copy _1, copy _31, copy _32, copy _9) @383:17-383:71
     goto bb6
 }
 
-fn rt.table.free(1) source 8 @369:18-369:22 {
+fn rt.table.free(1) source 9 @393:18-393:22 {
     let _0: ()
-    let _1: ptr_mut[u8] "tb" @369:23-369:37
+    let _1: ptr_mut[u8] "tb" @393:23-393:37
     let _2: bool
     let _3: int
     let _4: int
@@ -12259,57 +12637,57 @@ fn rt.table.free(1) source 8 @369:18-369:22 {
     let _19: int
     let _20: ()
   bb0:
-    _4 = call fn rt.table.ENTRIES() @373:21-373:28
-    _3 = call fn rt.table.word(copy _1, copy _4) @373:12-373:29
-    _2 = ne copy _3, const 0 @373:12-373:34
-    switch copy _2 [0: bb1, else: bb2] @373:12-373:34
+    _4 = call fn rt.table.ENTRIES() @397:21-397:28
+    _3 = call fn rt.table.word(copy _1, copy _4) @397:12-397:29
+    _2 = ne copy _3, const 0 @397:12-397:34
+    switch copy _2 [0: bb1, else: bb2] @397:12-397:34
   bb1:
-    _13 = call fn rt.table.INDEX() @375:21-375:26
-    _12 = call fn rt.table.word(copy _1, copy _13) @375:12-375:27
-    _11 = ne copy _12, const 0 @375:12-375:32
-    switch copy _11 [0: bb3, else: bb4] @375:12-375:32
+    _13 = call fn rt.table.INDEX() @399:21-399:26
+    _12 = call fn rt.table.word(copy _1, copy _13) @399:12-399:27
+    _11 = ne copy _12, const 0 @399:12-399:32
+    switch copy _11 [0: bb3, else: bb4] @399:12-399:32
   bb2:
-    _9 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @374:26-374:44
-    _10 = call fn rt.table.ENTRIES() @374:52-374:59
-    _8 = call intrinsic mem.ptr.offset(copy _9, copy _10) @374:26-374:60
-    _7 = call intrinsic mem.ptr.read(copy _8) @374:26-374:67
-    _6 = call intrinsic mem.ptr.cast_mut(copy _7) @374:26-374:78
-    _5 = call intrinsic extern.c.sisu_rt_free(copy _6) @374:13-374:79
+    _9 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @398:26-398:44
+    _10 = call fn rt.table.ENTRIES() @398:52-398:59
+    _8 = call intrinsic mem.ptr.offset(copy _9, copy _10) @398:26-398:60
+    _7 = call intrinsic mem.ptr.read(copy _8) @398:26-398:67
+    _6 = call intrinsic mem.ptr.cast_mut(copy _7) @398:26-398:78
+    _5 = call intrinsic extern.c.sisu_rt_free(copy _6) @398:13-398:79
     goto bb1
   bb3:
-    _20 = call intrinsic extern.c.sisu_rt_free(copy _1) @377:9-377:25
+    _20 = call intrinsic extern.c.sisu_rt_free(copy _1) @401:9-401:25
     _0 = const ()
     return
   bb4:
-    _18 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @376:26-376:44
-    _19 = call fn rt.table.INDEX() @376:52-376:57
-    _17 = call intrinsic mem.ptr.offset(copy _18, copy _19) @376:26-376:58
-    _16 = call intrinsic mem.ptr.read(copy _17) @376:26-376:65
-    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @376:26-376:76
-    _14 = call intrinsic extern.c.sisu_rt_free(copy _15) @376:13-376:77
+    _18 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @400:26-400:44
+    _19 = call fn rt.table.INDEX() @400:52-400:57
+    _17 = call intrinsic mem.ptr.offset(copy _18, copy _19) @400:26-400:58
+    _16 = call intrinsic mem.ptr.read(copy _17) @400:26-400:65
+    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @400:26-400:76
+    _14 = call intrinsic extern.c.sisu_rt_free(copy _15) @400:13-400:77
     goto bb3
 }
 
-fn rt.table.drop(4) source 8 @386:18-386:22 {
+fn rt.table.drop(4) source 9 @410:18-410:22 {
     let _0: int
-    let _1: rt.types.Types "ts" @386:23-386:32
-    let _2: ptr_mut[u8] "tb" @386:34-386:48
-    let _3: int "first" @386:50-386:60
-    let _4: int "mode" @386:62-386:71
+    let _1: rt.types.Types "ts" @410:23-410:32
+    let _2: ptr_mut[u8] "tb" @410:34-410:48
+    let _3: int "first" @410:50-410:60
+    let _4: int "mode" @410:62-410:71
     let _5: (int, int)
     let _6: int
     let _7: int
     let _8: int
     let _9: int
-    let _10: int "key" @387:10-387:13
-    let _11: int "val" @387:15-387:18
-    let _12: bool "drops_key" @388:9-388:18
-    let _13: bool "drops_value" @389:9-389:20
-    let _14: int "status" @390:9-390:15
+    let _10: int "key" @411:10-411:13
+    let _11: int "val" @411:15-411:18
+    let _12: bool "drops_key" @412:9-412:18
+    let _13: bool "drops_value" @413:9-413:20
+    let _14: int "status" @414:9-414:15
     let _15: bool
-    let _16: int "n" @392:13-392:14
+    let _16: int "n" @416:13-416:14
     let _17: int
-    let _18: int "i" @393:13-393:14
+    let _18: int "i" @417:13-417:14
     let _19: bool
     let _20: int
     let _21: int
@@ -12320,68 +12698,68 @@ fn rt.table.drop(4) source 8 @386:18-386:22 {
     let _26: int
     let _27: ()
   bb0:
-    _7 = call fn rt.table.KEY() @387:32-387:35
-    _6 = call fn rt.table.word(copy _2, copy _7) @387:23-387:36
-    _9 = call fn rt.table.VALUE() @387:47-387:52
-    _8 = call fn rt.table.word(copy _2, copy _9) @387:38-387:53
-    _5 = tuple(copy _6, copy _8) @387:22-387:54
-    _10 = copy _5.0 @387:10-387:13
-    _11 = copy _5.1 @387:15-387:18
-    _12 = call fn rt.types.Types.needs_drop(copy _1, copy _10) @388:21-388:39
-    _13 = ge copy _11, const 0 @389:23-389:31
-    switch copy _13 [0: bb2, else: bb1] @389:23-389:54
+    _7 = call fn rt.table.KEY() @411:32-411:35
+    _6 = call fn rt.table.word(copy _2, copy _7) @411:23-411:36
+    _9 = call fn rt.table.VALUE() @411:47-411:52
+    _8 = call fn rt.table.word(copy _2, copy _9) @411:38-411:53
+    _5 = tuple(copy _6, copy _8) @411:22-411:54
+    _10 = copy _5.0 @411:10-411:13
+    _11 = copy _5.1 @411:15-411:18
+    _12 = call fn rt.types.Types.needs_drop(copy _1, copy _10) @412:21-412:39
+    _13 = ge copy _11, const 0 @413:23-413:31
+    switch copy _13 [0: bb2, else: bb1] @413:23-413:54
   bb1:
-    _13 = call fn rt.types.Types.needs_drop(copy _1, copy _11) @389:36-389:54
+    _13 = call fn rt.types.Types.needs_drop(copy _1, copy _11) @413:36-413:54
     goto bb2
   bb2:
-    _14 = call fn rt.value.OK() @390:18-390:26
-    _15 = copy _12 @391:8-391:17
-    switch copy _15 [0: bb4, else: bb5] @391:8-391:32
+    _14 = call fn rt.value.OK() @414:18-414:26
+    _15 = copy _12 @415:8-415:17
+    switch copy _15 [0: bb4, else: bb5] @415:8-415:32
   bb3:
-    _27 = call fn rt.table.free(copy _2) @400:5-400:13
-    _0 = copy _14 @401:12-401:18
-    return @401:5-401:18
+    _27 = call fn rt.table.free(copy _2) @424:5-424:13
+    _0 = copy _14 @425:12-425:18
+    return @425:5-425:18
   bb4:
-    _15 = copy _13 @391:21-391:32
-    switch copy _15 [0: bb3, else: bb6] @391:8-391:32
+    _15 = copy _13 @415:21-415:32
+    switch copy _15 [0: bb3, else: bb6] @415:8-415:32
   bb5:
-    switch copy _15 [0: bb3, else: bb6] @391:8-391:32
+    switch copy _15 [0: bb3, else: bb6] @415:8-415:32
   bb6:
-    _17 = call fn rt.table.LEN() @392:26-392:29
-    _16 = call fn rt.table.word(copy _2, copy _17) @392:17-392:30
-    _18 = copy _3 @393:17-393:22
+    _17 = call fn rt.table.LEN() @416:26-416:29
+    _16 = call fn rt.table.word(copy _2, copy _17) @416:17-416:30
+    _18 = copy _3 @417:17-417:22
     goto bb7
   bb7:
-    _19 = lt copy _18, copy _16 @394:15-394:20
-    switch copy _19 [0: bb3, else: bb8] @394:15-394:20
+    _19 = lt copy _18, copy _16 @418:15-418:20
+    switch copy _19 [0: bb3, else: bb8] @418:15-418:20
   bb8:
-    switch copy _13 [0: bb9, else: bb10] @395:16-395:27
+    switch copy _13 [0: bb9, else: bb10] @419:16-419:27
   bb9:
-    switch copy _12 [0: bb11, else: bb12] @397:16-397:25
+    switch copy _12 [0: bb11, else: bb12] @421:16-421:25
   bb10:
-    _22 = call fn rt.table.value_at(copy _2, copy _18) @396:66-396:81
-    _21 = call fn rt.value.drop(copy _1, copy _22, copy _11, copy _4) @396:51-396:93
-    _20 = call fn rt.value.after_part(copy _14, copy _21) @396:26-396:94
-    _14 = copy _20 @396:17-396:94
-    switch copy _12 [0: bb11, else: bb12] @397:16-397:25
+    _22 = call fn rt.table.value_at(copy _2, copy _18) @420:66-420:81
+    _21 = call fn rt.value.drop(copy _1, copy _22, copy _11, copy _4) @420:51-420:93
+    _20 = call fn rt.value.after_part(copy _14, copy _21) @420:26-420:94
+    _14 = copy _20 @420:17-420:94
+    switch copy _12 [0: bb11, else: bb12] @421:16-421:25
   bb11:
-    _26 = add copy _18, const 1 @399:13-399:19
-    _18 = move _26 @399:13-399:19
+    _26 = add copy _18, const 1 @423:13-423:19
+    _18 = move _26 @423:13-423:19
     goto bb7
   bb12:
-    _25 = call fn rt.table.key_at(copy _2, copy _18) @398:66-398:79
-    _24 = call fn rt.value.drop(copy _1, copy _25, copy _10, copy _4) @398:51-398:91
-    _23 = call fn rt.value.after_part(copy _14, copy _24) @398:26-398:92
-    _14 = copy _23 @398:17-398:92
+    _25 = call fn rt.table.key_at(copy _2, copy _18) @422:66-422:79
+    _24 = call fn rt.value.drop(copy _1, copy _25, copy _10, copy _4) @422:51-422:91
+    _23 = call fn rt.value.after_part(copy _14, copy _24) @422:26-422:92
+    _14 = copy _23 @422:17-422:92
     goto bb11
 }
 
-fn rt.table.equal(3) source 8 @408:18-408:23 {
+fn rt.table.equal(3) source 9 @432:18-432:23 {
     let _0: bool
-    let _1: rt.types.Types "ts" @408:24-408:33
-    let _2: ptr_mut[u8] "a" @408:35-408:48
-    let _3: ptr_mut[u8] "b" @408:50-408:63
-    let _4: int "n" @409:9-409:10
+    let _1: rt.types.Types "ts" @432:24-432:33
+    let _2: ptr_mut[u8] "a" @432:35-432:48
+    let _3: ptr_mut[u8] "b" @432:50-432:63
+    let _4: int "n" @433:9-433:10
     let _5: int
     let _6: bool
     let _7: int
@@ -12391,11 +12769,11 @@ fn rt.table.equal(3) source 8 @408:18-408:23 {
     let _11: int
     let _12: int
     let _13: int
-    let _14: int "key" @412:10-412:13
-    let _15: int "val" @412:15-412:18
-    let _16: int "i" @413:9-413:10
+    let _14: int "key" @436:10-436:13
+    let _15: int "val" @436:15-436:18
+    let _16: int "i" @437:9-437:10
     let _17: bool
-    let _18: int "j" @415:13-415:14
+    let _18: int "j" @439:13-439:14
     let _19: ptr_mut[u8]
     let _20: bool
     let _21: bool
@@ -12406,62 +12784,62 @@ fn rt.table.equal(3) source 8 @408:18-408:23 {
     let _26: int
     let _27: int
   bb0:
-    _5 = call fn rt.table.LEN() @409:21-409:24
-    _4 = call fn rt.table.word(copy _2, copy _5) @409:13-409:25
-    _8 = call fn rt.table.LEN() @410:21-410:24
-    _7 = call fn rt.table.word(copy _3, copy _8) @410:13-410:25
-    _6 = ne copy _4, copy _7 @410:8-410:25
-    switch copy _6 [0: bb1, else: bb2] @410:8-410:25
+    _5 = call fn rt.table.LEN() @433:21-433:24
+    _4 = call fn rt.table.word(copy _2, copy _5) @433:13-433:25
+    _8 = call fn rt.table.LEN() @434:21-434:24
+    _7 = call fn rt.table.word(copy _3, copy _8) @434:13-434:25
+    _6 = ne copy _4, copy _7 @434:8-434:25
+    switch copy _6 [0: bb1, else: bb2] @434:8-434:25
   bb1:
-    _11 = call fn rt.table.KEY() @412:31-412:34
-    _10 = call fn rt.table.word(copy _2, copy _11) @412:23-412:35
-    _13 = call fn rt.table.VALUE() @412:45-412:50
-    _12 = call fn rt.table.word(copy _2, copy _13) @412:37-412:51
-    _9 = tuple(copy _10, copy _12) @412:22-412:52
-    _14 = copy _9.0 @412:10-412:13
-    _15 = copy _9.1 @412:15-412:18
-    _16 = const 0 @413:13-413:14
+    _11 = call fn rt.table.KEY() @436:31-436:34
+    _10 = call fn rt.table.word(copy _2, copy _11) @436:23-436:35
+    _13 = call fn rt.table.VALUE() @436:45-436:50
+    _12 = call fn rt.table.word(copy _2, copy _13) @436:37-436:51
+    _9 = tuple(copy _10, copy _12) @436:22-436:52
+    _14 = copy _9.0 @436:10-436:13
+    _15 = copy _9.1 @436:15-436:18
+    _16 = const 0 @437:13-437:14
     goto bb3
   bb2:
-    _0 = const false @411:16-411:21
-    return @411:9-411:21
+    _0 = const false @435:16-435:21
+    return @435:9-435:21
   bb3:
-    _17 = lt copy _16, copy _4 @414:11-414:16
-    switch copy _17 [0: bb4, else: bb5] @414:11-414:16
+    _17 = lt copy _16, copy _4 @438:11-438:16
+    switch copy _17 [0: bb4, else: bb5] @438:11-438:16
   bb4:
-    _0 = const true @421:12-421:16
-    return @421:5-421:16
+    _0 = const true @445:12-445:16
+    return @445:5-445:16
   bb5:
-    _19 = call fn rt.table.key_at(copy _2, copy _16) @415:29-415:41
-    _18 = call fn rt.table.find(copy _1, copy _3, copy _19, copy _14) @415:17-415:47
-    _20 = lt copy _18, const 0 @416:12-416:17
-    switch copy _20 [0: bb6, else: bb7] @416:12-416:17
+    _19 = call fn rt.table.key_at(copy _2, copy _16) @439:29-439:41
+    _18 = call fn rt.table.find(copy _1, copy _3, copy _19, copy _14) @439:17-439:47
+    _20 = lt copy _18, const 0 @440:12-440:17
+    switch copy _20 [0: bb6, else: bb7] @440:12-440:17
   bb6:
-    _21 = ge copy _15, const 0 @418:12-418:20
-    switch copy _21 [0: bb10, else: bb9] @418:12-418:97
+    _21 = ge copy _15, const 0 @442:12-442:20
+    switch copy _21 [0: bb10, else: bb9] @442:12-442:97
   bb7:
-    _0 = const false @417:20-417:25
-    return @417:13-417:25
+    _0 = const false @441:20-441:25
+    return @441:13-441:25
   bb8:
-    _27 = add copy _16, const 1 @420:9-420:15
-    _16 = move _27 @420:9-420:15
+    _27 = add copy _16, const 1 @444:9-444:15
+    _16 = move _27 @444:9-444:15
     goto bb3
   bb9:
-    _23 = call fn rt.table.value_at(copy _2, copy _16) @418:45-418:59
-    _24 = call fn rt.table.value_at(copy _3, copy _18) @418:66-418:80
-    _26 = call fn rt.table.VALUE() @418:90-418:95
-    _25 = call fn rt.table.word(copy _3, copy _26) @418:82-418:96
-    _22 = call fn rt.value.equal(copy _1, copy _23, copy _15, copy _24, copy _25) @418:29-418:97
-    _21 = not copy _22 @418:25-418:97
-    switch copy _21 [0: bb8, else: bb11] @418:12-418:97
+    _23 = call fn rt.table.value_at(copy _2, copy _16) @442:45-442:59
+    _24 = call fn rt.table.value_at(copy _3, copy _18) @442:66-442:80
+    _26 = call fn rt.table.VALUE() @442:90-442:95
+    _25 = call fn rt.table.word(copy _3, copy _26) @442:82-442:96
+    _22 = call fn rt.value.equal(copy _1, copy _23, copy _15, copy _24, copy _25) @442:29-442:97
+    _21 = not copy _22 @442:25-442:97
+    switch copy _21 [0: bb8, else: bb11] @442:12-442:97
   bb10:
-    switch copy _21 [0: bb8, else: bb11] @418:12-418:97
+    switch copy _21 [0: bb8, else: bb11] @442:12-442:97
   bb11:
-    _0 = const false @419:20-419:25
-    return @419:13-419:25
+    _0 = const false @443:20-443:25
+    return @443:13-443:25
 }
 
-fn rt.text.grow(3) source 9 @23:18-23:22 {
+fn rt.text.grow(3) source 10 @23:18-23:22 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "t" @23:23-23:36
     let _2: int "need" @23:38-23:47
@@ -12534,7 +12912,7 @@ fn rt.text.grow(3) source 9 @23:18-23:22 {
     return @41:13-41:47
 }
 
-fn rt.text.from_bytes(3) source 9 @49:18-49:28 {
+fn rt.text.from_bytes(3) source 10 @49:18-49:28 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @49:29-49:44
     let _2: ptr_mut[u8] "b" @49:46-49:59
@@ -12592,7 +12970,7 @@ fn rt.text.from_bytes(3) source 9 @49:18-49:28 {
     return
 }
 
-fn rt.text.push(3) source 9 @72:18-72:22 {
+fn rt.text.push(3) source 10 @72:18-72:22 {
     let _0: ()
     let _1: ptr_mut[u8] "t" @72:23-72:36
     let _2: ptr_mut[u8] "b" @72:38-72:51
@@ -12652,7 +13030,7 @@ fn rt.text.push(3) source 9 @72:18-72:22 {
     goto bb3
 }
 
-fn rt.text.put(2) source 9 @92:18-92:21 {
+fn rt.text.put(2) source 10 @92:18-92:21 {
     let _0: ()
     let _1: ptr_mut[u8] "t" @92:22-92:35
     let _2: int "c" @92:37-92:43
@@ -12699,7 +13077,7 @@ fn rt.text.put(2) source 9 @92:18-92:21 {
     goto bb1
 }
 
-fn rt.text.put_word(3) source 9 @109:18-109:26 {
+fn rt.text.put_word(3) source 10 @109:18-109:26 {
     let _0: ()
     let _1: ptr_mut[u8] "t" @109:27-109:40
     let _2: int "w" @109:42-109:48
@@ -12730,7 +13108,7 @@ fn rt.text.put_word(3) source 9 @109:18-109:26 {
     goto bb1
 }
 
-fn rt.text.push_int(2) source 9 @120:18-120:26 {
+fn rt.text.push_int(2) source 10 @120:18-120:26 {
     let _0: ()
     let _1: ptr_mut[u8] "t" @120:27-120:40
     let _2: int "n" @120:42-120:48
@@ -12860,7 +13238,7 @@ fn rt.text.push_int(2) source 9 @120:18-120:26 {
     switch copy _40 [0: bb14, else: bb15] @146:16-146:22
 }
 
-fn rt.text.digit_code(2) pure source 9 @152:10-152:20 {
+fn rt.text.digit_code(2) pure source 10 @152:10-152:20 {
     let _0: int
     let _1: int "d" @152:21-152:27
     let _2: bool "upper" @152:29-152:40
@@ -12885,7 +13263,7 @@ fn rt.text.digit_code(2) pure source 9 @152:10-152:20 {
     return @155:5-155:39
 }
 
-fn rt.text.digits(5) source 9 @164:18-164:24 {
+fn rt.text.digits(5) source 10 @164:18-164:24 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @164:25-164:40
     let _2: int "low" @164:42-164:50
@@ -12901,7 +13279,7 @@ fn rt.text.digits(5) source 9 @164:18-164:24 {
     return
 }
 
-fn rt.text.push_digits(5) source 9 @174:18-174:29 {
+fn rt.text.push_digits(5) source 10 @174:18-174:29 {
     let _0: ()
     let _1: ptr_mut[u8] "t" @174:30-174:43
     let _2: int "low" @174:45-174:53
@@ -13048,7 +13426,7 @@ fn rt.text.push_digits(5) source 9 @174:18-174:29 {
     switch copy _47 [0: bb3, else: bb4] @206:16-206:59
 }
 
-fn rt.time.civil(1) source 10 @12:18-12:23 {
+fn rt.time.civil(1) source 11 @12:18-12:23 {
     let _0: (int, int, int)
     let _1: int "days" @12:24-12:33
     let _2: int "z" @13:9-13:10
@@ -13132,7 +13510,7 @@ fn rt.time.civil(1) source 10 @12:18-12:23 {
     return @22:5-22:21
 }
 
-fn rt.time.put_padded(3) source 10 @29:5-29:15 {
+fn rt.time.put_padded(3) source 11 @29:5-29:15 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @29:16-29:31
     let _2: int "n" @29:33-29:39
@@ -13214,7 +13592,7 @@ fn rt.time.put_padded(3) source 10 @29:5-29:15 {
     return
 }
 
-fn rt.time.strftime(4) source 10 @51:18-51:26 {
+fn rt.time.strftime(4) source 11 @51:18-51:26 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @51:27-51:42
     let _2: int "nanos" @51:44-51:54
@@ -13401,7 +13779,7 @@ fn rt.time.strftime(4) source 10 @51:18-51:26 {
     goto bb1
 }
 
-fn rt.time.rfc3339(2) source 10 @112:18-112:25 {
+fn rt.time.rfc3339(2) source 11 @112:18-112:25 {
     let _0: ()
     let _1: ptr_mut[u8] "out" @112:26-112:41
     let _2: int "nanos" @112:43-112:53
@@ -13486,7 +13864,7 @@ fn rt.time.rfc3339(2) source 10 @112:18-112:25 {
     goto bb3
 }
 
-fn rt.value.target(3) source 11 @119:18-119:24 {
+fn rt.value.target(3) source 12 @119:18-119:24 {
     let _0: (ptr_mut[u8], int)
     let _1: rt.types.Types "ts" @119:25-119:34
     let _2: ptr_mut[u8] "p" @119:36-119:49
@@ -13594,7 +13972,7 @@ fn rt.value.target(3) source 11 @119:18-119:24 {
     goto bb9
 }
 
-fn rt.value.concrete(3) source 11 @145:18-145:26 {
+fn rt.value.concrete(3) source 12 @145:18-145:26 {
     let _0: int
     let _1: rt.types.Types "ts" @145:27-145:36
     let _2: ptr_mut[u8] "p" @145:38-145:51
@@ -13629,7 +14007,7 @@ fn rt.value.concrete(3) source 11 @145:18-145:26 {
     return @150:13-150:40
 }
 
-fn rt.value.variant(3) source 11 @158:18-158:25 {
+fn rt.value.variant(3) source 12 @158:18-158:25 {
     let _0: int
     let _1: rt.types.Types "ts" @158:26-158:35
     let _2: ptr_mut[u8] "p" @158:37-158:50
@@ -13679,7 +14057,7 @@ fn rt.value.variant(3) source 11 @158:18-158:25 {
     return @165:13-165:21
 }
 
-fn rt.value.fn_env(2) source 11 @174:5-174:11 {
+fn rt.value.fn_env(2) source 12 @174:5-174:11 {
     let _0: int
     let _1: ptr_mut[u8] "p" @174:12-174:25
     let _2: ptr[int] "h" @174:27-174:38
@@ -13702,7 +14080,7 @@ fn rt.value.fn_env(2) source 11 @174:5-174:11 {
     return @178:9-178:74
 }
 
-fn rt.value.is_text(1) pure source 11 @182:10-182:17 {
+fn rt.value.is_text(1) pure source 12 @182:10-182:17 {
     let _0: bool
     let _1: int "k" @182:18-182:24
     let _2: int
@@ -13726,7 +14104,7 @@ fn rt.value.is_text(1) pure source 11 @182:10-182:17 {
     return @183:5-183:48
 }
 
-fn rt.value.same_bytes(4) source 11 @191:18-191:28 {
+fn rt.value.same_bytes(4) source 12 @191:18-191:28 {
     let _0: bool
     let _1: ptr[u8] "a" @191:29-191:39
     let _2: int "na" @191:41-191:48
@@ -13753,7 +14131,7 @@ fn rt.value.same_bytes(4) source 11 @191:18-191:28 {
     return @195:9-195:20
 }
 
-fn rt.value.f32_equal(2) pure source 11 @202:10-202:19 {
+fn rt.value.f32_equal(2) pure source 12 @202:10-202:19 {
     let _0: bool
     let _1: int "x" @202:20-202:26
     let _2: int "y" @202:28-202:34
@@ -13787,7 +14165,7 @@ fn rt.value.f32_equal(2) pure source 11 @202:10-202:19 {
     return @207:5-207:49
 }
 
-fn rt.value.f32_nan(1) pure source 11 @210:10-210:17 {
+fn rt.value.f32_nan(1) pure source 12 @210:10-210:17 {
     let _0: bool
     let _1: int "bits" @210:18-210:27
     let _2: int
@@ -13804,7 +14182,7 @@ fn rt.value.f32_nan(1) pure source 11 @210:10-210:17 {
     return @211:5-211:71
 }
 
-fn rt.value.equal(5) source 11 @219:18-219:23 {
+fn rt.value.equal(5) source 12 @219:18-219:23 {
     let _0: bool
     let _1: rt.types.Types "ts" @219:24-219:33
     let _2: ptr_mut[u8] "a0" @219:35-219:49
@@ -14585,7 +14963,7 @@ fn rt.value.equal(5) source 11 @219:18-219:23 {
     return @327:13-331:14
 }
 
-fn rt.value.enum_equal(5) source 11 @339:5-339:15 {
+fn rt.value.enum_equal(5) source 12 @339:5-339:15 {
     let _0: bool
     let _1: rt.types.Types "ts" @339:16-339:25
     let _2: ptr_mut[u8] "a" @339:27-339:40
@@ -14705,7 +15083,7 @@ fn rt.value.enum_equal(5) source 11 @339:5-339:15 {
     return @351:13-351:25
 }
 
-fn rt.value.fields_equal(5) source 11 @359:5-359:17 {
+fn rt.value.fields_equal(5) source 12 @359:5-359:17 {
     let _0: bool
     let _1: rt.types.Types "ts" @359:18-359:27
     let _2: ptr_mut[u8] "a" @359:29-359:42
@@ -14795,7 +15173,7 @@ fn rt.value.fields_equal(5) source 11 @359:5-359:17 {
     return @376:17-376:29
 }
 
-fn rt.value.signed_order(2) pure source 11 @389:10-389:22 {
+fn rt.value.signed_order(2) pure source 12 @389:10-389:22 {
     let _0: int
     let _1: int "x" @389:23-389:29
     let _2: int "y" @389:31-389:37
@@ -14818,7 +15196,7 @@ fn rt.value.signed_order(2) pure source 11 @389:10-389:22 {
     return @393:9-393:23
 }
 
-fn rt.value.unsigned_order(2) pure source 11 @398:10-398:24 {
+fn rt.value.unsigned_order(2) pure source 12 @398:10-398:24 {
     let _0: int
     let _1: int "x" @398:25-398:31
     let _2: int "y" @398:33-398:39
@@ -14845,7 +15223,7 @@ fn rt.value.unsigned_order(2) pure source 11 @398:10-398:24 {
     return @401:5-401:40
 }
 
-fn rt.value.bytes_order(4) source 11 @408:5-408:16 {
+fn rt.value.bytes_order(4) source 12 @408:5-408:16 {
     let _0: int
     let _1: ptr[u8] "a" @408:17-408:27
     let _2: int "na" @408:29-408:36
@@ -14882,7 +15260,7 @@ fn rt.value.bytes_order(4) source 11 @408:5-408:16 {
     return @417:13-417:27
 }
 
-fn rt.value.f32_order(2) pure source 11 @423:10-423:19 {
+fn rt.value.f32_order(2) pure source 12 @423:10-423:19 {
     let _0: int
     let _1: int "x" @423:20-423:26
     let _2: int "y" @423:28-423:34
@@ -14960,7 +15338,7 @@ fn rt.value.f32_order(2) pure source 11 @423:10-423:19 {
     return @434:5-434:45
 }
 
-fn rt.value.float_order(2) pure source 11 @437:10-437:21 {
+fn rt.value.float_order(2) pure source 12 @437:10-437:21 {
     let _0: int
     let _1: f64 "x" @437:22-437:28
     let _2: f64 "y" @437:30-437:36
@@ -14990,7 +15368,7 @@ fn rt.value.float_order(2) pure source 11 @437:10-437:21 {
     return @443:9-443:21
 }
 
-fn rt.value.order(5) source 11 @455:18-455:23 {
+fn rt.value.order(5) source 12 @455:18-455:23 {
     let _0: int
     let _1: rt.types.Types "ts" @455:24-455:33
     let _2: ptr_mut[u8] "a0" @455:35-455:49
@@ -15612,7 +15990,7 @@ fn rt.value.order(5) source 11 @455:18-455:23 {
     return @533:13-539:14
 }
 
-fn rt.value.enum_order(5) source 11 @546:5-546:15 {
+fn rt.value.enum_order(5) source 12 @546:5-546:15 {
     let _0: int
     let _1: rt.types.Types "ts" @546:16-546:25
     let _2: ptr_mut[u8] "a" @546:27-546:40
@@ -15734,7 +16112,7 @@ fn rt.value.enum_order(5) source 11 @546:5-546:15 {
     return @562:13-562:21
 }
 
-fn rt.value.fields_order(5) source 11 @570:5-570:17 {
+fn rt.value.fields_order(5) source 12 @570:5-570:17 {
     let _0: int
     let _1: rt.types.Types "ts" @570:18-570:27
     let _2: ptr_mut[u8] "a" @570:29-570:42
@@ -15826,7 +16204,7 @@ fn rt.value.fields_order(5) source 11 @570:5-570:17 {
     return @588:17-588:25
 }
 
-fn rt.value.hash_bytes(3) source 11 @599:5-599:15 {
+fn rt.value.hash_bytes(3) source 12 @599:5-599:15 {
     let _0: int
     let _1: int "state" @599:16-599:26
     let _2: ptr[u8] "p" @599:28-599:38
@@ -15868,7 +16246,7 @@ fn rt.value.hash_bytes(3) source 11 @599:5-599:15 {
     goto bb1
 }
 
-fn rt.value.hash(4) source 11 @621:18-621:22 {
+fn rt.value.hash(4) source 12 @621:18-621:22 {
     let _0: int
     let _1: rt.types.Types "ts" @621:23-621:32
     let _2: int "state" @621:34-621:44
@@ -16316,7 +16694,7 @@ fn rt.value.hash(4) source 11 @621:18-621:22 {
     return @690:17-690:25
 }
 
-fn rt.value.hash_fields(4) source 11 @698:5-698:16 {
+fn rt.value.hash_fields(4) source 12 @698:5-698:16 {
     let _0: int
     let _1: rt.types.Types "ts" @698:17-698:26
     let _2: int "state" @698:28-698:38
@@ -16363,7 +16741,7 @@ fn rt.value.hash_fields(4) source 11 @698:5-698:16 {
     goto bb1
 }
 
-fn rt.value.move_bytes(3) source 11 @719:5-719:15 {
+fn rt.value.move_bytes(3) source 12 @719:5-719:15 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @719:16-719:31
     let _2: ptr_mut[u8] "src" @719:33-719:48
@@ -16397,7 +16775,7 @@ fn rt.value.move_bytes(3) source 11 @719:5-719:15 {
     goto bb1
 }
 
-fn rt.value.copy_parts(4) source 11 @734:5-734:15 {
+fn rt.value.copy_parts(4) source 12 @734:5-734:15 {
     let _0: ()
     let _1: rt.types.Types "ts" @734:16-734:25
     let _2: ptr_mut[u8] "dst" @734:27-734:42
@@ -16447,7 +16825,7 @@ fn rt.value.copy_parts(4) source 11 @734:5-734:15 {
     goto bb1
 }
 
-fn rt.value.copy_fields(4) source 11 @751:5-751:16 {
+fn rt.value.copy_fields(4) source 12 @751:5-751:16 {
     let _0: ()
     let _1: rt.types.Types "ts" @751:17-751:26
     let _2: ptr_mut[u8] "dst" @751:28-751:43
@@ -16493,7 +16871,7 @@ fn rt.value.copy_fields(4) source 11 @751:5-751:16 {
     goto bb1
 }
 
-fn rt.value.new_buffer(6) source 11 @772:5-772:15 {
+fn rt.value.new_buffer(6) source 12 @772:5-772:15 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @772:16-772:31
     let _2: ptr[u8] "src" @772:33-772:45
@@ -16547,7 +16925,7 @@ fn rt.value.new_buffer(6) source 11 @772:5-772:15 {
     goto bb3
 }
 
-fn rt.value.copy_list(4) source 11 @795:5-795:14 {
+fn rt.value.copy_list(4) source 12 @795:5-795:14 {
     let _0: ()
     let _1: rt.types.Types "ts" @795:15-795:24
     let _2: ptr_mut[u8] "dst" @795:26-795:41
@@ -16713,7 +17091,7 @@ fn rt.value.copy_list(4) source 11 @795:5-795:14 {
     goto bb21
 }
 
-fn rt.value.copy(4) source 11 @833:18-833:22 {
+fn rt.value.copy(4) source 12 @833:18-833:22 {
     let _0: ()
     let _1: rt.types.Types "ts" @833:23-833:32
     let _2: ptr_mut[u8] "dst" @833:34-833:49
@@ -17297,7 +17675,7 @@ fn rt.value.copy(4) source 11 @833:18-833:22 {
     goto bb14
 }
 
-fn rt.value.retain(3) source 11 @941:18-941:24 {
+fn rt.value.retain(3) source 12 @941:18-941:24 {
     let _0: ()
     let _1: rt.types.Types "ts" @941:25-941:34
     let _2: ptr_mut[u8] "p" @941:36-941:49
@@ -17544,7 +17922,7 @@ fn rt.value.retain(3) source 11 @941:18-941:24 {
     goto bb3
 }
 
-fn rt.value.after_part(2) source 11 @988:18-988:28 {
+fn rt.value.after_part(2) source 12 @988:18-988:28 {
     let _0: int
     let _1: int "before" @988:29-988:40
     let _2: int "now" @988:42-988:50
@@ -17573,7 +17951,7 @@ fn rt.value.after_part(2) source 11 @988:18-988:28 {
     return @992:9-992:22
 }
 
-fn rt.value.run_glue(2) source 11 @1003:5-1003:13 {
+fn rt.value.run_glue(2) source 12 @1003:5-1003:13 {
     let _0: int
     let _1: int "glue" @1003:14-1003:23
     let _2: ptr_mut[u8] "p" @1003:25-1003:38
@@ -17593,7 +17971,7 @@ fn rt.value.run_glue(2) source 11 @1003:5-1003:13 {
     return @1005:9-1005:18
 }
 
-fn rt.value.drop_parts(4) source 11 @1014:5-1014:15 {
+fn rt.value.drop_parts(4) source 12 @1014:5-1014:15 {
     let _0: int
     let _1: rt.types.Types "ts" @1014:16-1014:25
     let _2: ptr_mut[u8] "p" @1014:27-1014:40
@@ -17661,7 +18039,7 @@ fn rt.value.drop_parts(4) source 11 @1014:5-1014:15 {
     goto bb4
 }
 
-fn rt.value.drop_fields(5) source 11 @1037:5-1037:16 {
+fn rt.value.drop_fields(5) source 12 @1037:5-1037:16 {
     let _0: int
     let _1: rt.types.Types "ts" @1037:17-1037:26
     let _2: ptr_mut[u8] "p" @1037:28-1037:41
@@ -17741,7 +18119,7 @@ fn rt.value.drop_fields(5) source 11 @1037:5-1037:16 {
     goto bb4
 }
 
-fn rt.value.free_buffer(1) source 11 @1059:5-1059:16 {
+fn rt.value.free_buffer(1) source 12 @1059:5-1059:16 {
     let _0: ()
     let _1: ptr_mut[u8] "p" @1059:17-1059:30
     let _2: ptr_mut[int] "w" @1064:13-1064:14
@@ -17777,7 +18155,7 @@ fn rt.value.free_buffer(1) source 11 @1059:5-1059:16 {
     goto bb1
 }
 
-fn rt.value.drop_rest(4) source 11 @1078:18-1078:27 {
+fn rt.value.drop_rest(4) source 12 @1078:18-1078:27 {
     let _0: int
     let _1: rt.types.Types "ts" @1078:28-1078:37
     let _2: ptr_mut[u8] "p" @1078:39-1078:52
@@ -17826,7 +18204,7 @@ fn rt.value.drop_rest(4) source 11 @1078:18-1078:27 {
     return @1089:17-1089:62
 }
 
-fn rt.value.drop(4) source 11 @1102:18-1102:22 {
+fn rt.value.drop(4) source 12 @1102:18-1102:22 {
     let _0: int
     let _1: rt.types.Types "ts" @1102:23-1102:32
     let _2: ptr_mut[u8] "p" @1102:34-1102:47
@@ -18495,7 +18873,7 @@ fn rt.value.drop(4) source 11 @1102:18-1102:22 {
     return @1224:13-1224:54
 }
 
-fn rt.dispatch.Call.word(2) source 1 @163:9-163:13 {
+fn rt.dispatch.Call.word(2) source 2 @163:9-163:13 {
     let _0: int
     let _1: rt.dispatch.Call "self" @163:9-163:13
     let _2: int "k" @163:20-163:26
@@ -18590,7 +18968,7 @@ fn rt.dispatch.Call.word(2) source 1 @163:9-163:13 {
     return @177:13-177:34
 }
 
-fn rt.dispatch.Call.ret_ty(1) source 1 @181:9-181:15 {
+fn rt.dispatch.Call.ret_ty(1) source 2 @181:9-181:15 {
     let _0: int
     let _1: rt.dispatch.Call "self" @181:9-181:15
   bb0:
@@ -18598,7 +18976,7 @@ fn rt.dispatch.Call.ret_ty(1) source 1 @181:9-181:15 {
     return @182:9-182:28
 }
 
-fn rt.dispatch.Call.ty(2) source 1 @185:9-185:11 {
+fn rt.dispatch.Call.ty(2) source 2 @185:9-185:11 {
     let _0: int
     let _1: rt.dispatch.Call "self" @185:9-185:11
     let _2: int "i" @185:18-185:24
@@ -18609,7 +18987,7 @@ fn rt.dispatch.Call.ty(2) source 1 @185:9-185:11 {
     return @186:9-186:32
 }
 
-fn rt.dispatch.Call.arg(2) source 1 @192:9-192:12 {
+fn rt.dispatch.Call.arg(2) source 2 @192:9-192:12 {
     let _0: ptr_mut[u8]
     let _1: rt.dispatch.Call "self" @192:9-192:12
     let _2: int "i" @192:19-192:25
@@ -18624,7 +19002,7 @@ fn rt.dispatch.Call.arg(2) source 1 @192:9-192:12 {
     return @195:9-195:76
 }
 
-fn rt.dispatch.Call.place(2) source 1 @198:9-198:14 {
+fn rt.dispatch.Call.place(2) source 2 @198:9-198:14 {
     let _0: (ptr_mut[u8], int)
     let _1: rt.dispatch.Call "self" @198:9-198:14
     let _2: int "i" @198:21-198:27
@@ -18637,7 +19015,7 @@ fn rt.dispatch.Call.place(2) source 1 @198:9-198:14 {
     return @199:9-199:62
 }
 
-fn rt.dispatch.Call.first(2) source 1 @203:9-203:14 {
+fn rt.dispatch.Call.first(2) source 2 @203:9-203:14 {
     let _0: int
     let _1: rt.dispatch.Call "self" @203:9-203:14
     let _2: int "i" @203:21-203:27
@@ -18652,7 +19030,7 @@ fn rt.dispatch.Call.first(2) source 1 @203:9-203:14 {
     return @206:9-206:43
 }
 
-fn rt.dispatch.Call.table(2) source 1 @209:9-209:14 {
+fn rt.dispatch.Call.table(2) source 2 @209:9-209:14 {
     let _0: ptr_mut[u8]
     let _1: rt.dispatch.Call "self" @209:9-209:14
     let _2: int "i" @209:21-209:27
@@ -18669,7 +19047,7 @@ fn rt.dispatch.Call.table(2) source 1 @209:9-209:14 {
     return @213:9-213:58
 }
 
-fn rt.dispatch.Call.set(3) source 1 @219:9-219:12 {
+fn rt.dispatch.Call.set(3) source 2 @219:9-219:12 {
     let _0: ()
     let _1: rt.dispatch.Call "self" @219:9-219:12
     let _2: int "k" @219:19-219:25
@@ -18685,7 +19063,7 @@ fn rt.dispatch.Call.set(3) source 1 @219:9-219:12 {
     return
 }
 
-fn rt.dispatch.Call.none(1) source 1 @224:9-224:13 {
+fn rt.dispatch.Call.none(1) source 2 @224:9-224:13 {
     let _0: ()
     let _1: rt.dispatch.Call "self" @224:9-224:13
     let _2: ()
@@ -18695,7 +19073,7 @@ fn rt.dispatch.Call.none(1) source 1 @224:9-224:13 {
     return
 }
 
-fn rt.dispatch.Call.some(2) source 1 @228:9-228:13 {
+fn rt.dispatch.Call.some(2) source 2 @228:9-228:13 {
     let _0: ()
     let _1: rt.dispatch.Call "self" @228:9-228:13
     let _2: int "w" @228:20-228:26
@@ -18708,7 +19086,7 @@ fn rt.dispatch.Call.some(2) source 1 @228:9-228:13 {
     return
 }
 
-fn rt.dispatch.Call.set_bool(2) source 1 @233:9-233:17 {
+fn rt.dispatch.Call.set_bool(2) source 2 @233:9-233:17 {
     let _0: ()
     let _1: rt.dispatch.Call "self" @233:9-233:17
     let _2: bool "b" @233:24-233:31
@@ -18728,7 +19106,7 @@ fn rt.dispatch.Call.set_bool(2) source 1 @233:9-233:17 {
     return
 }
 
-fn rt.types.Types.at(2) pure source 12 @142:27-142:29 {
+fn rt.types.Types.at(2) pure source 13 @142:27-142:29 {
     let _0: int
     let _1: rt.types.Types "self" @142:27-142:29
     let _2: int "k" @142:36-142:42
@@ -18739,7 +19117,7 @@ fn rt.types.Types.at(2) pure source 12 @142:27-142:29 {
     return @145:9-145:50
 }
 
-fn rt.types.Types.header(2) pure source 12 @148:27-148:33 {
+fn rt.types.Types.header(2) pure source 13 @148:27-148:33 {
     let _0: rt.types.Header
     let _1: rt.types.Types "self" @148:27-148:33
     let _2: int "t" @148:40-148:46
@@ -18796,7 +19174,7 @@ fn rt.types.Types.header(2) pure source 12 @148:27-148:33 {
     return @153:13-165:14
 }
 
-fn rt.types.Types.kind(2) pure source 12 @168:27-168:31 {
+fn rt.types.Types.kind(2) pure source 13 @168:27-168:31 {
     let _0: int
     let _1: rt.types.Types "self" @168:27-168:31
     let _2: int "t" @168:38-168:44
@@ -18809,7 +19187,7 @@ fn rt.types.Types.kind(2) pure source 12 @168:27-168:31 {
     return @169:9-169:34
 }
 
-fn rt.types.Types.a(2) pure source 12 @173:27-173:28 {
+fn rt.types.Types.a(2) pure source 13 @173:27-173:28 {
     let _0: int
     let _1: rt.types.Types "self" @173:27-173:28
     let _2: int "t" @173:35-173:41
@@ -18824,7 +19202,7 @@ fn rt.types.Types.a(2) pure source 12 @173:27-173:28 {
     return @174:9-174:38
 }
 
-fn rt.types.Types.size(2) pure source 12 @177:27-177:31 {
+fn rt.types.Types.size(2) pure source 13 @177:27-177:31 {
     let _0: int
     let _1: rt.types.Types "self" @177:27-177:31
     let _2: int "t" @177:38-177:44
@@ -18839,7 +19217,7 @@ fn rt.types.Types.size(2) pure source 12 @177:27-177:31 {
     return @178:9-178:38
 }
 
-fn rt.types.Types.needs_drop(2) pure source 12 @181:27-181:37 {
+fn rt.types.Types.needs_drop(2) pure source 13 @181:27-181:37 {
     let _0: bool
     let _1: rt.types.Types "self" @181:27-181:37
     let _2: int "t" @181:44-181:50
@@ -18860,1449 +19238,1463 @@ fn rt.types.Types.needs_drop(2) pure source 12 @181:27-181:37 {
     return @182:9-182:58
 }
 
-fn rt.dispatch.LIST_NEW(0) value pure source 1 {
+fn rt.dispatch.LIST_NEW(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 85 @44:36-44:38
     return @44:36-44:38
 }
 
-fn rt.dispatch.LIST_WITH_CAPACITY(0) value pure source 1 {
+fn rt.dispatch.LIST_WITH_CAPACITY(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 86 @46:46-46:48
     return @46:46-46:48
 }
 
-fn rt.dispatch.LIST_PUSH(0) value pure source 1 {
+fn rt.dispatch.LIST_PUSH(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 87 @48:37-48:39
     return @48:37-48:39
 }
 
-fn rt.dispatch.LIST_POP(0) value pure source 1 {
+fn rt.dispatch.LIST_POP(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 88 @50:36-50:38
     return @50:36-50:38
 }
 
-fn rt.dispatch.LIST_LAST(0) value pure source 1 {
+fn rt.dispatch.LIST_LAST(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 89 @52:37-52:39
     return @52:37-52:39
 }
 
-fn rt.dispatch.LIST_FIRST(0) value pure source 1 {
+fn rt.dispatch.LIST_FIRST(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 90 @54:38-54:40
     return @54:38-54:40
 }
 
-fn rt.dispatch.LIST_GET(0) value pure source 1 {
+fn rt.dispatch.LIST_GET(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 91 @56:36-56:38
     return @56:36-56:38
 }
 
-fn rt.dispatch.LIST_IS_EMPTY(0) value pure source 1 {
+fn rt.dispatch.LIST_IS_EMPTY(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 92 @58:41-58:43
     return @58:41-58:43
 }
 
-fn rt.dispatch.LIST_INSERT(0) value pure source 1 {
+fn rt.dispatch.LIST_INSERT(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 93 @60:39-60:41
     return @60:39-60:41
 }
 
-fn rt.dispatch.LIST_REMOVE(0) value pure source 1 {
+fn rt.dispatch.LIST_REMOVE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 94 @62:39-62:41
     return @62:39-62:41
 }
 
-fn rt.dispatch.LIST_EXTEND(0) value pure source 1 {
+fn rt.dispatch.LIST_EXTEND(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 95 @64:39-64:41
     return @64:39-64:41
 }
 
-fn rt.dispatch.LIST_REVERSE(0) value pure source 1 {
+fn rt.dispatch.LIST_REVERSE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 96 @66:40-66:42
     return @66:40-66:42
 }
 
-fn rt.dispatch.LIST_SWAP(0) value pure source 1 {
+fn rt.dispatch.LIST_SWAP(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 97 @68:37-68:39
     return @68:37-68:39
 }
 
-fn rt.dispatch.LIST_CLEAR(0) value pure source 1 {
+fn rt.dispatch.LIST_CLEAR(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 98 @70:38-70:40
     return @70:38-70:40
 }
 
-fn rt.dispatch.LIST_SLICE(0) value pure source 1 {
+fn rt.dispatch.LIST_SLICE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 99 @72:38-72:40
     return @72:38-72:40
 }
 
-fn rt.dispatch.LIST_SLICE_MIDDLE(0) value pure source 1 {
+fn rt.dispatch.LIST_SLICE_MIDDLE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 100 @74:45-74:48
     return @74:45-74:48
 }
 
-fn rt.dispatch.LIST_CONTAINS(0) value pure source 1 {
+fn rt.dispatch.LIST_CONTAINS(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 101 @76:41-76:44
     return @76:41-76:44
 }
 
-fn rt.dispatch.LIST_ITER(0) value pure source 1 {
+fn rt.dispatch.LIST_ITER(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 102 @78:37-78:40
     return @78:37-78:40
 }
 
-fn rt.dispatch.LIST_JOIN(0) value pure source 1 {
+fn rt.dispatch.LIST_JOIN(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 103 @80:37-80:40
     return @80:37-80:40
 }
 
-fn rt.dispatch.LIST_SORT(0) value pure source 1 {
+fn rt.dispatch.LIST_SORT(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 104 @82:37-82:40
     return @82:37-82:40
 }
 
-fn rt.dispatch.DICT_NEW(0) value pure source 1 {
+fn rt.dispatch.DICT_NEW(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 149 @84:36-84:39
     return @84:36-84:39
 }
 
-fn rt.dispatch.DICT_GET(0) value pure source 1 {
+fn rt.dispatch.DICT_GET(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 150 @86:36-86:39
     return @86:36-86:39
 }
 
-fn rt.dispatch.DICT_CONTAINS(0) value pure source 1 {
+fn rt.dispatch.DICT_CONTAINS(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 151 @88:41-88:44
     return @88:41-88:44
 }
 
-fn rt.dispatch.DICT_IS_EMPTY(0) value pure source 1 {
+fn rt.dispatch.DICT_IS_EMPTY(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 152 @90:41-90:44
     return @90:41-90:44
 }
 
-fn rt.dispatch.DICT_INSERT(0) value pure source 1 {
+fn rt.dispatch.DICT_INSERT(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 153 @92:39-92:42
     return @92:39-92:42
 }
 
-fn rt.dispatch.DICT_REMOVE(0) value pure source 1 {
+fn rt.dispatch.DICT_REMOVE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 154 @94:39-94:42
     return @94:39-94:42
 }
 
-fn rt.dispatch.DICT_ENTRY(0) value pure source 1 {
+fn rt.dispatch.DICT_ENTRY(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 155 @96:38-96:41
     return @96:38-96:41
 }
 
-fn rt.dispatch.DICT_KEYS(0) value pure source 1 {
+fn rt.dispatch.DICT_KEYS(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 156 @98:37-98:40
     return @98:37-98:40
 }
 
-fn rt.dispatch.DICT_VALUES(0) value pure source 1 {
+fn rt.dispatch.DICT_VALUES(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 157 @100:39-100:42
     return @100:39-100:42
 }
 
-fn rt.dispatch.DICT_ITEMS(0) value pure source 1 {
+fn rt.dispatch.DICT_ITEMS(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 158 @102:38-102:41
     return @102:38-102:41
 }
 
-fn rt.dispatch.ENTRY_OR_INSERT(0) value pure source 1 {
+fn rt.dispatch.ENTRY_OR_INSERT(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 159 @104:43-104:46
     return @104:43-104:46
 }
 
-fn rt.dispatch.SET_NEW(0) value pure source 1 {
+fn rt.dispatch.SET_NEW(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 160 @106:35-106:38
     return @106:35-106:38
 }
 
-fn rt.dispatch.SET_ADD(0) value pure source 1 {
+fn rt.dispatch.SET_ADD(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 161 @108:35-108:38
     return @108:35-108:38
 }
 
-fn rt.dispatch.SET_REMOVE(0) value pure source 1 {
+fn rt.dispatch.SET_REMOVE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 162 @110:38-110:41
     return @110:38-110:41
 }
 
-fn rt.dispatch.SET_CONTAINS(0) value pure source 1 {
+fn rt.dispatch.SET_CONTAINS(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 163 @112:40-112:43
     return @112:40-112:43
 }
 
-fn rt.dispatch.SET_IS_EMPTY(0) value pure source 1 {
+fn rt.dispatch.SET_IS_EMPTY(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 164 @114:40-114:43
     return @114:40-114:43
 }
 
-fn rt.dispatch.SET_ITER(0) value pure source 1 {
+fn rt.dispatch.SET_ITER(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 165 @116:36-116:39
     return @116:36-116:39
 }
 
-fn rt.dispatch.LIST_AS_SLICE(0) value pure source 1 {
+fn rt.dispatch.LIST_AS_SLICE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 175 @118:41-118:44
     return @118:41-118:44
 }
 
-fn rt.dispatch.SLICE_TO_LIST(0) value pure source 1 {
+fn rt.dispatch.SLICE_TO_LIST(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 176 @120:41-120:44
     return @120:41-120:44
 }
 
-fn rt.dispatch.SLICE_AT(0) value pure source 1 {
+fn rt.dispatch.SLICE_AT(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 177 @122:36-122:39
     return @122:36-122:39
 }
 
-fn rt.dispatch.SLICE_GET(0) value pure source 1 {
+fn rt.dispatch.SLICE_GET(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 178 @124:37-124:40
     return @124:37-124:40
 }
 
-fn rt.dispatch.SLICE_IS_EMPTY(0) value pure source 1 {
+fn rt.dispatch.SLICE_IS_EMPTY(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 179 @126:42-126:45
     return @126:42-126:45
 }
 
-fn rt.dispatch.SLICE_SLICE(0) value pure source 1 {
+fn rt.dispatch.SLICE_SLICE(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 180 @128:39-128:42
     return @128:39-128:42
 }
 
-fn rt.dispatch.SLICE_CUT(0) value pure source 1 {
+fn rt.dispatch.SLICE_CUT(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 181 @130:37-130:40
     return @130:37-130:40
 }
 
-fn rt.dispatch.SLICE_ITER(0) value pure source 1 {
+fn rt.dispatch.SLICE_ITER(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 182 @132:38-132:41
     return @132:38-132:41
 }
 
-fn rt.dispatch.OK(0) value pure source 1 {
+fn rt.dispatch.OK(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 0 @135:17-135:18
     return @135:17-135:18
 }
 
-fn rt.dispatch.OPEN(0) value pure source 1 {
+fn rt.dispatch.OPEN(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = sub const -9223372036854775807, const 1 @138:19-138:43
     return @138:19-138:43
 }
 
-fn rt.dispatch.MOST_ROOM(0) value pure source 1 {
+fn rt.dispatch.MOST_ROOM(0) value pure source 2 {
     let _0: int
   bb0:
     _0 = const 1048576 @141:24-141:31
     return @141:24-141:31
 }
 
-fn rt.floats.SHORTEST(0) value pure source 2 {
+fn rt.dispatch.SLOT_WRITE(0) value pure source 2 {
+    let _0: int
+  bb0:
+    _0 = const 1 @709:25-709:26
+    return @709:25-709:26
+}
+
+fn rt.dispatch.SLOT_DROP(0) value pure source 2 {
+    let _0: int
+  bb0:
+    _0 = const 2 @710:24-710:25
+    return @710:24-710:25
+}
+
+fn rt.floats.SHORTEST(0) value pure source 3 {
     let _0: int
   bb0:
     _0 = const 0 @32:23-32:24
     return @32:23-32:24
 }
 
-fn rt.floats.SHORTEST32(0) value pure source 2 {
+fn rt.floats.SHORTEST32(0) value pure source 3 {
     let _0: int
   bb0:
     _0 = const 1 @33:25-33:26
     return @33:25-33:26
 }
 
-fn rt.floats.FIXED(0) value pure source 2 {
+fn rt.floats.FIXED(0) value pure source 3 {
     let _0: int
   bb0:
     _0 = const 2 @34:20-34:21
     return @34:20-34:21
 }
 
-fn rt.floats.BIG(0) value pure source 2 {
+fn rt.floats.BIG(0) value pure source 3 {
     let _0: int
   bb0:
     _0 = const 41 @37:18-37:20
     return @37:18-37:20
 }
 
-fn rt.floats.MASK(0) value pure source 2 {
+fn rt.floats.MASK(0) value pure source 3 {
     let _0: int
   bb0:
     _0 = const 4294967295 @38:19-38:29
     return @38:19-38:29
 }
 
-fn rt.floats.LIMIT(0) value pure source 2 {
+fn rt.floats.LIMIT(0) value pure source 3 {
     let _0: int
   bb0:
     _0 = const 200000000000000000 @42:20-42:38
     return @42:20-42:38
 }
 
-fn rt.iter.KIND(0) value pure source 3 {
+fn rt.iter.KIND(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @37:19-37:20
     return @37:19-37:20
 }
 
-fn rt.iter.A(0) value pure source 3 {
+fn rt.iter.A(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @38:16-38:17
     return @38:16-38:17
 }
 
-fn rt.iter.B(0) value pure source 3 {
+fn rt.iter.B(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 2 @39:16-39:17
     return @39:16-39:17
 }
 
-fn rt.iter.C(0) value pure source 3 {
+fn rt.iter.C(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 3 @40:16-40:17
     return @40:16-40:17
 }
 
-fn rt.iter.STATE(0) value pure source 3 {
+fn rt.iter.STATE(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 4 @41:20-41:21
     return @41:20-41:21
 }
 
-fn rt.iter.SIZE(0) value pure source 3 {
+fn rt.iter.SIZE(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 5 @42:19-42:20
     return @42:19-42:20
 }
 
-fn rt.iter.P(0) value pure source 3 {
+fn rt.iter.P(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 6 @43:16-43:17
     return @43:16-43:17
 }
 
-fn rt.iter.WORDS(0) value pure source 3 {
+fn rt.iter.WORDS(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 11 @44:33-44:35
     return @44:33-44:35
 }
 
-fn rt.iter.OTHER(0) value pure source 3 {
+fn rt.iter.OTHER(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @48:20-48:21
     return @48:20-48:21
 }
 
-fn rt.iter.RANGE_KIND(0) value pure source 3 {
+fn rt.iter.RANGE_KIND(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @49:25-49:26
     return @49:25-49:26
 }
 
-fn rt.iter.LIST_KIND(0) value pure source 3 {
+fn rt.iter.LIST_KIND(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 2 @50:24-50:25
     return @50:24-50:25
 }
 
-fn rt.iter.S_RANGE(0) value pure source 3 {
+fn rt.iter.S_RANGE(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @65:35-65:36
     return @65:35-65:36
 }
 
-fn rt.iter.S_LIST_REF(0) value pure source 3 {
+fn rt.iter.S_LIST_REF(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @66:38-66:39
     return @66:38-66:39
 }
 
-fn rt.iter.S_ITEMS(0) value pure source 3 {
+fn rt.iter.S_ITEMS(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 2 @67:35-67:36
     return @67:35-67:36
 }
 
-fn rt.iter.S_CHARS(0) value pure source 3 {
+fn rt.iter.S_CHARS(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 3 @68:35-68:36
     return @68:35-68:36
 }
 
-fn rt.iter.S_BYTES(0) value pure source 3 {
+fn rt.iter.S_BYTES(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 4 @69:35-69:36
     return @69:35-69:36
 }
 
-fn rt.iter.S_OWNED_BYTES(0) value pure source 3 {
+fn rt.iter.S_OWNED_BYTES(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 5 @70:41-70:42
     return @70:41-70:42
 }
 
-fn rt.iter.S_ENUMERATE(0) value pure source 3 {
+fn rt.iter.S_ENUMERATE(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 6 @71:39-71:40
     return @71:39-71:40
 }
 
-fn rt.iter.S_ZIP(0) value pure source 3 {
+fn rt.iter.S_ZIP(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 7 @72:33-72:34
     return @72:33-72:34
 }
 
-fn rt.iter.S_DECAY(0) value pure source 3 {
+fn rt.iter.S_DECAY(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 8 @73:35-73:36
     return @73:35-73:36
 }
 
-fn rt.iter.S_TABLE_REF(0) value pure source 3 {
+fn rt.iter.S_TABLE_REF(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 9 @74:39-74:40
     return @74:39-74:40
 }
 
-fn rt.iter.S_TABLE_OWN(0) value pure source 3 {
+fn rt.iter.S_TABLE_OWN(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 10 @75:39-75:41
     return @75:39-75:41
 }
 
-fn rt.iter.S_GEN(0) value pure source 3 {
+fn rt.iter.S_GEN(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 11 @76:33-76:35
     return @76:33-76:35
 }
 
-fn rt.iter.S_RECV(0) value pure source 3 {
+fn rt.iter.S_RECV(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 12 @77:34-77:36
     return @77:34-77:36
 }
 
-fn rt.iter.S_DONE(0) value pure source 3 {
+fn rt.iter.S_DONE(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 13 @78:34-78:36
     return @78:34-78:36
 }
 
-fn rt.iter.GOT(0) value pure source 3 {
+fn rt.iter.GOT(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @83:18-83:19
     return @83:18-83:19
 }
 
-fn rt.iter.ENDED(0) value pure source 3 {
+fn rt.iter.ENDED(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @84:20-84:21
     return @84:20-84:21
 }
 
-fn rt.iter.RAISED(0) value pure source 3 {
+fn rt.iter.RAISED(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 2 @85:21-85:22
     return @85:21-85:22
 }
 
-fn rt.iter.KEYS(0) value pure source 3 {
+fn rt.iter.KEYS(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @88:19-88:20
     return @88:19-88:20
 }
 
-fn rt.iter.VALUES(0) value pure source 3 {
+fn rt.iter.VALUES(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @89:21-89:22
     return @89:21-89:22
 }
 
-fn rt.list.UNORDERED(0) value pure source 4 {
+fn rt.list.UNORDERED(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 2 @25:24-25:25
     return @25:24-25:25
 }
 
-fn rt.show.W_UNIT(0) value pure source 7 {
+fn rt.show.W_UNIT(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 10536 @85:21-85:27
     return @85:21-85:27
 }
 
-fn rt.show.W_TRUE(0) value pure source 7 {
+fn rt.show.W_TRUE(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 1702195796 @86:21-86:31
     return @86:21-86:31
 }
 
-fn rt.show.W_FALSE(0) value pure source 7 {
+fn rt.show.W_FALSE(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 435728179526 @87:22-87:34
     return @87:22-87:34
 }
 
-fn rt.show.W_BOX(0) value pure source 7 {
+fn rt.show.W_BOX(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 7311716462412459842 @88:20-88:38
     return @88:20-88:38
 }
 
-fn rt.show.W_BOXED(0) value pure source 7 {
+fn rt.show.W_BOXED(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 15716 @89:22-89:28
     return @89:22-89:28
 }
 
-fn rt.show.W_COMMA(0) value pure source 7 {
+fn rt.show.W_COMMA(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 8236 @90:22-90:28
     return @90:22-90:28
 }
 
-fn rt.show.W_COLON(0) value pure source 7 {
+fn rt.show.W_COLON(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 8250 @91:22-91:28
     return @91:22-91:28
 }
 
-fn rt.show.W_SOME(0) value pure source 7 {
+fn rt.show.W_SOME(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 173500362579 @92:21-92:33
     return @92:21-92:33
 }
 
-fn rt.show.W_NONE(0) value pure source 7 {
+fn rt.show.W_NONE(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 1701736270 @93:21-93:31
     return @93:21-93:31
 }
 
-fn rt.show.W_OK(0) value pure source 7 {
+fn rt.show.W_OK(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 2648911 @94:19-94:27
     return @94:19-94:27
 }
 
-fn rt.show.W_ERR(0) value pure source 7 {
+fn rt.show.W_ERR(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 678588997 @95:20-95:30
     return @95:20-95:30
 }
 
-fn rt.show.W_EMPTY_SET(0) value pure source 7 {
+fn rt.show.W_EMPTY_SET(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 176772375923 @96:26-96:38
     return @96:26-96:38
 }
 
-fn rt.show.W_ENTRY(0) value pure source 7 {
+fn rt.show.W_ENTRY(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 17584981042685244 @97:22-97:38
     return @97:22-97:38
 }
 
-fn rt.show.W_PTR(0) value pure source 7 {
+fn rt.show.W_PTR(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 7500912 @98:20-98:28
     return @98:20-98:28
 }
 
-fn rt.show.W_SCOPE(0) value pure source 7 {
+fn rt.show.W_SCOPE(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 17562982135591740 @99:22-99:38
     return @99:22-99:38
 }
 
-fn rt.show.W_CANCEL(0) value pure source 7 {
+fn rt.show.W_CANCEL(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 7812730931309011772 @100:23-100:41
     return @100:23-100:41
 }
 
-fn rt.show.W_CANCEL_END(0) value pure source 7 {
+fn rt.show.W_CANCEL_END(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 68644036506721 @101:27-101:41
     return @101:27-101:41
 }
 
-fn rt.show.W_SENDER(0) value pure source 7 {
+fn rt.show.W_SENDER(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 4499770459719824188 @102:23-102:41
     return @102:23-102:41
 }
 
-fn rt.show.W_RECEIVER(0) value pure source 7 {
+fn rt.show.W_RECEIVER(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 7311146929262785084 @103:25-103:43
     return @103:25-103:43
 }
 
-fn rt.show.W_RECEIVER_END(0) value pure source 7 {
+fn rt.show.W_RECEIVER_END(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 15986 @104:29-104:35
     return @104:29-104:35
 }
 
-fn rt.show.W_TIMER(0) value pure source 7 {
+fn rt.show.W_TIMER(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 17577228508951612 @105:22-105:38
     return @105:22-105:38
 }
 
-fn rt.show.W_MUTEX(0) value pure source 7 {
+fn rt.show.W_MUTEX(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 44497563317581 @106:22-106:36
     return @106:22-106:36
 }
 
-fn rt.show.W_LOCKED(0) value pure source 7 {
+fn rt.show.W_LOCKED(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 4495829839926750268 @107:23-107:41
     return @107:23-107:41
 }
 
-fn rt.show.W_RW_LOCK(0) value pure source 7 {
+fn rt.show.W_RW_LOCK(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 11377073881642834 @108:24-108:40
     return @108:24-108:40
 }
 
-fn rt.show.W_DROPPED(0) value pure source 7 {
+fn rt.show.W_DROPPED(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 7234312004648985660 @109:24-109:42
     return @109:24-109:42
 }
 
-fn rt.show.W_WEAK(0) value pure source 7 {
+fn rt.show.W_WEAK(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 45541172270888 @110:21-110:35
     return @110:21-110:35
 }
 
-fn rt.show.W_CELL(0) value pure source 7 {
+fn rt.show.W_CELL(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 173617734979 @111:21-111:33
     return @111:21-111:33
 }
 
-fn rt.show.W_FN(0) value pure source 7 {
+fn rt.show.W_FN(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 1047422524 @112:19-112:29
     return @112:19-112:29
 }
 
-fn rt.show.W_ITER(0) value pure source 7 {
+fn rt.show.W_ITER(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 68661049321788 @113:21-113:35
     return @113:21-113:35
 }
 
-fn rt.show.MUTEX_HEADER(0) value pure source 7 {
+fn rt.show.MUTEX_HEADER(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 32 @117:27-117:29
     return @117:27-117:29
 }
 
-fn rt.show.SHORTEST(0) value pure source 7 {
+fn rt.show.SHORTEST(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 0 @121:23-121:24
     return @121:23-121:24
 }
 
-fn rt.show.SHORTEST32(0) value pure source 7 {
+fn rt.show.SHORTEST32(0) value pure source 8 {
     let _0: int
   bb0:
     _0 = const 1 @122:25-122:26
     return @122:25-122:26
 }
 
-fn rt.table.KEY(0) value pure source 8 {
+fn rt.table.KEY(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 0 @34:18-34:19
     return @34:18-34:19
 }
 
-fn rt.table.VALUE(0) value pure source 8 {
+fn rt.table.VALUE(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 1 @35:20-35:21
     return @35:20-35:21
 }
 
-fn rt.table.KEY_SIZE(0) value pure source 8 {
+fn rt.table.KEY_SIZE(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 2 @36:23-36:24
     return @36:23-36:24
 }
 
-fn rt.table.VALUE_SIZE(0) value pure source 8 {
+fn rt.table.VALUE_SIZE(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 3 @37:25-37:26
     return @37:25-37:26
 }
 
-fn rt.table.ENTRIES(0) value pure source 8 {
+fn rt.table.ENTRIES(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 4 @38:22-38:23
     return @38:22-38:23
 }
 
-fn rt.table.LEN(0) value pure source 8 {
+fn rt.table.LEN(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 5 @39:18-39:19
     return @39:18-39:19
 }
 
-fn rt.table.CAP(0) value pure source 8 {
+fn rt.table.CAP(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 6 @40:18-40:19
     return @40:18-40:19
 }
 
-fn rt.table.INDEX(0) value pure source 8 {
+fn rt.table.INDEX(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 7 @41:20-41:21
     return @41:20-41:21
 }
 
-fn rt.table.MASK(0) value pure source 8 {
+fn rt.table.MASK(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 8 @42:19-42:20
     return @42:19-42:20
 }
 
-fn rt.table.HEADER(0) value pure source 8 {
+fn rt.table.HEADER(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 9 @43:34-43:35
     return @43:34-43:35
 }
 
-fn rt.table.BASIS(0) value pure source 8 {
+fn rt.table.BASIS(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const -3750763034362895579 @47:20-47:40
     return @47:20-47:40
 }
 
-fn rt.table.SPREAD_1(0) value pure source 8 {
+fn rt.table.SPREAD_1(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const -49064778989728563 @48:23-48:41
     return @48:23-48:41
 }
 
-fn rt.table.SPREAD_2(0) value pure source 8 {
+fn rt.table.SPREAD_2(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const -4265267296055464877 @49:23-49:43
     return @49:23-49:43
 }
 
-fn rt.table.LOW_31(0) value pure source 8 {
+fn rt.table.LOW_31(0) value pure source 9 {
     let _0: int
   bb0:
     _0 = const 2147483647 @52:21-52:31
     return @52:21-52:31
 }
 
-fn rt.types.UNIT(0) value pure source 12 {
+fn rt.types.UNIT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 0 @11:23-11:24
     return @11:23-11:24
 }
 
-fn rt.types.INT(0) value pure source 12 {
+fn rt.types.INT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 1 @12:22-12:23
     return @12:22-12:23
 }
 
-fn rt.types.SIZED(0) value pure source 12 {
+fn rt.types.SIZED(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 2 @13:24-13:25
     return @13:24-13:25
 }
 
-fn rt.types.U64(0) value pure source 12 {
+fn rt.types.U64(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 3 @14:22-14:23
     return @14:22-14:23
 }
 
-fn rt.types.FLOAT(0) value pure source 12 {
+fn rt.types.FLOAT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 4 @15:24-15:25
     return @15:24-15:25
 }
 
-fn rt.types.F32(0) value pure source 12 {
+fn rt.types.F32(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 5 @16:22-16:23
     return @16:22-16:23
 }
 
-fn rt.types.BOOL(0) value pure source 12 {
+fn rt.types.BOOL(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 6 @17:23-17:24
     return @17:23-17:24
 }
 
-fn rt.types.CHAR(0) value pure source 12 {
+fn rt.types.CHAR(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 7 @18:23-18:24
     return @18:23-18:24
 }
 
-fn rt.types.STR(0) value pure source 12 {
+fn rt.types.STR(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 8 @19:22-19:23
     return @19:22-19:23
 }
 
-fn rt.types.STRING(0) value pure source 12 {
+fn rt.types.STRING(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 9 @20:25-20:26
     return @20:25-20:26
 }
 
-fn rt.types.PATH(0) value pure source 12 {
+fn rt.types.PATH(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 10 @21:23-21:25
     return @21:23-21:25
 }
 
-fn rt.types.REF(0) value pure source 12 {
+fn rt.types.REF(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 11 @22:22-22:24
     return @22:22-22:24
 }
 
-fn rt.types.LIST(0) value pure source 12 {
+fn rt.types.LIST(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 12 @23:23-23:25
     return @23:23-23:25
 }
 
-fn rt.types.ITER(0) value pure source 12 {
+fn rt.types.ITER(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 13 @24:23-24:25
     return @24:23-24:25
 }
 
-fn rt.types.OPTION(0) value pure source 12 {
+fn rt.types.OPTION(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 14 @25:25-25:27
     return @25:25-25:27
 }
 
-fn rt.types.RESULT(0) value pure source 12 {
+fn rt.types.RESULT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 15 @26:25-26:27
     return @26:25-26:27
 }
 
-fn rt.types.TUPLE(0) value pure source 12 {
+fn rt.types.TUPLE(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 16 @27:24-27:26
     return @27:24-27:26
 }
 
-fn rt.types.BOX(0) value pure source 12 {
+fn rt.types.BOX(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 17 @28:22-28:24
     return @28:22-28:24
 }
 
-fn rt.types.STRUCT(0) value pure source 12 {
+fn rt.types.STRUCT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 18 @29:25-29:27
     return @29:25-29:27
 }
 
-fn rt.types.ENUM(0) value pure source 12 {
+fn rt.types.ENUM(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 19 @30:23-30:25
     return @30:23-30:25
 }
 
-fn rt.types.ERRSET(0) value pure source 12 {
+fn rt.types.ERRSET(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 20 @31:25-31:27
     return @31:25-31:27
 }
 
-fn rt.types.FN(0) value pure source 12 {
+fn rt.types.FN(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 21 @32:21-32:23
     return @32:21-32:23
 }
 
-fn rt.types.OPAQUE(0) value pure source 12 {
+fn rt.types.OPAQUE(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 22 @33:25-33:27
     return @33:25-33:27
 }
 
-fn rt.types.CONST(0) value pure source 12 {
+fn rt.types.CONST(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 23 @34:24-34:26
     return @34:24-34:26
 }
 
-fn rt.types.DICT(0) value pure source 12 {
+fn rt.types.DICT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 24 @35:23-35:25
     return @35:23-35:25
 }
 
-fn rt.types.SET(0) value pure source 12 {
+fn rt.types.SET(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 25 @36:22-36:24
     return @36:22-36:24
 }
 
-fn rt.types.ENTRY(0) value pure source 12 {
+fn rt.types.ENTRY(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 26 @37:24-37:26
     return @37:24-37:26
 }
 
-fn rt.types.I128(0) value pure source 12 {
+fn rt.types.I128(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 27 @38:23-38:25
     return @38:23-38:25
 }
 
-fn rt.types.U128(0) value pure source 12 {
+fn rt.types.U128(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 28 @39:23-39:25
     return @39:23-39:25
 }
 
-fn rt.types.DYN(0) value pure source 12 {
+fn rt.types.DYN(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 29 @40:22-40:24
     return @40:22-40:24
 }
 
-fn rt.types.SCOPE(0) value pure source 12 {
+fn rt.types.SCOPE(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 30 @41:24-41:26
     return @41:24-41:26
 }
 
-fn rt.types.HANDLE(0) value pure source 12 {
+fn rt.types.HANDLE(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 31 @42:25-42:27
     return @42:25-42:27
 }
 
-fn rt.types.CANCELLATION(0) value pure source 12 {
+fn rt.types.CANCELLATION(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 32 @43:31-43:33
     return @43:31-43:33
 }
 
-fn rt.types.SENDER(0) value pure source 12 {
+fn rt.types.SENDER(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 33 @44:25-44:27
     return @44:25-44:27
 }
 
-fn rt.types.RECEIVER(0) value pure source 12 {
+fn rt.types.RECEIVER(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 34 @45:27-45:29
     return @45:27-45:29
 }
 
-fn rt.types.TIMER(0) value pure source 12 {
+fn rt.types.TIMER(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 35 @46:24-46:26
     return @46:24-46:26
 }
 
-fn rt.types.MUTEX(0) value pure source 12 {
+fn rt.types.MUTEX(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 36 @47:24-47:26
     return @47:24-47:26
 }
 
-fn rt.types.GUARD(0) value pure source 12 {
+fn rt.types.GUARD(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 37 @48:24-48:26
     return @48:24-48:26
 }
 
-fn rt.types.SHARED(0) value pure source 12 {
+fn rt.types.SHARED(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 38 @49:25-49:27
     return @49:25-49:27
 }
 
-fn rt.types.WEAK(0) value pure source 12 {
+fn rt.types.WEAK(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 39 @50:23-50:25
     return @50:23-50:25
 }
 
-fn rt.types.CELL(0) value pure source 12 {
+fn rt.types.CELL(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 40 @51:23-51:25
     return @51:23-51:25
 }
 
-fn rt.types.ARENA(0) value pure source 12 {
+fn rt.types.ARENA(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 41 @52:24-52:26
     return @52:24-52:26
 }
 
-fn rt.types.BYTES(0) value pure source 12 {
+fn rt.types.BYTES(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 42 @53:24-53:26
     return @53:24-53:26
 }
 
-fn rt.types.DATETIME(0) value pure source 12 {
+fn rt.types.DATETIME(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 43 @54:27-54:29
     return @54:27-54:29
 }
 
-fn rt.types.RW_LOCK(0) value pure source 12 {
+fn rt.types.RW_LOCK(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 44 @55:26-55:28
     return @55:26-55:28
 }
 
-fn rt.types.READ_GUARD(0) value pure source 12 {
+fn rt.types.READ_GUARD(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 45 @56:29-56:31
     return @56:29-56:31
 }
 
-fn rt.types.PTR(0) value pure source 12 {
+fn rt.types.PTR(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 46 @57:22-57:24
     return @57:22-57:24
 }
 
-fn rt.types.NEEDS_DROP(0) value pure source 12 {
+fn rt.types.NEEDS_DROP(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 1 @64:29-64:30
     return @64:29-64:30
 }
 
-fn rt.types.PLAIN(0) value pure source 12 {
+fn rt.types.PLAIN(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 2 @65:24-65:25
     return @65:24-65:25
 }
 
-fn rt.types.ERROR(0) value pure source 12 {
+fn rt.types.ERROR(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 4 @66:24-66:25
     return @66:24-66:25
 }
 
-fn rt.types.COUNTED(0) value pure source 12 {
+fn rt.types.COUNTED(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 8 @67:26-67:27
     return @67:26-67:27
 }
 
-fn rt.types.DROPS_BY_VARIANT(0) value pure source 12 {
+fn rt.types.DROPS_BY_VARIANT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 16 @68:35-68:37
     return @68:35-68:37
 }
 
-fn rt.types.COPIES_BY_VARIANT(0) value pure source 12 {
+fn rt.types.COPIES_BY_VARIANT(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 32 @69:36-69:38
     return @69:36-69:38
 }
 
-fn rt.types.CONTEXTUAL(0) value pure source 12 {
+fn rt.types.CONTEXTUAL(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 64 @73:29-73:31
     return @73:29-73:31
 }
 
-fn rt.types.BARE(0) value pure source 12 {
+fn rt.types.BARE(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 128 @74:23-74:26
     return @74:23-74:26
 }
 
-fn rt.types.WORDS(0) value pure source 12 {
+fn rt.types.WORDS(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 11 @77:24-77:26
     return @77:24-77:26
 }
 
-fn rt.types.SIZE(0) value pure source 12 {
+fn rt.types.SIZE(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 1 @79:23-79:24
     return @79:23-79:24
 }
 
-fn rt.types.FLAGS(0) value pure source 12 {
+fn rt.types.FLAGS(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 2 @80:24-80:25
     return @80:24-80:25
 }
 
-fn rt.types.A(0) value pure source 12 {
+fn rt.types.A(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 3 @81:20-81:21
     return @81:20-81:21
 }
 
-fn rt.types.B(0) value pure source 12 {
+fn rt.types.B(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 4 @82:20-82:21
     return @82:20-82:21
 }
 
-fn rt.types.NAME(0) value pure source 12 {
+fn rt.types.NAME(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 5 @83:23-83:24
     return @83:23-83:24
 }
 
-fn rt.types.PARTS(0) value pure source 12 {
+fn rt.types.PARTS(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 6 @84:24-84:25
     return @84:24-84:25
 }
 
-fn rt.types.DROPS(0) value pure source 12 {
+fn rt.types.DROPS(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 7 @85:24-85:25
     return @85:24-85:25
 }
 
-fn rt.types.COPIES(0) value pure source 12 {
+fn rt.types.COPIES(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 8 @86:25-86:26
     return @86:25-86:26
 }
 
-fn rt.types.TAG(0) value pure source 12 {
+fn rt.types.TAG(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 9 @87:22-87:23
     return @87:22-87:23
 }
 
-fn rt.types.SHOWN(0) value pure source 12 {
+fn rt.types.SHOWN(0) value pure source 13 {
     let _0: int
   bb0:
     _0 = const 10 @88:24-88:26
     return @88:24-88:26
 }
 
-fn rt.value.OK(0) value pure source 11 {
+fn rt.value.OK(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 0 @94:21-94:22
     return @94:21-94:22
 }
 
-fn rt.value.FORGETTING(0) value pure source 11 {
+fn rt.value.FORGETTING(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 1 @101:29-101:30
     return @101:29-101:30
 }
 
-fn rt.value.DEFERRING(0) value pure source 11 {
+fn rt.value.DEFERRING(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 2 @102:28-102:29
     return @102:28-102:29
 }
 
-fn rt.value.MUTEX_HEADER(0) value pure source 11 {
+fn rt.value.MUTEX_HEADER(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 32 @106:27-106:29
     return @106:27-106:29
 }
 
-fn rt.value.MUTEX_POISONED(0) value pure source 11 {
+fn rt.value.MUTEX_POISONED(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 16 @107:29-107:31
     return @107:29-107:31
 }
 
-fn rt.value.PRIME(0) value pure source 11 {
+fn rt.value.PRIME(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 1099511628211 @110:20-110:33
     return @110:20-110:33
 }
 
-fn rt.value.LESS(0) value pure source 11 {
+fn rt.value.LESS(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const -1 @383:23-383:25
     return @383:23-383:25
 }
 
-fn rt.value.EQUAL(0) value pure source 11 {
+fn rt.value.EQUAL(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 0 @384:24-384:25
     return @384:24-384:25
 }
 
-fn rt.value.GREATER(0) value pure source 11 {
+fn rt.value.GREATER(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 1 @385:26-385:27
     return @385:26-385:27
 }
 
-fn rt.value.UNORDERED(0) value pure source 11 {
+fn rt.value.UNORDERED(0) value pure source 12 {
     let _0: int
   bb0:
     _0 = const 2 @386:28-386:29

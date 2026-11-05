@@ -150,22 +150,15 @@ unsafe extern "C" {
         result: *const *mut u8,
         args: *const *const *mut u8,
     ) -> u8;
-    fn sisu_rt_table_lookup(
+    fn sisu_rt_table_slot(
         ret: *mut i64,
         types: *const *const u64,
-        tb: *const *mut u8,
-        k: *const *mut u8,
+        d: *const *mut u8,
+        key: *const *mut u8,
         kt: *const i64,
-    ) -> u8;
-    fn sisu_rt_table_push(
-        ret: *mut i64,
-        types: *const *const u64,
-        tb: *const *mut u8,
-        k: *const *mut u8,
+        mode: *const i64,
     ) -> u8;
     fn sisu_rt_table_len(ret: *mut i64, tb: *const *mut u8) -> u8;
-    fn sisu_rt_table_key_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
-    fn sisu_rt_table_value_at(ret: *mut *mut u8, tb: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_iter_next(
         ret: *mut i64,
         types: *const *const u64,
@@ -785,40 +778,28 @@ unsafe extern "C" fn sisu_rt_trace_retain(p: *mut u8) {
 
 // ------------------------------------------------------------------ tables
 
-/// The position of the entry of the table at `tb` whose key is the key at
-/// `k` of type `kt`, or -1.
+/// The address of the value under the key at `key` (of type `kt`, behind
+/// any references) in the dict at `d`, for `d{k}` in `mode`
+/// (`abi::SLOT_READ` and its kin): a copy of a missing key appended for a
+/// write, 0 for a drop and -1 for a read, which panics (the runtime in
+/// Sisu's, decision 681).
 ///
 /// # Safety
-/// `tb` must be a table, and `k` hold a value of type `kt`.
-pub(crate) unsafe fn table_lookup(tb: *mut u8, k: *mut u8, kt: u32) -> i64 {
+/// `d` must hold a dict and `key` a value of type `kt`.
+pub(crate) unsafe fn table_slot(d: *mut u8, key: *mut u8, kt: u32, mode: u32) -> i64 {
     let types = crate::desc::base();
-    let kt = i64::from(kt);
+    let (kt, mode) = (i64::from(kt), i64::from(mode));
     let mut ret = 0i64;
     // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_table_lookup(&mut ret, &types, &tb, &k, &kt) } != abi::OK {
-        failed("table's lookup");
+    if unsafe { sisu_rt_table_slot(&mut ret, &types, &d, &key, &kt, &mode) } != abi::OK {
+        failed("`d{k}`'s slot");
     }
     ret
 }
 
-/// Appends to the table at `tb` an entry whose key moves in from `k`: its
-/// position, where the caller writes its value.
-///
-/// # Safety
-/// `tb` must be a table without the key, and `k` hold one, which moves in.
-pub(crate) unsafe fn table_push(tb: *mut u8, k: *mut u8) -> u64 {
-    let types = crate::desc::base();
-    let mut ret = 0i64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_table_push(&mut ret, &types, &tb, &k) } != abi::OK {
-        failed("table's push");
-    }
-    ret as u64
-}
-
 /// The parts of the table at `tb`'s header the runtime in Rust reads,
 /// through the runtime in Sisu's exports (decision 506): its number of
-/// entries and the bytes of a key.
+/// entries.
 ///
 /// # Safety
 /// `tb` must be the address of a live table.
@@ -828,7 +809,6 @@ pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
     let status = unsafe {
         match part {
             TablePart::Len => sisu_rt_table_len(&mut ret, &tb),
-            TablePart::KeyBytes => sisu_rt_table_key_bytes(&mut ret, &tb),
         }
     };
     if status != abi::OK {
@@ -841,22 +821,6 @@ pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
 #[derive(Clone, Copy)]
 pub(crate) enum TablePart {
     Len,
-    KeyBytes,
-}
-
-/// The address of the value of entry `i` of the table at `tb`.
-///
-/// # Safety
-/// `tb` must be the address of a live table of more than `i` entries.
-pub(crate) unsafe fn table_value_at(tb: *mut u8, i: u64) -> *mut u8 {
-    let i = i as i64;
-    let mut ret = std::ptr::null_mut();
-    // SAFETY: as for [`equal`].
-    let status = unsafe { sisu_rt_table_value_at(&mut ret, &tb, &i) };
-    if status != abi::OK {
-        failed("table's entry");
-    }
-    ret
 }
 
 // --------------------------------------------------------------- iterators

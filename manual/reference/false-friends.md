@@ -83,7 +83,11 @@ Eero 8
 ### FF-3: `7 / 2` on integers
 
 Python 3 gives 3.5 and Rust gives 3. Sisu gives neither: `/` divides
-floats, and on integers it is E0301, whose fix writes `//`.
+floats, and on integers it is E0301, which offers two fixes: `//` for
+the division in whole numbers, and the float division, here `7.0 /
+2.0` (a literal takes `.0`, a name `.to_f64()`). These are the two that
+[20](../../proposal/20-pre-registration.md) expects of FF-3, "a fix-it
+offering `//` or a float conversion".
 
 <!-- file: examples/reference-false-friends/int_division.sisu -->
 ```sisu
@@ -101,6 +105,7 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 3 |     print(7 / 2)
   |           ^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.0`, `.0`
 
 ```
 
@@ -188,7 +193,7 @@ maintainers.
 | Habit | Sisu | Code | Names the Sisu way |
 |---|---|---|---|
 | `xs[-1]` | `xs[^1]` | [E0344](diagnostics.md#e0344) | yes, as a fix |
-| `7 / 2` | `7 // 2` | [E0301](diagnostics.md#e0301) | yes, as a fix |
+| `7 / 2` | `7 // 2`, or `7.0 / 2.0` | [E0301](diagnostics.md#e0301) | yes, as two fixes |
 | `if xs:` | `if not xs.is_empty():` | [E0302](diagnostics.md#e0302) | yes, in a note |
 | `a if c else b` | `if c: a else: b` | [E0115](diagnostics.md#e0115) | yes, as a fix |
 | `count = 0` to declare | `var count = 0` | [E0200](diagnostics.md#e0200) | `let`, as a fix |
@@ -935,7 +940,7 @@ with a fix that writes the Sisu spelling.
 | `Vec<T>` | `list[T]` | [E0117](diagnostics.md#e0117) | yes, as a fix |
 | `println!(...)` | `print(...)` | [E0117](diagnostics.md#e0117) | yes, as a fix |
 | `pub(crate)` | `pub(package)` | [E0130](diagnostics.md#e0130) | yes, as a fix |
-| `7 / 2` is 3 | `7 // 2` | [E0301](diagnostics.md#e0301) | yes, as a fix |
+| `7 / 2` is 3 | `7 // 2` | [E0301](diagnostics.md#e0301) | yes, as the first of two fixes |
 | `-7 % 3` is -1 | 2, as in Python | none: FF-6 | |
 
 ### `let mut`

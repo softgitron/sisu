@@ -1,5 +1,5 @@
 $ sisu check total.sisu
-error[E0310]: `+` cannot be applied to `int` and `String`
+error[E0310]: `+=` cannot be applied to `int` and `String`
   --> total.sisu:19:11
    |
 19 |     print(total(Team(name="Owls", points=7)))

@@ -281,6 +281,7 @@ pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCac
     let mut program = sir::Program {
         sources: p.sources.clone(),
         entry: p.entry.clone(),
+        exports: p.exports.clone(),
         types: p.types.clone(),
         intrinsics: p.intrinsics.clone(),
         functions,

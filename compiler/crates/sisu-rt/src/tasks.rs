@@ -1106,7 +1106,6 @@ unsafe fn try_send(c: &Call<'_>) -> u8 {
 unsafe fn recv(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is a receiver.
     let ch = unsafe { c.word(0) } as u32;
-    let size = ty(elem_of(c.ty(0))).size;
     let site = Site::current();
     sched::blocking(|| {
         with(|s| {
@@ -1375,7 +1374,7 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
                 Attempt::Wait
             })
         }),
-        Some(crate::iter::Waits::Recv(ch, size)) => sched::blocking(|| {
+        Some(crate::iter::Waits::Recv(ch)) => sched::blocking(|| {
             with(|s| {
                 if s.cancelled_now() {
                     // SAFETY: the result is an option.

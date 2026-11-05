@@ -1344,7 +1344,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-174 not selected
+181 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a

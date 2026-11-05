@@ -120,7 +120,11 @@ and the core traits such as `Display` and `Iterator`. Anything else is
 imported by name, so each file says where its names come from. An
 import that the file does not use is no error, and `sisu fmt` keeps
 it; `sisu lint` names it, W0027 (`lint.unused-import`), with a fix that
-removes it ([R16](../reference/sisu-command.md#sisu-lint)).
+removes it ([R16](../reference/sisu-command.md#sisu-lint)). Imports
+stand at the top of a file, before its declarations, and their names
+are the whole module's: an import inside a function's body, which
+Python allows, is E0277 (`resolve.import-in-body`), whose fix moves it
+to the top.
 
 **Try it.** In `src/main.sisu`, change `import trip.distance` to `from
 trip.distance import *`, and call `between` without `distance.`.
@@ -321,6 +325,7 @@ error[E0236]: `Ord` for `f64` can be implemented only in the package of the trai
    |
 22 | impl Ord for f64:
    | ^^^^^^^^^^^^^^^^
+  = note: the impl is this package's when `f64` is a type of this package, `Ord` a trait of it, or one of the trait's type arguments a type of its own, as `Vector` in `impl Mul[Vector] for f64`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -328,7 +333,9 @@ error[D0006]: the program was not run: errors found (1)
 E0236 (`resolve.orphan-impl`) points into the library. The till is the
 root package, so the same impl in `till/src/main.sisu` would compile:
 nothing depends on the till, and no other package can choose a second
-order for `f64` in the same build (D-013).
+order for `f64` in the same build (D-013). The note names the third way
+an impl is the library's own, through a type argument of the trait, as
+chapter 14's `plane` gives `f64` an operator that takes a `Vector`.
 
 </details>
 
@@ -398,6 +405,36 @@ scripts (D-032): what a package needs is written in these tables.
 An unknown key gets the warning W0005 (`package.unknown-key`), and a
 mistake an error at its line in the file, so a misspelt key does not
 go unnoticed.
+
+A dependency with `when` is not built on the other targets, so code
+that builds everywhere imports it under the same condition, which an
+import's `@cfg` may test, and uses it only in an `if comptime` branch
+on the same fact. Here the program `sauna` has `winlog = { path =
+"../winlog", when = { os = "windows" } }` among its dependencies:
+
+<!-- file: examples/reference-diagnostics/e0275_excluded_cfg.files/sauna/src/main.sisu -->
+```sisu
+# The import tests the target, and so does the code that uses it.
+@cfg(target.os == "windows")
+import winlog
+
+def main():
+    if comptime target.os == "windows":
+        winlog.record("the stove is on")
+    else:
+        print("the stove is on")
+```
+
+<!-- output: examples/reference-diagnostics/e0275_excluded_cfg.console -->
+```console
+$ sisu run sauna
+the stove is on
+```
+
+On Linux the import binds nothing and the first branch is left out of
+the build, so the program prints its own line. A use of `winlog`
+outside such a branch is E0200, whose note names the `@cfg` and the
+`if comptime` to write ([R13](../reference/modules.md#target-conditions)).
 
 ## Documentation for a library's users
 

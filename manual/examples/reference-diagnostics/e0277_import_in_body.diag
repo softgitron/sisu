@@ -1,0 +1,2 @@
+4:5-4:20 E0277 resolve.import-in-body
+  fix resolve.move-import 2:1-2:1 "import std.math\n" 4:1-5:1 ""

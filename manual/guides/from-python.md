@@ -309,6 +309,7 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
 5 |     print(sum(points) / len(points))
   |           ^^^^^^^^^^^^^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
+  = fix: divide them as floats: `.to_f64()`, `.to_f64()`
 
 error[E0302]: a condition must be a `bool`, not `list[int]`; Sisu has no truthiness
   --> habits.sisu:6:8
@@ -319,8 +320,9 @@ error[E0302]: a condition must be a `bool`, not `list[int]`; Sisu has no truthin
 
 ```
 
-Read E0301's fix with care. `//` floors, which is Python 2's meaning;
-for Python 3's, convert both sides to `f64`, as step 4 does.
+Read E0301's two fixes with care. The first writes `//`, which floors,
+Python 2's meaning; the second converts both sides to `f64`, Python 3's
+meaning, as step 4 does. A port of Python 3 takes the second.
 
 These are the habits, with the Sisu spelling of each. R19 shows the
 diagnostic that each one gets, and which ones carry a fix that writes

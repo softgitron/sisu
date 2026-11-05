@@ -5,6 +5,7 @@
 ##! stage 2's. Reading what `sisu sir` printed gives a program that writes
 ##! the same bytes again.
 
+import stage1.sir.write
 from stage1.sir import (
     Aggregate,
     BasicBlock,
@@ -675,6 +676,61 @@ pub pure def read(text: str) -> Program ! ReadError:
         return Err(Bad(line=1, message="missing `sir 0` header".to_string()))
     return Ok(p)
 
+## The `@export`s of the program the text spells (decision 683): each line
+## `export "SYMBOL" FUNCTION` before the functions, the symbol and the
+## function, in order. Stage 1's `sir.Program` has no field for them, so
+## they are read here, beside `read`, and written back by `export_lines`.
+pub pure def exports(text: str) -> list[(String, String)] ! ReadError:
+    var out: list[(String, String)] = []
+    var pos = 0
+    var line_no = 0
+    let n = text.byte_len()
+    while pos < n:
+        let (start, end, next) = line_at(text, pos)
+        pos = next
+        line_no += 1
+        let (s, e) = trimmed(text, start, end)
+        if starts_at(text, s, e, "fn "):
+            return Ok(out)
+        if not starts_at(text, s, e, "export "):
+            continue
+        var c = Cur(s=text, pos=s + 7, end=e)
+        let r = export_line(mut c)
+        if let Err(Wrong(message)) = r:
+            return Err(Bad(line=line_no, message=message.copy()))
+        if let Ok(pair) = r:
+            out.push(pair.copy())
+    return Ok(out)
+
+## A line's symbol and function, after its `export `.
+pure def export_line(mut c: Cur) -> (String, String) ! LineError:
+    let symbol = c.string()?
+    let f = c.name()?
+    if not c.at_end():
+        return wrong("unexpected `{c.rest()}`")
+    return Ok((symbol, f))
+
+## `text`, SIR that stage 1's writer wrote, with the lines of `exports`
+## after its entry's, where `sisu-sir`'s writer puts them.
+pub pure def export_lines(text: str, exports: list[(String, String)]) -> String:
+    if exports.is_empty():
+        return text.to_string()
+    var lines = String.new()
+    for (symbol, f) in exports:
+        lines.push("export {write.quote(symbol)} {f}\n")
+    var out = String.new()
+    var pos = 0
+    var placed = False
+    let n = text.byte_len()
+    while pos < n:
+        let (start, end, next) = line_at(text, pos)
+        out.push(text.byte_slice(pos, next))
+        if not placed and starts_at(text, start, end, "entry "):
+            out.push(lines)
+            placed = True
+        pos = next
+    return out
+
 ## The line starting at `pos`: its start, its end (before the line
 ## break) and where the next starts.
 pure def line_at(text: str, pos: int) -> (int, int, int):
@@ -737,6 +793,10 @@ pure def header_line(
             else:
                 return wrong("unknown entry flag `{c.rest()}`")
         p.entry = Some(entry)
+        return Ok(())
+    if c.eat("export "):
+        # An `@export` (decision 683), which `exports` reads: stage 1's
+        # `sir.Program` has no place for it.
         return Ok(())
     if c.eat("test "):
         let name = c.string()?
