@@ -1,0 +1,2 @@
+6:21-6:24 E0100 parse.expected expected="`)`" found="`for`"
+  fix parse.sisu-spelling 6:15-6:36 "(p * p for p in primes)"

@@ -1,0 +1,4 @@
+5:12-5:26 E0310 type.binary-operator op="+" lhs="i16" rhs="u32"
+  fix type.convert-to-int 5:18-5:18 ".to_int()"
+8:12-8:35 E0310 type.binary-operator op="*" lhs="i16" rhs="u32"
+  fix type.convert-to-int 8:27-8:27 ".to_int()"

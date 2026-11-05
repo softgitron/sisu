@@ -1,0 +1,3 @@
+11:1-11:21 E0232 resolve.missing-trait-method trait="Sauna" ty="Kiuas" methods="`WARM_UP`"
+12:11-12:17 E0271 resolve.not-a-trait-constant name="WARMUP" trait="Sauna"
+  fix resolve.similar-name 12:11-12:17 "WARM_UP"

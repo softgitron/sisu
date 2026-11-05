@@ -1,0 +1,4 @@
+5:20-5:21 E0005 lex.unknown-character char="\\u{a0}"
+  fix lex.write-space 5:20-5:21 " "
+6:8-6:9 E0005 lex.unknown-character char="\\u{200b}"
+  fix lex.remove-character 6:8-6:9 ""

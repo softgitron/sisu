@@ -1,0 +1,2 @@
+src/main.sisu:4:6-4:22 E0203 resolve.unknown-module name="atlas.geo.points"
+  fix resolve.similar-module src/main.sisu:4:6-4:22 "atlas.geo.point"

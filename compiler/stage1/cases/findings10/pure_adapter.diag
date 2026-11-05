@@ -1,0 +1,4 @@
+10:12-10:41 E0333 type.impure-call callee="map" name="squares"
+  label 9:10-9:17 type.declared-pure-here name="squares"
+10:12-10:47 E0333 type.impure-call callee="sum" name="squares"
+  label 9:10-9:17 type.declared-pure-here name="squares"

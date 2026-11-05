@@ -1,5 +1,5 @@
 5:9-5:15 E0243 resolve.not-derivable name="Encode"
 21:11-21:79 E0347 type.bound-not-satisfied ty="Pair[Plain]" bound="Eq"
-  fix type.derive-trait 5:1-5:16 "@derive(Encode, Eq)"
+  fix type.derive-trait-for 5:1-5:16 "@derive(Encode, Eq)"
 22:11-22:25 E0347 type.bound-not-satisfied ty="Money" bound="Arbitrary"
   fix type.derive-trait 14:1-14:1 "@derive(Arbitrary)\n"
