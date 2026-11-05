@@ -312,8 +312,11 @@ host contract, and a `Drop` for the host's streams.
 **`Slice` is a copy, and not `Copy`.** A `Slice[T]` is a list of copies
 of the values it views (like `str`), so making one costs a copy, and it
 is passed by reference because an intrinsic cannot point into a value
-passed to it by value. *Pay*: a view is a pointer and a length in the
-backend, and then `Copy`, as `str` is.
+passed to it by value. In the interpreter its pointer from `as_ptr`
+views the list or the `bytes` `as_slice` made it from (decision 823), a
+record of the place the slice was stored in, so only that pointer views
+in place, not its references from `Slice.at`. *Pay*: a view is a pointer
+and a length in the backend, and then `Copy`, as `str` is.
 
 **A method's type is read from its name.** The must-consume rule (a
 type's own methods are where its values end) recognises a method by its
@@ -763,15 +766,20 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   thread, there is no header import (`import c`), and a struct is not
   passed by value; `@export("name")` gives the function the global
   symbol `name` of C's own convention over plain values (decision 785),
-  a `@repr(c)` struct by a pointer to it and not by value, and a
-  `CString`'s `as_ptr()` is not valid across a foreign call (decision
-  688).
+  a `@repr(c)` struct by a pointer to it and not by value (`D0103`,
+  decision 824), and a `CString`'s `as_ptr()` is valid across a foreign
+  call in the interpreter, whose slice's pointer views the bytes in
+  place, but not natively, where `mem.slice.as_ptr` of a `u8` is refused
+  because a `Slice[u8]` holds a word for each byte (decision 823).
   `rt.switch` has instructions for x86-64
   and AArch64 Linux only, and nothing makes a context for a new stack yet
   (the stack pool's `Context.start`). *Pay*: 22's `@blocking`, header
-  import, a `@repr(c)` struct by value at the boundary (its C
-  classification), a slice that views its list in place for `as_ptr()`
-  (decision 785); the runtime in Sisu (D-086) over the switch.
+  import, a `@repr(c)` struct by value at the boundary (its System V
+  classification, an `INTEGER` or `SSE` eightbyte each or memory, in
+  both lowerings byte-identically, and AArch64's), a `Slice[u8]` and a
+  `list[u8]` laid out a byte an element (D-086's layouts per type), after
+  which a native slice can view its list in place (decision 823); the
+  runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
 decisions 207 to 211) leaves:
@@ -972,7 +980,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780 and 784): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780, 784, 820 and 821): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -998,15 +1006,19 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   (decision 645), the channels' buffers (decision 680), `d{k}`'s
   slot (decision 681), the scheduler's seeded generator with the
   default strategy's choice of the next task (decision 724), the tasks'
-  records with their parking and waking (decision 780), and the lookups
-  by a `str` that no front end lowers to yet (decision 784). Still
-  `sisu-rt`'s: the decoding of every other
-  intrinsic's call (four words and two slices) and the other checks,
-  whose panics its messages name (a missing key), an iterator of a
-  borrowed value reached by `iter`, a generator's items
-  and a receiver's values (the iterators themselves are made by the
-  runtime in Sisu's exports, decision 542), PCT's and the exhaustive
-  search's choice of the next task, what a task's record does not hold
+  records with their parking and waking (decision 780), the lookups
+  by a `str` that no front end lowers to yet (decision 784), the
+  thirteen intrinsics that make an iterator or take every item of one,
+  an iterator of a borrowed value reached by `iter` among them (decision
+  820), and PCT's and the exhaustive search's choices (decision 821).
+  Still `sisu-rt`'s: the decoding of every other intrinsic's call (four
+  words and two slices; `sum`, the formatting, the characters', the
+  floats', the texts' and bytes', the errors', the assertions', the
+  capabilities' and the host's, the tasks' and raw memory's families,
+  265 of the 328, where the runtime in Sisu decodes 63) and the other checks, whose panics its messages
+  name (a missing key, a range of step 0), a generator's items and a
+  receiver's values, the trail's text a search's driver reads, what a
+  task's record does not hold
   (its coroutine, context, outcome and anchors, beside the record under
   its number, decision 780),
   mutexes, capabilities and the
@@ -1024,10 +1036,12 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   type to hash it and again to compare it, 1.024 times the instructions of
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
-  Rust counterpart: an iterator of a borrowed value reached by `iter`
-  next (decision 781); then the dispatch of the other intrinsics follows its
-  objects, each family's descriptor read by Sisu code as decision 625
-  reads a collection's); text constants for the runtime's code (its data in
+  Rust counterpart: the dispatch of the other intrinsics, family by
+  family, each family's descriptor read by Sisu code as decisions 625 and
+  820 read theirs, `sum` and the characters' next (decision 820 measured
+  a call's decoding at about 950 instructions more than the Rust's, so a
+  family called in a loop wants the descriptor's words read once and the
+  value's references followed once); text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
   in registers, or the backend's own frames for the runtime's code), after
   which a glue's drop can stay in Sisu; a key hashed and compared by code
@@ -1070,8 +1084,9 @@ Nothing here switches the default.
   its place's frame, stripped at each access and at a foreign call, where
   decision 560's addresses miss a returned frame that a call of the same
   depth covers and a shared pointer to a place a mutable one also
-  reaches: a week, both lowerings and the C calls; stage 0's tenth to twelfth rounds
-  did not start it (decision 726), for the size of what each lowering must change in
+  reaches: a week, both lowerings and the C calls; stage 0's tenth to
+  fourteenth rounds did not start it (decisions 726, 787 and 825), for
+  the size of what each lowering must change in
   the debug profile at once: `ptr.of` and `ptr.of_mut` give a tagged word
   (a call of the runtime where they are a copy of an address now), and
   every operation that reads a pointer's word inline strips the tag or
@@ -1081,7 +1096,17 @@ Nothing here switches the default.
   inside a `@repr(c)` value handed to C, and the stripping of the
   descriptors' pointer arguments in `rawmem.rs` and `checked.rs`, each
   in the Rust lowering, stage 2's and Cranelift's path the same bytes,
-  `--native-from-lir` comparing them); the reads of a
+  `--native-from-lir` comparing them). A round of its own begins with
+  the one place both lowerings share, the runtime: a `checked.rs` that
+  keeps, for each tag, the borrow and frame it names, and strips the tag
+  at every descriptor it reads, with `rt.rs`'s and `rawmem.rs`'s tests
+  over tagged words, before any lowering writes one; then one operation
+  at a time in the Rust lowering behind a debug-only switch that stays
+  off (`ptr.of` and `addr` first, since every other test reads through
+  them), stage 2's the same operation the same day, and the switch
+  turned on only when `--native-from-lir` gives the same bytes for every
+  case of `unsafe/` and the export wrapper of decision 785 strips its
+  pointer arguments; the reads of a
   reference into a block (`reference_behind`) checked as a pointer's are,
   which the monitor's loans do in the interpreter and native code has no
   hook for (a debug build's reference reads through the runtime: two

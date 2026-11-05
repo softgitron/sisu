@@ -4,7 +4,7 @@ The runtime of natively compiled Sisu is being written in Sisu, piece by
 piece, as D-086 orders ([15](../../proposal/15-decision-log.md)); this
 package holds what is written so far, and `crates/sisu-rt`, the runtime
 in Rust, the rest. `docs/architecture.md` ("Stage 2", "The runtime in
-Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780 and 784) describes it, and
+Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780, 784, 820 and 821) describes it, and
 `docs/port-debt.md` ("The runtime in Sisu") lists what is left.
 
 ## What it is
@@ -23,10 +23,11 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 | Module | What |
 |---|---|
 | `lib.sisu` | the exports, `==` of two texts' bytes, and the text entries interpolation calls most (their bodies here, a call fewer) |
-| `dispatch.sisu` | the intrinsics of lists, dicts, sets and slices, a list's and a set's iterator and the lookups by a `str` (decision 784) among them, decoded from their descriptors and done here (decisions 625 and 646): the runtime in Rust reads the intrinsic's number alone and hands the call over; a panic, a drop and a list's view are asked of it; and `in` as an operator, a table's literal, the generated code's inline lookups (decision 646) and `d{k}`'s slot (decision 681), which the runtime in Rust's entries hand over |
+| `dispatch.sisu` | the intrinsics of lists, dicts, sets and slices, a list's and a set's iterator and the lookups by a `str` (decision 784) among them, and the thirteen that make an iterator or take every item of one (`range`, `zip`, `sorted`, `any`, `iter.ref` and their kin, decision 820), decoded from their descriptors and done here (decisions 625 and 646): the runtime in Rust reads the intrinsic's number alone and hands the call over; a panic, a drop and a list's view are asked of it; and `in` as an operator, a table's literal, the generated code's inline lookups (decision 646) and `d{k}`'s slot (decision 681), which the runtime in Rust's entries hand over |
 | `queue.sisu` | the scheduler's queues: the run queue, the waiters under their keys and the timers, records of one to three words in a list's layout, whose blocks the runtime in Rust gives and keeps (decision 645) |
 | `channel.sisu` | the channels' buffers: the values sent and not received, in the order they were sent, in a ring of slots of the value's size that grows when it is full, whose blocks the runtime in Rust gives and keeps (decision 680) |
 | `tasks.sisu` | the tasks' records of the scheduler, three words a record in a queue: a task's state, what it waits for and whether it is a generator; a task parked under its keys in the waiters' queue, and the tasks a key or a cancellation wakes put in the run queue in the interpreter's order, the coroutine and the rest of each task the runtime in Rust's under the same number (decision 780) |
+| `choose.sisu` | the scheduler's other two strategies: PCT's change points, its priorities by task drawn when first asked, a yield point at which a task gives way or is preempted and the next task by priority; the exhaustive search's choices from its prefix, recorded in its trail, and the next task among the ready ones in creation order, each over queues the runtime in Rust keeps and the generator of `draw.sisu` (decision 821) |
 | `draw.sisu` | the scheduler's seeded generator, the interpreter's SplitMix64 with its seeding, a number below a bound, and the choice of the next task under the default strategy, taken out of the run queue as `queue.sisu` takes it, the generator's word the runtime in Rust's (decision 724) |
 | `types.sisu` | the program's type table, as the runtime in Rust lays it out in memory when the program starts (`crates/sisu-rt/src/desc.rs`) |
 | `host.sisu` | the runtime in Rust's functions this code calls, and C's |
@@ -38,7 +39,7 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 | `time.sisu` | a time's text: RFC 3339, as a `DateTime`'s `Debug` writes it, and `fmt.strftime`'s directives (decision 469) |
 | `list.sisu` | lists over raw memory: growth, the moves of `insert`, `remove`, `pop`, `extend`, `reverse` and `swap`, a slice's copies, the stable sort, `in` and `join` (decision 385); `dispatch.sisu` checks the indices of `insert`, `remove` and `swap`, whose panics the runtime in Rust raises (decisions 562 and 625) |
 | `table.sisu` | the tables of dicts and sets: entries in insertion order, each with its key's hash, and an index of slots probed linearly; a lookup, an entry appended and one taken out, and a table copied, compared and dropped (decision 422); the header's layout, which the runtime in Rust reads only through the exports (decision 506) |
-| `iter.sisu` | iterators: the object compiled code steps in part (decision 253), the next item of each kind, the iterator of an `Iterable[T]` argument, every item left, the drop (decision 423); a new iterator of each of the eleven kinds and what one may wait for, the layout the runtime in Rust no longer mirrors (decision 542) |
+| `iter.sisu` | iterators: the object compiled code steps in part (decision 253), the next item of each kind, the iterator of an `Iterable[T]` argument, every item left, the drop (decision 423); a new iterator of each of the eleven kinds and what one may wait for, the layout the runtime in Rust no longer mirrors (decision 542), six of which (a range, a borrowed list's, table's or receiver's items, an enumeration and a zip) only `dispatch.sisu` makes (decision 820) |
 
 The runtime's code has no text of its own to point to, so the words
 `Debug` writes are constants of their bytes packed eight to a word

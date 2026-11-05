@@ -144,7 +144,11 @@ These checks apply to every case without an expectation file:
   `.status` (decision 427).
 - Every failing test in `.test`, `.sim`, `.schedule` and `.select` output
   prints a replay token; `sisu test --replay TOKEN NAME.sisu` must fail
-  that test again with the same report.
+  that test again with the same report, and in a package case `sisu test
+  --replay TOKEN FILE` with the file its `replay:` line names, `.` for a
+  module's test and `tests/NAME.sisu` for a black-box one (decision 827).
+  A test that takes the real `System` prints why it has no token instead
+  (`D0031`, and `D0138` under `--sim`).
 - For a case with `.test`, `sisu test --jobs 1` (the tests on one
   thread) prints what the default, parallel run printed.
 - Every run of `sisu test` compared with a `.test`, `.explore`, `.sim`,
@@ -420,7 +424,9 @@ and the time spent building and running them.
 - `sim/` is the `sim` profile and the schedulers (`# sim`, `# schedule`):
   a lost update found by the bounded exhaustive search, a depth-2 bug
   found by PCT, crashes of a crash-consistent file system, nodes and
-  partitions, `choose` and `always`, faults from declared error sets, and
+  partitions, `choose` and `always`, faults from declared error sets on
+  the capabilities a test names, the real `System` a test that takes it
+  gets, neither simulated nor replayed (`real_system`, decision 822), and
   HTTP over simulated nodes with faults.
 - `testing/` is `sisu test`'s surface (17): parametrised tests, suites
   and tags (`# select`), snapshots, transcripts, `@refines`, fakes of the
@@ -527,7 +533,8 @@ and the time spent building and running them.
   and into a C struct (`pointers`); plain data, its bit casts, bytes and
   views, and `transmute` (`plain_casts`); foreign calls the interpreter
   emulates, `strlen`, `memcpy`, `malloc`, `free`, `getenv` and `write`
-  (`foreign`); and a refusal of the model for each obligation it checks,
+  (`foreign`); a `CString` whose pointer `strlen` and a `CStr` read while
+  it lives, the interpreter's alone (`cstring`, decision 823); and a refusal of the model for each obligation it checks,
   each a panic naming it (`out_of_bounds`, `released`, `uninitialised`,
   `misaligned`, `released_twice`, `release_layout`, `release_other`,
   `shared_write`, `invalid_bits`, `overwrite`, `leaked`, `gone`,
