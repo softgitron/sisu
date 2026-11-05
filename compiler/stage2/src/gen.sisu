@@ -385,7 +385,9 @@ impl Cg:
         let rt = f.locals[0].ty.copy()
         if rt != Type.Unit:
             let plain = export_type(rt) else:
-                return unsupported("the result of the exported function `{symbol}`, a `{write.ty(rt)}`")
+                return unsupported(
+                    "the result of the exported function `{symbol}`, a `{write.ty(rt)}`"
+                )
             ret = Some(plain)
         let inner = self.instance(p, name, [])?
         var sig = String.new("(")
