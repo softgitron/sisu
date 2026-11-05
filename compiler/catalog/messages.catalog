@@ -1104,3 +1104,7 @@ D0136 cli     cli.bench-samples           `--samples` takes 2 or more, not {valu
 # black-box test files) names each before its list (decision 644; the
 # manual's finding from chapter 19 and R15).
 D0137 cli     cli.test-program            tests of `{program}`:
+# A test that takes the real `System` under `sisu test --sim` gets the real
+# one, which is neither simulated nor replayed (17, "Simulation and
+# replay"; decision 822; the manual's finding X12).
+D0138 cli     cli.replay-no-token-sim     no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones

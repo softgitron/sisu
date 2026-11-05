@@ -824,8 +824,20 @@ impl<'p> Interp<'p, '_> {
                     if name == "sim.always" {
                         return self.open_always(vals, dest);
                     }
+                    // A slice views its list or bytes in place for its
+                    // pointer (decision 823): what it was made from.
+                    let viewed = if matches!(name.as_str(), "list.as_slice" | "bytes.as_slice") {
+                        vals.first().and_then(|v| self.pointer_of(v).ok())
+                    } else {
+                        None
+                    };
                     let r = self.intrinsic(name, tys, vals, ret.as_ref());
-                    self.finish_call(name, tys, dest, ret, r)
+                    self.finish_call(name, tys, dest, ret, r)?;
+                    if let Some(src) = viewed {
+                        let at = self.resolve(dest)?;
+                        self.note_view(at, src);
+                    }
+                    Ok(())
                 }
             },
             StatementKind::Drop { place, flag } => {

@@ -61,7 +61,9 @@ pub(crate) fn clean() {
 /// The program with the dispatcher of its tests as its entry.
 fn with_dispatcher(prog: &sir::Program, case_seed: u64, sim: bool) -> Result<sir::Program, String> {
     let function = |name: &str| prog.functions.iter().find(|f| f.name == name);
-    let real_system = |f: &sir::Function| !sim && sir::takes_real_system(f);
+    // A test that takes the real `System` gets it in the `sim` profile too
+    // (decision 822).
+    let real_system = |f: &sir::Function| sir::takes_real_system(f);
     let entry_system = prog.tests.iter().filter_map(|(_, f)| function(f)).any(real_system);
     let mut locals: Vec<String> = vec!["()".into(), if entry_system { "System" } else { "()" }.into()];
     let mut local = |ty: &str| {
@@ -92,14 +94,6 @@ fn with_dispatcher(prog: &sir::Program, case_seed: u64, sim: bool) -> Result<sir
         }
         if real_system(f) {
             args.push("move _1".to_string());
-        } else if sir::takes_real_system(f) {
-            // In the `sim` profile a test's `System` is simulated (17).
-            if function("System.sim").is_none() {
-                return Err("a simulated `System` the program does not keep".into());
-            }
-            let s = local("System");
-            body.push_str(&format!("    _{s} = call fn System.sim(const {case_seed})\n"));
-            args.push(format!("move _{s}"));
         } else if !params.is_empty() {
             let maker = if sim { "System.sim" } else { "System.fake" };
             if function(maker).is_none() {
@@ -509,12 +503,10 @@ pub(crate) fn run(
 ) -> Result<Vec<(String, TestResult, RunReport)>, i32> {
     let exe = executable(prog, options, profile, host)?;
     let real = |k: usize| {
-        options.sim.is_none()
-            && prog
-                .tests
-                .get(k)
-                .and_then(|(_, f)| prog.functions.iter().find(|x| x.name == *f))
-                .is_some_and(sir::takes_real_system)
+        prog.tests
+            .get(k)
+            .and_then(|(_, f)| prog.functions.iter().find(|x| x.name == *f))
+            .is_some_and(sir::takes_real_system)
     };
     let done: Mutex<Vec<Option<Done>>> = Mutex::new(vec![None; which.len()]);
     let parallel: Vec<usize> = (0..which.len()).filter(|&i| !real(which[i])).collect();

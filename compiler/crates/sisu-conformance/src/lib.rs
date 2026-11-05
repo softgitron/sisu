@@ -408,6 +408,16 @@ pub(crate) fn failure_blocks(out: &str) -> Vec<(String, String)> {
     blocks
 }
 
+/// The file the `replay:` line of `token` in `out` names: a package's
+/// black-box test file, `.` for its modules' own tests, or a file case's
+/// file (decision 827).
+pub(crate) fn replay_file(out: &str, token: &str) -> Option<String> {
+    out.lines().find_map(|l| {
+        let rest = l.strip_prefix("replay: sisu test --replay ")?.strip_prefix(token)?;
+        rest.split_whitespace().next().map(String::from)
+    })
+}
+
 impl Runner<'_> {
     /// Every failing test of the `sisu test` output `out`, again from its
     /// replay token: it must fail the same way (17, "Simulation and
@@ -424,8 +434,11 @@ impl Runner<'_> {
         for (token, block) in failure_blocks(out) {
             self.report.tokens += 1;
             let mut args = vec!["test".to_string(), "--replay".to_string(), token.clone()];
+            // A package's token names the file it replays (decision 827).
             if !case.package {
                 args.push(file.clone());
+            } else if let Some(f) = replay_file(out, &token) {
+                args.push(f);
             }
             let again = invoke(self.sisu, cwd, &args);
             self.compare(

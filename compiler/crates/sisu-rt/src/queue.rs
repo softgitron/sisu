@@ -25,7 +25,6 @@ unsafe extern "C" {
         c: *const i64,
     ) -> u8;
     fn sisu_rt_queue_word(ret: *mut i64, q: *const *mut u8, i: *const i64, j: *const i64) -> u8;
-    fn sisu_rt_queue_swap_remove(ret: *mut i64, q: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_queue_remove(ret: *mut u64, q: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_queue_position(ret: *mut i64, q: *const *mut u8, j: *const i64, x: *const i64) -> u8;
     fn sisu_rt_channel_init(
@@ -42,6 +41,47 @@ unsafe extern "C" {
     fn sisu_rt_draw_next(ret: *mut i64, state: *const *mut i64) -> u8;
     fn sisu_rt_draw_below(ret: *mut i64, state: *const *mut i64, n: *const i64) -> u8;
     fn sisu_rt_draw_pick(ret: *mut i64, state: *const *mut i64, q: *const *mut u8) -> u8;
+    fn sisu_rt_choose_pct_start(ret: *mut u64, state: *const *mut i64, st: *const *mut u8, depth: *const i64)
+    -> u8;
+    fn sisu_rt_choose_pct_yield(
+        ret: *mut i64,
+        state: *const *mut i64,
+        st: *const *mut u8,
+        prios: *const *mut u8,
+        cur: *const i64,
+        asked: *const u64,
+        ready: *const *mut u8,
+    ) -> u8;
+    fn sisu_rt_choose_pct_pick(
+        ret: *mut i64,
+        state: *const *mut i64,
+        prios: *const *mut u8,
+        ready: *const *mut u8,
+    ) -> u8;
+    fn sisu_rt_choose_next(
+        ret: *mut i64,
+        state: *const *mut i64,
+        prefix: *const *mut u8,
+        trail: *const *mut u8,
+        searching: *const u64,
+        options: *const i64,
+        at_yield: *const u64,
+    ) -> u8;
+    fn sisu_rt_choose_search_yield(
+        ret: *mut i64,
+        state: *const *mut i64,
+        prefix: *const *mut u8,
+        trail: *const *mut u8,
+        ready: *const *mut u8,
+    ) -> u8;
+    fn sisu_rt_choose_search_pick(
+        ret: *mut i64,
+        state: *const *mut i64,
+        prefix: *const *mut u8,
+        trail: *const *mut u8,
+        ready: *const *mut u8,
+        forced: *const i64,
+    ) -> u8;
     fn sisu_rt_task_add(
         ret: *mut i64,
         recs: *const *mut u8,
@@ -128,6 +168,116 @@ impl Rng {
     }
 }
 
+/// The choices of PCT and of the exhaustive search (decision 501): the
+/// runtime in Sisu's (`compiler/rt/src/choose.sisu`, decision 821), over
+/// queues kept here and the generator's word, with the run queue handed to
+/// each call, so that a depth and a seed, or a search's prefix, name the
+/// schedule they named.
+pub(crate) struct Choices {
+    /// PCT's state, one word a record: the priority the next change point
+    /// gives, the yield points passed, and the change points.
+    pct: Queue,
+    /// PCT's priorities by task, drawn when first asked.
+    prios: Queue,
+    /// The search's prefix, the choices it was told to make.
+    prefix: Queue,
+    /// The search's choices so far: taken, of how many, and whether at a
+    /// yield point (1).
+    trail: Queue,
+}
+
+impl Choices {
+    /// No choice made yet, under a search told to begin with `prefix`.
+    pub(crate) fn new(prefix: &[u32]) -> Choices {
+        let mut q = Queue::new(1);
+        for &c in prefix {
+            q.push(i64::from(c), 0, 0);
+        }
+        Choices { pct: Queue::new(1), prios: Queue::new(1), prefix: q, trail: Queue::new(3) }
+    }
+
+    /// PCT's change points for a run of depth `depth`, drawn now.
+    pub(crate) fn pct_start(&mut self, rng: &mut Rng, depth: u32) {
+        let mut unit = 0u64;
+        let (state, depth): (*mut i64, i64) = (&mut rng.0, i64::from(depth));
+        // SAFETY: `state` is the generator's word and `self.pct` an empty
+        // queue of one word a record.
+        unprobed(|| unsafe { sisu_rt_choose_pct_start(&mut unit, &state, &self.pct.0, &depth) });
+    }
+
+    /// A yield point of the running task `cur` under PCT, `asked` when it
+    /// gives way: whether it is preempted, a ready task now higher.
+    pub(crate) fn pct_yield(&mut self, rng: &mut Rng, cur: u32, asked: bool, ready: &Queue) -> bool {
+        let mut go = 0i64;
+        let (state, cur, asked): (*mut i64, i64, u64) = (&mut rng.0, i64::from(cur), u64::from(asked));
+        // SAFETY: `state` is the generator's word, the queues are PCT's
+        // and the run queue.
+        unprobed(|| unsafe {
+            sisu_rt_choose_pct_yield(&mut go, &state, &self.pct.0, &self.prios.0, &cur, &asked, &ready.0)
+        });
+        go != 0
+    }
+
+    /// The next task under PCT, taken out of the run queue `ready`.
+    pub(crate) fn pct_pick(&mut self, rng: &mut Rng, ready: &mut Queue) -> Option<u32> {
+        let mut t = 0i64;
+        let state: *mut i64 = &mut rng.0;
+        // SAFETY: as in `pct_yield`.
+        unprobed(|| unsafe { sisu_rt_choose_pct_pick(&mut t, &state, &self.prios.0, &ready.0) });
+        u32::try_from(t).ok()
+    }
+
+    /// The next choice among `options`: the search's (`searching`), recorded,
+    /// or a draw of the generator.
+    pub(crate) fn choose(&mut self, rng: &mut Rng, searching: bool, options: u32, at_yield: bool) -> u32 {
+        let mut c = 0i64;
+        let state: *mut i64 = &mut rng.0;
+        let (searching, options, at_yield) = (u64::from(searching), i64::from(options), u64::from(at_yield));
+        // SAFETY: `state` is the generator's word and the queues the
+        // search's.
+        unprobed(|| unsafe {
+            sisu_rt_choose_next(&mut c, &state, &self.prefix.0, &self.trail.0, &searching, &options, &at_yield)
+        });
+        c as u32
+    }
+
+    /// A yield point under the search: the ready task it preempts for.
+    pub(crate) fn search_yield(&mut self, rng: &mut Rng, ready: &Queue) -> Option<u32> {
+        let mut t = 0i64;
+        let state: *mut i64 = &mut rng.0;
+        // SAFETY: as in `choose`, and `ready` is the run queue.
+        unprobed(|| unsafe {
+            sisu_rt_choose_search_yield(&mut t, &state, &self.prefix.0, &self.trail.0, &ready.0)
+        });
+        u32::try_from(t).ok()
+    }
+
+    /// The next task under the search, `forced` when a yield point chose
+    /// it, taken out of the run queue `ready`.
+    pub(crate) fn search_pick(&mut self, rng: &mut Rng, ready: &mut Queue, forced: Option<u32>) -> Option<u32> {
+        let mut t = 0i64;
+        let state: *mut i64 = &mut rng.0;
+        let forced = forced.map_or(-1, i64::from);
+        // SAFETY: as in `search_yield`.
+        unprobed(|| unsafe {
+            sisu_rt_choose_search_pick(&mut t, &state, &self.prefix.0, &self.trail.0, &ready.0, &forced)
+        });
+        u32::try_from(t).ok()
+    }
+
+    /// The search's choices so far, dotted as `taken/options/y` (`y` at a
+    /// yield point, `n` elsewhere).
+    pub(crate) fn trail_text(&self) -> String {
+        let parts: Vec<String> = (0..self.trail.len())
+            .map(|i| {
+                let y = if self.trail.word(i, 2) != 0 { "y" } else { "n" };
+                format!("{}/{}/{y}", self.trail.word(i, 0), self.trail.word(i, 1))
+            })
+            .collect();
+        parts.join(".")
+    }
+}
+
 /// The records a queue has room for before it first grows.
 const CAPACITY: i64 = 16;
 
@@ -194,18 +344,6 @@ impl Queue {
     /// The first words of the records, in order.
     pub(crate) fn firsts(&self) -> Vec<i64> {
         (0..self.len()).map(|i| self.word(i, 0)).collect()
-    }
-
-    /// Takes out the record `i`, the last moving into its slot: its first
-    /// word.
-    pub(crate) fn swap_remove(&mut self, i: usize) -> i64 {
-        if i >= self.len() {
-            crate::rt::internal("a record outside a queue of the scheduler");
-        }
-        let mut w = 0i64;
-        // SAFETY: `self.0` is a live queue and `i` one of its records.
-        unprobed(|| unsafe { sisu_rt_queue_swap_remove(&mut w, &self.0, &(i as i64)) });
-        w
     }
 
     /// Takes out the record `i`, keeping the others' order.

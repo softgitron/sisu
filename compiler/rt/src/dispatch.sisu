@@ -1,12 +1,13 @@
-##! The intrinsics of lists, dicts and sets, decoded and done here (D-086;
-##! decision 625). A call of an intrinsic gives the runtime in Rust its
+##! The intrinsics of lists, dicts and sets, and those that make an
+##! iterator or take every item of one, decoded and done here (D-086;
+##! decisions 625 and 820). A call of an intrinsic gives the runtime in Rust its
 ##! descriptor, `u32` words: the intrinsic's number, the number of its
 ##! arguments and of its type arguments, the type of its result, of each
 ##! argument and each type argument; and the addresses of its result and
 ##! of each argument. For the intrinsics numbered here the runtime in Rust
 ##! reads the number alone and hands the rest to `export_collection`, which
 ##! reads the types, finds the values behind references, checks what the
-##! call asks and does it, by `list.sisu` and `table.sisu`; it asks the
+##! call asks and does it, by `list.sisu`, `table.sisu` and `iter.sisu`; it asks the
 ##! runtime in Rust for what is that runtime's own: a panic, whose message
 ##! its catalog names, the drop of a value, which may run a program's glue
 ##! on the task's stack, and a view of a list's elements, an object it
@@ -24,10 +25,12 @@ from rt.host import sisu_rt_free
 from rt.host import sisu_rt_list_bounds
 from rt.host import sisu_rt_list_view
 from rt.host import sisu_rt_missing_key
+from rt.host import sisu_rt_range_step
 from rt.host import sisu_rt_slice_bounds
 from rt.host import sisu_rt_unordered
 from rt.types import CHAR
 from rt.types import DICT
+from rt.types import ITER
 from rt.types import LIST
 from rt.types import PATH
 from rt.types import REF
@@ -41,6 +44,32 @@ from std.mem import ptr
 # Rust's `abi::Intrinsic`, each after its name (`sisu-rt`'s test
 # `the_collections_numbers_are_the_runtimes` holds them to it).
 
+## `range`
+pub(package) const RANGE: int = 9
+## `enumerate`
+pub(package) const ENUMERATE: int = 10
+## `zip`
+pub(package) const ZIP: int = 11
+## `zip_shortest`
+pub(package) const ZIP_SHORTEST: int = 12
+## `reversed`
+pub(package) const REVERSED: int = 13
+## `iterable_list`
+pub(package) const ITERABLE_LIST: int = 14
+## `sorted`
+pub(package) const SORTED: int = 15
+## `any`
+pub(package) const ANY: int = 17
+## `all`
+pub(package) const ALL: int = 18
+## `iter.ref`
+pub(package) const ITER_REF: int = 19
+## `iter.mut`
+pub(package) const ITER_MUT: int = 20
+## `iter.own`
+pub(package) const ITER_OWN: int = 21
+## `Iter.of`
+pub(package) const ITER_OF: int = 23
 ## `list.new`
 pub(package) const LIST_NEW: int = 85
 ## `list.with_capacity`
@@ -152,13 +181,15 @@ const OPEN: int = -9223372036854775807 - 1
 const MOST_ROOM: int = 1048576
 
 ## A call of an intrinsic: the program's types, its descriptor, the
-## address of its result and the block of its arguments' addresses.
+## address of its result, the block of its arguments' addresses, and how
+## what it drops is dropped (`value.drop`'s mode).
 @derive(Copy)
 struct Call:
     ts: Types
     desc: ptr[u8]
     ret: ptr mut u8
     args: ptr mut u8
+    mode: int
 
 impl Call:
     ## Word `k` of the descriptor, a `u32`: half of the word of eight bytes
@@ -195,6 +226,17 @@ impl Call:
     ## The type of argument `i`.
     def ty(self, i: int) -> int:
         return self.word(4 + i)
+
+    ## Type argument `k`, which the call has.
+    def targ(self, k: int) -> int:
+        return self.word(4 + self.word(1) + k)
+
+    ## The item type of the `Iterable[T]` argument `k`: its type argument
+    ## `k`, -1 when the call gives none.
+    def item(self, k: int) -> int:
+        if k < self.word(2):
+            return self.targ(k)
+        return -1
 
     ## The address argument `i` is at.
     ##
@@ -685,6 +727,88 @@ def slice_call(c: Call, id: int) -> int:
         c.set(0, iter.new_list_ref(l, size).addr())
     return OK
 
+## The iterators' intrinsics: the status.
+##
+## Requires:
+## - `call`: `c` is a call of one of the iterators' intrinsics above
+def iter_call(c: Call, id: int) -> int:
+    let ts = c.ts
+    if id == RANGE:
+        let step = c.first(2)
+        if step == 0:
+            # safety: returns_promptly: the runtime in Rust raises the panic.
+            return unsafe sisu_rt_range_step().to_int()
+        c.set(0, iter.new_range(c.first(0), c.first(1), step).addr())
+        return OK
+    if id == ITER_REF or id == ITER_MUT:
+        # An iterator of references into the borrowed collection (decision
+        # 781), or of a borrowed receiver's values.
+        let (p, t) = c.place(0)
+        let k = ts.kind(t)
+        if k == LIST:
+            c.set(0, iter.new_list_ref(p, ts.size(ts.a(t))).addr())
+        elif k == DICT:
+            c.set(0, iter.table_part(c.table(0), 2).addr())
+        elif k == SET:
+            c.set(0, iter.table_part(c.table(0), 0).addr())
+        else:
+            # A receiver, the one other value `iter.ref` is lowered for.
+            c.set(0, iter.new_waiting(c.first(0), ts.size(ts.a(t)), False).addr())
+        return OK
+    if id == ITER_OWN or id == ITER_OF:
+        let rt = c.ret_ty()
+        let item = if ts.kind(rt) == ITER: ts.a(rt) else: -1
+        c.set(0, iter.iterable(ts, c.arg(0), c.ty(0), item).addr())
+        return OK
+    let first = iter.iterable(ts, c.arg(0), c.ty(0), c.item(0))
+    if id == ENUMERATE:
+        c.set(0, iter.new_enumerate(first).addr())
+        return OK
+    if id == ZIP or id == ZIP_SHORTEST:
+        let second = iter.iterable(ts, c.arg(1), c.ty(1), c.item(1))
+        c.set(0, iter.new_zip(first, second, id == ZIP, c.targ(0), c.targ(1)).addr())
+        return OK
+    if id == ANY or id == ALL:
+        let want = id == ANY
+        let room = scratch(16)
+        var st = OK
+        while True:
+            st = iter.next(ts, first, room, c.mode)
+            if st != OK:
+                break
+            # safety: valid, aligned: the room holds an option's tag and a
+            #   `bool`'s word.
+            let (tag, b) = unsafe (room.cast[int]().read(), room.cast[int]().offset(1).read())
+            if tag != 0:
+                c.set_bool(not want)
+                break
+            if (b != 0) == want:
+                c.set_bool(want)
+                break
+        free(room)
+        return value.after_part(st, iter.drop(ts, first, c.mode))
+    if id == ITERABLE_LIST:
+        return iter.collect(ts, first, c.item(0), c.ret, c.mode)
+    # `reversed` and `sorted`: every item, of the call's type argument.
+    let t = c.targ(0)
+    if id == SORTED:
+        let st = iter.collect(ts, first, t, c.ret, c.mode)
+        if st != OK:
+            return st
+        if not list.sort(ts, c.ret, t):
+            # safety: returns_promptly: the runtime in Rust raises the panic.
+            let raised = unsafe sisu_rt_unordered().to_int()
+            _ = dropped(c.ret, c.ret_ty())
+            return raised
+        return OK
+    let items = scratch(24)
+    let st = iter.collect(ts, first, t, items, c.mode)
+    if st == OK:
+        list.reverse(items, ts.size(t))
+        c.set(0, iter.new_items(ts, items, t).addr())
+    free(items)
+    return st
+
 ## A dict or a set of type `t` from a literal's `n` entries at `items`, each
 ## the key's bytes and then the value's, moved in, its table's address
 ## written at `out`: a key given again replaces the value and is itself
@@ -772,18 +896,20 @@ pub(package) def slot(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, mode: 
 
 ## A call of one of the intrinsics above: `desc` its descriptor, `ret` the
 ## address of its result and `args` the block of its arguments' addresses,
-## the types those of the table at `types`. Its status: 0, or that of the
-## panic it raised.
+## the types those of the table at `types`, `mode` how what it drops is
+## dropped. Its status: 0, or that of the panic it raised.
 ##
 ## Requires:
 ## - `call`: `desc`, `ret` and `args` are a call of the generated code of an
 ##   intrinsic numbered above, whose arguments are live values of the types
 ##   its descriptor gives
 pub(package) def collection(
-    types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8
+    types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8, mode: int
 ) -> int:
-    let c = Call(ts=Types(words=types), desc=desc, ret=ret, args=args)
+    let c = Call(ts=Types(words=types), desc=desc, ret=ret, args=args, mode=mode)
     let id = c.word(0)
+    if id <= ITER_OF:
+        return iter_call(c, id)
     if id >= LIST_NEW and id <= LIST_SORT:
         return list_call(c, id)
     if id >= LIST_AS_SLICE and id <= SLICE_ITER:

@@ -153,6 +153,13 @@ pub(crate) struct Block {
 /// and whether the block is of a slice's values).
 type PlaceKey = (u32, u32, u64, u32, Vec<Step>, bool);
 
+/// What names the place a slice was stored in: (task, frame, serial,
+/// local, path).
+type ViewKey = (u32, u32, u64, u32, Vec<Step>);
+
+/// The views kept before those of places that are gone are let go.
+const VIEWS_KEPT: usize = 1024;
+
 /// The raw memory of a run.
 #[derive(Default)]
 pub(crate) struct RawMem {
@@ -161,6 +168,13 @@ pub(crate) struct RawMem {
     /// The block made for each place, so that two pointers to one place
     /// have one address.
     places: HashMap<PlaceKey, u32>,
+    /// The list or the bytes each slice `as_slice` made views, by the place
+    /// the slice was stored in (decision 823).
+    views: HashMap<ViewKey, Pointer>,
+}
+
+fn view_key(p: &Pointer) -> ViewKey {
+    (p.task, p.frame, p.serial, p.local, p.path.clone())
 }
 
 fn align_up(n: u64, align: u64) -> u64 {
@@ -1034,6 +1048,15 @@ impl<'p> Interp<'p, '_> {
                 &[("op", format!("ptr.{op}")), ("obligation", "valid".into())],
             ));
         }
+        // A byte of a `bytes` that a slice's pointer views (decision 823),
+        // which no place of its own holds.
+        if let Some(x) = self.viewed_byte(&at)? {
+            let v = Value::Int(i64::from(x));
+            if inner == 0 && pty == *ty {
+                return Ok(Some(v));
+            }
+            return self.reread(&v, off, &pty, ty, inner, op);
+        }
         let current = self.read(&at)?;
         if current.is_moved() {
             return Ok(None);
@@ -1044,14 +1067,29 @@ impl<'p> Interp<'p, '_> {
             }
             return Ok(Some(self.read(&at)?.clone()));
         }
+        self.reread(current, off, &pty, ty, inner, op)
+    }
+
+    /// The value of type `ty` that the bytes from `inner` of the value
+    /// `current` of type `pty` hold, at the offset `off` of a place's
+    /// block: a read through a pointer of another type than the place's.
+    fn reread(
+        &self,
+        current: &Value,
+        off: u64,
+        pty: &Type,
+        ty: &Type,
+        inner: u64,
+        op: &str,
+    ) -> Result<Option<Value>, Unwind> {
         // Another type: through the bytes of the value there.
         let l = self.mem_layout(ty)?;
         let mut bytes = Vec::new();
-        if self.encode(current, &pty, &mut bytes).is_err() {
-            return Err(self.place_mistyped(off, ty, &pty, op, "valid"));
+        if self.encode(current, pty, &mut bytes).is_err() {
+            return Err(self.place_mistyped(off, ty, pty, op, "valid"));
         }
         let Some(part) = bytes.get(inner as usize..(inner + l.size) as usize) else {
-            return Err(self.place_mistyped(off, ty, &pty, op, "valid"));
+            return Err(self.place_mistyped(off, ty, pty, op, "valid"));
         };
         match self.decode(part, ty) {
             Ok(v) => Ok(Some(v)),
@@ -1064,7 +1102,54 @@ impl<'p> Interp<'p, '_> {
                     ("obligation", "valid".into()),
                 ],
             )),
-            Err(Bad::Opaque) => Err(self.place_mistyped(off, ty, &pty, op, "valid")),
+            Err(Bad::Opaque) => Err(self.place_mistyped(off, ty, pty, op, "valid")),
+        }
+    }
+
+    /// The byte at `at` when it is an element of a `bytes`, which a slice's
+    /// pointer views in place (decision 823).
+    fn viewed_byte(&self, at: &Pointer) -> Result<Option<u8>, Unwind> {
+        let Some((Step::Index(k), base)) = at.path.split_last() else { return Ok(None) };
+        let base = Pointer { path: base.to_vec(), ..at.clone() };
+        match self.read(&base)? {
+            Value::Bytes(b) => Ok(b.get(*k).copied()),
+            _ => Ok(None),
+        }
+    }
+
+    /// Records that the slice stored at `at` was made from the list or the
+    /// bytes at `src` (decision 823). Those of places that are gone are let
+    /// go when many are kept.
+    pub(crate) fn note_view(&mut self, at: Pointer, src: Pointer) {
+        if self.raw.views.len() >= VIEWS_KEPT {
+            let gone: Vec<ViewKey> = self
+                .raw
+                .views
+                .keys()
+                .filter(|k| {
+                    let p = Pointer { task: k.0, frame: k.1, serial: k.2, local: k.3, path: k.4.clone(), tag: 0 };
+                    !self.place_alive(&p)
+                })
+                .cloned()
+                .collect();
+            for k in gone {
+                self.raw.views.remove(&k);
+            }
+        }
+        self.raw.views.insert(view_key(&at), Pointer { tag: 0, ..src });
+    }
+
+    /// The list or the bytes the slice at `at`, of `n` values, views: where
+    /// it was made from, while that holds as many values.
+    fn viewed(&self, at: &Pointer, n: u64) -> Option<Pointer> {
+        let src = self.raw.views.get(&view_key(at))?;
+        if !self.place_alive(src) {
+            return None;
+        }
+        match self.read(src).ok()? {
+            Value::List(xs) if xs.len() as u64 == n => Some(src.clone()),
+            Value::Bytes(b) if b.len() as u64 == n => Some(src.clone()),
+            _ => None,
         }
     }
 
@@ -1471,6 +1556,12 @@ impl<'p> Interp<'p, '_> {
                     Value::List(xs) => xs.len() as u64,
                     other => return Err(ice(format!("`as_ptr` of {other:?}"))),
                 };
+                // The slice's values are copies; its pointer views the list
+                // or the bytes it was made from, where they are, so that it
+                // stays valid while they live (decision 823).
+                if let Some(src) = self.viewed(&at, n) {
+                    at = src;
+                }
                 let block = self.place_block(at, elem, Some(n))?;
                 Ok(Self::ptr_value(RawPtr { block: Some(block), off: 0, shared: true, tag }))
             }

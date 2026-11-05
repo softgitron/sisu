@@ -1,0 +1,203 @@
+##! The scheduler's other two strategies (decision 501; D-086's order,
+##! decision 821): PCT's priorities and change points, and the exhaustive
+##! search's choices, as the interpreter's `Strategy::Pct` and
+##! `Strategy::Exhaustive` make them, so that a depth and a seed, or a
+##! search's prefix, name the schedule they named. Their state is in queues
+##! of `queue.sisu`, which the runtime in Rust's scheduler
+##! (`crates/sisu-rt/src/sched.rs`) keeps and hands to each call with the
+##! generator's word (`draw.sisu`) and the run queue: PCT's of one word a
+##! record, the priority the next change point gives, the yield points
+##! passed and then the change points, and its priorities by task; the
+##! search's prefix of one word a record and its trail of three, each
+##! choice taken, of how many, and whether at a yield point.
+
+import rt.draw
+import rt.queue
+from std.mem import ptr
+
+## The records of PCT's state: the priority the next change point gives,
+## the yield points passed, and the change points from here.
+const LOW: int = 0
+const YIELDS: int = 1
+const POINTS: int = 2
+
+## PCT's change points are drawn from the first this many yield points, as
+## the interpreter's `PCT_STEPS`.
+const STEPS: int = 1000
+
+## A task's priority is above every change point's: this, plus a draw
+## below `SPREAD`.
+const HIGH: int = 1099511627776
+const SPREAD: int = 1000000000
+
+## PCT's state for a run of depth `depth`, in the empty queue `st`: its
+## `depth - 1` change points drawn from the generator at `state`, and the
+## priority the first gives.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+## - `queue`: `st` holds a live, empty queue of one word a record
+pub(package) def pct_start(state: ptr mut int, st: ptr mut u8, depth: int):
+    queue.push(st, HIGH // 2, 0, 0)
+    queue.push(st, 0, 0, 0)
+    var k = 1
+    while k < max(depth, 1):
+        queue.push(st, 1 + draw.unsigned_mod(draw.next(state), STEPS), 0, 0)
+        k += 1
+
+## The priority of the task `t`, those up to it drawn when first asked.
+##
+## Requires:
+## - `state`: as in `pct_start`
+## - `queue`: `prios` holds a live queue of one word a record
+pub(package) def priority(state: ptr mut int, prios: ptr mut u8, t: int) -> int:
+    while queue.count(prios) <= t:
+        queue.push(prios, HIGH + draw.unsigned_mod(draw.next(state), SPREAD), 0, 0)
+    return queue.word(prios, t, 0)
+
+## A yield point of the running task `cur` under PCT, `asked` when it gives
+## way: whether a ready task of the run queue `ready` now has a higher
+## priority, so that `cur` is preempted. At a change point `cur` drops
+## below every task; one that gives way drops below every other, or a spin
+## loop would never let one run.
+##
+## Requires:
+## - `state`: as in `pct_start`
+## - `queue`: `st` holds PCT's state, `prios` its priorities and `ready`
+##   a live queue of one word a record
+pub(package) def pct_yield(
+    state: ptr mut int, st: ptr mut u8, prios: ptr mut u8, cur: int, asked: bool, ready: ptr mut u8
+) -> bool:
+    let passed = queue.word(st, YIELDS, 0) + 1
+    queue.set(st, YIELDS, 0, passed)
+    var k = POINTS
+    var at_point = False
+    while k < queue.count(st):
+        if queue.word(st, k, 0) == passed:
+            at_point = True
+        k += 1
+    if at_point:
+        _ = priority(state, prios, cur)
+        let low = max(queue.word(st, LOW, 0) - 1, 0)
+        queue.set(st, LOW, 0, low)
+        queue.set(prios, cur, 0, low)
+    let n = queue.count(ready)
+    if asked and n > 0:
+        _ = priority(state, prios, cur)
+        var least = queue.word(prios, 0, 0)
+        var i = 1
+        while i < queue.count(prios):
+            least = min(least, queue.word(prios, i, 0))
+            i += 1
+        queue.set(prios, cur, 0, max(least - 1, 0))
+    let mine = priority(state, prios, cur)
+    var higher = False
+    var j = 0
+    while j < n:
+        if priority(state, prios, queue.word(ready, j, 0)) > mine:
+            higher = True
+        j += 1
+    return higher
+
+## The next task under PCT: the first of the ready ones of highest
+## priority, taken out of the run queue `ready` as `draw.pick` takes one;
+## -1 when none is ready.
+##
+## Requires:
+## - `state`, `queue`: as in `pct_yield`
+pub(package) def pct_pick(state: ptr mut int, prios: ptr mut u8, ready: ptr mut u8) -> int:
+    let n = queue.count(ready)
+    if n == 0:
+        return -1
+    var best = 0
+    var top = priority(state, prios, queue.word(ready, 0, 0))
+    var i = 1
+    while i < n:
+        let p = priority(state, prios, queue.word(ready, i, 0))
+        if p > top:
+            top = p
+            best = i
+        i += 1
+    return queue.swap_remove(ready, best)
+
+## The next choice among `options`: under the exhaustive search
+## (`searching`), the search's prefix at the trail's length, or 0 past it,
+## at most the last option, recorded in the trail with whether it is at a
+## yield point; otherwise a draw of the generator. 0 without a draw for one
+## option or none.
+##
+## Requires:
+## - `state`: as in `pct_start`
+## - `queue`: `prefix` holds a live queue of one word a record and `trail`
+##   one of three
+pub(package) def choose(
+    state: ptr mut int, prefix: ptr mut u8, trail: ptr mut u8, searching: bool, options: int, at_yield: bool
+) -> int:
+    if options <= 1:
+        return 0
+    if not searching:
+        return draw.below(state, options)
+    let k = queue.count(trail)
+    var taken = 0
+    if k < queue.count(prefix):
+        taken = min(queue.word(prefix, k, 0), options - 1)
+    queue.push(trail, taken, options, if at_yield: 1 else: 0)
+    return taken
+
+## The ready task that `k` others of the run queue `ready` come before in
+## creation order: the `k`th of them sorted by number.
+##
+## Requires:
+## - `queue`: `ready` holds a live queue of one word a record, of distinct
+##   tasks, and `0 <= k < count`
+def nth(ready: ptr mut u8, k: int) -> int:
+    let n = queue.count(ready)
+    var i = 0
+    while i < n:
+        let t = queue.word(ready, i, 0)
+        var below = 0
+        var j = 0
+        while j < n:
+            if queue.word(ready, j, 0) < t:
+                below += 1
+            j += 1
+        if below == k:
+            return t
+        i += 1
+    return -1
+
+## A yield point under the exhaustive search: the task chosen to preempt
+## the running one, among the ready ones in creation order, or -1 to go on
+## (choice 0, or none ready).
+##
+## Requires:
+## - `state`, `queue`: as in `choose`, and `ready` as in `nth`
+pub(package) def search_yield(
+    state: ptr mut int, prefix: ptr mut u8, trail: ptr mut u8, ready: ptr mut u8
+) -> int:
+    let n = queue.count(ready)
+    if n == 0:
+        return -1
+    let c = choose(state, prefix, trail, True, 1 + n, True)
+    if c == 0:
+        return -1
+    return nth(ready, c - 1)
+
+## The next task under the exhaustive search: `forced`, the one a yield
+## point chose, or else the search's choice among the ready ones in
+## creation order, taken out of the run queue `ready`; -1 when none is
+## ready.
+##
+## Requires:
+## - `state`, `queue`: as in `search_yield`
+pub(package) def search_pick(
+    state: ptr mut int, prefix: ptr mut u8, trail: ptr mut u8, ready: ptr mut u8, forced: int
+) -> int:
+    let n = queue.count(ready)
+    if n == 0:
+        return -1
+    var chosen = forced
+    if chosen < 0:
+        chosen = nth(ready, choose(state, prefix, trail, True, n, False))
+    let i = queue.position(ready, 0, chosen)
+    return queue.swap_remove(ready, max(i, 0))

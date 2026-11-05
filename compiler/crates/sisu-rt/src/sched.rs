@@ -39,7 +39,7 @@
 //! the drops an intrinsic makes.
 
 use crate::abi::{self, Kind};
-use crate::queue::{self as records, Queue, Records};
+use crate::queue::{self as records, Choices, Queue, Records};
 use crate::rt::{self, Panic, ty};
 use crate::stack::{Mark, Pool, Region, Slot};
 use corosensei::{Coroutine, CoroutineResult, Yielder};
@@ -354,18 +354,9 @@ pub(crate) struct Sched {
     pub fake_clock: Option<u32>,
     /// How the next task is chosen (`SISU_SCHEDULER`, decision 501).
     pub strategy: Strategy,
-    /// PCT's priorities by task, drawn when first asked.
-    pub priorities: Vec<u64>,
-    /// PCT's change points: the yield points at which the running task
-    /// drops below every other.
-    pub change_points: Vec<u64>,
-    /// The priority the next change point gives.
-    pub next_low: u64,
-    /// The yield points passed, which PCT's change points count.
-    pub yields: u64,
-    /// The exhaustive search's choices so far: taken, of how many, and
-    /// whether at a yield point.
-    pub trail: Vec<(u32, u32, bool)>,
+    /// PCT's priorities and change points, and the exhaustive search's
+    /// prefix and choices so far: the runtime in Sisu's (decision 821).
+    pub choices: Choices,
     /// The task a choice at a yield point preempts for.
     pub forced: Option<u32>,
     /// The predicates of `sim.always` open, innermost last: the code and
@@ -441,10 +432,6 @@ pub(crate) enum Strategy {
     Exhaustive { prefix: Vec<u32> },
 }
 
-/// PCT's change points are drawn from the first this many yield points,
-/// as the interpreter's `PCT_STEPS`.
-const PCT_STEPS: u64 = 1000;
-
 impl Strategy {
     pub(crate) fn from_env() -> Strategy {
         let Ok(v) = std::env::var("SISU_SCHEDULER") else { return Strategy::Random };
@@ -482,9 +469,7 @@ pub(crate) fn trail_text() -> Option<String> {
         if !matches!(sched.strategy, Strategy::Exhaustive { .. }) {
             return None;
         }
-        let parts: Vec<String> =
-            sched.trail.iter().map(|(t, o, y)| format!("{t}/{o}/{}", if *y { "y" } else { "n" })).collect();
-        Some(parts.join("."))
+        Some(sched.choices.trail_text())
     })
 }
 
@@ -593,13 +578,12 @@ pub(crate) fn start(
     crate::budget::store(budget as i64);
     // Under PCT and the exhaustive search every yield point reaches the
     // scheduler, as each of the interpreter's does.
-    let mut change_points = Vec::new();
-    let mut next_low = 0;
+    let mut choices = Choices::new(match &strategy {
+        Strategy::Exhaustive { prefix } => prefix,
+        _ => &[],
+    });
     if let Strategy::Pct { depth } = &strategy {
-        for _ in 1..(*depth).max(1) {
-            change_points.push(1 + rng.next() % PCT_STEPS);
-        }
-        next_low = 1 << 39;
+        choices.pct_start(&mut rng, *depth);
     }
     if strategy != Strategy::Random {
         crate::budget::store(1);
@@ -653,11 +637,7 @@ pub(crate) fn start(
         pool,
         fake_clock: None,
         strategy,
-        priorities: Vec::new(),
-        change_points,
-        next_low,
-        yields: 0,
-        trail: Vec::new(),
+        choices,
         forced: None,
         always: Vec::new(),
         checking: false,
@@ -1261,35 +1241,14 @@ impl Sched {
         let cur = self.cur;
         let go = match self.strategy {
             Strategy::Random => false,
-            Strategy::Pct { .. } => {
-                self.yields += 1;
-                if self.change_points.contains(&self.yields) {
-                    self.priority(cur);
-                    self.next_low = self.next_low.saturating_sub(1);
-                    self.priorities[cur as usize] = self.next_low;
-                }
-                // A task that gives way drops below every other, or a spin
-                // loop would never let one run.
-                if asked && !self.ready.is_empty() {
-                    self.priority(cur);
-                    let low = self.priorities.iter().copied().min().unwrap_or(1).saturating_sub(1);
-                    self.priorities[cur as usize] = low;
-                }
-                let mine = self.priority(cur);
-                let ready = self.ready_list();
-                let best = ready.iter().map(|t| self.priority(*t)).max();
-                best.is_some_and(|b| b > mine)
-            }
+            // The runtime in Sisu chooses under both (decision 821).
+            Strategy::Pct { .. } => self.choices.pct_yield(&mut self.rng, cur, asked, &self.ready),
             Strategy::Exhaustive { .. } => {
-                if self.ready.is_empty() {
-                    return false;
+                let chosen = self.choices.search_yield(&mut self.rng, &self.ready);
+                if chosen.is_some() {
+                    self.forced = chosen;
                 }
-                let ready = self.ready_sorted();
-                let c = self.choose(1 + ready.len() as u32, true);
-                if c > 0 {
-                    self.forced = Some(ready[c as usize - 1]);
-                }
-                c > 0
+                chosen.is_some()
             }
         };
         if go {
@@ -1299,40 +1258,12 @@ impl Sched {
         go
     }
 
-    /// A task's PCT priority, drawn when first asked: above every change
-    /// point's.
-    fn priority(&mut self, t: u32) -> u64 {
-        while self.priorities.len() <= t as usize {
-            let p = (1 << 40) + self.rng.next() % 1_000_000_000;
-            self.priorities.push(p);
-        }
-        self.priorities[t as usize]
-    }
-
-    /// The ready tasks in creation order.
-    fn ready_sorted(&self) -> Vec<u32> {
-        let mut r = self.ready_list();
-        r.sort_unstable();
-        r
-    }
-
     /// The next choice among `options` (`sim.choose`, and the exhaustive
     /// search's): the search's schedule, or a draw of the generator;
     /// recorded for the search (the interpreter's `choose`).
     pub(crate) fn choose(&mut self, options: u32, at_yield: bool) -> u32 {
-        if options <= 1 {
-            return 0;
-        }
-        let taken = match &self.strategy {
-            Strategy::Exhaustive { prefix } => {
-                prefix.get(self.trail.len()).copied().unwrap_or(0).min(options - 1)
-            }
-            _ => self.rng.below(options as usize) as u32,
-        };
-        if matches!(self.strategy, Strategy::Exhaustive { .. }) {
-            self.trail.push((taken, options, at_yield));
-        }
-        taken
+        let searching = matches!(self.strategy, Strategy::Exhaustive { .. });
+        self.choices.choose(&mut self.rng, searching, options, at_yield)
     }
 
     /// The interpreter's `switch`: the next task among the ready ones, by
@@ -1341,38 +1272,20 @@ impl Sched {
     fn pick(&mut self, last: u32) -> u32 {
         let next = loop {
             if !self.ready.is_empty() {
-                let i = match self.strategy {
-                    // The runtime in Sisu draws the task and takes it out
-                    // (decision 724).
-                    Strategy::Random => match self.rng.pick(&mut self.ready) {
-                        Some(t) => break t as u32,
-                        None => continue,
-                    },
-                    Strategy::Pct { .. } => {
-                        let ready = self.ready_list();
-                        let (mut best, mut top) = (0, None);
-                        for (k, t) in ready.iter().enumerate() {
-                            let p = self.priority(*t);
-                            if top.is_none_or(|q| p > q) {
-                                top = Some(p);
-                                best = k;
-                            }
-                        }
-                        best
-                    }
+                // The runtime in Sisu chooses the task and takes it out
+                // (decisions 724 and 821).
+                let chosen = match self.strategy {
+                    Strategy::Random => self.rng.pick(&mut self.ready).map(|t| t as u32),
+                    Strategy::Pct { .. } => self.choices.pct_pick(&mut self.rng, &mut self.ready),
                     Strategy::Exhaustive { .. } => {
-                        let chosen = match self.forced.take() {
-                            Some(t) => t,
-                            None => {
-                                let ready = self.ready_sorted();
-                                let c = self.choose(ready.len() as u32, false);
-                                ready[c as usize]
-                            }
-                        };
-                        self.ready.position(0, i64::from(chosen)).unwrap_or(0)
+                        let forced = self.forced.take();
+                        self.choices.search_pick(&mut self.rng, &mut self.ready, forced)
                     }
                 };
-                break self.ready.swap_remove(i) as u32;
+                match chosen {
+                    Some(t) => break t,
+                    None => continue,
+                }
             }
             if !self.advance_time() {
                 rt::abort(&self.deadlock_report());
@@ -1555,10 +1468,6 @@ impl Sched {
         self.timers.push(i64::from(c), at, i64::from(t));
     }
 
-    /// The ready tasks, in the run queue's order.
-    fn ready_list(&self) -> Vec<u32> {
-        self.ready.firsts().into_iter().map(|t| t as u32).collect()
-    }
 
     /// Wakes the task `t` if it waits: the runtime in Sisu puts it in the
     /// run queue (decision 780).

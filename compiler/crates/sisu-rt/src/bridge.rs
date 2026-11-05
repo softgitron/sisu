@@ -117,7 +117,6 @@ unsafe extern "C" {
         t: *const i64,
     ) -> u8;
     fn sisu_rt_list_grow(ret: *mut u64, l: *const *mut u8, extra: *const i64, size: *const i64) -> u8;
-    fn sisu_rt_list_reverse(ret: *mut u64, l: *const *mut u8, size: *const i64) -> u8;
     fn sisu_rt_table_literal(
         ret: *mut i64,
         types: *const *const u64,
@@ -142,13 +141,13 @@ unsafe extern "C" {
         x: *const *mut u8,
         xt: *const i64,
     ) -> u8;
-    fn sisu_rt_list_sort(ret: *mut u64, types: *const *const u64, l: *const *mut u8, e: *const i64) -> u8;
     fn sisu_rt_collection(
         ret: *mut i64,
         types: *const *const u64,
         desc: *const *const u32,
         result: *const *mut u8,
         args: *const *const *mut u8,
+        mode: *const i64,
     ) -> u8;
     fn sisu_rt_table_slot(
         ret: *mut i64,
@@ -166,8 +165,6 @@ unsafe extern "C" {
         out: *const *mut u8,
         mode: *const i64,
     ) -> u8;
-    fn sisu_rt_iter_drop(ret: *mut i64, types: *const *const u64, it: *const *mut u8, mode: *const i64)
-    -> u8;
     fn sisu_rt_iter_iterable(
         ret: *mut *mut u8,
         types: *const *const u64,
@@ -175,8 +172,6 @@ unsafe extern "C" {
         arg: *const i64,
         item: *const i64,
     ) -> u8;
-    fn sisu_rt_iter_range(ret: *mut *mut u8, cur: *const i64, stop: *const i64, step: *const i64) -> u8;
-    fn sisu_rt_iter_list_ref(ret: *mut *mut u8, xs: *const *mut u8, size: *const i64) -> u8;
     fn sisu_rt_iter_items(
         ret: *mut *mut u8,
         types: *const *const u64,
@@ -186,18 +181,7 @@ unsafe extern "C" {
     fn sisu_rt_iter_chars(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
     fn sisu_rt_iter_bytes(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
     fn sisu_rt_iter_owned_bytes(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
-    fn sisu_rt_iter_enumerate(ret: *mut *mut u8, inner: *const *mut u8) -> u8;
-    fn sisu_rt_iter_zip(
-        ret: *mut *mut u8,
-        a: *const *mut u8,
-        b: *const *mut u8,
-        strict: *const u64,
-        ta: *const i64,
-        tb: *const i64,
-    ) -> u8;
-    fn sisu_rt_iter_table_ref(ret: *mut *mut u8, tb: *const *mut u8, part: *const i64) -> u8;
     fn sisu_rt_iter_generator(ret: *mut *mut u8, task: *const i64, size: *const i64) -> u8;
-    fn sisu_rt_iter_receiver(ret: *mut *mut u8, chan: *const i64, size: *const i64) -> u8;
     fn sisu_rt_iter_waits(ret: *mut i64, it: *const *mut u8, out: *const *mut u8) -> u8;
     fn sisu_rt_iter_collect(
         ret: *mut i64,
@@ -415,19 +399,6 @@ pub(crate) unsafe fn list_grow(l: *mut u8, extra: u64, size: u32) {
     }
 }
 
-/// The elements of the list at `l` in the reverse order.
-///
-/// # Safety
-/// `l` must hold a list of elements of `size` bytes.
-pub(crate) unsafe fn list_reverse(l: *mut u8, size: u32) {
-    let size = i64::from(size);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_reverse(&mut ret, &l, &size) } != abi::OK {
-        failed("list's reverse");
-    }
-}
-
 /// A `dict` or `set` of type `t` from a literal's `n` entries, moved in
 /// from `items` (each the key's bytes, then the value's), its table's word
 /// written at `out`: the runtime in Sisu's (decision 646). The status of
@@ -478,22 +449,6 @@ pub(crate) unsafe fn contains(c: *mut u8, ct: u32, x: *mut u8, xt: u32) -> bool 
     // SAFETY: as for [`equal`].
     if unsafe { sisu_rt_contains(&mut ret, &types, &c, &ct, &x, &xt) } != abi::OK {
         failed("`in`");
-    }
-    ret != 0
-}
-
-/// Sorts the list at `l`, of type `e`, stably by its elements' order;
-/// `false`, leaving it as it was, when two have none.
-///
-/// # Safety
-/// `l` must hold a list of elements of type `e`.
-pub(crate) unsafe fn list_sort(l: *mut u8, e: u32) -> bool {
-    let types = crate::desc::base();
-    let e = i64::from(e);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_sort(&mut ret, &types, &l, &e) } != abi::OK {
-        failed("list's sort");
     }
     ret != 0
 }
@@ -848,22 +803,6 @@ pub(crate) unsafe fn iter_next(it: *mut u8, out: *mut u8) -> u8 {
     status_of(ret)
 }
 
-/// Drops the iterator at `it`, or nothing when it is null, and what it
-/// owns: its status.
-///
-/// # Safety
-/// `it` must be an iterator's object, or null, dead afterwards.
-pub(crate) unsafe fn iter_drop(it: *mut u8) -> u8 {
-    let types = crate::desc::base();
-    let mode = mode();
-    let mut ret = 0i64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_iter_drop(&mut ret, &types, &it, &mode) } != abi::OK {
-        failed("iterator's drop");
-    }
-    status_of(ret)
-}
-
 /// The iterator of the items of an `Iterable[T]` argument at `p`, of type
 /// `arg`, whose items are `item` when the call says.
 ///
@@ -899,24 +838,17 @@ pub(crate) unsafe fn iter_collect(it: *mut u8, item: Option<u32>, out: *mut u8) 
 }
 
 /// A new iterator's object, made by the runtime in Sisu (decision 542),
-/// whose layout is `iter.sisu`'s alone.
+/// whose layout is `iter.sisu`'s alone: the kinds the runtime in Rust
+/// makes; the intrinsics that make the others are the runtime in Sisu's
+/// (decision 820).
 pub(crate) enum NewIter<'a> {
-    Range(i64, i64, i64),
-    /// A borrowed list's elements, of `size` bytes.
-    ListRef(*mut u8, u32),
     /// The elements of a list it owns, of type `elem`.
     Items(&'a mut crate::mem::List, u32),
     Chars(*const u8, u64),
     Bytes(*const u8, u64),
     OwnedBytes(&'a [u8]),
-    Enumerate(*mut u8),
-    Zip(*mut u8, *mut u8, bool, u32, u32),
-    /// A borrowed table's keys (0), values (1) or both (2).
-    TableRef(*mut u8, u64),
     /// A generator's items, its task and their size.
     Generator(u32, u32),
-    /// A receiver's values, its channel and their size.
-    Receiver(u32, u32),
 }
 
 /// Makes a new iterator's object.
@@ -930,8 +862,6 @@ pub(crate) unsafe fn iter_new(kind: NewIter<'_>) -> *mut u8 {
     // SAFETY: as for [`equal`]; each argument is in memory of its own.
     let status = unsafe {
         match kind {
-            NewIter::Range(cur, stop, step) => sisu_rt_iter_range(&mut ret, &cur, &stop, &step),
-            NewIter::ListRef(xs, size) => sisu_rt_iter_list_ref(&mut ret, &xs, &i(size)),
             NewIter::Items(list, elem) => {
                 let types = crate::desc::base();
                 let xs = (list as *mut crate::mem::List).cast::<u8>();
@@ -942,13 +872,7 @@ pub(crate) unsafe fn iter_new(kind: NewIter<'_>) -> *mut u8 {
             NewIter::OwnedBytes(data) => {
                 sisu_rt_iter_owned_bytes(&mut ret, &data.as_ptr(), &(data.len() as i64))
             }
-            NewIter::Enumerate(inner) => sisu_rt_iter_enumerate(&mut ret, &inner),
-            NewIter::Zip(a, b, strict, ta, tb) => {
-                sisu_rt_iter_zip(&mut ret, &a, &b, &u64::from(strict), &i(ta), &i(tb))
-            }
-            NewIter::TableRef(tb, part) => sisu_rt_iter_table_ref(&mut ret, &tb, &(part as i64)),
             NewIter::Generator(task, size) => sisu_rt_iter_generator(&mut ret, &i(task), &i(size)),
-            NewIter::Receiver(chan, size) => sisu_rt_iter_receiver(&mut ret, &i(chan), &i(size)),
         }
     };
     if status != abi::OK {
@@ -1055,14 +979,28 @@ pub(crate) unsafe extern "C" fn sisu_rt_missing_key(key: *mut u8, key_ty: i64) -
     rt::raise_msg(sisu_diag::msg::PANIC_MISSING_KEY, &[("key", String::from_utf8_lossy(&shown).into_owned())])
 }
 
-/// Whether the intrinsic numbered `id` is a list's, a dict's or a set's,
-/// whose call the runtime in Sisu decodes and does (decision 625).
+/// Whether the intrinsic numbered `id` is a list's, a dict's or a set's, or
+/// one that makes an iterator or takes every item of one, whose call the
+/// runtime in Sisu decodes and does (decisions 625 and 820).
 pub(crate) fn collects(id: u32) -> bool {
     use abi::Intrinsic as I;
     matches!(
         abi::Intrinsic::from_id(id),
         Some(
-            I::ListNew
+            I::Range
+                | I::Enumerate
+                | I::Zip
+                | I::ZipShortest
+                | I::Reversed
+                | I::IterableList
+                | I::Sorted
+                | I::Any
+                | I::All
+                | I::IterRef
+                | I::IterMut
+                | I::IterOwn
+                | I::IterOf
+                | I::ListNew
                 | I::ListWithCapacity
                 | I::ListPush
                 | I::ListPop
@@ -1116,17 +1054,17 @@ pub(crate) fn collects(id: u32) -> bool {
     )
 }
 
-/// A call of a list's, a dict's or a set's intrinsic, which the runtime in
-/// Sisu decodes from its descriptor and does (`dispatch.sisu`, decision
-/// 625): its status.
+/// A call of a list's, a dict's or a set's intrinsic, or an iterator's,
+/// which the runtime in Sisu decodes from its descriptor and does
+/// (`dispatch.sisu`, decisions 625 and 820): its status.
 ///
 /// # Safety
 /// As `sisu_rt_intrinsic`, of an intrinsic [`collects`] names.
 pub(crate) unsafe fn collection(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
     let types = crate::desc::base();
-    let mut status = 0i64;
+    let (mut status, mode) = (0i64, mode());
     // SAFETY: as the caller guarantees.
-    if unsafe { sisu_rt_collection(&mut status, &types, &desc, &ret, &args) } != abi::OK {
+    if unsafe { sisu_rt_collection(&mut status, &types, &desc, &ret, &args, &mode) } != abi::OK {
         failed("intrinsic of a collection");
     }
     status as u8
@@ -1140,6 +1078,12 @@ extern "C" fn sisu_rt_slice_bounds(start: i64, end: i64) -> u8 {
         sisu_diag::msg::PANIC_SLICE_BOUNDS,
         &[("start", start.to_string()), ("end", end.to_string())],
     )
+}
+
+/// A range of step 0 (decision 820): the panic raised, and its status.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_range_step() -> u8 {
+    rt::raise_msg(sisu_diag::msg::PANIC_RANGE_STEP, &[])
 }
 
 /// A sort that met two elements without an order: the panic raised, and its

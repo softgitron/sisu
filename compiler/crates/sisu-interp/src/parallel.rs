@@ -148,10 +148,10 @@ fn run_one(
     (r, report)
 }
 
-/// Whether the test function takes the real `System` (in the `sim`
-/// profile its `System` is simulated, so it runs with the others).
-fn takes_real_system(prog: &sir::Program, options: &Options, function: &str) -> bool {
-    options.sim.is_none() && prog.functions.iter().any(|f| f.name == function && sir::takes_real_system(f))
+/// Whether the test function takes the real `System`, which it gets in
+/// the `sim` profile too (decision 822): it runs alone.
+fn takes_real_system(prog: &sir::Program, function: &str) -> bool {
+    prog.functions.iter().any(|f| f.name == function && sir::takes_real_system(f))
 }
 
 /// Runs the tests at these indices (in declaration order); see the
@@ -164,7 +164,7 @@ pub(crate) fn run(
 ) -> Vec<(String, TestResult, RunReport)> {
     let tests: Vec<(String, String)> = which.iter().filter_map(|i| prog.tests.get(*i).cloned()).collect();
     let parallel: Vec<usize> =
-        (0..tests.len()).filter(|&k| !takes_real_system(prog, options, &tests[k].1)).collect();
+        (0..tests.len()).filter(|&k| !takes_real_system(prog, &tests[k].1)).collect();
     let jobs = if options.jobs == 0 { DEFAULT_JOBS } else { options.jobs }.min(parallel.len()).max(1);
     let virtual_time = host.virtual_time();
     let done: Mutex<Vec<Option<Done>>> = Mutex::new(vec![None; tests.len()]);

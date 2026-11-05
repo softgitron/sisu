@@ -32,13 +32,13 @@ def kinds(fs: Fs) -> list[String]:
     out.sort()
     return out
 
-test "the simulated file system fails, and is never revoked"(sys: System):
-    let seen = kinds(sys.fs)
+test "the simulated file system fails, and is never revoked"(fs: Fs):
+    let seen = kinds(fs)
     assert not seen.contains("Revoked")
     assert seen
         == ["AlreadyExists", "Interrupted", "InvalidData", "NotFound", "Other", "PermissionDenied"]
 
-test "a caretaker of it is revoked as ever"(sys: System):
-    let held, revoker = sys.fs.revocable()
+test "a caretaker of it is revoked as ever"(fs: Fs):
+    let held, revoker = fs.revocable()
     revoker.revoke()
     assert held.write_text(Path.new("x.txt"), "x") == Err(Revoked)

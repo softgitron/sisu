@@ -98,6 +98,18 @@ pub(package) def word(q: ptr mut u8, i: int, j: int) -> int:
         let h = header(q)
         return q.cast[ptr[int]]().read().offset(i * h.offset(3).read() + j).read()
 
+## Sets the word `j` of the record `i` to `w`.
+##
+## Requires:
+## - `queue`: `q` holds a live queue, `0 <= i < count` and `j` is within
+##   its width
+pub(package) def set(q: ptr mut u8, i: int, j: int, w: int):
+    # safety: in_bounds, valid, aligned, writable: the record `i` is in the
+    #   buffer and `j` within it, as `queue` requires.
+    unsafe:
+        let h = header(q)
+        q.cast[ptr[int]]().read().cast_mut().offset(i * h.offset(3).read() + j).write(w)
+
 ## Takes out the record `i`, the last moving into its slot: its first word.
 ##
 ## Requires:

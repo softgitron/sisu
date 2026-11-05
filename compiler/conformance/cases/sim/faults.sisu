@@ -1,9 +1,10 @@
-# Faults come from types (17): under `sisu test --sim` a test that declares
-# a `System` gets a simulated one, and each call through a capability's
-# operations fails, at the `--faults` rate, with an error of the method's
-# declared set and of nothing else. Code that handles the errors holds;
-# code that assumes the call works is caught, with a token that replays
-# the same faults.
+# Faults come from types (17): under `sisu test --sim` a test that names
+# the capabilities it uses gets simulated ones, and each call through a
+# capability's operations fails, at the `--faults` rate, with an error of
+# the method's declared set and of nothing else. Code that handles the
+# errors holds; code that assumes the call works is caught, with a token
+# that replays the same faults. A test that takes the real `System` gets
+# the real one (`sim/real_system`).
 # sim --faults 0.2
 
 def store_all(fs: Fs, n: int) -> int ! IoError:
@@ -28,11 +29,11 @@ def store_retrying(fs: Fs, n: int) -> int:
                     pass
     return written
 
-test "assuming every write works"(sys: System):
-    assert store_all(sys.fs, 20) == Ok(20)
+test "assuming every write works"(fs: Fs):
+    assert store_all(fs, 20) == Ok(20)
 
-test "retrying each write"(sys: System):
-    assert store_retrying(sys.fs, 20) == 20
+test "retrying each write"(fs: Fs):
+    assert store_retrying(fs, 20) == 20
 
 test "a test without a System is untouched":
     let fs = Fs.in_memory()

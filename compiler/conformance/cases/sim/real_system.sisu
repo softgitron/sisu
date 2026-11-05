@@ -1,0 +1,16 @@
+# A test that takes the real `System` can be neither simulated nor
+# replayed (17, "Simulation and replay"): under `sisu test --sim` it gets
+# the real one, as it does outside it, runs alone, and no fault reaches
+# it, and when it fails its token says why there is none. A test that
+# names the capabilities it uses gets simulated ones, which fail at the
+# `--faults` rate and replay from their token.
+# sim --faults 1.0
+
+test "the real System is not simulated"(sys: System):
+    assert sys.fs.exists(Path.new("/"))
+
+test "nor replayed"(sys: System):
+    assert sys.fs.exists(Path.new("/no/such/directory"))
+
+test "named capabilities are simulated"(fs: Fs):
+    assert fs.write_text(Path.new("x.txt"), "x").is_ok()

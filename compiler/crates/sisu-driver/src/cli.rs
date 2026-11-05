@@ -3832,8 +3832,11 @@ fn run_tests(
                     .get(index)
                     .and_then(|(_, f)| prog.functions.iter().find(|x| x.name == *f))
                     .is_some_and(sisu_sir::takes_real_system);
-                // In the `sim` profile its `System` is simulated: it replays.
-                let replay = if takes_system && options.sim.is_none() {
+                // It gets the real `System` in the `sim` profile too, which a
+                // replay cannot stand in for either (17; decision 822).
+                let replay = if takes_system && options.sim.is_some() {
+                    text(msg::CLI_REPLAY_NO_TOKEN_SIM, &[])
+                } else if takes_system {
                     text(msg::CLI_REPLAY_NO_TOKEN, &[])
                 } else {
                     let token = crate::replay::Token {

@@ -781,8 +781,11 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
             again.extend(flags.iter().cloned());
             again.push("--replay".into());
             again.push(token.clone());
+            // A package's token names the file it replays (decision 827).
             if !case.package {
                 again.push(file.clone());
+            } else if let Some(f) = crate::replay_file(&out.stdout, &token) {
+                again.push(f);
             }
             let replayed = crate::invoke_with_limit(sisu, &cwd, &again, None, TESTS_TIMEOUT);
             let first = crate::failure_blocks(&replayed.stdout)

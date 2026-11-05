@@ -13,6 +13,7 @@
 ##! the runtime in Rust (`crates/sisu-rt`), which is deleted.
 
 import rt.channel
+import rt.choose
 import rt.dispatch
 import rt.draw
 import rt.floats
@@ -262,13 +263,6 @@ def export_has_edge(text: ptr[u8], n: int, part: ptr[u8], m: int, at_end: bool) 
 def export_list_grow(l: ptr mut u8, extra: int, size: int):
     list.reserve(l, extra, size)
 
-## `list.reverse` (`list.reverse`).
-##
-## Requires:
-## - `list`: `l` holds a live list of elements of `size` bytes
-def export_list_reverse(l: ptr mut u8, size: int):
-    list.reverse(l, size)
-
 ## A dict or a set of type `t` from a literal's `n` entries at `items`,
 ## moved in, its table's address written at `out` (`dispatch.literal`,
 ## decision 646): the status of the drops of keys given again.
@@ -304,28 +298,21 @@ def export_table_inline_find(
 def export_contains(types: ptr[int], c: ptr mut u8, ct: int, x: ptr mut u8, xt: int) -> bool:
     return dispatch.contains(Types(words=types), c, ct, x, xt)
 
-## `list.sort`: the elements of the list at `l`, of type `e`, sorted stably
-## by their order; False, leaving it as it was, when two have none
-## (`list.sort`).
-##
-## Requires:
-## - `typed`: `types` is the program's table, and `l` holds a live list of
-##   elements of type `e`
-def export_list_sort(types: ptr[int], l: ptr mut u8, e: int) -> bool:
-    return list.sort(Types(words=types), l, e)
-
-## A call of an intrinsic of a list, a dict or a set (`dispatch.collection`,
-## decision 625): its descriptor at `desc`, the address of its result and
-## the block of its arguments' addresses; its status, that of the panic it
-## raised or 0.
+## A call of an intrinsic of a list, a dict or a set, or of one that makes
+## an iterator or takes its items (`dispatch.collection`, decisions 625 and
+## 820): its descriptor at `desc`, the address of its result and the block
+## of its arguments' addresses, and how what it drops is dropped (`mode`);
+## its status, that of the panic it raised or 0.
 ##
 ## Requires:
 ## - `call`: `types` is the program's table, and `desc`, `ret` and `args` a
 ##   call of the generated code of one of the intrinsics `dispatch.sisu`
 ##   numbers, whose arguments are live values of the types its descriptor
 ##   gives
-def export_collection(types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8) -> int:
-    return dispatch.collection(types, desc, ret, args)
+def export_collection(
+    types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8, mode: int
+) -> int:
+    return dispatch.collection(types, desc, ret, args, mode)
 
 ## The number of entries of the table at `tb` (`table.length`).
 ##
@@ -345,15 +332,6 @@ def export_table_len(tb: ptr mut u8) -> int:
 def export_iter_next(types: ptr[int], it: ptr mut u8, out: ptr mut u8, mode: int) -> int:
     return iter.next(Types(words=types), it, out, mode)
 
-## Drops the iterator at `it` (0 for none) and what it owns (`iter.drop`):
-## its status.
-##
-## Requires:
-## - `typed`: `types` is the program's table, and `it` the address of a live
-##   iterator's object, dead afterwards, or 0
-def export_iter_drop(types: ptr[int], it: ptr mut u8, mode: int) -> int:
-    return iter.drop(Types(words=types), it, mode)
-
 ## The iterator of the items of an `Iterable[T]` argument at `p` of type
 ## `arg`, whose items are of type `item` (-1 when the call does not say;
 ## `iter.iterable`).
@@ -364,19 +342,11 @@ def export_iter_drop(types: ptr[int], it: ptr mut u8, mode: int) -> int:
 def export_iter_iterable(types: ptr[int], p: ptr mut u8, arg: int, item: int) -> ptr mut u8:
     return iter.iterable(Types(words=types), p, arg, item)
 
-## The iterator of a range from `cur` to `stop` by `step` (`iter.new_range`):
-## the runtime in Rust makes every iterator through these exports (decision
-## 542), and the object's layout is this package's alone.
-def export_iter_range(cur: int, stop: int, step: int) -> ptr mut u8:
-    return iter.new_range(cur, stop, step)
-
-## The iterator of the addresses of the elements, `size` bytes each, of the
-## borrowed list at `xs` (`iter.new_list_ref`).
-def export_iter_list_ref(xs: ptr mut u8, size: int) -> ptr mut u8:
-    return iter.new_list_ref(xs, size)
-
 ## The iterator that owns the elements, of type `elem`, of the list at `xs`
-## (`iter.new_items`).
+## (`iter.new_items`): the runtime in Rust makes the iterators it makes
+## through these exports (decision 542), and the object's layout is this
+## package's alone; the intrinsics that make the others are this package's
+## (decision 820).
 ##
 ## Requires:
 ## - `typed`: `types` is the program's table, and `xs` holds a live list of
@@ -401,40 +371,10 @@ def export_iter_bytes(b: ptr mut u8, n: int) -> ptr mut u8:
 def export_iter_owned_bytes(b: ptr[u8], n: int) -> ptr mut u8:
     return iter.new_owned_bytes(b, n)
 
-## The iterator of an index beside each item of the iterator at `inner`,
-## which it owns (`iter.new_enumerate`).
-##
-## Requires:
-## - `iterator`: `inner` is the address of a live iterator's object
-def export_iter_enumerate(inner: ptr mut u8) -> ptr mut u8:
-    return iter.new_enumerate(inner)
-
-## The iterator of the pairs of the iterators at `a` and `b`, which it owns,
-## of items of types `ta` and `tb`, their lengths agreeing when `strict`
-## (`iter.new_zip`).
-##
-## Requires:
-## - `iterator`: `a` and `b` are the addresses of live iterators' objects
-def export_iter_zip(a: ptr mut u8, b: ptr mut u8, strict: bool, ta: int, tb: int) -> ptr mut u8:
-    return iter.new_zip(a, b, strict, ta, tb)
-
-## The iterator of references into the table at `tb`: its keys (0), its
-## values (1) or both (2) (`iter.table_part`).
-##
-## Requires:
-## - `table`: `tb` is the address of a live table
-def export_iter_table_ref(tb: ptr mut u8, part: int) -> ptr mut u8:
-    return iter.table_part(tb, part)
-
 ## The iterator of the items, `size` bytes each, of the generator whose task
 ## is `task` (`iter.new_waiting`).
 def export_iter_generator(task: int, size: int) -> ptr mut u8:
     return iter.new_waiting(task, size, True)
-
-## The iterator of the values, `size` bytes each, of the channel `chan`'s
-## receiver.
-def export_iter_receiver(chan: int, size: int) -> ptr mut u8:
-    return iter.new_waiting(chan, size, False)
 
 ## What `Iter.next` of the iterator at `it` may wait for (`iter.waits`): 1
 ## for a generator's item, 2 for a receiver's value, its task or channel and
@@ -457,6 +397,74 @@ def export_iter_collect(
     types: ptr[int], it: ptr mut u8, item: int, out: ptr mut u8, mode: int
 ) -> int:
     return iter.collect(Types(words=types), it, item, out, mode)
+
+## PCT's state for a run of depth `depth` in the empty queue `st`, its
+## change points drawn from the generator at `state` (`choose.pct_start`,
+## decision 821).
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+## - `queue`: `st` holds a live, empty queue of one word a record
+def export_choose_pct_start(state: ptr mut int, st: ptr mut u8, depth: int):
+    choose.pct_start(state, st, depth)
+
+## Whether the running task `cur` is preempted at a yield point under PCT,
+## `asked` when it gives way (`choose.pct_yield`): 1 when it is.
+##
+## Requires:
+## - `state`: as in `export_choose_pct_start`
+## - `queue`: `st` holds PCT's state, `prios` its priorities, `ready` the
+##   run queue
+def export_choose_pct_yield(
+    state: ptr mut int, st: ptr mut u8, prios: ptr mut u8, cur: int, asked: bool, ready: ptr mut u8
+) -> int:
+    return if choose.pct_yield(state, st, prios, cur, asked, ready): 1 else: 0
+
+## The next task under PCT, taken out of the run queue `ready`
+## (`choose.pct_pick`); -1 when none is ready.
+##
+## Requires:
+## - `state`, `queue`: as in `export_choose_pct_yield`
+def export_choose_pct_pick(state: ptr mut int, prios: ptr mut u8, ready: ptr mut u8) -> int:
+    return choose.pct_pick(state, prios, ready)
+
+## The next choice among `options`: the exhaustive search's (`searching`),
+## recorded in its trail, or a draw of the generator (`choose.choose`).
+##
+## Requires:
+## - `state`: as in `export_choose_pct_start`
+## - `queue`: `prefix` holds a live queue of one word a record and `trail`
+##   one of three
+def export_choose_next(
+    state: ptr mut int,
+    prefix: ptr mut u8,
+    trail: ptr mut u8,
+    searching: bool,
+    options: int,
+    at_yield: bool,
+) -> int:
+    return choose.choose(state, prefix, trail, searching, options, at_yield)
+
+## The ready task the exhaustive search preempts the running one for at a
+## yield point, or -1 (`choose.search_yield`).
+##
+## Requires:
+## - `state`, `queue`: as in `export_choose_next`, and `ready` the run queue
+def export_choose_search_yield(
+    state: ptr mut int, prefix: ptr mut u8, trail: ptr mut u8, ready: ptr mut u8
+) -> int:
+    return choose.search_yield(state, prefix, trail, ready)
+
+## The next task under the exhaustive search, `forced` (-1 for none) when a
+## yield point chose it, taken out of the run queue `ready`
+## (`choose.search_pick`); -1 when none is ready.
+##
+## Requires:
+## - `state`, `queue`: as in `export_choose_search_yield`
+def export_choose_search_pick(
+    state: ptr mut int, prefix: ptr mut u8, trail: ptr mut u8, ready: ptr mut u8, forced: int
+) -> int:
+    return choose.search_pick(state, prefix, trail, ready, forced)
 
 ## Makes the four words at `q` an empty queue of the scheduler of records
 ## of `width` words, its buffer at `buffer` with room for `capacity` of
@@ -488,13 +496,6 @@ def export_queue_push(q: ptr mut u8, a: int, b: int, c: int):
 ## - `queue`: `q` holds a live queue, `0 <= i < len` and `j` within its width
 def export_queue_word(q: ptr mut u8, i: int, j: int) -> int:
     return queue.word(q, i, j)
-
-## Takes out the record `i`, the last moving into its slot: its first word.
-##
-## Requires:
-## - `queue`: `q` holds a live queue and `0 <= i < len`
-def export_queue_swap_remove(q: ptr mut u8, i: int) -> int:
-    return queue.swap_remove(q, i)
 
 ## Takes out the record `i`, those after it one slot down.
 ##
