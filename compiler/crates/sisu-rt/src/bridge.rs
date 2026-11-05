@@ -1039,12 +1039,10 @@ unsafe extern "C" fn sisu_rt_gen_item(task: i64, out: *mut u8, size: i64) -> i64
 /// `out` must have room for a value of the channel's.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_recv_item(chan: i64, out: *mut u8, size: i64) -> i64 {
-    match crate::sched::with(|s| s.recv_now(chan as u32)) {
-        Some(Ok(v)) => {
-            // SAFETY: as the caller guarantees.
-            unsafe { mem::copy(out, v.as_ptr().cast::<u8>(), size as usize) };
-            0
-        }
+    let _ = size;
+    // SAFETY: as the caller guarantees.
+    match crate::sched::with(|s| unsafe { s.recv_now(chan as u32, out) }) {
+        Some(Ok(())) => 0,
         Some(Err(())) => 1,
         None => 2 + i64::from(rt::raise_msg(sisu_diag::msg::PANIC_NESTED_RECV, &[])),
     }

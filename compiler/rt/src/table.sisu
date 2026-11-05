@@ -316,6 +316,30 @@ pub(package) def push(ts: Types, tb: ptr mut u8, k: ptr mut u8) -> int:
     set_word(tb, LEN, n + 1)
     return n
 
+## Appends an entry whose key is a copy (`.copy()`) of the key at `k`, of
+## type `kt` behind any references, made in the entry's place, and whose
+## value the caller writes at `value_at` of its position, which is the
+## result; the key is indexed (`d{k}` assigned, decision 681).
+##
+## Requires:
+## - `typed`: `tb` is the address of a live table, which holds no key equal
+##   to the key at `k`, a live value of type `kt`
+pub(package) def push_copy(ts: Types, tb: ptr mut u8, k: ptr mut u8, kt: int) -> int:
+    reserve(tb, 1)
+    let n = word(tb, LEN)
+    let e = entry(tb, n)
+    let (q, t) = value.target(ts, k, kt)
+    # safety: in_bounds, valid, aligned, writable: entry `n` has room in the
+    #   block, after `reserve`.
+    unsafe:
+        let key = e.offset(8)
+        value.copy(ts, key, q, t)
+        let h = hash_key(ts, key, word(tb, KEY))
+        e.cast[int]().write(h)
+        place(tb.cast[ptr[int]]().offset(INDEX).read().cast_mut(), word(tb, MASK), h, n)
+    set_word(tb, LEN, n + 1)
+    return n
+
 ## Moves entry `i` of the table at `tb` out to `out`, its key and then its
 ## value, the entries after it a place down, and makes the index again.
 ##

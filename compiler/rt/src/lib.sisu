@@ -12,6 +12,7 @@
 ##! (`types.sisu`, decision 350). Each function replaces its counterpart in
 ##! the runtime in Rust (`crates/sisu-rt`), which is deleted.
 
+import rt.channel
 import rt.dispatch
 import rt.floats
 import rt.iter
@@ -556,3 +557,48 @@ def export_queue_position(q: ptr mut u8, j: int, x: int) -> int:
 ##   live queue
 def export_queue_take_key(q: ptr mut u8, key: int, out: ptr mut u8):
     queue.take_key(q, key, out)
+
+## Makes the five words at `c` an empty buffer of a channel's values of
+## `size` bytes, its slots at `slots`, `room` of them (decision 680).
+##
+## Requires:
+## - `blocks`: `c` points to five writable words, and `slots` to room for
+##   `room` slots of `size` bytes rounded up to a word (at least one) from
+##   `malloc`, and `room` is at least 1
+def export_channel_init(c: ptr mut u8, slots: ptr mut u8, room: int, size: int):
+    channel.init(c, slots, room, size)
+
+## The values a channel's buffer holds.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer
+def export_channel_len(c: ptr mut u8) -> int:
+    return channel.count(c)
+
+## Moves the value of `size` bytes at `src` into a channel's buffer, after
+## the others.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer of values of `size` bytes, and `src`
+##   a value, the buffer's afterwards
+def export_channel_push(c: ptr mut u8, src: ptr[u8], size: int):
+    channel.push(c, src, size)
+
+## Moves the first value of a channel's buffer, `size` bytes, out to
+## `dst`: whether there was one.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer of values of `size` bytes, and `dst`
+##   has room for one
+def export_channel_pop(c: ptr mut u8, dst: ptr mut u8, size: int) -> bool:
+    return channel.pop(c, dst, size)
+
+## The address of the value under the key at `key`, of type `kt`, in the
+## dict at `d`, for `d{k}` (`dispatch.slot`, decision 681): appended for
+## `mode` 1, 0 when missing for `mode` 2, -1 when missing for a read.
+##
+## Requires:
+## - `typed`: `types` is the program's table, `d` holds a live dict and
+##   `key` a live value of type `kt`
+def export_table_slot(types: ptr[int], d: ptr mut u8, key: ptr mut u8, kt: int, mode: int) -> int:
+    return dispatch.slot(Types(words=types), d, key, kt, mode)

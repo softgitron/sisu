@@ -160,9 +160,9 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::ReceiverRecv => recv(c),
             I::ReceiverTryRecv => system(|| {
                 let ch = c.word(0) as u32;
-                let elem = elem_of(c.ty(0));
-                match with(|s| s.recv_now(ch)) {
-                    Some(Ok(v)) => write_some(c.ret, &v, ty(elem).size),
+                // The value goes after the option's tag.
+                match with(|s| s.recv_now(ch, c.ret.add(8))) {
+                    Some(Ok(())) => mem::set_word(c.ret, 0, 0),
                     _ => mem::set_word(c.ret, 0, 1),
                 }
                 abi::OK
@@ -477,14 +477,18 @@ impl sched::Sched {
         out
     }
 
-    /// The next value of a channel if there is one now: `Ok(words)`,
-    /// `Err(())` when it is closed and drained, `None` when a receiver
-    /// would wait.
-    pub(crate) fn recv_now(&mut self, ch: u32) -> Option<Result<Box<[u64]>, ()>> {
+    /// The next value of a channel if there is one now, moved out to
+    /// `out`: `Ok(())`, `Err(())` when it is closed and drained, `None`
+    /// when a receiver would wait.
+    ///
+    /// # Safety
+    /// `out` must have room for a value of the channel's.
+    pub(crate) unsafe fn recv_now(&mut self, ch: u32, out: *mut u8) -> Option<Result<(), ()>> {
         let chan = self.channels.get_mut(ch as usize)?;
-        if let Some(v) = chan.buf.pop_front() {
+        // SAFETY: as the caller guarantees.
+        if unsafe { chan.buf.pop(out) } {
             self.wake_key(Key::Chan(ch));
-            return Some(Ok(v));
+            return Some(Ok(()));
         }
         if chan.closed || chan.senders == 0 {
             return Some(Err(()));
@@ -1005,7 +1009,7 @@ unsafe fn channel(c: &Call<'_>) -> u8 {
         let ch = with(|s| {
             let ch = s.channels.len() as u32;
             s.channels.push(sched::Channel {
-                buf: std::collections::VecDeque::new(),
+                buf: crate::queue::ChanBuf::new(ty(elem).size, cap as usize),
                 cap: cap as usize,
                 closed: false,
                 senders: 1,
@@ -1042,8 +1046,7 @@ unsafe fn send(c: &Call<'_>) -> u8 {
             }
             if chan.buf.len() < chan.cap {
                 // SAFETY: the value is moved into the channel.
-                let v = unsafe { take_words(vp, ty(vt).size) };
-                s.channels[ch as usize].buf.push_back(v);
+                unsafe { s.channels[ch as usize].buf.push(vp) };
                 s.wake_key(Key::Chan(ch));
                 return Then::Sent;
             }
@@ -1085,8 +1088,7 @@ unsafe fn try_send(c: &Call<'_>) -> u8 {
             if chan.receivers == 0 || chan.closed || chan.buf.len() >= chan.cap {
                 return false;
             }
-            let v = take_words(vp, size);
-            s.channels[ch as usize].buf.push_back(v);
+            s.channels[ch as usize].buf.push(vp);
             s.wake_key(Key::Chan(ch));
             true
         });
@@ -1114,9 +1116,10 @@ unsafe fn recv(c: &Call<'_>) -> u8 {
                     write_task_error(c.ret, c.ret_ty, "Cancelled", None);
                     return Attempt::Done(abi::OK);
                 }
-                match s.recv_now(ch) {
-                    Some(Ok(v)) => {
-                        write_some(c.ret, &v, size);
+                // The value goes after the result's tag.
+                match s.recv_now(ch, c.ret.add(8)) {
+                    Some(Ok(())) => {
+                        mem::set_word(c.ret, 0, 0);
                         Attempt::Done(abi::OK)
                     }
                     Some(Err(())) => {
@@ -1144,8 +1147,18 @@ pub(crate) fn drop_channel_end(ch: u32, receiver: bool) -> u8 {
             chan.senders = chan.senders.saturating_sub(1);
         }
         let elem = chan.elem;
-        let left: Vec<(Box<[u64]>, u32)> =
-            if chan.receivers == 0 { chan.buf.drain(..).map(|v| (v, elem)).collect() } else { Vec::new() };
+        let mut left: Vec<(Box<[u64]>, u32)> = Vec::new();
+        if chan.receivers == 0 {
+            let words = (ty(elem).size as usize).div_ceil(8);
+            loop {
+                let mut v = vec![0u64; words.max(1)].into_boxed_slice();
+                // SAFETY: the words have room for a value of the channel's.
+                if !unsafe { chan.buf.pop(v.as_mut_ptr().cast()) } {
+                    break;
+                }
+                left.push((v, elem));
+            }
+        }
         s.wake_key(Key::Chan(ch));
         left
     });
@@ -1369,10 +1382,11 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
                     unsafe { c.none() };
                     return Attempt::Done(abi::OK);
                 }
-                match s.recv_now(ch) {
-                    Some(Ok(v)) => {
+                // SAFETY: the value goes after the option's tag.
+                match unsafe { s.recv_now(ch, c.ret.add(8)) } {
+                    Some(Ok(())) => {
                         // SAFETY: as above.
-                        unsafe { write_some(c.ret, &v, size) };
+                        unsafe { mem::set_word(c.ret, 0, 0) };
                         Attempt::Done(abi::OK)
                     }
                     Some(Err(())) => {

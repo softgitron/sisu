@@ -5,6 +5,8 @@
 //! Sisu's convention (the result's address, each argument's, the status).
 //! The blocks are given here, kept for the run and not counted among the
 //! program's allocations, as the `Vec`s and the map they replace were not.
+//! The buffers of channels are the runtime in Sisu's too
+//! (`compiler/rt/src/channel.sisu`, decision 680), kept the same way.
 
 unsafe extern "C" {
     fn sisu_rt_queue_init(
@@ -28,6 +30,16 @@ unsafe extern "C" {
     fn sisu_rt_queue_position(ret: *mut i64, q: *const *mut u8, j: *const i64, x: *const i64) -> u8;
     fn sisu_rt_queue_clear(ret: *mut u64, q: *const *mut u8) -> u8;
     fn sisu_rt_queue_take_key(ret: *mut u64, q: *const *mut u8, key: *const i64, out: *const *mut u8) -> u8;
+    fn sisu_rt_channel_init(
+        ret: *mut u64,
+        c: *const *mut u8,
+        slots: *const *mut u8,
+        room: *const i64,
+        size: *const i64,
+    ) -> u8;
+    fn sisu_rt_channel_len(ret: *mut i64, c: *const *mut u8) -> u8;
+    fn sisu_rt_channel_push(ret: *mut u64, c: *const *mut u8, src: *const *const u8, size: *const i64) -> u8;
+    fn sisu_rt_channel_pop(ret: *mut u64, c: *const *mut u8, dst: *const *mut u8, size: *const i64) -> u8;
 }
 
 /// The records a queue has room for before it first grows.
@@ -47,7 +59,7 @@ fn unprobed(f: impl FnOnce() -> u8) {
     let status = f();
     probe.store(limit, std::sync::atomic::Ordering::Relaxed);
     if status != 0 {
-        crate::rt::internal("the runtime in Sisu failed in a queue of the scheduler");
+        crate::rt::internal("the runtime in Sisu failed in a queue of the scheduler or a channel's buffer");
     }
 }
 
@@ -136,5 +148,72 @@ impl Queue {
         // SAFETY: both are live queues, `self.0` of two words a record.
         unprobed(|| unsafe { sisu_rt_queue_clear(&mut unit, &out.0) });
         unprobed(|| unsafe { sisu_rt_queue_take_key(&mut unit, &self.0, &key, &out.0) });
+    }
+}
+
+/// The buffer of a channel (decision 680): the values sent and not yet
+/// received, in the order they were sent, the runtime in Sisu's
+/// (`compiler/rt/src/channel.sisu`), a ring of slots of the value's size
+/// that grows when it is full, whose blocks are given here and kept for the
+/// run, not counted among the program's allocations, as the `VecDeque` it
+/// replaces was not. The channel's capacity is a bound the scheduler checks.
+pub(crate) struct ChanBuf {
+    at: *mut u8,
+    size: i64,
+}
+
+/// The slots a channel's buffer has before it first grows, fewer when the
+/// channel's capacity is smaller.
+const CHAN_ROOM: usize = 8;
+
+impl ChanBuf {
+    /// An empty buffer of values of `size` bytes, for a channel of
+    /// `capacity`.
+    pub(crate) fn new(size: u32, capacity: usize) -> ChanBuf {
+        let room = capacity.clamp(1, CHAN_ROOM) as i64;
+        let slot = (i64::from(size).max(1) + 7) / 8 * 8;
+        let at = crate::mem::alloc_kept(40);
+        let slots = crate::mem::alloc_kept((room * slot) as usize);
+        if at.is_null() || slots.is_null() {
+            crate::rt::abort("out of memory");
+        }
+        let size = i64::from(size);
+        let mut unit = 0u64;
+        // SAFETY: `at` is five words and `slots` room for `room` slots, both
+        // from malloc, as the export requires.
+        unprobed(|| unsafe { sisu_rt_channel_init(&mut unit, &at, &slots, &room, &size) });
+        ChanBuf { at, size }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        let mut n = 0i64;
+        // SAFETY: `self.at` is a live buffer.
+        unprobed(|| unsafe { sisu_rt_channel_len(&mut n, &self.at) });
+        n as usize
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Moves the value at `src` in after the others.
+    ///
+    /// # Safety
+    /// `src` must hold a value of the buffer's size, the buffer's after.
+    pub(crate) unsafe fn push(&mut self, src: *const u8) {
+        let mut unit = 0u64;
+        // SAFETY: `self.at` is a live buffer and `src` a value of its size.
+        unprobed(|| unsafe { sisu_rt_channel_push(&mut unit, &self.at, &src, &self.size) });
+    }
+
+    /// Moves the first value out to `dst`: whether there was one.
+    ///
+    /// # Safety
+    /// `dst` must have room for a value of the buffer's size.
+    pub(crate) unsafe fn pop(&mut self, dst: *mut u8) -> bool {
+        let mut got = 0u64;
+        // SAFETY: `self.at` is a live buffer and `dst` has room for a value.
+        unprobed(|| unsafe { sisu_rt_channel_pop(&mut got, &self.at, &dst, &self.size) });
+        got & 0xff != 0
     }
 }

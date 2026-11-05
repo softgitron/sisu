@@ -45,7 +45,6 @@ use crate::stack::{Mark, Pool, Region, Slot};
 use corosensei::{Coroutine, CoroutineResult, Yielder};
 use sisu_diag::msg;
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 /// The root task's number.
@@ -261,9 +260,10 @@ pub(crate) struct ScopeRec {
     pub winner: Option<u32>,
 }
 
-/// A bounded channel; its values are kept as words.
+/// A bounded channel; its values are in a buffer of the runtime in Sisu's
+/// (decision 680).
 pub(crate) struct Channel {
-    pub buf: VecDeque<Box<[u64]>>,
+    pub buf: crate::queue::ChanBuf,
     pub cap: usize,
     pub closed: bool,
     pub senders: u32,

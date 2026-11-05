@@ -1,0 +1,118 @@
+##! The buffers of channels (D-086's order; decision 680): the values a
+##! channel holds, sent and not received yet, in the order they were sent,
+##! which the runtime in Rust's scheduler (`crates/sisu-rt/src/tasks.rs`)
+##! keeps here and reaches only through the exports. A buffer is a ring of
+##! slots of one size, the channel's value's rounded up to a word, and its
+##! header is five words: the address of its slots, the slot of the first
+##! value, the number of values, the slots there are and a slot's bytes.
+##! It grows to twice its slots when a value finds it full, the values that
+##! wrapped round moved after the others, so a channel's capacity is a
+##! bound the scheduler checks and not the room it takes. Its blocks are
+##! the runtime in Rust's, kept for the run and not counted among the
+##! program's allocations, as the queues of the scheduler's are (decision
+##! 645). A value moves in and out as its bytes: a sent value is the
+##! buffer's until a receiver takes it or the runtime in Rust drops it.
+
+from rt.host import memmove
+from rt.host import sisu_rt_grow
+from std.mem import ptr
+
+## The header's words of the buffer at `c`.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer
+def header(c: ptr mut u8) -> ptr mut int:
+    return c.cast[int]()
+
+## Makes the five words at `c` an empty buffer of values of `size` bytes,
+## whose slots are at `slots`, `room` of them.
+##
+## Requires:
+## - `blocks`: `c` points to five writable words, and `slots` to room for
+##   `room` slots of `size` bytes rounded up to a word (at least one) from
+##   `malloc`, which `realloc` may grow, and `room` is at least 1
+pub(package) def init(c: ptr mut u8, slots: ptr mut u8, room: int, size: int):
+    # safety: in_bounds, valid, aligned, writable: `c` is five words, by
+    #   `blocks`.
+    unsafe:
+        let w = header(c)
+        w.write(slots.addr())
+        w.offset(1).write(0)
+        w.offset(2).write(0)
+        w.offset(3).write(room)
+        w.offset(4).write(max((size + 7) // 8, 1) * 8)
+
+## The values the buffer at `c` holds.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer
+pub(package) def count(c: ptr mut u8) -> int:
+    # safety: in_bounds, valid, aligned: a buffer's third word is its
+    #   number of values, by `buffer`.
+    return unsafe header(c).offset(2).read()
+
+## Doubles the slots of the full buffer at `c`, the values that wrapped
+## round to its start moved after the last slot, so that they follow the
+## others.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer whose slots are all taken
+def grow(c: ptr mut u8):
+    # safety: in_bounds, valid, aligned, writable: a buffer is its slots'
+    #   address, its first slot, its number of values, its slots and a
+    #   slot's bytes, by `buffer`, and the block grown holds twice the
+    #   slots, so the `first` slots that wrapped fit after the old ones;
+    #   returns_promptly: the runtime in Rust grows the block, keeping its
+    #   bytes, and memmove moves them.
+    unsafe:
+        let h = header(c)
+        let first = h.offset(1).read()
+        let room = h.offset(3).read()
+        let size = h.offset(4).read()
+        let slots = sisu_rt_grow(c.cast[ptr[u8]]().read().cast_mut(), room * 2 * size)
+        h.write(slots.addr())
+        h.offset(3).write(room * 2)
+        if first > 0:
+            _ = memmove(slots.offset(room * size), slots.as_const(), first * size)
+
+## Moves the value of `size` bytes at `src` in after the others.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer of values of `size` bytes, and `src`
+##   a value, the buffer's afterwards
+pub(package) def push(c: ptr mut u8, src: ptr[u8], size: int):
+    # safety: in_bounds, valid, aligned, writable: as in `grow`, the slot
+    #   after the last value is in the block once it has room;
+    #   returns_promptly: memmove moves the value's bytes.
+    unsafe:
+        let h = header(c)
+        let n = h.offset(2).read()
+        if n == h.offset(3).read():
+            grow(c)
+        let room = h.offset(3).read()
+        let at = (h.offset(1).read() + n) % room
+        let slots = c.cast[ptr[u8]]().read().cast_mut()
+        _ = memmove(slots.offset(at * h.offset(4).read()), src, size)
+        h.offset(2).write(n + 1)
+
+## Moves the first value, of `size` bytes, out to `dst`: whether there was
+## one.
+##
+## Requires:
+## - `buffer`: `c` holds a live buffer of values of `size` bytes, and `dst`
+##   has room for one
+pub(package) def pop(c: ptr mut u8, dst: ptr mut u8, size: int) -> bool:
+    # safety: in_bounds, valid, aligned, writable: as in `push`, the first
+    #   value's slot is in the block; returns_promptly: memmove moves its
+    #   bytes.
+    unsafe:
+        let h = header(c)
+        let n = h.offset(2).read()
+        if n == 0:
+            return False
+        let first = h.offset(1).read()
+        let slots = c.cast[ptr[u8]]().read()
+        _ = memmove(dst, slots.offset(first * h.offset(4).read()), size)
+        h.offset(1).write((first + 1) % h.offset(3).read())
+        h.offset(2).write(n - 1)
+        return True

@@ -704,6 +704,32 @@ pub(package) def find(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, want_v
         return table.value_at(tb, i).addr()
     return 1
 
+## `sisu_rt_dict_slot`'s modes (`abi::SLOT_READ` and its kin): a missing
+## key panics, is inserted, or is nothing to drop.
+const SLOT_WRITE: int = 1
+const SLOT_DROP: int = 2
+
+## The address of the value under the key at `key`, of type `kt` behind
+## any references, in the dict at `p`: `d{k}`'s slot (decision 681). A key
+## the dict does not hold is appended, a copy of it, for `SLOT_WRITE`,
+## whose value the caller writes; is 0 for `SLOT_DROP`; and is -1 for a
+## read, whose panic, naming the key, the runtime in Rust raises.
+##
+## Requires:
+## - `typed`: `p` holds a live dict and `key` a live value of type `kt`
+pub(package) def slot(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, mode: int) -> int:
+    # safety: valid, aligned, writable: a dict's value is its table's
+    #   address.
+    let tb = unsafe p.cast[ptr[u8]]().read().cast_mut()
+    let i = table.find(ts, tb, key, kt)
+    if i >= 0:
+        return table.value_at(tb, i).addr()
+    if mode == SLOT_WRITE:
+        return table.value_at(tb, table.push_copy(ts, tb, key, kt)).addr()
+    if mode == SLOT_DROP:
+        return 0
+    return -1
+
 ## A call of one of the intrinsics above: `desc` its descriptor, `ret` the
 ## address of its result and `args` the block of its arguments' addresses,
 ## the types those of the table at `types`. Its status: 0, or that of the
