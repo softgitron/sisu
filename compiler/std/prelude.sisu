@@ -5675,9 +5675,11 @@ impl[T, E] Result[T, E]:
     ##
     ## ```
     ## let lost: Result[int, String] = Err("lost".to_string())
-    ## assert lost.or_else(e -> e.byte_len()) == 4
+    ## let length = lost.or_else(e -> e.byte_len())
+    ## assert length == 4
     ## let found: Result[int, String] = Ok(7)
-    ## assert found.or_else(e -> 0) == 7
+    ## let seven = found.or_else(e -> 0)
+    ## assert seven == 7
     ## ```
     def or_else(own self, f: (E) -> T) -> T:
         if self.is_ok():
@@ -5715,9 +5717,11 @@ impl[T, E] list[Result[T, E]]:
     ##
     ## ```
     ## let all: list[Result[int, String]] = [Ok(4), Ok(5)]
-    ## assert all.try_collect() == Ok([4, 5])
+    ## let values = all.try_collect()
+    ## assert values == Ok([4, 5])
     ## let one: list[Result[int, String]] = [Ok(4), Err("lost"), Err("late")]
-    ## assert one.try_collect() == Err("lost")
+    ## let first = one.try_collect()
+    ## assert first == Err("lost")
     ## ```
     pure def try_collect(own self) -> Result[list[T], E]:
         var out: list[T] = []

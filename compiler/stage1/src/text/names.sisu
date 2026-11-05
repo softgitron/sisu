@@ -5,7 +5,6 @@
 ##! generated from Unicode's data; a lookup is a binary search over a
 ##! table's records.
 
-from stage1.text import char_at
 from stage1.unicode_tables import (
     SCRIPTS,
     combining_classes,

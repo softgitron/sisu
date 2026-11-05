@@ -1073,6 +1073,16 @@ if ! stage1 sir-batch "$work/behaviour.sir" "$work/behaviour.sandboxes" > "$work
     echo "check.sh: stage 1 failed lowering the $class programs" >&2
     exit 1
 fi
+# A batch makes one base, of the runtime profile `full`; a package of
+# another profile (its manifest's `runtime`, RULES.md R122) is lowered by
+# the single command in its directory, as the driver lowers it (R141).
+for k in $(seq 1 "$n"); do
+    prog=$(sed -n "${k}p" "$work/behaviour.sandboxes")
+    if [ -d "$prog" ] && [ -f "$prog/sisu.toml" ] &&
+        grep -Eq '^runtime *= *"(single|freestanding)"' "$prog/sisu.toml"; then
+        stage1 sir "$prog" > "$work/behaviour.sir/$k.sir" 2> /dev/null
+    fi
+done
 middle=$(date +%s.%N)
 parallel behaviour_one "$list" "$work/behaviour"
 end=$(date +%s.%N)

@@ -2539,6 +2539,54 @@ already passes `--target-runtime`, which now reaches imports and
 dependencies too). The new cases are in `cases/findings14/` and
 `cases/packages/runtime_import.pkg`.
 
+### The fifteenth round: lookups by `str`, the parser's cost, Unicode names, the planned helpers, names despite a parse error
+
+This round took the lookup by `str` without its `String` (decisions 729
+and 784), the parser's own cost that R127 left, D-048's names and lints,
+the library's planned helpers, G4's names despite a parse error, `sisu
+doc`'s values and the call on a public type's `Debug`. RULES.md has the
+rules (R134 to R141, decisions 800 to 807) and their decision texts:
+
+- **Lookups by `str`** (R134): `get`, `remove` and the index of a
+  `dict[String, V]` and `contains` and `remove` of a `set[String]` by a
+  `str` pass the `str` to decision 784's intrinsics. 30,000 lookups take
+  370 M instructions on the interpreter before, 260 M after; natively they
+  make 31 allocations where they made 30,031, but take 124 M instructions
+  where they took 98 M, since the backend lowers `dict.get` in place and
+  the `_str` intrinsics through the runtime's dispatch.
+- **The parser's cost** (R135): the lines from the tokens, fewer calls a
+  token. The prelude's parse takes 353 M instructions where it took 464 M;
+  a cached two-line `check` 3.23 G where it took 3.43 G, the parser 0.70 G
+  of it (0.91 G).
+- **Unicode names** (R136): names in NFC, a combining mark in a name, and
+  `W0031` and `W0032`, from tables `tools/unicode_tables.py` generates
+  (`src/unicode_tables.sisu`, 821 lines), which `check.sh` keeps fresh.
+- **The planned helpers** (R137): `checked_add`, `checked_sub`,
+  `checked_mul` and `checked_pow` of the sized integers, `int.checked_pow`,
+  `Result.or_else`, `Iter.try_map` and `list[Result[T, E]].try_collect`.
+- **Names despite a parse error** (R138): a body with a syntax error
+  reports the names outside its broken statements, and none that they
+  write.
+- **`sisu doc`'s values** (R139): decided against for the round.
+- **A public type's `Debug`** (R140): every type keeps it; 10's sentence is
+  changed in the decision text.
+- **The merge's differences** (R141): the conformance suite's
+  `runtime_single`, whose package `check.sh` now lowers with the base of
+  its own profile.
+
+Decided against: `sisu doc`'s values of an example (R139), a string
+literal's key and `dict.contains` by `str` without their `String` (R134),
+and the trials of R135. Open: the backend's in-place lowering of the
+`_str` intrinsics (stage 0's), `try_collect` after an adapter's `map`
+(R137), the borrow of a `str` index by `dict.index_str` (R134), a batch's
+base for each runtime profile (R141), the confusables and scripts of
+Unicode's own files (R136), and the
+profile stage 1 is built with (R135: the release profile parses the
+prelude in 373 M instructions, the debug profile in 988 M).
+
+Stage 1's version stays 0.11.0: the driver relies on no new form. The new
+cases are in `cases/findings15/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3296,6 +3344,21 @@ command's start is the parser's own 0.91 G, the resolution of the base
 cost a byte is now mostly the native code's for each operation, a load,
 a compare and a branch each a few instructions more than they need.
 
+The fifteenth round profiled the parser (callgrind on `sisu1 parse
+--print` of the prelude, 988 M instructions): the table of lines was made
+twice, by `Parser.new` and by `render_ids_in` of no diagnostic, 45 M each
+at about 230 instructions a byte, and the parser's most frequent calls
+(`at`, `current`, `nth`, `flush_trivia`, `tokens_attached`) cost 100 to
+250 instructions each, most of it the call. R135 finds the lines from the
+tokens, makes no table for no diagnostic, and reads the current token in
+place: the prelude's parse takes 353 M instructions where it took 464 M,
+and the two-line `check` 3.23 G where it took 3.43 G. What is left of a
+command's start is the parser's 0.70 G, the lexer's 0.53 G and the AST
+builder's 0.54 G, and the code of the debug profile, in which `sisu1` and
+`check.sh` build stage 1: the release profile parses the prelude in 373 M
+instructions, 2.6 times fewer, which makes the profile the larger lever
+(the driver's and `sisu1`'s to choose).
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3392,8 +3455,7 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
 7. **The manual's other findings** (manual/README.md, "What the plan
    found in stage 0"): item 11 has those of the front end the fifth round
    left. Decided against: `enumerate(own xs)` (04 writes `mut` at a call,
-   never `own`), and NFC names and the confusable lints (D-048), which wait
-   for generated Unicode tables (R133 says what they would hold).
+   never `own`); NFC names and the confusable lints (D-048) are R136's.
 8. **Start-up and speed** (above, "Starting up" and "The compile-time
    evaluator"): the base's prelude, `cap` and `builtin_impls`, parsed and
    resolved again by each command, which a cache of the parsed and
@@ -3403,7 +3465,8 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
    cache (R125) took a tenth off a command's start; the parse of the
    base's modules, half of it, is left; the fourteenth round's (R127)
    made the lexer twice as fast and the AST builder a third faster, and
-   the parser itself, 0.91 G of a two-line `check`, is what is left.
+   the parser itself, 0.91 G of a two-line `check`, was left; the
+   fifteenth round's (R135) took it to 0.70 G, the command to 3.23 G.
 9. **Unsafe code** (above, "Unsafe code"): since round 11 the intrinsics
    of `std.mem` run in stage 0's interpreter, on the checked memory model
    of D-085 with the foreign calls of `extern` blocks emulated, and
@@ -3463,7 +3526,11 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     (R128), an item's own `##` and a variant's fields' in reflection
     (R129), checks before `return impl` (R130; a `let` there decided
     against) and the label at an unrolled template's line (R131); decided
-    against for the round: NFC names and the confusable lints (R133). The tenth round took a variant's
+    against for the round: NFC names and the confusable lints (R133). The
+    fifteenth round took NFC names and the lints (R136), the planned helpers
+    (R137), names despite a parse error (R138) and a public type's `Debug`
+    (R140, every type keeps it); decided against for the round: `sisu
+    doc`'s values (R139). The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of
