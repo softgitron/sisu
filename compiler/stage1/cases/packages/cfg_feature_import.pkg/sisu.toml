@@ -1,0 +1,7 @@
+# A package whose item a `@cfg(feature=...)` leaves out (RULES.md, R91).
+[package]
+name = "app"
+version = "0.1.0"
+
+[features]
+fast = []

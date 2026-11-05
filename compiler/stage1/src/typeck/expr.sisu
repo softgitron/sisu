@@ -26,7 +26,7 @@ from stage1.syntax.ast import (
     UnOp,
 )
 from stage1.syntax.ast import build
-from stage1.typeck.check import Checker, Cx, RetCtx, first_of
+from stage1.typeck.check import Checker, Cx, PASSED, RetCtx, first_of
 from stage1.typeck.program import Answer, DefKind, FnInfo, param_local_ty
 from stage1.typeck.std_sources import int_width, sized, widens
 from stage1.typeck.thir import (
@@ -606,6 +606,7 @@ impl Checker:
         let TyData.Fn(_, _, True) = self.types.data(z) else:
             return
         var callee: String? = None
+        var passed: DefId? = None
         match self.exprs[x.index].kind:
             case TExprKind.FnRef(d, _):
                 var pure = False
@@ -613,6 +614,7 @@ impl Checker:
                     pure = i.pure
                 if not pure:
                     callee = Some(cx.prog.defs[d.index].name.copy())
+                    passed = Some(d)
             case TExprKind.Closure(c):
                 var body: BlockId? = None
                 if let Some(cl) = self.closures[c.index]:
@@ -622,7 +624,11 @@ impl Checker:
             case _:
                 pass
         if let Some(name) = callee:
-            let d = self.error(cx, Msg.TypeImpureArgument, self.span_of(x)).with("callee", name)
+            var d = self.error(cx, Msg.TypeImpureArgument, self.span_of(x)).with("callee", name)
+            # The function passed, whose operation responsible is named once
+            # every body is checked (RULES.md, R90).
+            if let Some(p) = passed:
+                d = d.with(PASSED, "{p.index}")
             self.report(d)
 
     ## A `ref T` of a `Copy` type used as a value becomes the `T`.
@@ -1593,16 +1599,22 @@ impl Checker:
                     l = self.infer_expr(cx, lhs, Some(right))
             case _:
                 pass
+        # A shift's amount is a count of bits, which takes no part in the
+        # shifted value's type (RULES.md, R80): a literal on the left keeps
+        # its own, and neither side widens to the other.
+        let shift = op == BinOp.Shl or op == BinOp.Shr
         # A literal on the left takes the sized integer type on the right.
         let rt = self.resolved(self.ty_of(r))
         if let Some(k) = self.int_kind(cx, rt):
-            if k != "int":
+            if k != "int" and not shift:
                 if let TExprKind.Int(_) = self.exprs[l.index].kind:
                     if self.resolved(self.ty_of(l)) == Ty.int():
                         l = self.infer_expr(cx, lhs, Some(rt))
         # Integers of two types: the narrower widens when that loses nothing.
-        var widened = False
-        if let Some(a) = self.int_kind(cx, self.ty_of(l)):
+        var widened = shift and self.shifts_sized(cx, self.ty_of(l), self.ty_of(r))
+        if widened:
+            pass
+        elif let Some(a) = self.int_kind(cx, self.ty_of(l)):
             if let Some(b) = self.int_kind(cx, self.ty_of(r)):
                 if a != b and widens(a, b):
                     let to = self.resolved(self.ty_of(r))
@@ -1752,6 +1764,16 @@ impl Checker:
             return TArg(expr=x, mode=ArgMode.Value)
         return TArg(expr=x, mode=ArgMode.Ref)
 
+    ## Whether `l << r` (or `>>`) shifts a sized integer, of a type other
+    ## than `int`, by an amount of an integer type: its value keeps `l`'s
+    ## type (RULES.md, R80).
+    pure def shifts_sized(self, cx: Cx, l: Ty, r: Ty) -> bool:
+        let a = self.int_kind(cx, self.resolved(l)) else:
+            return False
+        if a == "int":
+            return False
+        return self.int_kind(cx, self.resolved(r)).is_some()
+
     ## The type of `lhs op rhs`, reporting a misuse.
     pub pure def binary_result(
         mut self, cx: Cx, op: BinOp, l: TExprId, r: TExprId, range: TextRange
@@ -1769,6 +1791,11 @@ impl Checker:
             _ = self.infer.unify(mut self.types, rt, lt)
         lt = self.resolved(lt)
         rt = self.resolved(rt)
+        # A sized integer shifted by an amount of any integer type keeps its
+        # type, and an amount outside its width traps (03; RULES.md, R80).
+        if op == BinOp.Shl or op == BinOp.Shr:
+            if self.shifts_sized(cx, lt, rt):
+                return (lt, True)
         # Two values of one sized integer type: what `int` allows.
         if let Some(a) = self.int_kind(cx, lt):
             if let Some(b) = self.int_kind(cx, rt):

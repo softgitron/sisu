@@ -59,6 +59,16 @@ impl InferTable:
                 case None:
                     return cur
 
+    ## `zonk`, keeping the absorbing variable a variable: what a parameter
+    ## expects of a closure written in a `T !` function's body, whose `?`
+    ## then adds to the set the function infers (RULES.md, R89).
+    pub pure def zonk_open(mut self, mut types: Types, t: Ty) -> Ty:
+        let saved = self.absorbing
+        self.absorbing = None
+        let z = self.zonk(mut types, t)
+        self.absorbing = saved
+        return z
+
     ## Resolves every variable inside a type. The absorbing variable becomes
     ## the set absorbed so far; an unbound one stays a variable.
     pub pure def zonk(self, mut types: Types, t: Ty) -> Ty:

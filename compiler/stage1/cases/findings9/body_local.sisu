@@ -1,0 +1,11 @@
+# E0428's note offers making the value before the scope, which outlives
+# every task (RULES.md, R88); `own () -> ...` would move it into the first
+# task the loop spawns and leave none for the next.
+import std.task
+
+def main():
+    task.scope do s:
+        let names = ["Aino", "Eero"]
+        for i in range(2):
+            s.spawn do:
+                print("{len(names)} {i}")

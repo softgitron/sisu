@@ -1,0 +1,7 @@
+# `sisu fmt` keeps an import the file does not use, which `sisu lint`
+# reports with the fix that removes it (09, 10; RULES.md, R87).
+import std.json
+from std.time import Duration, DateTime
+
+def main():
+    print("{Duration.seconds(2)}")

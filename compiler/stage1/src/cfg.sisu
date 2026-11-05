@@ -55,6 +55,8 @@ struct Filter:
     features: Features?
     problems: list[Problem]
     left_out: list[int]
+    ## The items left out by their `@cfg`, by name, with the condition.
+    removed: list[(String, String)]
 
 impl Filter:
     pure def holds(mut self, ast: Ast, e: ExprId, name: Name?) -> bool:
@@ -149,6 +151,8 @@ impl Filter:
             let attrs = ast.item(id).attrs.copy()
             if not self.kept(ast, attrs):
                 self.left_out.push(ast.item(id).node)
+                if let Some(name) = item_name(ast.item(id).kind):
+                    self.removed.push((name, condition_text(ast, attrs)))
                 continue
             var tested = False
             match ast.item(id).kind:
@@ -196,6 +200,31 @@ impl Filter:
             ast.items[id.index].kind = kind
             out.push(id)
         return out
+
+## The name an item declares, for the items an import names.
+pure def item_name(kind: ItemKind) -> String?:
+    return match kind:
+        case ItemKind.Fn(f): Some(f.name.text.copy())
+        case ItemKind.Struct(s): Some(s.name.text.copy())
+        case ItemKind.Enum(e) | ItemKind.ErrorSet(e): Some(e.name.text.copy())
+        case ItemKind.Trait(t): Some(t.name.text.copy())
+        case ItemKind.Const(c): Some(c.name.text.copy())
+        case _: None
+
+## The condition of an item's `@cfg` as written, for the simple forms
+## `feature="NAME"` and `test`; else `...`.
+pure def condition_text(ast: Ast, attrs: list[Attr]) -> String:
+    for a in attrs:
+        if a.name != "cfg":
+            continue
+        let x = a.args.first() else:
+            continue
+        if let Some(n) = x.name:
+            if let ExprKind.Str(parts) = ast.expr(x.value).kind:
+                return "{n.text}=\"{build.plain_text(parts)}\""
+        if let ExprKind.Name(n) = ast.expr(x.value).kind:
+            return n.copy()
+    return "...".to_string()
 
 pure def has_cfg(attrs: list[Attr]) -> bool:
     for a in attrs:
@@ -254,11 +283,15 @@ pure def affected(ast: Ast, items: list[ItemId], tests: bool) -> bool:
 pub pure def filter(m: Module, tests: bool, features: Features?) -> Filtered:
     if not affected(m.ast, m.items, tests):
         return Filtered(module=None, problems=[], left_out=[])
-    var f = Filter(tests=tests, features=features.copy(), problems=[], left_out=[])
+    var f = Filter(tests=tests, features=features.copy(), problems=[], left_out=[], removed=[])
     var ast = m.ast.copy()
     let items = f.items(mut ast, m.items)
     let module = Module(
-        ast=ast, items=items, docs=m.docs.copy(), broken_names=m.broken_names.copy()
+        ast=ast,
+        items=items,
+        docs=m.docs.copy(),
+        broken_names=m.broken_names.copy(),
+        left_out=f.removed.copy(),
     )
     return Filtered(module=Some(module), problems=f.problems, left_out=f.left_out)
 

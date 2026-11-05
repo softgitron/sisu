@@ -1,0 +1,11 @@
+## load
+loaded
+## 1
+40
+## 2
+error[E0300]: expected `int`, found `str`
+  --> <input>:1:8
+  |
+1 | scaled("four")
+  |        ^^^^^^
+

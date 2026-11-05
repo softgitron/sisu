@@ -1,0 +1,8 @@
+#!/usr/bin/env sisu
+# A file loaded into a session: its definitions, then the inputs.
+const BASE: int = 10
+
+def scaled(n: int) -> int:
+    return n * BASE
+
+print("loaded")

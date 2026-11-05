@@ -64,6 +64,7 @@ from stage1.typeck.template import (
     unfold,
     unfold_expr,
     unfold_fn,
+    written_shape,
 )
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData
 
@@ -315,8 +316,17 @@ impl Resolver:
                     for x in a.args:
                         args.push(self.text_in(module, x.range))
                     attrs.push((a.name.copy(), args))
+                # A struct's fields' types as written (RULES.md, R92).
+                var field_types: list[TypeShape] = []
+                if is_struct:
+                    for ft in field_tys:
+                        field_types.push(written_shape(self.sources[module.index].ast, ft))
                 let target = Target(
-                    name=name.copy(), written=written, body=body.copy(), attrs=attrs
+                    name=name.copy(),
+                    written=written,
+                    body=body.copy(),
+                    attrs=attrs,
+                    field_types=field_types,
                 )
                 var unfolded: String? = None
                 # Where the template stopped, in its module, and why.

@@ -262,7 +262,14 @@ impl Parser:
         if self.at(SyntaxKind.UnsafeKw):
             self.bump()
         _ = self.expect(SyntaxKind.DefKw)
-        _ = self.expect_name()
+        # `type` starts a type where an expression goes (`T: type`), so a
+        # function of that name could never be called (RULES.md, R93).
+        if self.at(SyntaxKind.Ident) and self.current_text() == "type":
+            let (start, end) = self.error_span()
+            self.report(Diagnostic.new(Msg.ParseKeywordAsName, start, end).with("keyword", "type"))
+            self.bump()
+        else:
+            _ = self.expect_name()
         if self.at(SyntaxKind.LBracket):
             self.generic_params()
         if self.at(SyntaxKind.LParen):

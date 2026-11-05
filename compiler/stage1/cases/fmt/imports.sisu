@@ -1,7 +1,7 @@
 # A run of imports sorted, `import`s first, with the names a `from`
-# imports sorted too, and the unused ones removed: a name is used when the
-# file spells it outside the imports, or in a doc comment. A run ends at a
-# blank line or a comment.
+# imports sorted too, the unused ones kept (RULES.md, R87: `sisu lint`
+# reports them; a name is used when the file spells it outside the imports,
+# or in a doc comment). A run ends at a blank line or a comment.
 import json
 from std.collections import SortedSet, Deque
 import std.string as text

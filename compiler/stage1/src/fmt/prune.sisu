@@ -1,6 +1,8 @@
-##! Unused imports, which `sisu fmt` removes (09, "Unused import/variable
-##! as a hard error"; stage 0's `sisu-fmt/src/prune.rs`). The formatter
-##! works without name resolution, so an import is used when the file
+##! Unused imports, which `sisu lint` reports with the fix that removes
+##! them (09, "Unused import/variable as a hard error"; RULES.md, R87):
+##! `sisu fmt`, which stage 0's `sisu-fmt/src/prune.rs` had remove them,
+##! changes a file's layout and nothing else (10). This works without name
+##! resolution, as the formatter's pass did, so an import is used when the file
 ##! spells its name: as an identifier outside the imports, or as a word of
 ##! a doc comment, whose examples are compiled as tests. That is enough,
 ##! because nothing else needs an import: a method is found through every
@@ -8,7 +10,9 @@
 ##! use: a re-export (`pub` or `pub(package)`), and an import with a
 ##! comment inside it, which would have nowhere to go.
 
+from stage1.diag import Catalog, Diagnostic, Edit, Msg
 from stage1.fmt.lines import Src
+from stage1.parser import parse
 from stage1.syntax.kinds import SyntaxKind
 from stage1.text import is_alphanumeric
 
@@ -125,3 +129,49 @@ pure def has_comment(src: Src, n: int) -> bool:
                 if has_comment(src, c):
                     return True
     return False
+
+## The unused imports of a file that parses, each `lint.unused-import` at
+## its name with the fix that removes it: the whole import, or the name and
+## its comma in a `from` that keeps others (RULES.md, R87).
+pub pure def lints(text: str, catalog: Catalog) -> list[Diagnostic]:
+    var out: list[Diagnostic] = []
+    let parsed = parse(text, catalog)
+    for d in parsed.diagnostics:
+        if catalog.is_error(d.msg):
+            return out
+    let whole: str = parsed.tree.text
+    let src = Src(tree=ref parsed.tree, text=whole)
+    let gone = unused(src)
+    var nodes: list[int] = []
+    for n in gone:
+        nodes.push(n)
+    nodes.sort()
+    for n in nodes:
+        var name = binding(src, n) ?? String.new()
+        if src.kind(n) == SyntaxKind.FromImport:
+            var names: list[String] = []
+            for c in src.child_nodes(n):
+                if src.kind(c) == SyntaxKind.ImportName:
+                    names.push(binding(src, c) ?? String.new())
+            name = names.join("`, `")
+        let node = ref src.tree.nodes[n]
+        var start = node.start
+        var end = node.end
+        if src.kind(n) == SyntaxKind.ImportName:
+            # The name and the comma after it, or the one before the last.
+            var i = end
+            while i < text.byte_len() and text.byte_at(i) == 32:
+                i += 1
+            if i < text.byte_len() and text.byte_at(i) == 44:
+                end = i + 1
+                while end < text.byte_len() and text.byte_at(end) == 32:
+                    end += 1
+            else:
+                var j = start - 1
+                while j >= 0 and text.byte_at(j) == 32:
+                    j -= 1
+                if j >= 0 and text.byte_at(j) == 44:
+                    start = j
+        let d = Diagnostic.new(Msg.LintUnusedImport, node.start, node.end).with("name", name)
+        out.push(d.fix_edits(Msg.LintRemoveImport, [Edit(start=start, end=end, text=String.new())]))
+    return out

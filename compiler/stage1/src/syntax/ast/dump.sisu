@@ -764,9 +764,12 @@ impl D:
                 out.push(", message: ")
                 self.opt_expr(mut out, message)
                 out.push(" }}")
-            case Expect(e):
+            case Expect(e, message):
                 out.push("Expect(")
                 self.expr(mut out, e)
+                if let Some(m) = message:
+                    out.push(", ")
+                    self.expr(mut out, m)
                 out.push(")")
             case Defer(b):
                 out.push("Defer(")

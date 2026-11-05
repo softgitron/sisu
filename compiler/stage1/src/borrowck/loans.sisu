@@ -34,7 +34,7 @@
 from stage1.borrowck.bitset import BitSet, LEFT_OUT, Rows
 from stage1.borrowck.finding import Arg, Finding, FindingParam, param, text
 from stage1.borrowck.init import dest, index_locals, operands, targets
-from stage1.borrowck.names import is_named, is_overwrite, local_name, place_name
+from stage1.borrowck.names import is_named, is_overwrite, local_name, place_name, place_text
 from stage1.borrowck.types import Types
 from stage1.diag import Msg
 from stage1.sir import (
@@ -1585,7 +1585,16 @@ impl Analysis:
         # accessed place and the borrowed one (`xs` for a push while an
         # element of `xs` is borrowed).
         let name_place = if gone: place.copy() else: common_prefix(place, lp)
-        let name = place_name(types, f, shorten(name_place))
+        var name = place_name(types, f, shorten(name_place))
+        # A closure made again while the one made before still borrows what
+        # it changes, a task spawned in a loop: the conflict is about what
+        # the closures change, which the tasks would change at once
+        # (RULES.md, R88).
+        var shared_change = False
+        if not gone and not is_named(f, name_place.local):
+            if let Some(q) = mut_capture(f, name_place.local):
+                name = Arg.Text(place_text(types, f, shorten(q)))
+                shared_change = True
         var m = Msg.BorrowModifyWhileBorrowed
         match acc:
             case Access.Read:
@@ -1604,7 +1613,7 @@ impl Analysis:
         if let Some(h) = later_holder:
             if is_named(f, h):
                 holder = Some(h)
-        var fd = Finding.new(m, f, s.loc).with_arg("name", name).with("line", "{line}").with(
+        var fd = Finding.new(m, f, s.loc).with_arg("name", name.copy()).with("line", "{line}").with(
             "end", end
         )
         match holder:
@@ -1616,7 +1625,9 @@ impl Analysis:
         fd.loan = Some(y)
         if let Some(l) = later_loc:
             fd = fd.label(Some(l), Msg.BorrowLaterUsed, [])
-        if not gone:
+        if shared_change:
+            fd = fd.note(Msg.TaskSharedChange, [param("name", name.copy())])
+        elif not gone:
             # In a loop that the borrow lasts through, the line it ends on
             # is the loop's last, so the change goes after the loop
             # (RULES.md, R77).
@@ -2028,6 +2039,11 @@ impl Analysis:
         ).at(b, si)
         if yielding:
             fd = fd.with("function", display_fn(f.name)).note(Msg.BorrowReturnOwned, [])
+        elif through_env:
+            # What the body makes ends with the body; made before the scope,
+            # it outlives every task, where `own` would move it into the
+            # first (RULES.md, R88).
+            fd = fd.note(Msg.TaskMakeOutside, [param("name", self.loan_name(f, types, l))])
         else:
             fd = fd.note(Msg.TaskUseOwn, [])
         fd.loan = Some(l)
@@ -2277,3 +2293,40 @@ pure def handle_sources(p: Program, types: Types, callee: Callee, n: int, dest: 
         if i < n:
             out.push(i)
     return out
+
+## The place a closure value held in `local`, or the reference in `local`
+## that a closure captures, borrows with `mut`, when the closure is a
+## task's: what the task changes (RULES.md, R88).
+pure def mut_capture(f: Function, local: LocalId) -> Place?:
+    var refs: dict[int, Place] = {}
+    var spawned: set[int] = set()
+    for b in f.blocks:
+        for s in b.stmts:
+            if let StatementKind.Assign(d, Rvalue.Ref(q, True)) = s.kind:
+                if d.proj.is_empty():
+                    _ = refs.insert(d.local.index, q.copy())
+            if let StatementKind.Call(_, callee, args) = s.kind:
+                if let Some(k) = spawn_task_arg(callee):
+                    if k < len(args):
+                        match args[k]:
+                            case Operand.Copy(p) | Operand.Move(p):
+                                _ = spawned.add(p.local.index)
+                            case _:
+                                pass
+    for b in f.blocks:
+        for s in b.stmts:
+            let StatementKind.Assign(d, Rvalue.Closure(_, _, ops)) = s.kind.copy() else:
+                continue
+            if not d.proj.is_empty() or not spawned.contains(d.local.index):
+                continue
+            for o in ops:
+                match o:
+                    case Operand.Copy(p) | Operand.Move(p):
+                        # The closure itself, or the reference it captures.
+                        let mine = d.local == local or p.local == local
+                        if mine and p.proj.is_empty():
+                            if let Some(q) = refs.get(p.local.index):
+                                return Some(q.copy())
+                    case _:
+                        pass
+    return None

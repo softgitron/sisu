@@ -1550,8 +1550,9 @@ impl Checker:
         elif p.mode != Mode.Mut and a.mutable:
             let d = self.error(cx, Msg.TypeMutArgumentUnexpected, a.range).with("param", p.name)
             self.report(self.callee_takes_mut(cx, d.fix_edits(Msg.TypeRemoveMut, []), p.name))
-        # What earlier arguments inferred may settle an associated type.
-        let z = self.infer.zonk(mut self.types, p.ty)
+        # What earlier arguments inferred may settle an associated type; a
+        # `T !` function's own error set stays open (RULES.md, R89).
+        let z = self.infer.zonk_open(mut self.types, p.ty)
         let pty = cx.prog.normalize(mut self.types, z, self.env)
         # An argument that mentions `it` where a one-parameter function is
         # expected is a closure over `it`.

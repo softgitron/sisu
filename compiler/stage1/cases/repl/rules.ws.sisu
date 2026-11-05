@@ -1,0 +1,5 @@
+# A worksheet with stage 1's rules: a slice's bound counted from the end
+# (RULES.md, R16) and `max` of a list.
+let scores = [7, 3, 9, 4]
+scores[1:^1]
+max(scores)

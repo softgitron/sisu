@@ -25,7 +25,7 @@ from stage1.typeck.thir import (
     TLetElse,
     TStmt,
 )
-from stage1.typeck.ty import Ty, TyData
+from stage1.typeck.ty import DefId, Ty, TyData
 
 ## What keeps an expression from only reading.
 pub enum Reading:
@@ -45,6 +45,21 @@ impl Checker:
             for e in self.stmt_exprs(s):
                 if let Some(name) = self.impure_callee(cx, e):
                     return Some(name)
+        return None
+
+    ## The first impure call of the body a function checked: its callee's
+    ## name, and its definition when it is a function (RULES.md, R90).
+    pub pure def body_impure(self, cx: Cx) -> (String, DefId?)?:
+        let b = self.body_block else:
+            return None
+        for s in self.blocks[b.index].stmts:
+            if let TStmt.Select(_, _) = s:
+                return Some(("select".to_string(), None))
+            for e in self.stmt_exprs(s):
+                if let Some(name) = self.impure_callee(cx, e):
+                    if let TExprKind.Call(Callee.Fn(def_, _), _) = self.exprs[e.index].kind:
+                        return Some((name, Some(def_)))
+                    return Some((name, None))
         return None
 
     pure def impure_callee(self, cx: Cx, e: TExprId) -> String?:

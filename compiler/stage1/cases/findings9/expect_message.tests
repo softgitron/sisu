@@ -1,0 +1,18 @@
+test "expect with a message" ... FAILED
+
+test "expect with a message" ... FAILED
+expectation failed: double(3) == 6
+  message: double of 3
+  left:  7
+  right: 6
+  at test "expect with a message" (expect_message.sisu:7:5)
+expectation failed: double(0) == 0
+  message: double of 0
+  left:  1
+  right: 0
+  at test "expect with a message" (expect_message.sisu:8:5)
+replay: sisu test --replay 1-HASH-0.0.1-t0-s0-r0 expect_message.sisu
+
+0 passed, 1 failed, 0 blocked
+--- stderr
+error: Exit(status=1)

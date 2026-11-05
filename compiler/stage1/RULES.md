@@ -27,8 +27,9 @@ and the outputs among `tokens`, `tree`, `trivia-tree`, `ast`, `names`,
 `types`, `sir`, `ownership`, `sir-tests`, `contracts-off`,
 `contracts-preconditions`, `ids` (all of what `sisu check --format=ids`
 prints), `human` (what `sisu check` prints), `fmt`, `fmt-check`, `doc`
-and `doc-output`, and `behaviour` for a runnable case a rule refuses (R21
-on), which `check.sh` then does not run. Any other difference fails the
+and `doc-output`, `ws` (a worksheet as `sisu ws` shows it, R79), and
+`behaviour` for a runnable case a rule refuses (R21 on), which
+`check.sh` then does not run. Any other difference fails the
 check. What a program
 does is checked against the conformance suite's expectations instead, by
 the class `behaviour`, the primary oracle: every runnable program of the
@@ -4545,3 +4546,565 @@ changes nothing, an explicit discriminant `Red = 1` is E0117", R2).
      for the literal as it is; an explicit discriminant is `E0900` until
      the layouts of `@repr` enums are lowered. Stage 1 decides it
      (RULES.md, R78).
+
+## R79. The programs of `sisu repl` and `sisu ws`: `sir --repl` and `sir --worksheet` (decision 580)
+
+**The rule.** Stage 1 builds the program a REPL session or a worksheet
+runs, as the driver's `repl.rs` writes it for the Rust front end, so that
+the driver runs `sisu repl` and `sisu ws` on stage 1 and stage 0's
+interpreter alone:
+
+- `sisu1 sir --repl SESSION INPUT --kept OUT [--load]`. SESSION holds the
+  session's program so far: its `#!` line (added when it has none, so a
+  new session's SESSION is empty, or holds only the inline metadata the
+  driver writes for a loaded package) and the inputs it kept, each as the
+  OUT of its own `--repl` wrote it. INPUT is the new input as typed. The
+  program is SESSION, the input (an input that is one expression
+  statement wrapped to be shown, `__repl_show(INPUT\n)`, anything else as
+  it is, each ending with a line break), `pass` and the function
+  `__repl_show`, which prints a value's `Debug` form unless it is `()`.
+  It is built as `sisu run` builds a script (without its tests, every
+  contract checked): its SIR on standard output and status 0, OUT then
+  holding SESSION and the input as the program keeps it (the driver makes
+  OUT the next SESSION when the run keeps the input); or, when it does not
+  build, the diagnostics of the phase that stopped it on standard error
+  (the front end's, warnings with them, then the failed `comptime`
+  expressions, then the ownership checker's, no `D0006` line after them)
+  and `error: Failed`, status 1, OUT not written. Those inside the input
+  are drawn in its text, as `<input>`, the others in the session's, as
+  `<repl>`; a label outside the input is drawn in `<repl>` too. With
+  `--load`, INPUT is a file loaded into the session (`sisu repl FILE`):
+  its `#!` line and inline metadata lead the program and the rest is the
+  input, kept as it is, its diagnostics drawn in the whole file under the
+  name given. Paths in the program's inline metadata are relative to the
+  working directory, as the Rust front end's are.
+- `sisu1 sir --worksheet FILE`: the worksheet (a script, a `#!` line added
+  when it has none), checked as written; if it does not build, the
+  diagnostics as above, drawn in the file as written (where the Rust front
+  end's lines counted the `#!` line it added), status 1. Else the
+  worksheet with each top-level statement (not an item, an attribute or
+  an error) preceded by `__ws_at(L)` and followed by `__ws_show(L, value)`
+  (an expression statement's value, or each name a `let` or `var` binds),
+  `L` the line the statement ends on in the file as written, and the
+  helpers, `__ws_at` printing `\u{1}L`, `__ws_show` printing `\u{2}L VALUE`
+  unless the value is `()`, and `__ws_fake`, which keeps `System.fake` in
+  the SIR for the fake `System` a worksheet runs against: its SIR on
+  standard output, status 0. The driver runs it (`run_main_faked`, or the
+  real `System` with `--run`) and writes each line of the file with the
+  values its markers give that line, then what was printed after a marker
+  under that line, as now; it no longer needs the statements' spans.
+
+**Why.** port-debt.md ("The Rust front end's roles still to replace"):
+the REPL and worksheets need only a program checked and lowered per input,
+and they ran on the frozen front end, so a worksheet lacked every rule
+stage 1 has gained (the manual's finding, chapter 5 and R16: `max(scores)`,
+`^` in a slice's bound, a generator expression and a trait's constant were
+errors there). The driver kept the wrapping and the instrumenting, which
+need a parser; stage 1 does both, so the driver needs no front end for
+them. What the driver still parses itself is `:why NAME`'s reading of the
+inputs it kept (which binds a name, what an initialiser reads, which input
+changes it), which no check or lowering gives; `sisu1 parse --tree` gives
+an input's tree in the form `sisu parse --tree` prints.
+
+**In stage 1.** `session` (the wrapping, a loaded file's preamble, the
+worksheet's markers), `main.repl_command`, `worksheet_command`,
+`held_build` (a program held in memory, `held_layout_input`) and
+`rebased`. `sisu1 --version` is 0.8.0: the driver may rely on both
+commands.
+
+**What it changes.** The sessions `cases/repl/session.repl` and
+`loaded.repl` (their transcripts, `.repl.out`) and the worksheets
+`cases/repl/sheet.ws.sisu`, `rules.ws.sisu` and `wrong.ws.sisu`, which the
+classes `repl` and `ws` of `check.sh` run; `rules.ws.sisu` uses R16's `^`
+and R61's `max` of a list, which the Rust front end refuses, and
+`wrong.ws.sisu` draws its diagnostic in the file as written.
+
+- Differs: `compiler/stage1/cases/repl/rules.ws.sisu`: ws
+- Differs: `compiler/stage1/cases/repl/wrong.ws.sisu`: ws
+
+**Decision 580**, for docs/architecture.md:
+
+580. Stage 1 builds the programs of `sisu repl` and `sisu ws`: `sir --repl
+     SESSION INPUT --kept OUT [--load]` gives the SIR of the session's
+     program with the input after it (an expression alone shown), or the
+     diagnostics of the phase that stopped it, those in the input drawn in
+     its text; `sir --worksheet FILE` gives the worksheet's SIR with each
+     top-level statement marked by the line it ends on in the file as
+     written and its values shown, or its diagnostics in the file as
+     written. `sisu1 --version` is 0.8.0. Stage 1 decides it (RULES.md,
+     R79).
+
+## R80. A sized integer shifted by an amount of any integer type keeps its type (decision 581)
+
+**The rule.** `x << k` and `x >> k` (and `<<=`, `>>=`) of a sized integer
+`x` (any of `u8` to `u128`, `i8` to `i128`, not `int`) by an amount `k` of
+any integer type, `int` among them, has `x`'s type: the amount is a count
+of bits, which neither widens to `x`'s type nor widens `x` to its own, and
+an amount below 0 or not below the width traps (`panic.shift-out-of-range-
+sized`), as it did for an amount of `x`'s type. A literal on the left of
+a shift keeps its own type (`int`) beside a sized amount, where it took
+the amount's. `int << k` with a sized `k` widens `k`, as before.
+
+**Why.** The stage 0 round's item (and the manual's finding, chapter 24:
+"A `u32` shifted by an `int`, `s << k`, widens to `int`, so `1u32 << 32`
+with the amount in an `int` is 4294967296, where a `u32` amount panics";
+and std has no `count_ones`, `leading_zeros` or `rotate_left`, which a
+checksum reaches for): `u64 << k` with `k` an `int` was `E0310`, since
+D-016's widening goes neither way between a `u64` and an `int`. 03 says
+"Shifts by more than the width trap", which is the width of the value
+shifted: a shift is not an arithmetic operator of two values of one type,
+and D-016's implicit widening, which is lossless, has nothing to widen
+here. The sixth round decided otherwise for `u32 << int` (the widening to
+`int`), reading a shift as an operator as the others; with `u64`, which
+has no wider type, that reading leaves the bit methods unwritable, so
+this round reverses it.
+
+**In stage 1.** `typeck.expr.binary_expr` (`shift`, `shifts_sized`) and
+`binary_result`; lowering and both backends took a sized intrinsic's
+amount of another integer type already (`u64.shl` reads its second operand
+as an integer, natively by its own type's flag).
+
+**What it changes.** The case `cases/findings9/shifts.sisu` (its `.out`:
+it runs, interpreted and natively).
+
+- Differs: `compiler/stage1/cases/findings9/shifts.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 581**, for docs/architecture.md:
+
+581. A sized integer shifted by an amount of any integer type keeps its
+     own type, and an amount outside its width traps; a literal on a
+     shift's left keeps `int`. This reverses the sixth round's reading of
+     `u32 << int` as widening to `int`. Stage 1 decides it (RULES.md,
+     R80).
+
+## R81. `expect cond, "message"` (decision 582)
+
+**The rule.** `expect` takes a message as `assert` does: `expect cond,
+message`, the message a `str` or a `String` (an interpolated literal
+among them), which a failure `expect` records shows under its first line
+(`R0155`, decision 545's `run.expect-failed-message`), and which outside
+a test is `assert`'s panic with its message.
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 19 and
+R15): `expect cond, "message"`, the form `assert` takes, was `E0117`
+("unexpected `,` after the end of the statement"), though 17 gives
+`expect` as `assert`'s non-fatal form and the intrinsics a failed `expect`
+lowers to take a message (R38).
+
+**In stage 1.** `parser.stmts` (the `ExpectStmt`'s message), the AST's
+`StmtKind.Expect(cond, message)`, `typeck.check` (`assert_message`), the
+template's copy and walk.
+
+**What it changes.** The case `cases/findings9/expect_message.sisu` (its
+`.tests`).
+
+- Differs: `compiler/stage1/cases/findings9/expect_message.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 582**, for docs/architecture.md:
+
+582. `expect` takes a message as `assert` does, `expect cond, message`,
+     which its recorded failure shows. Stage 1 decides it (RULES.md, R81).
+
+## R82. An assertion whose call takes a call shows its values (decision 583)
+
+**The rule.** An `assert` or `expect` whose condition is a call of a
+function or a method, and calls another function in an argument
+(`temps.contains(average(temps))`), which the failure's parts cannot
+evaluate again, evaluates each such argument once, into a temporary,
+before the call, when its type needs no drop; the failure then shows those
+arguments' values and the parts that only read (names and their fields),
+drawn under the condition as a condition that only reads has them (17,
+"Assertions"). Arguments are evaluated in their order, before the call,
+as the call evaluates them.
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 19): "An
+assertion whose parts call the program's own functions inside a method
+call, `assert temps.contains(average(temps))`, prints no values, though 17
+shows every sub-expression." Re-evaluating a call to show it could run its
+effects twice, which is why such a condition showed nothing; evaluating it
+once shows its value without that.
+
+**In stage 1.** `lower.stmts.assert_`, `lower.contracts` (`evaluate_once`,
+`read_again`, `assert_showing_parts`), `lower.exprs` (`FnLower.evaluated`,
+read by `place_of` and `into`).
+
+**What it changes.** The case `cases/findings9/assert_calls.sisu` (its
+`.tests`), and `cases/testing/expect.sisu`, whose `.sir-tests` is blessed
+again: its `expect even(double(3) + 1)` shows `double(3) + 1`.
+
+- Differs: `compiler/stage1/cases/findings9/assert_calls.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 583**, for docs/architecture.md:
+
+583. An assertion whose condition is a call that takes a call evaluates
+     that argument once and shows its value and the parts that only read
+     when it fails. Stage 1 decides it (RULES.md, R82).
+
+## R83. The test `@refines` makes stands at the attribute (decision 584)
+
+**The rule.** The test that `@refines(reference)` adds, `test "f refines
+reference"`, and the closure it checks its cases with, stand at the
+`@refines` attribute in the file of the function it checks: its frames,
+and a failure's `at test ... (FILE:LINE:COL)`, name the attribute's line,
+where they named the module the compiler writes, `<arbitrary>/main.sisu`.
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 19): "The
+test that `@refines` adds fails at `<arbitrary>/main.sisu:7:5`, in the
+module the compiler writes, rather than at the `@refines` line." A reader
+cannot open that module; the attribute is what asked for the test.
+
+**In stage 1.** `typeck.arbitrary.declare_refinements`
+(`Program.refines_at`), `lower` (`stand_at`).
+
+**What it changes.** The case `cases/findings9/refines_place.sisu` (its
+`.tests`), and the conformance suite's `testing/refines`, whose two
+failures now name `refines.sisu:16:1` and `refines.sisu:34:1`.
+
+- Differs: `compiler/stage1/cases/findings9/refines_place.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+- Differs: `compiler/conformance/cases/testing/refines.sisu`: sir-tests
+
+**Decision 584**, for docs/architecture.md:
+
+584. The test `@refines` adds stands at the attribute, in the file of the
+     function it checks, with the closure it checks the cases with. Stage
+     1 decides it (RULES.md, R83).
+
+## R84. A typed hole reached at compile time leaves the expression to run time (decision 585)
+
+**The rule.** A `comptime` expression whose evaluation reaches a typed
+hole (`todo(...)`) is not an error: it has no value to bake, so it is left
+in the program as a function the run calls, and reaching the hole there
+blocks the test it is in (R27) or stops the run with the hole's panic, as
+any hole does; the build warns of the hole (`W0001`), and a release build
+refuses it (`E0445`), as for every hole. A `comptime` expression that uses
+such a one reaches the hole too.
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 25): "A
+typed hole reached at compile time is E0602, so a test that uses a
+constant computed from a hole does not compile instead of being blocked."
+D-061 makes a hole a state a program may be in while it is written: what
+does not depend on it runs, and what does is blocked. A constant computed
+from a hole is the second.
+
+**In stage 1.** `interp` (`Stop.Hole`, and `visit`, which makes the
+function a value function with its body).
+
+**What it changes.** The case `cases/findings9/comptime_hole.sisu` (its
+`.tests`: one test blocked, one passed).
+
+- Differs: `compiler/stage1/cases/findings9/comptime_hole.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 585**, for docs/architecture.md:
+
+585. A `comptime` expression that reaches a typed hole is left to run time,
+     where the hole blocks the test or the run that reaches it; the build
+     warns of the hole. Stage 1 decides it (RULES.md, R84).
+
+## R85. `E1022` ends with the line of the command that stopped (decision 586)
+
+**The rule.** A lockfile whose `unsafe` level a package raises past
+(`E1022`, without `--accept-unsafe`) is followed by the line of the command
+it stops, as the manifests' other errors are (`E1019`, `E1021`):
+`error[D0006]: the program was not run: errors found (1)` for `run`, `sir`
+and `test`, `error[D0132]: the program was not compiled: errors found
+(1)` for `build`; `check` and `doc` print none, as for those errors.
+
+**Why.** The stage 0 round's item (the manual's finding, R13): "E1022 ends
+a run without the line D0006 that the other errors of a package's
+manifests end with."
+
+**In stage 1.** `main.write_lockfile` (`stopped`).
+
+**What it changes.** No case of the suite: a raised level needs a
+lockfile that records a lower one, which `check.sh`'s runs rewrite; the
+lines are the commands' own, as for `E1019`.
+
+**Decision 586**, for docs/architecture.md:
+
+586. `E1022` is followed by `D0006` or `D0132`, as the manifests' other
+     errors are. Stage 1 decides it (RULES.md, R85).
+
+## R86. `edition` takes an edition the compiler knows (decision 587)
+
+**The rule.** The manifest's `edition` is an edition the compiler knows,
+`"2027"`, the one 09's manifest names, the first: another year (`"1999"`)
+is `E1003` (`package.bad-value`, "`edition` takes an edition this compiler
+knows, `"2027"`, found `"1999"`"), and a value that is no year keeps its
+`E1003` ("a year, as in `"2027"`").
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 28): "The
+manifest's `edition` takes any text, `edition = "1999"` included, without
+a word." 13 makes an edition what the compiler understands, every one of
+them, and a new one comes every three years at most; one it does not know
+it cannot build as written.
+
+**In stage 1.** `manifest` (`EDITIONS`, `is_edition`).
+
+**What it changes.** The case `cases/packages/unknown_edition.pkg` (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/packages/unknown_edition.pkg`: names, types, sir, ownership, ids, human, doc, doc-output
+
+**Decision 587**, for docs/architecture.md:
+
+587. A manifest's `edition` is one the compiler knows, `"2027"` so far;
+     another year is `E1003`. Stage 1 decides it (RULES.md, R86).
+
+## R87. `sisu fmt` keeps an unused import, which `sisu lint` reports (decision 588)
+
+**The rule.** The formatter sorts imports and keeps each, used or not: it
+changes a file's layout and nothing else. An import whose name the file
+does not spell (outside the imports, or as a word of a doc comment), not a
+re-export and holding no comment, is the lint `W0027`
+(`lint.unused-import`, "`json` is imported and not used in this file") of
+`sisu lint`, at the import (or at the name, in a `from` that keeps
+others), with the fix `lint.remove-import` that removes it (the name and
+its comma, in a `from`). `check` prints no lint (R11).
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 21 and
+R13): "`sisu fmt` removes an import that a file does not use yet, so an
+exercise cannot hand the learner the import its solution needs, and an
+unused import gets no warning, though 09 says it warns." 10 makes the
+formatter the parser's, with no options, and a formatter that removes
+code changes what a file says; 09's table says Sisu warns and `sisu fmt`
+removes unused imports, which this rule keeps as a lint with the fix that
+removes it, which an editor or `sisu fix` applies. A warning of `check`
+would be every program's that imports what it does not use yet.
+
+**In stage 1.** `fmt` (`format_with`, `lines.format_tree`,
+`shape.shape_of`: no import left out), `fmt.prune.lints`,
+`main` (`lint`).
+
+**What it changes.** The case `cases/findings9/unused_import.sisu` (its
+`.lint`), and the `fmt` of every file with an unused import, which the
+Rust formatter still removes.
+
+- Differs: `compiler/stage1/cases/findings9/unused_import.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/names.pkg/app/src/main.sisu`: fmt, fmt-check
+- Differs: `compiler/stage1/cases/packages/names.pkg/app/src/helpers.sisu`: fmt, fmt-check
+- Differs: `compiler/stage1/cases/fmt/imports.sisu`: fmt, fmt-check
+- Differs: `compiler/stage1/cases/findings6/import_item.sisu`: fmt, fmt-check
+- Differs: `compiler/conformance/cases/wrong/unknown_module.sisu`: fmt, fmt-check
+- Differs: `compiler/conformance/cases/packages/visibility.pkg/app/src/main.sisu`: fmt, fmt-check
+- Differs: `compiler/conformance/cases/names/unknown_import.sisu`: fmt, fmt-check
+
+**Decision 588**, for docs/architecture.md:
+
+588. `sisu fmt` keeps an unused import; `sisu lint` reports it (`W0027`)
+     with the fix that removes it. Stage 1 decides it (RULES.md, R87).
+
+## R88. A task spawned in a loop that changes a captured value, and a task that borrows the body's value (decision 589)
+
+**The rule.** Tasks a loop spawns that change a captured `var`
+(`s.spawn do: count += 1`), the next borrowing it while the one before may
+still run, get `E0402` naming that value, `count`, where it named the
+closure's text as the value borrowed, with the note `task.shared-change`
+("each task the loop spawns changes `count`, and the tasks run at once:
+keep it in a `Mutex` (`Mutex(0)`, changed through `count.lock().value`),
+or have each task return its part and combine them after the scope"),
+where the note said to change the closure's text after the loop. And
+`E0428` (a task that borrows what the scope's body made) has the note
+`task.make-outside` ("make `names` before `task.scope`, outside the
+scope's body, so that it outlives every task; `own () -> ...` (or `do
+own:`) would move it into the first task and leave none for the next"),
+where it offered `own` first; `E0429` keeps `task.use-own`.
+
+**Why.** The stage 0 round's items (the manual's findings, chapter 20):
+"Tasks spawned in a loop that change a captured `var` ... get E0402, whose
+message names the closure's whole text as the value borrowed, says that it
+"cannot be modified", and says nothing about a `Mutex`"; "E0428's note
+offers `own () -> ...`, which moves the list into the first task and
+leaves none for the next; making the value outside the scope's block,
+which works, is not offered." 06 makes shared state a `Mutex` or an
+`Atomic`.
+
+**In stage 1.** `borrowck.loans` (`conflict`, `mut_capture`,
+`check_tasks`).
+
+**What it changes.** The cases `cases/findings9/shared_change.sisu` and
+`body_local.sisu` (their `.diag`).
+
+- Differs: `compiler/stage1/cases/findings9/shared_change.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings9/body_local.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+- Differs: `compiler/conformance/cases/wrong/task_borrows_body_local.sisu`: human
+- Differs: `compiler/conformance/cases/concurrency/task_borrows.sisu`: human
+
+**Decision 589**, for docs/architecture.md:
+
+589. `E0402` for tasks a loop spawns that change a captured value names
+     the value and notes that the tasks run at once and a `Mutex` keeps
+     it; `E0428`'s note offers making the value before the scope. Stage 1
+     decides it (RULES.md, R88).
+
+## R89. A `?` in a scope's body adds to the error set the function infers (decision 590)
+
+**The rule.** In a function whose error set is inferred (`-> T !`), a
+closure argument whose expected type mentions that set, a `task.scope`
+body that the function returns, keeps the set open: each `?` in it adds
+its error set to the function's, as a `?` in the function's own body
+does, where the closure was checked against the set inferred so far and
+each such `?` was `E0321`.
+
+**Why.** The stage 0 round's item (the manual's finding, chapter 22): "An
+inferred error set, `-> !`, leaves out what a `?` passes on inside a
+`task.scope` body: each such `?` is E0321." 05 infers the set from what
+the body passes on; the scope's body is part of the function's.
+
+**In stage 1.** `typeck.infer.zonk_open`, `typeck.call.check_arg`.
+
+**What it changes.** The case `cases/findings9/scope_errors.sisu` (its
+`.out`: it runs, interpreted and natively).
+
+- Differs: `compiler/stage1/cases/findings9/scope_errors.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 590**, for docs/architecture.md:
+
+590. A closure argument of a `T !` function keeps the inferred error set
+     open, so a `?` in a scope's body adds to it. Stage 1 decides it
+     (RULES.md, R89).
+
+## R90. `E0335` names the operation responsible (decision 591)
+
+**The rule.** `E0335` for a function passed where a `pure` one is required
+names the operation responsible for its impurity, as 03 asks: the first
+impure call of its body, followed through the program's own functions it
+calls to the first that is not one (`print`), where it named the function
+passed; when the way is longer than one call, the note `type.impure-path`
+gives it ("`helper` calls `noisy_square`, which calls `print`").
+
+**Why.** The eighth round's open item (the manual's finding, chapters 16
+and 26): "E0335 names the function passed (`noisy_square`) as the impure
+callee, where 03 asks for the operation responsible (`print`)." The check
+of the call has the function's name, not its body; each body records its
+first impure call, and once every body is checked the diagnostics follow
+them.
+
+**In stage 1.** `typeck.purity.body_impure`, `typeck.expr`
+(`check_purity_coercion`, `PASSED`), `typeck.responsible`.
+
+**What it changes.** The case `cases/findings9/impure_operation.sisu` (its
+`.diag`), and the conformance cases with `E0335`.
+
+- Differs: `compiler/stage1/cases/findings9/impure_operation.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 591**, for docs/architecture.md:
+
+591. `E0335` names the operation that makes the function passed impure,
+     followed through the program's functions, with a note giving the way.
+     Stage 1 decides it (RULES.md, R90).
+
+## R91. `E0204` for an item a `@cfg` left out names the condition (decision 592)
+
+**The rule.** `E0204` (`from M import X`, where `M` has no `X`) for an
+item a `@cfg` of `M` left out of this build has the note
+`resolve.cfg-left-out` ("`quick` is left out of this build by its
+`@cfg(feature="fast")`, which does not hold"), the condition written as
+the attribute has it for `feature="NAME"` and a name (`test`), `...`
+otherwise.
+
+**Why.** The eighth round's open item (the manual's finding, chapter 17):
+"E0204 for an item that `@cfg(feature=...)` left out does not name the
+feature." The filter that leaves the item out now records it with its
+module.
+
+**In stage 1.** `cfg` (`Filter.removed`, `item_name`, `condition_text`),
+the AST's `Module.left_out`, `typeck.collect.import_from`.
+
+**What it changes.** The case `cases/packages/cfg_feature_import.pkg` (its
+`.diag`; the note is the human form's).
+
+- Differs: `compiler/stage1/cases/packages/cfg_feature_import.pkg`: names, types, ids, human, doc, doc-output
+
+**Decision 592**, for docs/architecture.md:
+
+592. `E0204` for an item a `@cfg` left out notes the condition that did.
+     Stage 1 decides it (RULES.md, R91).
+
+## R92. A field's `ty` in a derive's template (decision 593)
+
+**The rule.** In a derive's template a struct's field has a `ty`: the type
+as the field's declaration writes it, its name that text
+(`reflect.name_of(f.ty)`), and its kind as the prelude's names give it
+(`int`, `f64`, `bool`, `char`, `str` and `String`, a `list` or an option
+of a type so written, with its element, a tuple), so that `reflect.is_str`,
+`is_list` and the others choose a form field by field; any other type's
+kind is not known to a derive, which runs before the types are resolved,
+and its `is_struct` is `False`. A variant's fields have no `ty` yet.
+
+**Why.** The eighth round's open item (the manual's finding, G21):
+"Inside a derive's template a field has no `ty` (E0608, "a field has no
+`ty`"), though a generic function that reflects reads it, so a derive
+cannot choose `Display` or `Debug` field by field."
+
+**In stage 1.** `typeck.template` (`Target.field_types`, `written_shape`,
+`TypeShape.of_target`), `typeck.instances`.
+
+**What it changes.** The case `cases/findings9/derive_field_type.sisu`
+(its `.out`: it runs, interpreted and natively).
+
+- Differs: `compiler/stage1/cases/findings9/derive_field_type.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 593**, for docs/architecture.md:
+
+593. A derive's template sees a struct field's `ty` as its declaration
+     writes it, with the kinds of the prelude's types. Stage 1 decides it
+     (RULES.md, R92).
+
+## R93. A function named `type` (decision 594)
+
+**The rule.** `def type()` is `E0124` ("`type` is a keyword and cannot be
+used as a name here"), as a parameter named by a keyword is: `type` starts
+a type where an expression goes (`T: type`), so each call of such a
+function was `E0103`.
+
+**Why.** The manual's finding (R1): "A function declared with a keyword as
+its name, `def type()`, compiles and cannot be called (E0103 at each
+call), where a parameter's or a field's name gets E0124."
+
+**In stage 1.** `parser.items.fn_def`.
+
+**What it changes.** The case `cases/findings9/keyword_function.sisu`
+(its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings9/keyword_function.sisu`: tree, trivia-tree, ast, names, types, sir, ownership, sir-tests, ids, human, fmt, fmt-check, doc, doc-output
+
+**Decision 594**, for docs/architecture.md:
+
+594. A function cannot be named `type`: `E0124`. Stage 1 decides it
+     (RULES.md, R93).
+
+## R94. `parse --shape` refuses what `fmt` refuses; an instance's note writes its type arguments as the source does (decision 595)
+
+**The rule.** `sisu1 parse --shape FILE` prints what formatting keeps
+(`fmt.shape`, the shape `fmt`'s self-check compares), or the file's syntax
+diagnostics in the conformance form and status 1 when it has an error
+`fmt` refuses: a test's name that interpolates (`E0132`, R73) among them,
+so the two agree on which files are formatted. And the note
+`type.instance-code` of a diagnostic placed at the call that made a
+template's instance (R77) writes the instance's line with the type
+arguments as the instance's name writes them, `return User(name=name)`,
+where it showed the compiler's names for them, `return __T0(name=name)`.
+
+**Why.** The manual round's findings: the conformance runner's format check
+asks `sisu parse --shape` (the Rust front end's, which accepts `test "n
+{N}":`) whether a file parses and `sisu fmt` (stage 1's, which refuses it
+as `E0132`) to format it, so such a file failed the check and a
+`.unformatted` did not excuse it; and a reader cannot know what `__T0`
+names. The driver routes `parse --shape` to stage 1 (stage 0's side), as
+it routes `parse --tree`.
+
+**In stage 1.** `main` (`parse --shape`), `typeck.as_written`.
+
+**What it changes.** The unit tests of `fmt.shape` and `typeck`, and the
+human form of `cases/findings8/instances.sisu` (listed under R77). Where
+stage 1's shape keeps an unused import (R87), the Rust front end's leaves
+it out; the conformance runner compares the shape before and after
+formatting, each from the same front end, so they agree either way.
+
+- Differs: `compiler/stage1/cases/findings8/instances.sisu`: ids, human, doc, doc-output
+
+**Decision 595**, for docs/architecture.md:
+
+595. `parse --shape` refuses what `fmt` refuses, `E0132` among it, and a
+     template instance's note at its call writes the type arguments as the
+     source does. Stage 1 decides it (RULES.md, R94).

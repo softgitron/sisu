@@ -116,6 +116,9 @@ pub struct Module:
     ## refers to the declaration that failed, so it is not reported as
     ## undefined.
     pub broken_names: list[String]
+    ## The items a `@cfg` left out of this build, each with its condition
+    ## as written (`feature="fast"`), which `E0204` names (RULES.md, R91).
+    pub left_out: list[(String, String)]
 
 @derive(Debug)
 pub struct Attr:
@@ -387,7 +390,8 @@ pub enum StmtKind:
     While(cond: Cond, body: Block)
     For(pat: PatternId, mode: Mode, iter: ExprId, body: Block)
     Assert(cond: ExprId, message: ExprId?)
-    Expect(ExprId)
+    ## `expect cond[, message]` (RULES.md, R81).
+    Expect(cond: ExprId, message: ExprId?)
     Defer(Block)
     With(value: ExprId, name: Name, body: Block)
     ## A nested declaration (`def`, `const`, ...).

@@ -2,7 +2,8 @@
 ##! the formatter with no options. Four spaces, 100 columns, Black's
 ##! bracket-first line splitting with breaks before binary operators, a
 ##! magic trailing comma, trailing commas in multi-line constructs, sorted
-##! imports with the unused ones removed, one blank line between items,
+##! imports (the unused ones kept, which `sisu lint` reports: RULES.md,
+##! R87), one blank line between items,
 ##! `T?` for `Option[T]`, `T ! E` for `Result[T, E]` when `E` is an error
 ##! set, and every comment kept, word for word. Whether `E` is an error set
 ##! is not in the syntax: the caller says, with `format_with`, from the
@@ -62,7 +63,8 @@ pub pure def format_with(text: str, error_sets: set[String], catalog: Catalog) -
         return Err(Syntax(diagnostics=errors))
     let whole: str = parsed.tree.text
     let src = Src(tree=ref parsed.tree, text=whole)
-    let pruned = prune.unused(src)
+    # An unused import stays: `sisu lint` reports it (RULES.md, R87).
+    let pruned: set[int] = set()
     let out = lines.format_pruned(src, error_sets, pruned)
     # The self-check (02: "an AST-equality self-check"). A text that comes
     # out as it went in parses to the tree it was parsed to, so it has
@@ -141,21 +143,23 @@ test "idempotent on its output"(sys: System):
     let head = "import cli\nimport std.json\nfrom std.time import DateTime, Duration\n\nstruct P:"
     assert once.starts_with(head)
 
-test "unused imports are removed"(sys: System):
+test "unused imports stay, sorted, and the lint names them"(sys: System):
     let catalog = test_catalog(sys)
     var src = "import std.json\nimport std.num as n\n".to_string()
     src.push("from std.time import Duration, DateTime, Instant\n")
     src.push("pub from std.collections import Deque\n\n## `Instant` in a doc comment counts.\n")
     src.push("def main():\n    print(Duration.seconds(1))\n")
-    var expected = "from std.time import Duration, Instant\n".to_string()
+    var expected = "import std.json\nimport std.num as n\n".to_string()
+    expected.push("from std.time import DateTime, Duration, Instant\n")
     expected.push(
         "pub from std.collections import Deque\n\n## `Instant` in a doc comment counts.\n"
     )
     expected.push("def main():\n    print(Duration.seconds(1))\n")
     assert formatted(src, catalog) == expected
-    # One with a comment inside stays.
-    let kept = "import std.json  # for later\n"
-    assert formatted(kept, catalog) == kept
+    var names: list[String] = []
+    for d in prune.lints(src, catalog):
+        names.push(d.param("name") ?? String.new())
+    assert names == ["json", "n", "DateTime"]
 
 test "a comment at the end does not break the line"(sys: System):
     let catalog = test_catalog(sys)

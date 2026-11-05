@@ -1,0 +1,6 @@
+# E0204 for an item that `@cfg(feature="fast")` left out names the
+# condition (RULES.md, R91).
+from app.tools import quick
+
+def main():
+    print("{quick()}")

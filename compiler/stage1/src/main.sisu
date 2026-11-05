@@ -80,6 +80,7 @@ import stage1.format
 import stage1.interp
 import stage1.lower
 import stage1.package
+import stage1.session
 import stage1.sir
 import stage1.sir.simplify
 import stage1.sir.write
@@ -142,7 +143,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.7.0"
+const VERSION: str = "0.8.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -184,6 +185,18 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         let text = sys.fs.read_to_string(Path.new(path))?
         let parsed = parse(text, catalog)
         let errs = render_ids(text, parsed.diagnostics, catalog)
+        # `--shape`: what formatting keeps, which `fmt`'s self-check compares
+        # (`fmt.shape`), or the file's syntax errors and status 1, as `sisu
+        # parse --shape` prints them; an error `fmt` refuses (`E0132` among
+        # them) refuses both (RULES.md, R94).
+        if rest.contains("--shape"):
+            match fmt.shape.shape(text, catalog):
+                case Some(s):
+                    emit(s, "")
+                    return Ok(())
+                case None:
+                    emit("", errs)
+                    return Err(Exit(status=1))
         if rest.contains("--ast"):
             emit(module_debug(build.module(parsed.tree)), errs)
         elif rest.contains("--print"):
@@ -317,6 +330,12 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.types"), out)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
         return Ok(())
+    # `sir --repl SESSION INPUT --kept OUT [--load]` and `sir --worksheet
+    # FILE`: the programs `sisu repl` and `sisu ws` run (RULES.md, R79).
+    if command == "sir" and rest.contains("--repl"):
+        return repl_command(sys, home, rest, catalog)
+    if command == "sir" and rest.contains("--worksheet"):
+        return worksheet_command(sys, home, rest, catalog)
     if command == "sir":
         # `--contracts=LEVEL`: the contracts lowering checks (07), all of
         # them by default, as `sisu sir --contracts=LEVEL` lowers.
@@ -361,7 +380,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
         let accept = words.contains("--accept-unsafe")
-        if not write_lockfile(sys, path, True, words.contains("--locked"), accept, catalog)?:
+        if not write_lockfile(
+            sys, path, True, words.contains("--locked"), accept, catalog, "cli.errors-found"
+        )?:
             return Err(Failed)
         let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -509,7 +530,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `--locked` keeps the lockfile as it is, or stops the command;
         # `--accept-unsafe` lets a package's `unsafe` level rise (22).
         let accept = words.contains("--accept-unsafe")
-        if not write_lockfile(sys, path, False, words.contains("--locked"), accept, catalog)?:
+        if not write_lockfile(sys, path, False, words.contains("--locked"), accept, catalog, "")?:
             return Err(Failed)
         let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -580,6 +601,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 shown = r.front(catalog, Some(True))
             for x in r.lints:
                 shown.diags.push(x.copy())
+            # The imports a module does not use (RULES.md, R87), in the
+            # program's own files.
+            for k in range(len(r.files)):
+                let (name, text) = r.files[k].copy()
+                if name.ends_with(".sisu") and not name.starts_with("<"):
+                    for d in fmt.prune.lints(text, catalog):
+                        shown.diags.push(Filed(file=k, diag=d.copy(), label_files=[]))
             sort_filed(mut shown.diags, catalog, True)
             if ids:
                 out.push(shown.ids(catalog))
@@ -1012,7 +1040,20 @@ def file_input(
 def layout_input(
     sys: System, home: str, layout: Layout, tests: bool, mut env: Environment, catalog: Catalog
 ) -> Input ! IoError:
-    let (named, cfg_diags) = named_modules(sys, home, layout, tests, mut env, catalog)?
+    return held_layout_input(sys, home, layout, tests, mut env, catalog, {})
+
+## `layout_input`, with the texts of modules held in memory by their paths
+## on disk, which are not read (a session's program, RULES.md, R79).
+def held_layout_input(
+    sys: System,
+    home: str,
+    layout: Layout,
+    tests: bool,
+    mut env: Environment,
+    catalog: Catalog,
+    held: dict[String, String],
+) -> Input ! IoError:
+    let (named, cfg_diags) = held_named_modules(sys, home, layout, tests, mut env, catalog, held)?
     var modules: list[typeck.InputModule] = []
     var embedded: dict[String, Embedded] = {}
     for i in range(len(layout.modules)):
@@ -2154,7 +2195,10 @@ def build_command(
 ) -> ! {IoError, CommandError}:
     # `--locked`, and `--accept-unsafe` (22).
     let (locked, accept) = lock
-    if not write_lockfile(sys, path, False, locked, accept, catalog)?:
+    var stopped = "cli.not-compiled"
+    if how.for_run:
+        stopped = "cli.errors-found"
+    if not write_lockfile(sys, path, False, locked, accept, catalog, stopped)?:
         return Err(Failed)
     let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
@@ -2322,6 +2366,215 @@ def build_program(
             emit("", "cannot run `{sisu}`: {e}\n")
             return Ok(False)
 
+## A program held in memory, checked and lowered as `sisu run` builds it
+## (without its tests, every contract checked): its SIR, or the report of
+## the phase that stopped it (the front end's diagnostics, warnings and
+## all, then the failed `comptime` expressions, then the ownership
+## checker's), or what stage 1 says of a program beyond its slice.
+enum Built:
+    Sir(String)
+    Stopped(Report)
+    Refused(String)
+
+## The program `text`, held as the file `disk` (whose directory its inline
+## metadata's paths are relative to) and named `name` in its diagnostics,
+## built (RULES.md, R79).
+def held_build(
+    sys: System, home: str, name: str, disk: str, text: str, catalog: Catalog
+) -> Built ! IoError:
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    var kept = Kept.new()
+    var env = base.environment()
+    let layout = package.load_file_with(sys.fs, name, disk, text, FeatureRequest.none())
+    var inputs: list[Input] = []
+    if len(layout.packages) == 1 and layout.problems.is_empty():
+        inputs.push(file_input(sys, home, name, text, False, mut env, catalog)?)
+    else:
+        if layout.modules.is_empty():
+            return Ok(Built.Stopped(problems_report(layout, catalog)))
+        var held: dict[String, String] = {}
+        _ = held.insert(disk.to_string(), text.to_string())
+        inputs.push(held_layout_input(sys, home, layout, False, mut env, catalog, held)?)
+    var built = inputs[0].copy()
+    built.contracts = CONTRACTS_ALL
+    let (r, sir) = report_with(base, built, name, catalog, mut kept, True)
+    let front = r.front(catalog, None)
+    if front.errors(catalog) > 0:
+        return Ok(Built.Stopped(front))
+    let evaluation = r.evaluation()
+    if evaluation.errors(catalog) > 0:
+        return Ok(Built.Stopped(evaluation))
+    let ownership = r.ownership()
+    if ownership.errors(catalog) > 0:
+        return Ok(Built.Stopped(ownership))
+    if not r.beyond.is_empty() or sir.is_empty():
+        var why = String.new()
+        for b in r.beyond:
+            why.push("beyond the slice: {b}\n")
+        return Ok(Built.Refused(why))
+    return Ok(Built.Sir(sir))
+
+## `sir --repl SESSION INPUT --kept OUT [--load]` (RULES.md, R79): the
+## program of a REPL session, SESSION's text (the session's program so far:
+## its `#!` line, inline metadata and the inputs it kept, as the `OUT` of
+## each gave them) with the input INPUT after it, as `sisu repl` runs it;
+## its SIR on standard output, and in OUT the session's program with the
+## input kept, which the driver gives the next input when the run keeps
+## it. An input that is an expression alone is shown. With `--load`, INPUT
+## is a file loaded into the session (`sisu repl FILE`): its `#!` line and
+## inline metadata lead the program. A program that does not build is the
+## diagnostics of the phase that stopped it, those in the input drawn in
+## its text, as `<input>` (or the loaded file), the others in the
+## session's, as `<repl>`, with no line after them.
+def repl_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog
+) -> ! {IoError, UsageError, CommandError}:
+    var files: list[String] = []
+    var kept_path = String.new()
+    var load = False
+    var k = 1
+    while k < len(rest):
+        let w = rest[k].copy()
+        if w == "--load":
+            load = True
+        elif w == "--kept" and k + 1 < len(rest):
+            kept_path = rest[k + 1].copy()
+            k += 1
+        elif w.starts_with("--"):
+            if w != "--repl":
+                return Err(Usage(text=usage()))
+        else:
+            files.push(w)
+        k += 1
+    if len(files) != 2 or kept_path.is_empty():
+        return Err(Usage(text=usage()))
+    let session_text = sys.fs.read_to_string(Path.new(files[0]))?
+    let input_text = sys.fs.read_to_string(Path.new(files[1]))?
+    var head = session_text.copy()
+    var entry = session.entry_of(input_text, catalog)
+    var shown_name = "<input>".to_string()
+    var shown_text = input_text.trim_end().to_string()
+    var delta = 0
+    if load:
+        let (preamble, body, end) = session.split_preamble(input_text)
+        var after = session_text.copy()
+        if after.starts_with("#!"):
+            after = String.new()
+            if let Some(i) = session_text.find("\n"):
+                after = session_text.byte_slice(i + 1, session_text.byte_len()).to_string()
+        head = "{preamble}{after}"
+        entry = session.Entry(source=body.copy(), prefix=0, len=body.trim_end().byte_len())
+        shown_name = files[1].copy()
+        shown_text = input_text.copy()
+        delta = end
+    elif not head.starts_with("#!"):
+        head = "{session.SHEBANG}{head}"
+    let at = head.byte_len() + entry.prefix
+    let kept = "{head}{entry.source}"
+    let program = "{kept}{session.TRAILER}"
+    match held_build(sys, home, "<repl>", absolute(sys, "<repl>"), program, catalog)?:
+        case Sir(sir):
+            sys.fs.write_text(Path.new(kept_path), kept)?
+            emit(sir, "")
+            return Ok(())
+        case Stopped(r):
+            emit("", rebased(r, at, entry.len, delta, shown_name, shown_text, catalog))
+            return Err(Failed)
+        case Refused(why):
+            emit("", why)
+            return Err(Failed)
+
+## `sir --worksheet FILE` (RULES.md, R79): the program `sisu ws` runs, the
+## worksheet FILE (a script, a `#!` line added when it has none) with each
+## top-level statement marked and shown (`session.instrument`), its SIR on
+## standard output, keeping `System.fake`; or, when the worksheet as
+## written does not build, the diagnostics of the phase that stopped it,
+## drawn in the file as written, with no line after them.
+def worksheet_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog
+) -> ! {IoError, UsageError, CommandError}:
+    var files: list[String] = []
+    for k in range(1, len(rest)):
+        if rest[k].starts_with("--"):
+            if rest[k] != "--worksheet":
+                return Err(Usage(text=usage()))
+        else:
+            files.push(rest[k].copy())
+    if len(files) != 1:
+        return Err(Usage(text=usage()))
+    let file = files[0].copy()
+    let source = sys.fs.read_to_string(Path.new(file))?
+    var sheet = source.copy()
+    var shift = 0
+    var delta = 0
+    if not source.starts_with("#!"):
+        sheet = "{session.SHEBANG}{source}"
+        shift = 1
+        delta = session.SHEBANG.byte_len()
+    let disk = absolute(sys, file)
+    match held_build(sys, home, file, disk, sheet, catalog)?:
+        case Sir(_):
+            pass
+        case Stopped(r):
+            emit("", rebased(r, delta, source.byte_len(), 0, file, source, catalog))
+            return Err(Failed)
+        case Refused(why):
+            emit("", why)
+            return Err(Failed)
+    let instrumented = session.instrument(sheet, shift, catalog)
+    match held_build(sys, home, file, disk, instrumented, catalog)?:
+        case Sir(sir):
+            emit(sir, "")
+            return Ok(())
+        case Stopped(r):
+            emit("", r.human(catalog))
+            return Err(Failed)
+        case Refused(why):
+            emit("", why)
+            return Err(Failed)
+
+## The human form of a report of a session's program whose input is the
+## `size` bytes from `start` of its first file: the diagnostics inside the
+## input drawn in the text it is shown in, `shown` named `name`, where the
+## input starts at `delta`, with their labels outside it in the program's
+## file; then the others, in the program's files.
+pure def rebased(
+    r: Report, start: int, size: int, delta: int, name: str, shown: str, catalog: Catalog
+) -> String:
+    var files = [(name.to_string(), shown.to_string())]
+    for f in r.files:
+        files.push(f.copy())
+    var mine: list[Filed] = []
+    var other: list[Filed] = []
+    for x in r.diags:
+        if x.file != 0 or x.diag.start < start or x.diag.end > start + size:
+            other.push(x.copy())
+            continue
+        var d = x.diag.copy()
+        d.start = d.start - start + delta
+        d.end = d.end - start + delta
+        var label_files: list[int] = []
+        for i in range(len(d.labels)):
+            let f = x.label_file(i)
+            let l = ref x.diag.labels[i]
+            if f == 0 and l.start >= start and l.end <= start + size:
+                d.labels[i].start = l.start - start + delta
+                d.labels[i].end = l.end - start + delta
+                label_files.push(0)
+            else:
+                label_files.push(f + 1)
+        for i in range(len(d.fixes)):
+            for j in range(len(d.fixes[i].edits)):
+                let e = ref x.diag.fixes[i].edits[j]
+                if e.start >= start and e.end <= start + size:
+                    d.fixes[i].edits[j].start = e.start - start + delta
+                    d.fixes[i].edits[j].end = e.end - start + delta
+        mine.push(Filed(file=0, diag=d, label_files=label_files))
+    var out = render_human_files(files, mine, catalog)
+    if not other.is_empty():
+        out.push(render_human_files(r.files, other, catalog))
+    return out
+
 ## The front end's warnings of a program built in the release profile
 ## (D-061, 10 and 17; RULES.md, R27): each typed hole an error naming the
 ## hole and its type where the debug profile warns, with the placeholder
@@ -2405,7 +2658,8 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
         emit("", catalog.plain_error("cli.unknown-feature", e))
         return Ok(2)
     let locked = words.contains("--locked")
-    if not write_lockfile(sys, path, False, locked, words.contains("--accept-unsafe"), catalog)?:
+    let accept = words.contains("--accept-unsafe")
+    if not write_lockfile(sys, path, False, locked, accept, catalog, "cli.errors-found")?:
         return Ok(1)
     let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
@@ -2632,8 +2886,17 @@ pure def output_for(disk: str, package_name: str, root: String?, release: bool) 
 ## `sir` in a workspace without one application (`cli.workspace-run`). With
 ## `locked` (`--locked`), a lockfile that would change is reported instead
 ## (`cli.locked`, with what changes), and the command stops: `False`.
+## A level that rises is an error of the manifests (RULES.md, R85): a
+## command that stops at errors says so after it, with `stopped`, the
+## message of its line (`D0006`, `D0132`), as after `E1019` and `E1021`.
 def write_lockfile(
-    sys: System, arg: str, sir: bool, locked: bool, accept_unsafe: bool, catalog: Catalog
+    sys: System,
+    arg: str,
+    sir: bool,
+    locked: bool,
+    accept_unsafe: bool,
+    catalog: Catalog,
+    stopped: str,
 ) -> bool ! IoError:
     let abs = absolute(sys, arg)
     let target = package.locate(sys.fs, abs) else:
@@ -2680,7 +2943,11 @@ def write_lockfile(
     if let Some(o) = old:
         if not accept_unsafe:
             if let Some(err) = raised_level(o, text, catalog):
-                emit("", err)
+                var errs = err.copy()
+                if not stopped.is_empty():
+                    let count = Param(name="count".to_string(), value="1")
+                    errs.push(catalog.plain_error(stopped, [count]))
+                emit("", errs)
                 return Ok(False)
     if locked:
         var what = "there is none".to_string()
@@ -3243,10 +3510,27 @@ def unknown_feature(sys: System, arg: str, request: FeatureRequest) -> list[Para
 def named_modules(
     sys: System, home: str, layout: Layout, tests: bool, mut env: Environment, catalog: Catalog
 ) -> (list[NamedModule], list[list[Diagnostic]]) ! IoError:
+    return held_named_modules(sys, home, layout, tests, mut env, catalog, {})
+
+## `named_modules`, with the texts `held` holds instead of the files'.
+def held_named_modules(
+    sys: System,
+    home: str,
+    layout: Layout,
+    tests: bool,
+    mut env: Environment,
+    catalog: Catalog,
+    held: dict[String, String],
+) -> (list[NamedModule], list[list[Diagnostic]]) ! IoError:
     var out: list[NamedModule] = []
     var problems: list[list[Diagnostic]] = []
     for m in layout.modules:
-        let text = sys.fs.read_to_string(Path.new(m.disk))?
+        var text = String.new()
+        match held.get(m.disk.copy()):
+            case Some(t):
+                text = t.copy()
+            case None:
+                text = sys.fs.read_to_string(Path.new(m.disk))?
         let parsed = parse(text, catalog)
         var features = Features.none()
         if m.package < len(layout.packages):
@@ -3510,7 +3794,7 @@ def doc_report(
     if let Some(e) = unknown_feature(sys, path, args.request):
         return Ok(DocReport.failed(catalog.plain_error("cli.unknown-feature", e), 2))
     # `--locked` keeps the lockfile as it is, or stops the command.
-    if not write_lockfile(sys, path, False, args.locked, args.accept_unsafe, catalog)?:
+    if not write_lockfile(sys, path, False, args.locked, args.accept_unsafe, catalog, "")?:
         return Ok(DocReport.failed(String.new(), 1))
     var inputs: list[Input] = []
     match layouts_of(sys, path, False, args.request):

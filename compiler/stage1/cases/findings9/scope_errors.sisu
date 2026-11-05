@@ -1,0 +1,32 @@
+# A `?` in the body of a `task.scope` that a `T !` function returns passes
+# its error into the set the function infers (RULES.md, R89), where each
+# was E0321 against the set inferred from the `?`s outside the scope.
+import std.task
+
+error ParseError:
+    Bad(text: String)
+
+error FetchError:
+    Down
+
+def parse(s: str) -> int ! ParseError:
+    if s == "x":
+        return Err(Bad(text=s.to_string()))
+    return Ok(len(s))
+
+def fetch(n: int) -> int ! FetchError:
+    if n > 2:
+        return Err(Down)
+    return Ok(n * 10)
+
+def both(s: str) -> int !:
+    let a = parse(s)?
+    return task.scope do t:
+        let other = t.spawn(() -> 2)
+        let b = fetch(a)?
+        return Ok(a + b + other.join().expect("joined"))
+
+def main():
+    print("{both("ab")}")
+    print("{both("abc")}")
+    print("{both("x")}")

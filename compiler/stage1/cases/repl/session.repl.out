@@ -1,0 +1,44 @@
+## 1
+## 2
+6
+## 3
+error[E0310]: `+` cannot be applied to `int` and `str`
+  --> <input>:1:1
+  |
+1 | x + "a"
+  | ^^^^^^^
+  = fix: write the value into the text: `"{x}a"`
+
+## 4
+error[E0200]: cannot find `missing` in this scope
+  --> <input>:2:20
+  |
+2 |     return n * 2 + missing
+  |                    ^^^^^^^
+
+## 5
+## 6
+6
+## 7
+printed once
+## 8
+## 9
+[2, 3]
+## 10
+panic: index out of bounds: the length is 4 but the index is 10
+  at main (<repl>:14:1)
+(not kept)
+## 11
+error[E0202]: `double` is defined more than once in this module
+  --> <input>:1:5
+  |
+1 | def double(n: int) -> int:
+  |     ^^^^^^
+  ::: <repl>:5:5
+  |
+5 | def double(n: int) -> int:
+  |     ------ first defined here
+  = note: rename one of them, or remove the one not wanted
+
+## 12
+(3, "three")

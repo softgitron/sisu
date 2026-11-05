@@ -134,8 +134,10 @@ pure def stmt(ast: Ast, s: StmtId, mut out: list[ExprId]):
             expr(ast, value, mut out)
         case StmtKind.Expr(e):
             expr(ast, e, mut out)
-        case StmtKind.Expect(e):
+        case StmtKind.Expect(e, message):
             expr(ast, e, mut out)
+            if let Some(m) = message:
+                expr(ast, m, mut out)
         case StmtKind.Return(e):
             if let Some(x) = e:
                 expr(ast, x, mut out)

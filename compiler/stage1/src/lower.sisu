@@ -417,6 +417,22 @@ pub pure def lower(
     intrinsic_defs_in(prog, shared, len(prog.defs), mut intrinsic_defs)
     let intrinsics = intrinsic_decls(prog, mut types, functions, intrinsic_defs)
     let (trait_methods, impls) = trait_decls(ctx, prog, mut types, functions)
+    # A test that `@refines` makes stands at the attribute, in the file of
+    # the function it checks, with the closure it checks the cases with
+    # (RULES.md, R83).
+    for d in prog.tests:
+        let (m, r) = prog.refines_at.get(prog.defs[d.index].name.copy()) else:
+            continue
+        if prog.defs[d.index].module == m:
+            continue
+        let at = ctx.loc(m, r) else:
+            continue
+        let source = ctx.source_index(prog, m)
+        let name = ctx.fn_name(prog, types, d)
+        let inner = "{name}#"
+        for k in range(len(functions)):
+            if functions[k].name == name or functions[k].name.starts_with(inner):
+                stand_at(mut functions[k], source, at)
     let (sources, renumbered) = renumber_sources(ctx.file_names, mut functions)
     var source_modules: list[ModuleId] = []
     for _ in sources:
@@ -1051,6 +1067,21 @@ pure def reach_from(
                             pass
                 case _:
                     pass
+
+## A function, and every statement and block of it, placed at `at` in the
+## file numbered `source`.
+pure def stand_at(mut f: Function, source: int, at: Loc):
+    f.source = source
+    f.loc = Some(at)
+    for b in range(len(f.blocks)):
+        if f.blocks[b].loc.is_some():
+            f.blocks[b].loc = Some(at)
+        for s in range(len(f.blocks[b].stmts)):
+            if f.blocks[b].stmts[s].loc.is_some():
+                f.blocks[b].stmts[s].loc = Some(at)
+    for l in range(len(f.locals)):
+        if f.locals[l].loc.is_some():
+            f.locals[l].loc = Some(at)
 
 ## The sources the kept functions come from: the root module's file first,
 ## then the others in the order they were first met; each function's index

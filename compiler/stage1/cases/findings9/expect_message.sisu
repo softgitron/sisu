@@ -1,0 +1,9 @@
+# `expect cond, "message"`, as `assert` takes its message (17; RULES.md,
+# R81): a failure that `expect` records says it, and the test goes on.
+def double(n: int) -> int:
+    return n + n + 1
+
+test "expect with a message":
+    expect double(3) == 6, "double of 3"
+    expect double(0) == 0, "double of {0}"
+    assert double(1) == 3

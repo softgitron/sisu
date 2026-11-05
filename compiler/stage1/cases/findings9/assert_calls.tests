@@ -1,0 +1,23 @@
+test "the average is one of the temperatures" ... FAILED
+test "a message too" ... FAILED
+
+test "the average is one of the temperatures" ... FAILED
+panic: assertion failed: temps.contains(average(temps))
+    temps.contains(average(temps))
+    │              │       │
+    [18, 20, 26]   21      [18, 20, 26]
+  at test "the average is one of the temperatures" (assert_calls.sisu:12:5)
+replay: sisu test --replay 1-HASH-0.0.1-t0-s0-r0 assert_calls.sisu
+
+test "a message too" ... FAILED
+panic: assertion failed: temps.contains(average(temps) + 1)
+  message: near the mean
+    temps.contains(average(temps) + 1)
+    │                      │      │
+    [3, 6]                 [3, 6] 5
+  at test "a message too" (assert_calls.sisu:16:5)
+replay: sisu test --replay 1-HASH-0.0.1-t1-s0-r0 assert_calls.sisu
+
+0 passed, 2 failed, 0 blocked
+--- stderr
+error: Exit(status=1)

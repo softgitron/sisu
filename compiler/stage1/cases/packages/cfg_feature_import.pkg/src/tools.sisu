@@ -1,0 +1,4 @@
+## The quick path, built with the feature `fast`.
+@cfg(feature="fast")
+pub def quick() -> int:
+    return 1

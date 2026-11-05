@@ -508,7 +508,7 @@ impl Resolver:
         # lowering.
         r.std_kept = r.sources.copy()
         for i in range(len(r.sources)):
-            r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+            r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[], left_out=[])
         # The text of each std module a program may import that has
         # templates, for their instances.
         var safety_texts: dict[String, String] = {}
@@ -723,7 +723,7 @@ impl Resolver:
         for m in self.prog.user_modules:
             if self.prog.modules[m.index].path == path:
                 return m
-        let empty = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        let empty = Module(ast=Ast.new(), items=[], docs=[], broken_names=[], left_out=[])
         let id = self.add_module(path.join("."), False, empty)
         self.prog.modules[id.index].package = pid
         self.prog.modules[id.index].path = path.copy()
@@ -983,7 +983,7 @@ impl Resolver:
     ## The program, its table of types and the root module's syntax.
     pub pure def into_parts(own self) -> (Program, Types, Module):
         var sources = self.sources
-        var root = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        var root = Module(ast=Ast.new(), items=[], docs=[], broken_names=[], left_out=[])
         let at = self.prog.root.index
         if at < len(sources):
             # The modules the root module imports come after it.
@@ -3677,6 +3677,17 @@ impl Resolver:
                         path.push(x.text.copy())
                     var d = Diagnostic.new(Msg.ResolveNotInModule, n.range.start, n.range.end)
                     d = d.with("module", path.join(".")).with("name", n.text)
+                    # An item a `@cfg` left out of this build says which
+                    # condition did (RULES.md, R91).
+                    if m.index < len(self.sources):
+                        for (gone, cond) in self.sources[m.index].left_out:
+                            if gone == n.text:
+                                let ps = [
+                                    MsgParam(name="name".to_string(), value=gone.copy()),
+                                    MsgParam(name="cfg".to_string(), value=cond.copy()),
+                                ]
+                                d = d.note_params(Msg.ResolveCfgLeftOut, ps)
+                                break
                     self.report_other(module, d)
 
     # ---------------------------------------------------------------- scripts

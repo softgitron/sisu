@@ -106,6 +106,7 @@ E0201 error   resolve.undefined-type      cannot find a type named `{name}`
 E0202 error   resolve.duplicate-definition  `{name}` is defined more than once in this module
 E0203 error   resolve.unknown-module      there is no module `{name}`
 E0204 error   resolve.not-in-module       module `{module}` has no item `{name}`
+-     note    resolve.cfg-left-out        `{name}` is left out of this build by its `@cfg({cfg})`, which does not hold
 E0205 error   resolve.duplicate-field     `{name}` is declared more than once in `{owner}`
 E0206 error   resolve.duplicate-variant   `{owner}` has more than one variant named `{name}`
 E0207 error   resolve.duplicate-parameter  the parameter `{name}` appears more than once
@@ -246,6 +247,7 @@ E0331 error   type.else-must-diverge      the block after `else:` must leave the
 E0333 error   type.impure-call            `{callee}` is not pure, so the pure function `{name}` cannot call it
 E0334 error   type.impure-capability      the pure function `{name}` cannot use the capability `{ty}`
 E0335 error   type.impure-argument        this function is passed where a pure function is required, but it calls `{callee}`, which is not pure
+-     note    type.impure-path            `{function}` calls {path}
 E0337 error   type.missing-field          missing the field `{field}` of `{ty}`
 E0338 error   type.move-out-of-borrow     cannot move `{what}` out of a borrowed value; copy it with `.copy()`
 E0339 error   type.mut-argument-missing   `{param}` is a `mut` parameter, so the call must say `mut` before the argument
@@ -451,6 +453,8 @@ E0435 error   type.yield-outside-generator  `yield` belongs in the body of a gen
 E0436 error   type.generator-result       `{name}` yields, so it must return `Iter[T]`, not `{ty}`
 -     help    task.wrap-mutex             wrap it: `Mutex[{ty}]` shares mutation between tasks; or move the value with an `own` task
 -     help    task.use-own                move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+-     help    task.make-outside           make `{name}` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
+-     help    task.shared-change          each task the loop spawns changes `{name}`, and the tasks run at once: keep it in a `Mutex` (`Mutex(0)`, changed through `{name}.lock().value`), or have each task return its part and combine them after the scope
 -     note    task.field-path             because of `{path}`, a `{ty}`
 -     note    task.make-inside            make the value inside the task, or give the task a value that is `Send` to make it from
 -     note    task.return-send            return a value that is `Send` from the task, and make the rest from it after the join
@@ -650,6 +654,8 @@ W0014 warning unsafe.ambient-authority    `{name}` is public and safe and reache
 # the compiler's warnings, with fix-its").
 W0015 warning lint.wildcard-own-enum     `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here
 -     fix     lint.list-variants          list them
+W0027 warning lint.unused-import         `{name}` is imported and not used in this file
+-     fix     lint.remove-import          remove the import
 # Stage 1's (RULES.md, R15; D-024): an error set that hides the prelude's.
 W0016 warning resolve.shadow-prelude-set  the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one
 # Stage 1's (RULES.md, R29 and R39; 07): a trait's contract binds its

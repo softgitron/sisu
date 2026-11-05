@@ -131,6 +131,9 @@ pub struct FnLower:
     ## the clause's parts are drawn from.
     pub fixed_loc: Loc?
     pub text_module: ModuleId?
+    ## The expressions an assertion evaluated once into a temporary, by
+    ## their index, which lowering them again reads (RULES.md, R82).
+    pub evaluated: dict[int, LocalId]
 
 ## The rest of a comprehension inside its loops.
 pub struct CompRest:
@@ -333,6 +336,7 @@ impl FnLower:
             extra=[],
             fixed_loc=None,
             text_module=None,
+            evaluated={},
         )
 
     ## Lowers the body; `from_` and `inner` are the arguments the result may

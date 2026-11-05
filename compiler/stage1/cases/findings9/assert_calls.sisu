@@ -1,0 +1,16 @@
+# An assertion whose condition calls a function as an argument of its call
+# shows that argument's value and the parts that only read, evaluated once
+# (17, "Assertions"; RULES.md, R82), where it showed no value.
+def average(xs: list[int]) -> int:
+    var total = 0
+    for x in xs:
+        total += x
+    return total // len(xs)
+
+test "the average is one of the temperatures":
+    let temps = [18, 20, 26]
+    assert temps.contains(average(temps))
+
+test "a message too":
+    let temps = [3, 6]
+    assert temps.contains(average(temps) + 1), "near the mean"

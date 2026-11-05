@@ -1,0 +1,188 @@
+##! What `sisu repl` and `sisu ws` ask of the front end (10, "REPL and
+##! scripts"; Q-48; RULES.md, R79): the program of a session, its inputs
+##! in order and then one more, or a worksheet instrumented to say each
+##! statement's value, written as the driver's `repl.rs` writes them for
+##! the Rust front end, so that what a session shows is the same.
+##!
+##! A session is a script: each input it keeps is one more top-level
+##! statement or item of it, an input that is a single expression is shown
+##! (its `Debug` form, unless it is `()`), and the program ends with `pass`
+##! and the function that shows a value. A worksheet's statements are each
+##! preceded by a marker of the line the statement ends on, in the file as
+##! written, and followed by its value or the values it binds, each with
+##! that line: `\u{1}LINE` and `\u{2}LINE VALUE` lines on standard output.
+
+from stage1.diag import Catalog
+from stage1.parser import parse
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Element, Tree, is_item
+
+## The line that makes a text a script.
+pub const SHEBANG: str = "#!/usr/bin/env sisu\n"
+
+## What the session's program adds after its inputs: the statement that
+## gives the script its `main` before any input does, and the function that
+## shows an expression's value.
+pub const TRAILER: str = "pass\n\ndef __repl_show[T](value: T):\n    if comptime reflect.name_of(T) != \"()\":\n        print(\"{{value:?}}\")\n"
+
+## What an instrumented worksheet adds after its text: its markers'
+## functions, and a function that keeps `System.fake` in the program, which
+## the driver calls for the fake `System` a worksheet runs against.
+pub const WS_HELPERS: str = "\ndef __ws_at(line: int):\n    print(\"\\u{{1}}{{line}}\")\n\ndef __ws_show[T](line: int, value: T):\n    if comptime reflect.name_of(T) != \"()\":\n        print(\"\\u{{2}}{{line}} {{value:?}}\")\n\ndef __ws_fake() -> System:\n    return System.fake(0)\n"
+
+## One input as the session's program holds it: its text there, where the
+## input's own text starts in it, and how long that text is.
+pub struct Entry:
+    pub source: String
+    pub prefix: int
+    pub len: int
+
+## An input typed into a session: an expression alone is wrapped to be
+## shown, anything else is kept as it is, each ending with a line break.
+pub pure def entry_of(input: str, catalog: Catalog) -> Entry:
+    let text = input.trim_end()
+    let parsed = parse("{SHEBANG}{input}\n", catalog)
+    let stmts = top_level(parsed.tree)
+    if len(stmts) == 1 and parsed.tree.nodes[stmts[0]].kind == SyntaxKind.ExprStmt:
+        let prefix = "__repl_show("
+        return Entry(source="{prefix}{text}\n)\n", prefix=prefix.byte_len(), len=text.byte_len())
+    return Entry(source="{text}\n", prefix=0, len=text.byte_len())
+
+## A file loaded into a session (`sisu repl FILE`): its `#!` line and its
+## inline metadata, which lead the session's program (a `#!` line added
+## when it has none), the rest, which is its first input, and where that
+## rest starts in the file.
+pub pure def split_preamble(text: str) -> (String, String, int):
+    var end = 0
+    var open = False
+    var offset = 0
+    while offset < text.byte_len():
+        var stop = text.byte_len()
+        var i = offset
+        while i < text.byte_len():
+            if text.byte_at(i) == 10:
+                stop = i + 1
+                break
+            i += 1
+        let bare = text.byte_slice(offset, stop).trim_end()
+        offset = stop
+        if not open and bare == "# /// script":
+            open = True
+        elif open and bare == "# ///":
+            end = offset
+            break
+    if end == 0 and text.starts_with("#!"):
+        end = text.byte_len()
+        if let Some(i) = text.find("\n"):
+            end = i + 1
+    var preamble = text.byte_slice(0, end).to_string()
+    if not preamble.starts_with("#!"):
+        preamble = "{SHEBANG}{preamble}"
+    var body = text.byte_slice(end, text.byte_len()).to_string()
+    if not body.is_empty() and not body.ends_with("\n"):
+        body.push("\n")
+    return (preamble, body, end)
+
+## A worksheet's text, `sheet` (a script, whose first `shift` lines the
+## file as written does not have), with a marker before each top-level
+## statement and its value or the values it binds after it, each with the
+## line the statement ends on in the file as written, and the helpers.
+pub pure def instrument(sheet: str, shift: int, catalog: Catalog) -> String:
+    let parsed = parse(sheet, catalog)
+    let tree = ref parsed.tree
+    var out = String.new()
+    var last = 0
+    for n in top_level(tree):
+        let kind = tree.nodes[n].kind
+        if is_item(kind) or kind == SyntaxKind.Attribute or kind == SyntaxKind.Error:
+            continue
+        let start = tree.nodes[n].start
+        let body = sheet.byte_slice(start, tree.nodes[n].end).trim_end()
+        let first = line_of(sheet, start)
+        let at = first + count_breaks(body) - shift
+        out.push(sheet.byte_slice(last, start))
+        out.push("__ws_at({at})\n")
+        if kind == SyntaxKind.ExprStmt:
+            out.push("__ws_show({at}, {body})\n")
+        else:
+            out.push(body)
+            out.push("\n")
+            for name in bound_names(tree, sheet, n):
+                out.push("__ws_show({at}, {name})\n")
+        last = start + body.byte_len()
+        # The line break the statement ended with is the one written.
+        if last < sheet.byte_len() and sheet.byte_at(last) == 10:
+            last += 1
+    out.push(sheet.byte_slice(last, sheet.byte_len()))
+    out.push(WS_HELPERS)
+    return out
+
+## The statements and items of a parsed file, in order.
+pure def top_level(tree: Tree) -> list[int]:
+    var out: list[int] = []
+    for e in tree.nodes[tree.root].children:
+        if let Element.Node(c) = e:
+            out.push(c)
+    return out
+
+## The names a `let` or `var` binds.
+pure def bound_names(tree: Tree, text: str, stmt: int) -> list[String]:
+    var out: list[String] = []
+    if tree.nodes[stmt].kind != SyntaxKind.LetStmt:
+        return out
+    for e in tree.nodes[stmt].children:
+        let Element.Node(c) = e else:
+            continue
+        let k = tree.nodes[c].kind
+        if k != SyntaxKind.IdentPat and k != SyntaxKind.TuplePat:
+            continue
+        for p in tree.preorder(c):
+            if tree.nodes[p].kind != SyntaxKind.IdentPat:
+                continue
+            for x in tree.nodes[p].children:
+                if let Element.Leaf(t) = x:
+                    if tree.tokens[t].kind == SyntaxKind.Ident:
+                        out.push(
+                            text.byte_slice(tree.tokens[t].start, tree.tokens[t].end).to_string()
+                        )
+                        break
+    return out
+
+## The 1-based line of byte `at`.
+pure def line_of(text: str, at: int) -> int:
+    return count_breaks(text.byte_slice(0, at)) + 1
+
+pure def count_breaks(text: str) -> int:
+    var n = 0
+    for i in range(text.byte_len()):
+        if text.byte_at(i) == 10:
+            n += 1
+    return n
+
+test "an expression alone is shown, a statement is kept as it is"(sys: System):
+    let catalog = test_catalog(sys)
+    let e = entry_of("1 + 2\n", catalog)
+    assert e.source == "__repl_show(1 + 2\n)\n" and e.prefix == 12 and e.len == 5
+    let s = entry_of("let x = 3", catalog)
+    assert s.source == "let x = 3\n" and s.prefix == 0
+    let d = entry_of("def f():\n    pass", catalog)
+    assert d.source == "def f():\n    pass\n"
+
+test "a loaded file's preamble leads the session"(sys: System):
+    let (pre, body, end) = split_preamble("# /// script\n# [dependencies]\n# ///\nlet x = 1")
+    assert pre == "#!/usr/bin/env sisu\n# /// script\n# [dependencies]\n# ///\n"
+    assert body == "let x = 1\n" and end == 36
+    let (p2, b2, e2) = split_preamble("#!/usr/bin/env sisu\nx")
+    assert p2 == SHEBANG and b2 == "x\n" and e2 == 20
+
+test "a worksheet's statements are marked by the line they end on"(sys: System):
+    let catalog = test_catalog(sys)
+    let out = instrument("{SHEBANG}let x = 3\nx * 2\ndef f():\n    pass\n", 1, catalog)
+    assert out.starts_with(
+        "{SHEBANG}__ws_at(1)\nlet x = 3\n__ws_show(1, x)\n__ws_at(2)\n__ws_show(2, x * 2)\ndef f():\n    pass\n"
+    )
+
+def test_catalog(sys: System) -> Catalog:
+    let text = sys.fs.read_to_string(Path.new("../catalog/messages.catalog")) else:
+        panic("the tests read the catalog at ../catalog/messages.catalog")
+    return Catalog.parse(text)

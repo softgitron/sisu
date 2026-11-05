@@ -178,6 +178,8 @@ impl FnLower:
     ## The place of an expression; a temporary (dropped at the end of the
     ## statement) for one that is not a place.
     pub pure def place_of(mut self, cx: Cx, e: TExprId) -> Place:
+        if let Some(t) = self.evaluated.get(e.index):
+            return Place.local(t)
         let x = self.ex(cx, e)
         match x.kind:
             case TExprKind.Local(l):
@@ -535,6 +537,10 @@ impl FnLower:
     pub pure def into(mut self, cx: Cx, own dest: Place, e: TExprId):
         let x = self.ex(cx, e)
         let loc = cx.loc(x.span)
+        # A part an assertion evaluated already (RULES.md, R82).
+        if let Some(t) = self.evaluated.get(e.index):
+            self.assign(cx, dest, Rvalue.Use(Operand.Copy(Place.local(t))), loc)
+            return
         if let Some(c) = self.literal(cx, x):
             self.assign(cx, dest, Rvalue.Use(Operand.Const(c)), loc)
             return

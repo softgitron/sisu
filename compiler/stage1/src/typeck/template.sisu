@@ -74,6 +74,7 @@ from stage1.syntax.ast import (
     StmtId,
     StmtKind,
     StrPart,
+    TypeExprId,
     TypeKind,
     UnOp,
 )
@@ -200,8 +201,13 @@ impl TypeShape:
         match t.body:
             case Body.Struct(fields):
                 s.kind = Kind.Struct
+                var k = 0
                 for (n, default) in fields:
-                    s.fields.push(FieldShape(name=n.copy(), ty=[], default=default))
+                    var ty: list[TypeShape] = []
+                    if k < len(t.field_types):
+                        ty.push(t.field_types[k].copy())
+                    s.fields.push(FieldShape(name=n.copy(), ty=ty, default=default))
+                    k += 1
             case Body.Enum(vs):
                 s.kind = Kind.Enum
                 for (n, fs) in vs:
@@ -210,6 +216,64 @@ impl TypeShape:
                         fields.push((f.copy(), []))
                     s.variants.push(VariantShape(name=n.copy(), fields=fields))
         return s
+
+## A field's type as its declaration writes it, which a derive sees before
+## the types are resolved (RULES.md, R92): its text, and its kind as the
+## prelude's names give it (`int`, `f64`, `bool`, `char`, `str`, `String`,
+## a `list` or an option of a type so written, a tuple); any other type's
+## kind is not known here.
+pub pure def written_shape(ast: Ast, t: TypeExprId) -> TypeShape:
+    let text = written_text(ast, t)
+    var s = TypeShape.named(text, text, Kind.Other)
+    match ast.type_expr(t).kind:
+        case TypeKind.Path(segments, args):
+            if len(segments) == 1:
+                let n: str = segments[0].text
+                if args.is_empty():
+                    s.kind = match n:
+                        case "int": Kind.Int
+                        case "f64": Kind.Float
+                        case "bool": Kind.Bool
+                        case "char": Kind.Char
+                        case "str" | "String": Kind.Str
+                        case _: Kind.Other
+                elif len(args) == 1 and (n == "list" or n == "Option"):
+                    s.elem = [written_shape(ast, args[0])]
+                    s.kind = if n == "list": Kind.List else: Kind.Option
+        case TypeKind.Option(inner):
+            s.elem = [written_shape(ast, inner)]
+            s.kind = Kind.Option
+        case TypeKind.Tuple(_):
+            s.kind = Kind.Tuple
+        case _:
+            pass
+    return s
+
+## The text of a type as written, for `written_shape`.
+pure def written_text(ast: Ast, t: TypeExprId) -> String:
+    match ast.type_expr(t).kind:
+        case TypeKind.Path(segments, args):
+            var parts: list[String] = []
+            for x in segments:
+                parts.push(x.text.copy())
+            let name = parts.join(".")
+            if args.is_empty():
+                return name
+            var a: list[String] = []
+            for x in args:
+                a.push(written_text(ast, x))
+            return "{name}[{a.join(", ")}]"
+        case TypeKind.Option(i):
+            return "{written_text(ast, i)}?"
+        case TypeKind.Tuple(es):
+            var a: list[String] = []
+            for (_, e) in es:
+                a.push(written_text(ast, e))
+            if len(a) == 1:
+                return "({a[0]},)"
+            return "({a.join(", ")})"
+        case _:
+            return "_".to_string()
 
 ## Whether two shapes are the same (Rust's derived `PartialEq`).
 pure def same_shape(a: TypeShape, b: TypeShape) -> bool:
@@ -369,6 +433,9 @@ pub struct Target:
     ## which `reflect.attributes_of` gives the derive (stage 1's: the
     ## derive of `std.mem`'s `Plain` asks for `@repr(c)`, 22).
     pub attrs: list[(String, list[String])]
+    ## A struct's fields' types as written, one for each field, which a
+    ## derive reads as `f.ty` (RULES.md, R92).
+    pub field_types: list[TypeShape]
 
 struct Unfold:
     ## The type parameters (`T`) and their arguments.
@@ -1679,7 +1746,7 @@ impl Unfold:
                 return self.copy_with_replacements(src, s, depth, mut out)
             case StmtKind.Let(_, _, _, _, _) | StmtKind.Assign(_, _, _) | StmtKind.Return(_):
                 return self.copy_with_replacements(src, s, depth, mut out)
-            case StmtKind.Assert(_, _) | StmtKind.Expect(_):
+            case StmtKind.Assert(_, _) | StmtKind.Expect(_, _):
                 return self.copy_with_replacements(src, s, depth, mut out)
             case _:
                 return fail(here, "compile-time values cannot be used in this statement")
@@ -2171,8 +2238,10 @@ pure def stmt_exprs(src: Src, s: StmtId) -> list[ExprId]:
             out.push(value)
         case StmtKind.Expr(e):
             out.push(e)
-        case StmtKind.Expect(e):
+        case StmtKind.Expect(e, message):
             out.push(e)
+            if let Some(m) = message:
+                out.push(m)
         case StmtKind.Return(Some(e)):
             out.push(e)
         case StmtKind.Assert(cond, message):
@@ -2331,7 +2400,11 @@ test "a derive template unfolds into the impl's source":
     let src = Src(ast=ref m.ast, source=source)
     let fields = [("x".to_string(), False), ("y".to_string(), False)]
     let target = Target(
-        name="Point".to_string(), written="Point".to_string(), body=Body.Struct(fields), attrs=[]
+        name="Point".to_string(),
+        written="Point".to_string(),
+        body=Body.Struct(fields),
+        attrs=[],
+        field_types=[],
     )
     var expected = String.new("\nimpl Named for Point:\n    def name(self) -> String:\n")
     expected.push("        var parts: list[String] = []\n")
