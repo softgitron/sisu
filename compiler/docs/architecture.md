@@ -10331,8 +10331,12 @@ R120 and R122)
      capacity 1 take 176.1 million instructions where they took 173.9
      million (callgrind, the release profile), 1.3 % more, a call of
      Sisu's convention for each draw. The seed grows from 699 352 to
-     703 530 bytes of SIR and the runtime's object to 785 920 bytes. This
-     changes no rule of the language.
+     703 530 bytes of SIR and the runtime's object to 785 920 bytes
+     (`target/rt/rt.o`), and as the fixed point builds it with the Sisu
+     backend from 1 361 088 to 1 372 016; the fixed point holds (rt-A.o
+     and rt-B.o the same bytes, as sisu2-A and sisu2-B, 31 167 928, and
+     stage1-A and stage1-B, 63 105 968, which carry stage 1's twelfth
+     round too). This changes no rule of the language.
 
 725. The rest of D-086's order for the scheduler is not this round's: a
      task's record (its state, the wait a deadlock reports, its scope,
