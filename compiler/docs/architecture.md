@@ -9964,3 +9964,210 @@ and sets, `in`, a slice's intrinsics and a table's literal** (section
 666. A generic method of the standard library may ask `reflect` of its
      type parameters; `json.decode`'s `Mismatch` names the expected type
      without an article. Stage 1 decides it (RULES.md, R110).
+
+**The runtime in Sisu: the channels' buffers and `d{k}`'s slot; the
+executable's dead code, `@export`, and what the manual found** (sections
+"Stage 2", "The runtime in Sisu", "Linking"; "The REPL and worksheets";
+D-086; 06, 10, 12, 17; the manual's findings under "Tooling and the
+driver", "Metaprogramming", "Ownership", "Testing", "Errors" and "The
+standard library")
+
+680. The channels' buffers are the runtime in Sisu's
+     (`rt/src/channel.sisu`, exports `sisu_rt_channel_*`): the values a
+     channel holds, sent and not received, in a ring of slots of the
+     value's size rounded up to a word, whose header is five words (the
+     slots' address, the first slot, the number of values, the slots, a
+     slot's bytes), grown to twice its slots when a value finds it full,
+     the values that wrapped round moved after the others. A value moves
+     in and out as its bytes: `send` and `try_send` move it from the
+     argument into the buffer and `recv`, `try_recv`, a receiver's
+     iterator and `sisu_rt_recv_item` straight out to their result, where
+     the runtime in Rust boxed each value in a `VecDeque`; a receiver
+     dropped takes out what is left and drops it in the order it was
+     sent, as before. The capacity stays a bound the scheduler checks, so
+     a channel of a large capacity starts with eight slots. The blocks
+     are the runtime in Rust's (`queue::ChanBuf`), kept for the run and
+     not counted, as decision 645's queues are, so `SISU_RT_ALLOCS` says
+     what it said, and the order of values is the interpreter's, so a
+     seed names the schedule it named (the cases of `concurrency/`,
+     `sim/` and `time/` give their output natively). Deleted: the
+     `VecDeque` of boxed words and the size a receiver's iterator kept
+     for its values. A task's record, its parking and waking and the
+     choice of the next task stay the runtime in Rust's: they hold the
+     coroutine, its context and the seeded generator's draws, the next
+     piece of D-086's order. 20 000 values sent through a channel of
+     capacity 1 take 173.9 million instructions where they took 164.3
+     million (callgrind, the release profile, built from the same SIR by
+     the Rust lowering), 5.8 % more, three calls of Sisu's convention a
+     value where a push and a pop of a `VecDeque` were inline. This
+     changes no rule of the language.
+
+681. `d{k}`'s slot is found or made by the runtime in Sisu
+     (`dispatch.slot`, export `sisu_rt_table_slot`): the value's address
+     under a key the dict holds; for an assignment, an entry appended
+     whose key is a copy made in its place (`table.push_copy`), where the
+     runtime in Rust copied it into a vector and moved it in; 0 for a
+     drop; -1 for a read, whose panic, naming the key in its `Debug`
+     form, the runtime in Rust's entry `sisu_rt_dict_slot` raises, which
+     the generated code still calls, so no lowering changes. Deleted:
+     `Table`'s position, push, key size and value address, `copy_key`,
+     and the exports `sisu_rt_table_lookup`, `_push`, `_key_bytes` and
+     `_value_at`, which nothing calls now. 30 000 assignments and 30 000
+     reads of `d{k}` take 127.8 million instructions where they took
+     125.0 million (2.2 % more). The seed grows from 685 014 to 699 352
+     bytes with 680. Still the runtime in Rust's: an iterator of a
+     borrowed value reached by `iter` (`IterRef`, `IterMut`) and the
+     decoding of the intrinsics other than the collections'. This
+     changes no rule of the language.
+
+682. A native executable leaves out what nothing reaches from `main`:
+     the link passes `--gc-sections` (`-dead_strip` on macOS), and the
+     runtime in Sisu's object, which the driver compiles with Cranelift,
+     has a section for each function (`per_function_section`, in the
+     library mode only), so that the runtime in Rust's functions a
+     program does not call and the runtime in Sisu's are dropped. The
+     program's own code was already only what `main` reaches: both
+     lowerings compile instances from a queue that `main`'s instance
+     starts (and an `@export`'s, 683), the dispatchers the `dyn` values
+     made need, and the glue the type table names, and the front ends
+     lower only what the entry, the tests and the root module reach, so
+     a ten-line program's object is 10.6 KB, its `main` and the function
+     it calls. That program's executable is 6 251 048 bytes where it was
+     7 325 600 (the debug profile; 6 249 448 where 7 323 992 in the
+     release profile; 21 083 192 where 22 464 232 when the driver is a
+     debug build, whose runtime in Rust is unoptimised), 1.74 MB
+     stripped. What is left is the runtime's: 0.45 MB of the runtime in
+     Sisu's code, nearly all of which the runtime in Rust's bridge
+     reaches, 0.50 MB of the runtime in Rust's and 0.37 MB of Rust's
+     standard library; 3.8 MB of debug information, the runtime's and
+     the standard library's, which a debugger and the line table of
+     decision 227 need; 0.4 MB of symbols; and the C library and
+     `libgcc_s`, linked dynamically (`libm` is linked only as needed).
+     The manual's 17.5 MB was a debug build of the driver. Static
+     linking and 12's `release-size` profile (stripped, the debug
+     information of the runtime left out, the runtime's code per program
+     rather than whole) are not this round's. The runtime in Sisu's
+     object grows from 727 264 to 776 576 bytes with its sections; the
+     fixed point's, which stage 2's backend writes as one section, is
+     unchanged in form. This changes no rule of the language.
+
+683. `@export("name")` makes the function the global symbol `name` in a
+     native build, in both lowerings (`Codegen::export_instance`,
+     stage 2's `Cg.export_instance`, as a runtime library's exports are,
+     decision 336), compiled before `main`'s instance so that `main`'s
+     calls of it call that symbol, and a root of what is compiled
+     whether or not `main` calls it; it was a local symbol named by the
+     lowering (`sisu$heat$2`), or left out when nothing called it. The
+     symbol has Sisu's convention, which is the C calling convention
+     over addresses: C declares `uint8_t name(R *result, const P1 *a1,
+     ...)`, each argument and the result in memory of their layout (an
+     `i32` a word, as every sized integer), and reads the status, 0, or
+     1 when a panic left the function, after which the caller must not
+     call Sisu code again; a function that takes and gives plain C
+     values, whose wrapper a C caller would not write, is the next step,
+     with the `@repr(c)` check at the boundary that 12 asks for, which is
+     stage 1's. The SIR names it in a line after the entry, `export
+     "name" FUNCTION` (`Program::exports`), which the Rust front end
+     writes, `sisu-sir` and stage 2 read (stage 2 beside stage 1's
+     `sir.Program`, which has no field for it, `read.exports`, and writes
+     back in place), and stage 1 does not write yet. The SIR path and the
+     LIR path give the same executable. The driver's test
+     `an_exported_function_is_a_global_symbol_that_c_calls` reads the
+     symbol table of both profiles' executables and links a C caller
+     that `main` calls through an `extern` block. This changes no rule
+     of the language.
+
+684. A `Zone`'s `Debug` form is the code that makes it:
+     `Zone.named("Europe/Helsinki")`, `Zone.utc()`, `Zone.fixed(19800)`
+     for a zone of one offset, where the derived form wrote its private
+     fields, its rules among them, which a worksheet shows for a `let`.
+     `std/zone_debug` holds it, natively too. The Rust front end, which
+     gives a public type its derived form first, still writes the
+     fields. This changes no rule of the language.
+
+685. `sisu repl --echo` writes each input after its prompt, a line of
+     continuation after its `...`, so that a session read from a pipe is
+     captured as a terminal shows it. The default stays: a terminal
+     echoes what is typed itself, and the suite's `.repl` captures, which
+     read their inputs from a pipe, are what the default prints. The
+     test `the_repl_echoes_its_inputs_when_asked` holds it. This changes
+     no rule of the language.
+
+686. Tagged pointers in the debug profile (port-debt.md) are not this
+     round's either: the change is one to every inline use of a
+     pointer's word in both lowerings and the C calls at once, and the
+     round spent its time on 680 to 685. Measured for it: a pointer's
+     word is read inline by `addr`, `with_addr`, `==`, order, hash and
+     `Debug` of pointers and by every foreign call of a pointer type,
+     each of which would strip the tag, and the runtime in Rust's
+     `rawmem.rs` and `checked.rs` read the descriptors' pointer
+     arguments; the C caller of 683 shows that a pointer handed out of
+     Sisu code must be stripped too. This changes no rule of the
+     language.
+
+687. A program's transcripts stay on the Rust front end's build of it
+     (decision 380): they run against the world of transcripts
+     (`transcript_world`, `transcript_system`), prelude functions that
+     only the program's tests or transcripts reach, which the Rust front
+     end keeps in the SIR it lowers for them (`sir_with`) and stage 1's
+     `sir --tests` does not, having no option to keep a function nothing
+     reaches. Once stage 1's `sir --tests` keeps them for a program that
+     has transcripts, the driver runs the transcripts from the SIR the
+     tests run from. This changes no rule of the language.
+
+688. A `CString`'s `as_ptr()` passed to C is refused by the interpreter
+     because `bytes.as_slice()` makes a `Slice` of copies of the bytes
+     (decision 646 keeps the interpreter's layout), a temporary that dies
+     when `as_ptr` returns, so the pointer is to a value that no longer
+     exists; natively `mem.slice.as_ptr` of a `u8` is refused at
+     lowering. The fix is a slice that views its list's elements where
+     they are, in the interpreter and in both lowerings, and is not this
+     round's. This changes no rule of the language.
+
+689. A run-time message keeps its form, `panic: ...`, for this round:
+     its code, as `panic [R0154]: ...`, would change 81 of the suite's
+     expectations, the runtime in Rust's and the interpreter's printing
+     of every panic, stage 1's tests that read them, and 193 of the
+     manual's sessions at once, a round of its own with the manual's.
+     This changes no rule of the language.
+
+690. A panic in `sisu repl FILE` is named by the session's program,
+     whose lines are stage 1's: its `sir --repl` writes one source for
+     the session, the loaded file's lines one below their own and a
+     typed input's after them. The line of the file's own is stage 1's
+     to give, with a source of its own for each input typed after the
+     load, named `<input>` as its diagnostics are. This changes no rule
+     of the language.
+
+691. Under `--sim`, a task that fails with an error nobody joins in a
+     scope whose body returns no result stops the test with `R0079`, as
+     06 has it: a failure nobody joined becomes the scope's result, and
+     a scope whose result cannot carry it panics. The runtime is right
+     and the program of G14 is not: a test that looks at the state the
+     tasks left joins them, or gives the scope's body a result type
+     whose error set holds the tasks' errors. This changes no rule of
+     the language.
+
+692. A test that takes the real `System` still gets the simulated one
+     under `--sim` (`System.sim`) and prints no token when it fails
+     outside it, where 17 says such a test is neither simulated nor
+     replayed and its token says so: the change is the test runner's
+     choice of a `System` and a token that says why it cannot be
+     replayed, a message of the catalog's, with the cases that show
+     both, and is left for the next round. This changes no rule of the
+     language.
+
+693. `@no_alloc`, `@no_block` and `@stack(...)`, which compile without a
+     word and check nothing, are to warn that they are accepted and
+     checked by nothing yet, in the manner of decision 343; the warning
+     is the front end's, so stage 1's. This changes no rule of the
+     language.
+
+694. A package chooses its runtime profile with `runtime` in
+     `[package]`, one of 12's `"full"`, `"single"` and `"freestanding"`,
+     `"full"` when it is left out; stage 0's scheduler, one thread with
+     its tasks as coroutines, is `single`'s, so a native build of either
+     of the first two is that runtime, and `"freestanding"` is refused
+     until there is a runtime without the scheduler. Reading the key, and
+     `target.runtime` naming the profile, are stage 1's manifest and
+     compile-time facts. This changes no rule of the language.

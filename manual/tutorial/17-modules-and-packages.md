@@ -431,8 +431,8 @@ $ sisu run sauna
 the stove is on
 ```
 
-On Linux the import binds nothing and the first branch is left out of
-the build, so the program prints its own line. A use of `winlog`
+On any other system the import binds nothing and the first branch is
+left out of the build, so the program prints its own line. A use of `winlog`
 outside such a branch is E0200, whose note names the `@cfg` and the
 `if comptime` to write ([R13](../reference/modules.md#target-conditions)).
 
