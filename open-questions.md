@@ -1607,3 +1607,16 @@ conformance diff.
 **Current lean.** The first: it keeps `Into`'s promise, gives `From` the error that 05 asks for, and needs no new template form because a newtype has one field.
 
 **What would settle it.** The owner's decision; the work is a trait in the prelude, two derive templates, a paragraph of 03 and 11 and a chapter's example.
+
+### Q-81. How is a type that compile-time code makes written where a type goes?
+
+**Question.** [08](proposal/08-metaprogramming.md) says that compile-time code produces values and types for use in expressions, never a declaration, and D-065 puts `@diagnostic_name(f)` after Q-27's type construction; [02](proposal/02-syntax.md) gives a type position a path with its arguments only. Stage 1's seventeenth round planned the first step (R155, decision 885): a `comptime def pick(wide: bool) -> type` whose body the template engine runs, and a type position that is such a call. 02 has no form for the call in a type position, so its syntax is the owner's.
+
+**Options.**
+- *`comptime f(args)` in a type position* (lean): the word already marks a constant argument computed at compile time (`Array[T, comptime n()]`), so `let x: comptime pick(True) = 3` reads as the same thing one level up; a call with no `comptime` stays a syntax error, which keeps a type position cheap to read.
+- *A bare call in a type position*: `let x: pick(True) = 3`, shorter, but a reader cannot tell a type from a function without looking the name up, and the grammar must take parentheses after a path everywhere a type goes.
+- *A `type` alias only*: `type Wide = comptime pick(True)` as the one place such a call may stand, every use naming the alias; the smallest grammar change, at the cost of a declaration per made type.
+
+**Current lean.** The first, with the third's alias allowed as well, since an alias is where a made type is usually given a name.
+
+**What would settle it.** The owner's decision; the work is R155's three steps (the parser's type grammar, the resolver's order and the template engine), then `@diagnostic_name` and `sisu eval`.
