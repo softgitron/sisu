@@ -9271,6 +9271,75 @@ D-085; decisions 301 and 302)
      says that Python's `decimal` has an eighth mode, `ROUND_05UP`, which
      the enum leaves out. This changes no rule of the language.
 
+**Stage 1's ninth round** (stage 1's RULES.md, R79 to R94; the REPL's and worksheets' programs, sized shifts, `expect` with a message, `lint` for unused imports, the findings' notes)
+
+580. Stage 1 builds the programs of `sisu repl` and `sisu ws`: `sir --repl
+     SESSION INPUT --kept OUT [--load]` gives the SIR of the session's
+     program with the input after it (an expression alone shown), or the
+     diagnostics of the phase that stopped it, those in the input drawn in
+     its text; `sir --worksheet FILE` gives the worksheet's SIR with each
+     top-level statement marked by the line it ends on in the file as
+     written and its values shown, or its diagnostics in the file as
+     written. `sisu1 --version` is 0.8.0. Stage 1 decides it (RULES.md,
+     R79).
+
+581. A sized integer shifted by an amount of any integer type keeps its
+     own type, and an amount outside its width traps; a literal on a
+     shift's left keeps `int`. This reverses the sixth round's reading of
+     `u32 << int` as widening to `int`. Stage 1 decides it (RULES.md,
+     R80).
+
+582. `expect` takes a message as `assert` does, `expect cond, message`,
+     which its recorded failure shows. Stage 1 decides it (RULES.md, R81).
+
+583. An assertion whose condition is a call that takes a call evaluates
+     that argument once and shows its value and the parts that only read
+     when it fails. Stage 1 decides it (RULES.md, R82).
+
+584. The test `@refines` adds stands at the attribute, in the file of the
+     function it checks, with the closure it checks the cases with. Stage
+     1 decides it (RULES.md, R83).
+
+585. A `comptime` expression that reaches a typed hole is left to run time,
+     where the hole blocks the test or the run that reaches it; the build
+     warns of the hole. Stage 1 decides it (RULES.md, R84).
+
+586. `E1022` is followed by `D0006` or `D0132`, as the manifests' other
+     errors are. Stage 1 decides it (RULES.md, R85).
+
+587. A manifest's `edition` is one the compiler knows, `"2027"` so far;
+     another year is `E1003`. Stage 1 decides it (RULES.md, R86).
+
+588. `sisu fmt` keeps an unused import; `sisu lint` reports it (`W0027`)
+     with the fix that removes it. Stage 1 decides it (RULES.md, R87).
+
+589. `E0402` for tasks a loop spawns that change a captured value names
+     the value and notes that the tasks run at once and a `Mutex` keeps
+     it; `E0428`'s note offers making the value before the scope. Stage 1
+     decides it (RULES.md, R88).
+
+590. A closure argument of a `T !` function keeps the inferred error set
+     open, so a `?` in a scope's body adds to it. Stage 1 decides it
+     (RULES.md, R89).
+
+591. `E0335` names the operation that makes the function passed impure,
+     followed through the program's functions, with a note giving the way.
+     Stage 1 decides it (RULES.md, R90).
+
+592. `E0204` for an item a `@cfg` left out notes the condition that did.
+     Stage 1 decides it (RULES.md, R91).
+
+593. A derive's template sees a struct field's `ty` as its declaration
+     writes it, with the kinds of the prelude's types. Stage 1 decides it
+     (RULES.md, R92).
+
+594. A function cannot be named `type`: `E0124`. Stage 1 decides it
+     (RULES.md, R93).
+
+595. `parse --shape` refuses what `fmt` refuses, `E0132` among it, and a
+     template instance's note at its call writes the type arguments as the
+     source does. Stage 1 decides it (RULES.md, R94).
+
 **The native checked memory model: the places of the program** (sections
 "The checked memory model" and "Raw memory, foreign calls and the machine
 intrinsics"; 22; D-085; decisions 543 and 544)
