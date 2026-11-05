@@ -41,8 +41,12 @@ unsafe extern "C" {
     fn sisu_rt_draw_next(ret: *mut i64, state: *const *mut i64) -> u8;
     fn sisu_rt_draw_below(ret: *mut i64, state: *const *mut i64, n: *const i64) -> u8;
     fn sisu_rt_draw_pick(ret: *mut i64, state: *const *mut i64, q: *const *mut u8) -> u8;
-    fn sisu_rt_choose_pct_start(ret: *mut u64, state: *const *mut i64, st: *const *mut u8, depth: *const i64)
-    -> u8;
+    fn sisu_rt_choose_pct_start(
+        ret: *mut u64,
+        state: *const *mut i64,
+        st: *const *mut u8,
+        depth: *const i64,
+    ) -> u8;
     fn sisu_rt_choose_pct_yield(
         ret: *mut i64,
         state: *const *mut i64,
@@ -236,7 +240,15 @@ impl Choices {
         // SAFETY: `state` is the generator's word and the queues the
         // search's.
         unprobed(|| unsafe {
-            sisu_rt_choose_next(&mut c, &state, &self.prefix.0, &self.trail.0, &searching, &options, &at_yield)
+            sisu_rt_choose_next(
+                &mut c,
+                &state,
+                &self.prefix.0,
+                &self.trail.0,
+                &searching,
+                &options,
+                &at_yield,
+            )
         });
         c as u32
     }
@@ -254,7 +266,12 @@ impl Choices {
 
     /// The next task under the search, `forced` when a yield point chose
     /// it, taken out of the run queue `ready`.
-    pub(crate) fn search_pick(&mut self, rng: &mut Rng, ready: &mut Queue, forced: Option<u32>) -> Option<u32> {
+    pub(crate) fn search_pick(
+        &mut self,
+        rng: &mut Rng,
+        ready: &mut Queue,
+        forced: Option<u32>,
+    ) -> Option<u32> {
         let mut t = 0i64;
         let state: *mut i64 = &mut rng.0;
         let forced = forced.map_or(-1, i64::from);

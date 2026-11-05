@@ -1468,7 +1468,6 @@ impl Sched {
         self.timers.push(i64::from(c), at, i64::from(t));
     }
 
-
     /// Wakes the task `t` if it waits: the runtime in Sisu puts it in the
     /// run queue (decision 780).
     pub(crate) fn wake(&mut self, t: u32) {

@@ -1,0 +1,7 @@
+# A black-box test file of the package (17): its failing test's token
+# names the file, which the replay runs again (decision 827).
+
+from calc import mean
+
+test "a failing black-box test replays from its token":
+    assert mean([1, 2]) == 2

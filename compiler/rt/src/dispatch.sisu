@@ -181,8 +181,9 @@ const OPEN: int = -9223372036854775807 - 1
 const MOST_ROOM: int = 1048576
 
 ## A call of an intrinsic: the program's types, its descriptor, the
-## address of its result, the block of its arguments' addresses, and how
-## what it drops is dropped (`value.drop`'s mode).
+## address of its result, the block of its arguments' addresses, how what
+## it drops is dropped (`value.drop`'s mode), and the descriptor's length,
+## read once.
 @derive(Copy)
 struct Call:
     ts: Types
@@ -190,6 +191,9 @@ struct Call:
     ret: ptr mut u8
     args: ptr mut u8
     mode: int
+    ## The descriptor's number of words: 4, and one for each argument and
+    ## each type argument.
+    words: int
 
 impl Call:
     ## Word `k` of the descriptor, a `u32`: half of the word of eight bytes
@@ -203,7 +207,7 @@ impl Call:
     ## - `call`: the call is the generated code's, whose descriptor has
     ##   word `k` and is aligned to eight bytes
     def word(self, k: int) -> int:
-        if k % 2 == 0 and k >= 4 and k + 1 >= 4 + self.word(1) + self.word(2):
+        if k % 2 == 0 and k + 1 >= self.words:
             # safety: in_bounds, valid: the descriptor's word `k`, by `call`;
             #   a byte needs no alignment.
             unsafe:
@@ -747,13 +751,18 @@ def iter_call(c: Call, id: int) -> int:
         let k = ts.kind(t)
         if k == LIST:
             c.set(0, iter.new_list_ref(p, ts.size(ts.a(t))).addr())
-        elif k == DICT:
-            c.set(0, iter.table_part(c.table(0), 2).addr())
-        elif k == SET:
-            c.set(0, iter.table_part(c.table(0), 0).addr())
+        elif k == DICT or k == SET:
+            let part = if k == DICT: 2 else: 0
+            # safety: valid, aligned, writable: a dict's and a set's value is
+            #   its table's address.
+            let tb = unsafe p.cast[ptr[u8]]().read().cast_mut()
+            c.set(0, iter.table_part(tb, part).addr())
         else:
             # A receiver, the one other value `iter.ref` is lowered for.
-            c.set(0, iter.new_waiting(c.first(0), ts.size(ts.a(t)), False).addr())
+            # safety: valid, aligned: a receiver's word is its channel's
+            #   number.
+            let ch = unsafe p.cast[int]().read()
+            c.set(0, iter.new_waiting(ch, ts.size(ts.a(t)), False).addr())
         return OK
     if id == ITER_OWN or id == ITER_OF:
         let rt = c.ret_ty()
@@ -906,7 +915,8 @@ pub(package) def slot(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, mode: 
 pub(package) def collection(
     types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8, mode: int
 ) -> int:
-    let c = Call(ts=Types(words=types), desc=desc, ret=ret, args=args, mode=mode)
+    var c = Call(ts=Types(words=types), desc=desc, ret=ret, args=args, mode=mode, words=4)
+    c.words = 4 + c.word(1) + c.word(2)
     let id = c.word(0)
     if id <= ITER_OF:
         return iter_call(c, id)

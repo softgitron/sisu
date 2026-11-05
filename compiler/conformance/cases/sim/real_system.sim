@@ -1,0 +1,15 @@
+test "the real System is not simulated" ... ok
+test "nor replayed" ... FAILED
+test "named capabilities are simulated" ... FAILED
+
+test "nor replayed" ... FAILED
+panic: assertion failed: sys.fs.exists(Path.new("/no/such/directory"))
+  at test "nor replayed" (real_system.sisu:13:5)
+no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones
+
+test "named capabilities are simulated" ... FAILED
+panic: assertion failed: fs.write_text(Path.new("x.txt"), "x").is_ok()
+  at test "named capabilities are simulated" (real_system.sisu:16:5)
+replay: sisu test --replay 1-9c82088f9be966da-0.0.1-t2-s0-r0-m1000000 real_system.sisu
+
+1 passed, 2 failed, 0 blocked

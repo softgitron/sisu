@@ -1127,7 +1127,8 @@ impl<'p> Interp<'p, '_> {
                 .views
                 .keys()
                 .filter(|k| {
-                    let p = Pointer { task: k.0, frame: k.1, serial: k.2, local: k.3, path: k.4.clone(), tag: 0 };
+                    let p =
+                        Pointer { task: k.0, frame: k.1, serial: k.2, local: k.3, path: k.4.clone(), tag: 0 };
                     !self.place_alive(&p)
                 })
                 .cloned()
@@ -1549,7 +1550,7 @@ impl<'p> Interp<'p, '_> {
                 }
                 .ok_or_else(|| ice("`as_ptr` without the type of its slice"))?;
                 let Value::Ref(r) = v else { return Err(ice("`as_ptr` of a slice that is no reference")) };
-                let tag = r.tag;
+                let mut tag = r.tag;
                 let mut at = self.pointer_of(v)?;
                 at.tag = 0;
                 let n = match self.read(&at)? {
@@ -1558,9 +1559,12 @@ impl<'p> Interp<'p, '_> {
                 };
                 // The slice's values are copies; its pointer views the list
                 // or the bytes it was made from, where they are, so that it
-                // stays valid while they live (decision 823).
+                // stays valid while they live (decision 823), under no
+                // loan of the slice's, whose borrow ends with it: the
+                // monitor sees it as a pointer to the place itself.
                 if let Some(src) = self.viewed(&at, n) {
                     at = src;
+                    tag = 0;
                 }
                 let block = self.place_block(at, elem, Some(n))?;
                 Ok(Self::ptr_value(RawPtr { block: Some(block), off: 0, shared: true, tag }))

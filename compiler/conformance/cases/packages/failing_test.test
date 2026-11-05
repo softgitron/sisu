@@ -1,3 +1,4 @@
+tests of `calc`:
 test "stats/a failing test in a module replays from its token" ... FAILED
 
 test "stats/a failing test in a module replays from its token" ... FAILED
@@ -5,5 +6,16 @@ panic: the property failed for [1, 0, 0] (case 3, shrunk 9 times)
   the property returned False
   at test "stats/a failing test in a module replays from its token" (src/stats.sisu:4:5)
 replay: sisu test --replay 1-82bf70ce3aaebef6-0.0.1-t0-s0-r0-c1.0.1.1.0.0.1.0.0.0 .
+
+0 passed, 1 failed, 0 blocked
+tests of `tests/mean.sisu`:
+test "a failing black-box test replays from its token" ... FAILED
+
+test "a failing black-box test replays from its token" ... FAILED
+panic: assertion failed: mean([1, 2]) == 2
+  left:  1
+  right: 2
+  at test "a failing black-box test replays from its token" (tests/mean.sisu:7:5)
+replay: sisu test --replay 1-eab874897b5f4a2c-0.0.1-t0-s0-r0 tests/mean.sisu
 
 0 passed, 1 failed, 0 blocked

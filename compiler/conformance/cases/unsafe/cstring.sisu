@@ -1,0 +1,30 @@
+# A `CString` handed to C (22, "Foreign calls"; 12, "Interop"): its
+# `as_ptr()` points to its own bytes, which a slice views in place in the
+# checked memory model, so the pointer stays valid while the `CString`
+# lives, across a foreign call that reads it (`strlen`) and through a
+# `CStr` that views it again. The interpreter emulates `strlen` on the
+# model (Q-55).
+
+from std.ffi import CStr, CString, c_char, c_size
+from std.mem import ptr
+
+# safety: the signature as <string.h> declares it for 64-bit Linux; it
+#   returns promptly.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+
+def main():
+    let c = CString.new("kiitos").expect("no NUL")
+    # safety: valid: `c` lives across the call and ends with its NUL, and
+    #   strlen keeps no pointer.
+    let n = unsafe strlen(c.as_ptr())
+    print(n)
+    print(c.byte_len())
+    # safety: terminated, stable: `c` ends with its NUL and outlives the view.
+    let seen = unsafe CStr.from_ptr(c.as_ptr())
+    match seen.to_text():
+        case Ok(t):
+            print(t)
+        case Err(_):
+            print("not UTF-8")
+    print(CString.new("a\0b").is_none())

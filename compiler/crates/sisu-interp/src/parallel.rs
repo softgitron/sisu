@@ -163,8 +163,7 @@ pub(crate) fn run(
     which: &[usize],
 ) -> Vec<(String, TestResult, RunReport)> {
     let tests: Vec<(String, String)> = which.iter().filter_map(|i| prog.tests.get(*i).cloned()).collect();
-    let parallel: Vec<usize> =
-        (0..tests.len()).filter(|&k| !takes_real_system(prog, &tests[k].1)).collect();
+    let parallel: Vec<usize> = (0..tests.len()).filter(|&k| !takes_real_system(prog, &tests[k].1)).collect();
     let jobs = if options.jobs == 0 { DEFAULT_JOBS } else { options.jobs }.min(parallel.len()).max(1);
     let virtual_time = host.virtual_time();
     let done: Mutex<Vec<Option<Done>>> = Mutex::new(vec![None; tests.len()]);
