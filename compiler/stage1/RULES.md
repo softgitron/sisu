@@ -11357,15 +11357,15 @@ first build, before it, gave the same bytes); nine requests of
 227,916 bytes from both.
 
 **Measured** (natively, the release profile, the mean of 20 requests
-after the first, on four cores at a load of about 8 to 10): a save of
+after the first, on four cores at a load of about 6 to 9, two runs each in turn): a save of
 `live/swap`, the served `build --for-run --emit-sir`, takes
-MEASURE_SWAP where it took MEASURE_SWAP_BEFORE; under callgrind a save
+0.022 to 0.029 s where it took 0.104 to 0.107 s; under callgrind a save
 took 1.18 G instructions, 0.23 G of them the base's copy and drop, 0.31
 G the second check and lowering, 0.12 G the three parses of `std.time`
 and 0.09 G the std bodies typed again. A `query diagnostics` of a module
 of `compiler/rt` (18 modules, 7,624 lines), each request with the module
 changed by a line from the last (its text and `--text` in turn), takes
-MEASURE_RT where it took MEASURE_RT_BEFORE: its time is the program's
+1.33 to 1.38 s where it took 1.42 to 1.45 s: its time is the program's
 own type check (3.7 G instructions), lowering and ownership check (11 G),
 which nothing kept between requests would shorten short of keeping each
 function's check while its module is unchanged (below).
@@ -11403,7 +11403,7 @@ and `typeck.collect` (`Resolver.parse_importables`).
       standard library's bodies as a request typed, lowered and placed
       them are kept for the next, and `build` takes its SIR from the
       check that made its report. A save of `live/swap` takes
-      MEASURE_SWAP served where it took MEASURE_SWAP_BEFORE, each answer
+      0.022 to 0.029 s served where it took 0.104 to 0.107 s, each answer
       a fresh request's bytes. Stage 1 decides it (RULES.md, R220).
 
 ## R221. `sir --tests --std` and `test --std` naming no path: the standard library's doc examples alone (decision 1221)
@@ -11586,7 +11586,10 @@ rounds of resolution: each round parsed the prelude and every
 documented module again for its items' starts, made the examples' text
 and parsed it. Now `check_program` makes each module's examples' module
 once (`typeck.collect.std_docs_of`, `StdDoc`) and each round declares
-them (`declare_std_doc`): MEASURE_STD.
+them (`declare_std_doc`): 26.9 G instructions in all, the declaring
+0.7 G and the making once 1.8 G, and natively 2.9 to 3.3 s of user time
+where it took 3.4 to 3.6 s (three runs each, in turn, at a load of about
+10).
 
 What is left is the examples' own: the std bodies they reach, typed,
 lowered and checked for ownership (18 G), which a server's second

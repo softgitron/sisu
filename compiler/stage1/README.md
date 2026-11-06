@@ -3115,8 +3115,8 @@ decisions 1220 to 1226) and their decision texts:
   library's bodies as a request typed, lowered and placed them are kept
   for the next request, as a batch keeps them for its next program; and
   `build` takes its SIR from the one check that made its report, without
-  copying the served base. A save of `live/swap` takes MEASURE_SWAP
-  served where it took MEASURE_SWAP_BEFORE; each answer is a fresh
+  copying the served base. A save of `live/swap` takes 0.022 to 0.029 s
+  served where it took 0.104 to 0.107 s; each answer is a fresh
   request's bytes.
 - **The examples alone** (R221): `sir --tests --std` and `test --std`
   naming no path outside a package lower and run the standard library's
@@ -4052,10 +4052,10 @@ served base 0.23 G, a second check, lowering and ownership check of the
 same program for its SIR 0.31 G, `std.time` parsed three times (once by
 the name pass, once in each check's import) 0.12 G, and the std bodies
 typed and lowered again 0.14 G. R220 takes all four: the save takes
-MEASURE_SWAP where it took MEASURE_SWAP_BEFORE (the mean of 20 after the
-first, at a load of about 8 to 10). A `query diagnostics` of a module of
-`compiler/rt`, 18 modules and 7,624 lines, takes MEASURE_RT where it took
-MEASURE_RT_BEFORE: the parse of its modules was 1 G of its 16 G
+0.022 to 0.029 s where it took 0.104 to 0.107 s (the mean of 20 after the
+first, at a load of about 6 to 9). A `query diagnostics` of a module of
+`compiler/rt`, 18 modules and 7,624 lines, takes 1.33 to 1.38 s where it took
+1.42 to 1.45 s: the parse of its modules was 1 G of its 16 G
 instructions; the rest is the program's own type check (3.7 G), lowering
 and ownership check (11 G), done again at each request, which only a
 memo of each body's results, with the dependencies no phase records,
