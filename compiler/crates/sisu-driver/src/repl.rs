@@ -1247,7 +1247,12 @@ pub(crate) fn evaluate_sheet(
 /// statements when given: the values and the printed lines by the line
 /// each marker names. The language server runs stage 1's program of a
 /// worksheet so where stage 1's evaluator stops (decision 1141).
-pub(crate) fn run_sheet(prog: &sisu_sir::Program, real: bool, fuel: Option<u64>, host: &mut dyn Host) -> Sheet {
+pub(crate) fn run_sheet(
+    prog: &sisu_sir::Program,
+    real: bool,
+    fuel: Option<u64>,
+    host: &mut dyn Host,
+) -> Sheet {
     let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
     let report = {
         let mut live = WithArgs { inner: &mut cap, args: Vec::new(), watch: Vec::new() };

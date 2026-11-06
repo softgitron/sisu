@@ -1600,9 +1600,12 @@ fn test_from_sir(
     }
     // The test cache (decision 242), for a run whose results the program's
     // code and these options decide: not one that searches schedules,
-    // simulates, updates snapshots or defers the ownership checker.
+    // simulates, updates snapshots or defers the ownership checker, nor the
+    // standard library's examples without a program, which have no file
+    // to keep it beside (decision 1144).
     let cached = sources
         && !deferring
+        && input.shown != "--std"
         && !has("--no-cache")
         && crate::native_tests::chosen().is_none()
         && opts.seeds.explore.is_none()
@@ -1834,7 +1837,9 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
                 && !has_ids(&p.flags)
                 && crate::front::stage1_takes_the_roles()
                 && crate::front::stage1_sir_reports();
-            !p.flags.iter().any(|f| (*f == "--defer-borrow" && !defers) || (*f == "--std" && !std_from_stage1))
+            !p.flags
+                .iter()
+                .any(|f| (*f == "--defer-borrow" && !defers) || (*f == "--std" && !std_from_stage1))
                 && !value("--from-sir")
                 && (!features || crate::front::stage1_sir_reports())
         }
@@ -2240,25 +2245,26 @@ fn stage1_command(
             // The tests of an answer of `sir --tests`, or its errors: under
             // `--defer-borrow` an error not deferred as the plain build
             // reports it, and the deferred diagnostics not shown but read.
-            let answered = |host: &mut dyn Host, r: &crate::front::Ran, path: &str| -> Result<Option<String>, i32> {
-                let deferring = defer && r.status == DEFERRED;
-                if defer && r.status != exit::OK && !deferring {
-                    let plain = run(host, &sir_words_with(path, false), Backend::Unused)?;
-                    if plain.status != exit::OK {
-                        host.stderr(&plain.stderr);
-                        return Err(plain.status.max(exit::ERROR));
+            let answered =
+                |host: &mut dyn Host, r: &crate::front::Ran, path: &str| -> Result<Option<String>, i32> {
+                    let deferring = defer && r.status == DEFERRED;
+                    if defer && r.status != exit::OK && !deferring {
+                        let plain = run(host, &sir_words_with(path, false), Backend::Unused)?;
+                        if plain.status != exit::OK {
+                            host.stderr(&plain.stderr);
+                            return Err(plain.status.max(exit::ERROR));
+                        }
+                        host.stderr(&r.stderr);
+                        return Err(r.status.max(exit::ERROR));
                     }
-                    host.stderr(&r.stderr);
-                    return Err(r.status.max(exit::ERROR));
-                }
-                if !defer || r.stdout.is_empty() {
-                    host.stderr(&r.stderr);
-                }
-                if (r.status != exit::OK && !deferring) || r.stdout.is_empty() {
-                    return Err(r.status.max(exit::ERROR));
-                }
-                Ok(deferring.then(|| r.stderr.clone()))
-            };
+                    if !defer || r.stdout.is_empty() {
+                        host.stderr(&r.stderr);
+                    }
+                    if (r.status != exit::OK && !deferring) || r.stdout.is_empty() {
+                        return Err(r.status.max(exit::ERROR));
+                    }
+                    Ok(deferring.then(|| r.stderr.clone()))
+                };
             let mut status = exit::OK;
             // When the run has more than one program (a workspace's members,
             // a package's black-box test files), each program's list starts

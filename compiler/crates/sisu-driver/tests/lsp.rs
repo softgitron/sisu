@@ -868,12 +868,10 @@ fn latency() {
             None => format!("{text}{}", "\n".repeat(passes)),
         };
         let bound = std::time::Duration::from_millis(1000);
-        let mut version = 2;
         let mut change = std::time::Duration::MAX;
         for passes in 1..=3 {
             let start = std::time::Instant::now();
-            c.change(&uri, version, &changed(passes));
-            version += 1;
+            c.change(&uri, passes as u32 + 1, &changed(passes));
             change = change.min(start.elapsed());
             if change < bound {
                 break;

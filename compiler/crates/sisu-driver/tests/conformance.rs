@@ -870,6 +870,50 @@ fn stage_1s_data_commands_answer_as_the_rust_front_end() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A package's `sisu build` (with `--native` and `--release` too) and
+/// `run --native` get their SIR from stage 1's served `build --emit-sir`
+/// from `sisu1 0.18.0` (its R195; decision 1140), each program compiled by
+/// the driver into the executable the answer names: the same lines,
+/// statuses and executables served, as a process and on the Rust front
+/// end, for a workspace of an application and a library.
+#[test]
+fn a_packages_build_is_served_as_it_runs_as_a_process() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases/packages/workspace.pkg");
+    let dir = std::env::temp_dir().join(format!("sisu-served-build-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::process::Command::new("cp").arg("-r").arg(&root).arg(&dir).status();
+    let sisu = |args: &[&str], serve: &str| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .env("SISU_STAGE1_SERVE", serve)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let asks: [&[&str]; 4] =
+        [&["build", "--native"], &["build", "--native", "--release"], &["build"], &["run", "--native"]];
+    for ask in asks {
+        let mut rust = vec!["--front-end=rust"];
+        rust.extend_from_slice(ask);
+        let _ = std::fs::remove_dir_all(dir.join("build"));
+        let oracle = sisu(&rust, "1");
+        let built = std::fs::read(dir.join("build/debug/greeter")).ok();
+        assert_eq!(oracle.2, Some(0), "{ask:?}: {}", oracle.1);
+        for serve in ["1", "0"] {
+            let _ = std::fs::remove_dir_all(dir.join("build"));
+            assert_eq!(sisu(ask, serve), oracle, "{ask:?} with SISU_STAGE1_SERVE={serve}");
+            assert!(std::fs::read(dir.join("build/debug/greeter")).ok() == built, "{ask:?}, {serve}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Whether the stage 1 the driver runs is `version` or later, as `sisu1
 /// --version` names it.
 fn stage1_at_least(version: &[u32]) -> bool {
