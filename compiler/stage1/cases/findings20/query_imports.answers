@@ -1,0 +1,30 @@
+answer 0
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	4:12-4:15	declaration
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	3:25-3:28	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	5:22-5:25	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	13:28-13:31	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	14:13-14:16	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	14:37-14:40	use
+answer 0
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	4:12-4:15	declaration
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	3:25-3:28	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	5:22-5:25	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	13:28-13:31	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	14:13-14:16	use
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	14:37-14:40	use
+answer 0
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	13:9-13:17	initial
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	3:30-3:38	initial
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	12:16-12:24	initial
+answer 0
+3:30-3:38	def starting() -> list[garden.beds.Bed]		The beds a garden starts with.
+answer 0
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	1:1-1:1
+answer 0
+COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	1:1-1:1	declaration
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	3:13-3:17	use
+answer 0
+refused	not-renamable
+answer 0
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	12:9-12:13	print
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	13:17-13:21	print

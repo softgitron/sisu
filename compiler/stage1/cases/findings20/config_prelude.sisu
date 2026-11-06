@@ -1,0 +1,15 @@
+## The prelude's functions in a configuration's constants, which the
+## compile-time evaluator runs (RULES.md, R173): `min`, `max` and `abs`;
+## `any`, `all`, `sorted` and `max` over a list; `enumerate`, `zip` and
+## `reversed` in a comprehension.
+const WORKERS: int = max(2, min(8, 16))
+const MARGIN: int = abs(-3)
+const SPREAD: f64 = abs(-2.5)
+const FIRST: str = min("pear", "apple")
+const ANY_LATE: bool = any([False, True])
+const ALL_POSITIVE: bool = all([x > 0 for x in [1, 2, 3]])
+const PORTS: list[int] = sorted([8082, 8080, 8081])
+const BUSIEST: int = max([4, 9, 2])
+const NUMBERED: list[(int, int)] = [p for p in enumerate([5, 6])]
+const PAIRED: list[(int, int)] = [p for p in zip([1, 2], [3, 4])]
+const BACKWARDS: list[int] = [x for x in reversed([1, 2, 3])]

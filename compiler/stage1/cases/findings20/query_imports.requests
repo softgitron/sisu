@@ -1,0 +1,8 @@
+query	references	src/beds.sisu	4	13	--dir	cases/packages/query_modules.pkg
+query	references	src/main.sisu	3	26	--dir	cases/packages/query_modules.pkg
+query	rename	src/main.sisu	3	31	initial	--dir	cases/packages/query_modules.pkg
+query	hover	src/main.sisu	3	31	--dir	cases/packages/query_modules.pkg
+query	definition	src/main.sisu	3	14	--dir	cases/packages/query_modules.pkg
+query	references	src/main.sisu	3	14	--dir	cases/packages/query_modules.pkg
+query	rename	src/main.sisu	3	14	plots	--dir	cases/packages/query_modules.pkg
+query	rename	src/main.sisu	12	10	print	--dir	cases/packages/query_modules.pkg

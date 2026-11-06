@@ -1,0 +1,276 @@
+answer 0
+8:34	errors	{Empty}
+11:12	type	: int
+12:10	type	: ref int
+17:13	mode	own
+20:15	type	: list[int]
+21:10	mode	mut
+22:16	type	: list[int]
+22:39	type	: ref int
+answer 0
+fix	0	write `mut` before the argument: `mut `	21:10-21:16	E0339	type.mut-argument-missing
+edit	21:10-21:10	mut 
+answer 0
+fix	0	take the result's value, or the default when it is an error, with `or`: `.or(`, `)`	24:11-24:25	E0371	type.coalesce
+edit	24:25-24:29	.or(
+edit	24:34-24:34	)
+answer 0
+answer 0
+24:17-24:24
+24:16-24:25
+24:11-24:25
+24:11-24:34
+24:10-24:35
+24:5-24:35
+19:12-24:35
+19:1-24:35
+1:1-24:35
+answer 0
+COMPILER/stage1/cases/findings20/query_assist.sisu	20:9-20:15	tally
+COMPILER/stage1/cases/findings20/query_assist.sisu	21:10-21:16	tally
+COMPILER/stage1/cases/findings20/query_assist.sisu	22:19-22:25	tally
+answer 0
+refused	not-a-name
+answer 0
+refused	not-renamable
+answer 0
+23:1-24:1	    let first: int = doubled[0]\n
+answer 0
+refused	syntax
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
+answer 0
+11:12-11:30	parse_task	Task	parse_task	line: str, default_hours: int, name: String	
+18:20-18:33	risky	int	Task.padded	self: ref Task, risky: bool, base: int	base
+24:11-24:22		str	main	t: Task	
+answer 0
+holes.sisu:11:12: the typed hole `todo("parse_task")` of type `Task`, in `parse_task`
+  in scope: `line: str`, `default_hours: int`, `name: String`
+  nothing in scope is of its type
+holes.sisu:18:20: the typed hole `todo("risky")` of type `int`, in `Task.padded`
+  in scope: `self: ref Task`, `risky: bool`, `base: int`
+  of its type: `base`
+holes.sisu:24:11: the typed hole `todo()` of type `str`, in `main`
+  in scope: `t: Task`
+  nothing in scope is of its type
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
+answer 0
+sir 0
+source 0 "slice_of_slice.sisu"
+entry main
+
+view struct Slice[T] {  }
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic Slice.at pure from 0
+intrinsic Slice.cut pure from 0
+intrinsic Slice.iter pure from 0
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic len pure
+intrinsic list.as_slice pure from 0
+intrinsic print
+
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: list[str] "towels" @5:9-5:15
+    let _2: Slice[str] "first_two" @6:9-6:18
+    let _3: Slice[str]
+    let _4: ref list[str]
+    let _5: ref Slice[str]
+    let _6: ()
+    let _7: int
+    let _8: ref Slice[str]
+    let _9: Slice[str] "middle" @8:9-8:15
+    let _10: Slice[str]
+    let _11: Slice[str]
+    let _12: ref list[str]
+    let _13: ref Slice[str]
+    let _14: ref Slice[str]
+    let _15: ()
+    let _16: String
+    let _17: ref mut String
+    let _18: ref str
+    let _19: ref Slice[str]
+    let _20: ()
+    let _21: ref str
+    let _22: ref Slice[str]
+    let _23: ref String
+    let _24: Iter[ref str]
+    let _25: Slice[str]
+    let _26: Slice[str]
+    let _27: ref list[str]
+    let _28: ref Slice[str]
+    let _29: ref Slice[str]
+    let _30: ref mut Iter[ref str]
+    let _31: Option[ref str]
+    let _32: int
+    let _33: ref str "t" @10:9-10:10
+    let _34: ()
+  bb0:
+    _1 = list(const "blue", const "green", const "red", const "white") @5:18-5:51
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = ref _1 @6:21-6:27
+    _3 = call intrinsic list.as_slice(copy _4) @6:21-6:38
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
+    _5 = ref _3 @6:21-6:38
+    _2 = call intrinsic Slice.cut(copy _5, const -9223372036854775808, const 2) @6:21-6:42
+    goto bb6
+  bb4 (cleanup):
+    drop _3
+    goto bb2
+  bb5 (cleanup):
+    drop _2
+    goto bb2
+  bb6 (unwind bb5):
+    drop _3 @6:42-6:42
+    goto bb7
+  bb7 (unwind bb5):
+    dead _3 @6:42-6:42
+    _8 = ref _2 @7:15-7:24
+    _7 = call intrinsic len(copy _8) @7:11-7:25
+    _6 = call intrinsic print(copy _7) @7:5-7:26
+    _12 = ref _1 @8:18-8:24
+    _11 = call intrinsic list.as_slice(copy _12) @8:18-8:35
+    goto bb8
+  bb8 (unwind bb9):
+    _13 = ref _11 @8:18-8:35
+    _10 = call intrinsic Slice.cut(copy _13, const 1, const -9223372036854775808) @8:18-8:39
+    goto bb10
+  bb9 (cleanup):
+    drop _11
+    goto bb5
+  bb10 (unwind bb11):
+    _14 = ref _10 @8:18-8:39
+    _9 = call intrinsic Slice.cut(copy _14, const -9223372036854775808, const 2) @8:18-8:43
+    goto bb14
+  bb11 (cleanup):
+    drop _10
+    goto bb9
+  bb12 (cleanup):
+    drop _9
+    goto bb5
+  bb13 (cleanup):
+    drop _11
+    goto bb12
+  bb14 (unwind bb13):
+    drop _10 @8:43-8:43
+    goto bb15
+  bb15 (unwind bb12):
+    drop _11 @8:43-8:43
+    goto bb16
+  bb16 (unwind bb12):
+    dead _11 @8:43-8:43
+    dead _10 @8:43-8:43
+    _16 = call intrinsic fmt.new() @9:11-9:36
+    _17 = ref mut _16 @9:11-9:36
+    _19 = ref _9 @9:13-9:19
+    _18 = call intrinsic Slice.at(copy _19, const 0) @9:13-9:22
+    _20 = call intrinsic fmt.display(copy _17, copy _18, const "") @9:13-9:22
+    _20 = call intrinsic fmt.text(copy _17, const " ") @9:11-9:36
+    _22 = ref _9 @9:25-9:31
+    _21 = call intrinsic Slice.at(copy _22, const 1) @9:25-9:34
+    _20 = call intrinsic fmt.display(copy _17, copy _21, const "") @9:25-9:34
+    goto bb17
+  bb17 (unwind bb18):
+    _23 = ref _16 @9:11-9:36
+    _15 = call intrinsic print(copy _23) @9:5-9:37
+    goto bb19
+  bb18 (cleanup):
+    drop _16
+    goto bb12
+  bb19 (unwind bb12):
+    drop _16 @9:37-9:37
+    goto bb20
+  bb20 (unwind bb12):
+    dead _16 @9:37-9:37
+    _27 = ref _1 @10:14-10:20
+    _26 = call intrinsic list.as_slice(copy _27) @10:14-10:31
+    goto bb21
+  bb21 (unwind bb22):
+    _28 = ref _26 @10:14-10:31
+    _25 = call intrinsic Slice.cut(copy _28, const 2, const -9223372036854775808) @10:14-10:35
+    goto bb23
+  bb22 (cleanup):
+    drop _26
+    goto bb12
+  bb23 (unwind bb24):
+    _29 = ref _25 @10:14-10:35
+    _24 = call intrinsic Slice.iter(copy _29) @10:14-10:35
+    goto bb26
+  bb24 (cleanup):
+    drop _25
+    goto bb22
+  bb25 (cleanup):
+    drop _24
+    goto bb24
+  bb26 (unwind bb25):
+    _30 = ref mut _24 @10:5-10:35
+    _31 = call intrinsic Iter.next(copy _30) @10:5-10:35
+    _32 = discriminant _31 @10:5-10:35
+    switch copy _32 [0: bb27, else: bb28] @10:5-10:35
+  bb27 (unwind bb25):
+    _33 = copy _31.as(0).0 @10:9-10:10
+    _34 = call intrinsic print(copy _33) @11:9-11:17
+    goto bb26
+  bb28 (unwind bb24):
+    drop _24 @11:17-11:17
+    goto bb29
+  bb29 (unwind bb22):
+    drop _25 @11:17-11:17
+    goto bb30
+  bb30 (unwind bb12):
+    drop _26 @11:17-11:17
+    goto bb31
+  bb31 (unwind bb12):
+    dead _26 @11:17-11:17
+    dead _25 @11:17-11:17
+    dead _24 @11:17-11:17
+    _0 = const ()
+    goto bb32
+  bb32 (unwind bb5):
+    drop _9 @11:17-11:17
+    goto bb33
+  bb33 (unwind bb2):
+    drop _2 @11:17-11:17
+    goto bb34
+  bb34:
+    drop _1 @11:17-11:17
+    return
+}
+answer 1
+error[E0278]: `days_in_month` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
+  --> prelude_internal.sisu:6:11
+  |
+6 |     print(days_in_month(2024, 2))
+  |           ^^^^^^^^^^^^^
+
+error[E0278]: `DrawState` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
+  --> prelude_internal.sisu:7:12
+  |
+7 |     let s: DrawState = todo()
+  |            ^^^^^^^^^
+
+warning[W0001]: typed hole `` of type `DrawState`
+  --> prelude_internal.sisu:7:24
+  |
+7 |     let s: DrawState = todo()
+  |                        ^^^^^^
+
+error[E0278]: `max_of` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
+  --> prelude_internal.sisu:8:11
+  |
+8 |     print(max_of([1, 2]))
+  |           ^^^^^^
+
+error[D0006]: the program was not run: errors found (3)
+error: Failed
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")

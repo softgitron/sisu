@@ -5,4 +5,4 @@
 def main():
     print(days_in_month(2024, 2))
     let s: DrawState = todo()
-    print(len(iterable_list([1, 2])))
+    print(max_of([1, 2]))

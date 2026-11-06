@@ -1232,7 +1232,7 @@ pub pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
 ## The items, in order, as a new list (of copies, unless the items are
 ## references).
 @intrinsic("iterable_list")
-pure def iterable_list[T](xs: Iterable[T]) -> list[T]
+pub pure def iterable_list[T](xs: Iterable[T]) -> list[T]
 
 ## The items of `it`, an iterator of a type that implements `Iterator`
 ## (`xs.iter().map(f)`, a program's own), as an `Iter` that takes each one

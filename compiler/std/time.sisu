@@ -439,13 +439,3 @@ pure def rule_change(cs: list[char], at: int) -> (Change, int)?:
         seconds = s
         k = e
     return Some((Change(month=parts[0], week=parts[1], weekday=parts[2], seconds=seconds), k))
-
-## The days in a month of the proleptic Gregorian calendar: the prelude's
-## helper, which a program reaches from here (RULES.md, R175).
-pub pure def days_in_month(year: int, month: int) -> int:
-    if month == 2:
-        let leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
-        return if leap: 29 else: 28
-    if month == 4 or month == 6 or month == 9 or month == 11:
-        return 30
-    return 31

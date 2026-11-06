@@ -1,0 +1,66 @@
+answer 0
+{
+  "WORKERS": 8,
+  "MARGIN": 3,
+  "SPREAD": 2.5,
+  "FIRST": "apple",
+  "ANY_LATE": true,
+  "ALL_POSITIVE": true,
+  "PORTS": [
+    8080,
+    8081,
+    8082
+  ],
+  "BUSIEST": 9,
+  "NUMBERED": [
+    [
+      0,
+      5
+    ],
+    [
+      1,
+      6
+    ]
+  ],
+  "PAIRED": [
+    [
+      1,
+      3
+    ],
+    [
+      2,
+      4
+    ]
+  ],
+  "BACKWARDS": [
+    3,
+    2,
+    1
+  ]
+}
+answer 0
+WORKERS = 8
+MARGIN = 3
+SPREAD = 2.5
+FIRST = "apple"
+ANY_LATE = true
+ALL_POSITIVE = true
+PORTS = [8080, 8081, 8082]
+BUSIEST = 9
+NUMBERED = [[0, 5], [1, 6]]
+PAIRED = [[1, 3], [2, 4]]
+BACKWARDS = [3, 2, 1]
+answer 1
+error[E0602]: the compile-time evaluation of this expression panicked: integer overflow: abs(-9223372036854775808)
+  --> config_prelude_refused.sisu:4:7
+  |
+4 | const LEAST: int = abs(-9223372036854775807 - 1)
+  |       ^^^^^
+
+error[E0602]: the compile-time evaluation of this expression panicked: zip: the arguments have different lengths
+  --> config_prelude_refused.sisu:5:7
+  |
+5 | const PAIRS: list[(int, int)] = [p for p in zip([1, 2], [3])]
+  |       ^^^^^
+
+error: Failed

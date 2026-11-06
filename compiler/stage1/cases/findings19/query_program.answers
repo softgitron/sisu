@@ -22,7 +22,7 @@ COMPILER/stage1/cases/findings19/query_program.sisu	20:5-20:9
 answer 0
 COMPILER/stage1/cases/findings19/query_program.sisu	28:9-28:15
 answer 0
-COMPILER/std/prelude.sisu	1179:5-1179:10
+COMPILER/std/prelude.sisu	1179:9-1179:14
 answer 0
 COMPILER/stage1/cases/findings19/query_program.sisu	20:5-20:9	declaration
 COMPILER/stage1/cases/findings19/query_program.sisu	27:13-27:17	use
@@ -44,11 +44,9 @@ COMPILER/stage1/cases/findings19/query_program.sisu	25:9-25:14	declaration
 COMPILER/stage1/cases/findings19/query_program.sisu	26:15-26:20	use
 COMPILER/stage1/cases/findings19/query_program.sisu	27:18-27:23	use
 answer 0
-function	failing	def failing(gen: Gen[T], prop: (T) -> bool, own prefix: list[int], size: int) -> Failure?	failing(${1:gen}, ${2:prop}, ${3:prefix}, ${4:size})
 variable	far	let far: Point	
 answer 0
 struct	f32	struct f32:	
-function	failing	def failing(gen: Gen[T], prop: (T) -> bool, own prefix: list[int], size: int) -> Failure?	failing(${1:gen}, ${2:prop}, ${3:prefix}, ${4:size})
 variable	far	let far: Point	
 keyword	for	keyword	
 keyword	from	keyword	

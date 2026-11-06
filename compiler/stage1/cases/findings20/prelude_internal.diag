@@ -1,0 +1,4 @@
+6:11-6:24 E0278 resolve.prelude-internal name="days_in_month"
+7:12-7:21 E0278 resolve.prelude-internal name="DrawState"
+7:24-7:30 W0001 type.hole name="" ty="DrawState"
+8:11-8:17 E0278 resolve.prelude-internal name="max_of"

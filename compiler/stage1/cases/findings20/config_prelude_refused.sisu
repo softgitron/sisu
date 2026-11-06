@@ -1,0 +1,5 @@
+## The evaluator's prelude functions stop as the run time does: `abs` of
+## the least `int` overflows, `zip` of lists of two lengths panics
+## (RULES.md, R173).
+const LEAST: int = abs(-9223372036854775807 - 1)
+const PAIRS: list[(int, int)] = [p for p in zip([1, 2], [3])]

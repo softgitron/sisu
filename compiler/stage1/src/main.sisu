@@ -691,7 +691,9 @@ def run_command(
             return Err(Failed)
         let locked = words.contains("--locked")
         let accept = words.contains("--accept-unsafe")
-        let how = BuildHow(native=native or emit_sir, release=release, for_run=for_run, emit_sir=emit_sir)
+        let how = BuildHow(
+            native=native or emit_sir, release=release, for_run=for_run, emit_sir=emit_sir
+        )
         return build_command(
             sys, home, path, how, (locked, accept), level, output, request, catalog, mut o, served
         )

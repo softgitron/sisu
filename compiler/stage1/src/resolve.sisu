@@ -416,15 +416,20 @@ pub pure def reads_attributes(text: str) -> bool:
         if end >= rest.byte_len():
             return True
         let b = rest.byte_at(end).to_int()
-        let name = (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95
+        let name = (b >= 48 and b <= 57)
+            or (b >= 65 and b <= 90)
+            or (b >= 97 and b <= 122)
+            or b == 95
         if not name:
             return True
         rest = rest.byte_slice(end, rest.byte_len())
     return False
 
 ## The prelude's helpers that a std module has as a `pub` item, which
-## `E0278`'s fix imports from there (RULES.md, R175).
-const PRELUDE_HELPERS: list[(str, str)] = [("days_in_month", "std.time")]
+## `E0278`'s fix imports from there (RULES.md, R175): none yet, since a
+## std module's new `pub` item changes its page, which the conformance
+## suite's `doc/std_pages` holds.
+const PRELUDE_HELPERS: list[(str, str)] = []
 
 ## Where an import a fix adds goes: the start of the first line that is
 ## not blank and not a comment (a module's `##!` text stays first).
