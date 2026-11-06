@@ -9,7 +9,7 @@ def main():
     let scores: list[int] = [7, 9, 4]
     let ages: dict[String, int] = {"Eero": 9, "Aino": 7}
     let seen: set[char] = {'b', 'a'}
-    var counts: Array[int, 3] = Array.filled(0)
+    var counts: Array[int, 3] = [0, 0, 0]
     counts[^1] = 5
     print("{scores} {ages} {seen} {counts}")
     print("{total(scores)} {total(scores[1:])}")

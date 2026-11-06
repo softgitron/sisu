@@ -638,7 +638,8 @@ error[D0103]: the native backend does not compile `mem.slice.as_ptr` of a `u8`, 
 
 `löyly`, the steam of a sauna, is five letters and six bytes, since
 `ö` takes two. The native backend does not compile `as_ptr` of a
-`CString` yet (D0103), since its bytes are narrower than a word, so
+`CString` yet (D0103): a native slice of its bytes is a copy, a word
+for each byte, where C needs the pointer to view the bytes in place, so
 such a program runs in the interpreter only.
 
 **Try it.** Give `is_set` a first parameter `env: Env`.

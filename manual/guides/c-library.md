@@ -210,9 +210,10 @@ functions that call them, `lookup` taking an `Env`
 the shorter way to pass text to C, runs in the interpreter, where the
 pointer views the `CString`'s own bytes while it lives
 ([chapter 27](../tutorial/27-systems.md#no-authority-without-a-capability)),
-and does not compile natively yet, since a native slice of bytes holds
-a word for each byte, so the wrapper builds the C string in raw memory
-to run both ways. The
+and does not compile natively yet, since a native slice of bytes is a
+copy that holds a word for each byte rather than a view of the bytes
+in place, so the wrapper builds the C string in raw memory to run both
+ways. The
 other direction, C calling Sisu, is `@export("NAME")`: a native build
 makes the function the global symbol `NAME` of C's own convention,
 whether or not the program calls it, so a C caller declares `int32_t

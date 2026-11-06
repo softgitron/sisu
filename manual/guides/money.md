@@ -190,8 +190,9 @@ here the three amounts add up to the bill.
 
 **Status.** `Decimal`, `Ratio` and the named roundings are in stage 0
 (D-076). D-076 makes `/` between two decimals a `Ratio`; stage 0 does
-not have it, and its E0310 says in a note what to write instead, `div`
-or `to_ratio`:
+not have it, since its `Ratio` holds two `int`s and the quotient of two
+long decimals would not fit, so `/` waits for a `Ratio` of `BigInt`s.
+Its E0310 says in a note what to write instead, `div` or `to_ratio`:
 
 <!-- file: examples/guide-money/divide.sisu -->
 ```sisu

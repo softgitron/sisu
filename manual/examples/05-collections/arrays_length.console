@@ -1,0 +1,9 @@
+$ sisu run arrays_length.sisu
+error[E0300]: expected `Array[int, 3]`, found `list[int]`
+  --> arrays_length.sisu:3:30
+  |
+3 |     let rgb: Array[int, 3] = [255, 0]
+  |                              ^^^^^^^^
+  |              ------------- expected because of this
+
+error[D0006]: the program was not run: errors found (1)

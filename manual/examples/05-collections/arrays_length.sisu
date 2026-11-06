@@ -1,0 +1,4 @@
+# A list literal of the wrong length is not an `Array[int, 3]`.
+def main():
+    let rgb: Array[int, 3] = [255, 0]
+    print(rgb)

@@ -1,0 +1,6 @@
+# A string literal becomes a `Url` where a `Url` is expected.
+from std.net import Url
+
+def main():
+    let home: Url = "https://example.com:8080/sauna?day=1"
+    print("{home.host} {home.port} {home.path} {home.query}")

@@ -13,3 +13,5 @@ def main():
     print(lines[:2].iter().try_map(line -> Ok(number(line)? * 2)))
     print(lines.iter().map(line -> number(line)).try_collect())
     print(lines[:2].iter().map(line -> number(line)).try_collect())
+    let firsts = lines.iter().map(line -> number(line)).take(2)
+    print(firsts.map(r -> r).try_collect())

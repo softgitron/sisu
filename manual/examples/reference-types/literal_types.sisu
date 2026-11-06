@@ -1,4 +1,6 @@
 # A literal becomes a value of any type that implements `FromLiteral`.
+from std.net import Url
+
 struct Celsius:
     degrees: f64
 
@@ -10,4 +12,5 @@ def main():
     let home: Path = "/home/aino"
     let name: String = "Aino"
     let warm: Celsius = 21.5
-    print("{home} {name} {warm.degrees}")
+    let site: Url = "https://example.com/sauna"
+    print("{home} {name} {warm.degrees} {site.host}")

@@ -3,14 +3,14 @@ from sauna_site import pages
 
 ## The page at `path`, from the routes that `pages` declares.
 def serve(path: str) -> String:
-    let routes: list[(str, () -> String)] = [
+    let routes: list[(str, () -> String)] = comptime [
         (a.args[0], f)
         for f in reflect.functions_of(pages)
         for a in reflect.attributes_of(f)
         if a.name == "route"
     ]
     for (route, page) in routes:
-        if route == "\"{path}\"":
+        if route == path:
             return page()
     return "no page at {path}"
 

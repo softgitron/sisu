@@ -111,8 +111,11 @@ results, with `try_collect()`, the values or the first error
 **Stage 0 differs.** [05](../../proposal/05-errors.md#propagation) has
 `try_collect` end a chain of adapters; in stage 0 it is a method of a
 `map`'s iterator and of `list[Result[T, E]]`, so after another adapter,
-`xs.iter().map(f).filter(g).try_collect()`, it is E0304 and is written
-`xs.iter().map(f).filter(g).collect().try_collect()`.
+`xs.iter().map(f).take(2).try_collect()`, it is E0304. The chain ends
+in the `map` that makes the results, `xs.iter().filter(g).map(f)`, or
+in `map(r -> r)` after the adapter,
+`xs.iter().map(f).take(2).map(r -> r).try_collect()`; the type system
+has no bound that would let the other adapters offer it.
 
 **Status.** In stage 0 (D-042), with the differences noted.
 

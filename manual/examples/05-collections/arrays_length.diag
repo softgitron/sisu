@@ -1,0 +1,2 @@
+3:30-3:38 E0300 type.mismatch expected="Array[int, 3]" found="list[int]"
+  label 3:14-3:27 type.expected-because

@@ -556,8 +556,9 @@ Down: 2.34
   `ROUND_05UP`, which `Rounding` leaves out.
 
 `/` between two decimals, which 03 designs to give a `Ratio`, is not
-in the compiler yet: it is E0310, whose note names `div`, which says
-where to round, and `to_ratio`, which gives the exact fraction. A
+in the compiler yet, and waits for a `Ratio` that holds `BigInt`s: it
+is E0310, whose note names `div`, which says where to round, and
+`to_ratio`, which gives the exact fraction. A
 literal keeps the places it is written with, so `3.50` prints as
 `3.50`, as `Decimal.parse("3.50")` does.
 

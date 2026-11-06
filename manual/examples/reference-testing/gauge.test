@@ -1,0 +1,12 @@
+test "a full tank" ... ok
+test "gauge/half a tank" ... ok
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 .
+
+2 passed, 1 failed, 0 blocked

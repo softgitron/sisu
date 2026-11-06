@@ -188,8 +188,11 @@ every item of one (`range`, `enumerate`, `zip`, `sorted`, a loop's
 `iter.ref` and the rest) and the choices of the PCT and exhaustive
 schedulers are Sisu's too, drawn in the interpreter's order, so a depth
 and a seed, or a prefix, name the same schedule both ways (decisions
-820 and 821). What stays in Rust is the decoding of most of the other
-intrinsics, the tasks' switch and clocks, the checked memory model, the
+820 and 821). Since the sixteenth, `sum` is Sisu's as well, its
+integers checked for overflow and its floats added pairwise in the
+interpreter's fixed shape, and the runtime finds the place of an
+intrinsic's argument without a call (decisions 902 and 903). What
+stays in Rust is the decoding of most of the other intrinsics, the tasks' switch and clocks, the checked memory model, the
 layout of types and the bridge between the two halves.
 
 The split follows the evidence. Zig's own x86-64 backend, its default

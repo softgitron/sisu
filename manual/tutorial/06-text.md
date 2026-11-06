@@ -360,9 +360,29 @@ the file notes.txt
 `"settings/app.toml"` becomes a `Path` because the annotation asks for
 one, and `"notes.txt"` because `describe` takes one. This works for
 literals only, not for a `str` held in a binding. Chapter 9 reads files
-by their paths. The same for web addresses, a literal that becomes a
-`Url`, is designed in [02](../../proposal/02-syntax.md#literals) and is
-not in the compiler yet.
+by their paths. A web address works the same way: `Url`, from the
+standard library's `std.net`, takes a string literal and reads its
+parts.
+
+<!-- file: examples/06-text/urls.sisu -->
+```sisu
+# A string literal becomes a `Url` where a `Url` is expected.
+from std.net import Url
+
+def main():
+    let home: Url = "https://example.com:8080/sauna?day=1"
+    print("{home.host} {home.port} {home.path} {home.query}")
+```
+
+<!-- output: examples/06-text/urls.out -->
+```text
+example.com 8080 /sauna day=1
+```
+
+`home.host` is the name of the machine, and `port`, `path` and `query`
+are the other parts. The literal is read when the program runs, so one
+that is not a web address stops the program with a panic that says
+what form it expected.
 
 ## Building text
 
@@ -884,8 +904,8 @@ When every test passes, compare your answer with
 - `chars()` and `bytes()` go through text. Text has no integer index;
   `byte_slice` cuts it between byte positions that fall between
   characters.
-- Raw, multi-line and byte literals; a literal becomes a `Path` where a
-  `Path` is expected.
+- Raw, multi-line and byte literals; a literal becomes a `Path` or a
+  `Url` where one is expected.
 - `String()`, `push` and `Builder` build text, and `parse_int` and
   `parse_float` read numbers out of it as optional values.
 

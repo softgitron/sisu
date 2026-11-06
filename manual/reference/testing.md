@@ -210,6 +210,88 @@ replay: sisu test --replay 1-b79581b3297380ab-0.0.1-t1-s0-r0 tests/tank.sisu
 **Status.** In stage 0 (D-041; decisions 480 and 508 of the
 architecture notes).
 
+## The tests of one module
+
+`sisu test src/NAME.sisu`, given a module of a package (a file under
+the `src/` of the nearest manifest above it), runs the tests that
+module declares and no others. The package is compiled as `sisu test`
+compiles it, so the module's imports, of the package's root or of a
+module beside it, resolve as they do in the package's run; a file that
+is no package's module is compiled alone, and its import of a file
+beside it is E0220 ([R13](modules.md#imports)). Here the module
+`tank.gauge` imports `left` from the package's root:
+
+<!-- file: examples/reference-testing/gauge.pkg/src/lib.sisu -->
+```sisu
+##! A water tank's level, in whole litres.
+
+## The litres left after `used` of `full`.
+pub def left(full: int, used: int) -> int:
+    return full - used
+
+test "a full tank":
+    assert left(40, 0) == 40
+```
+
+<!-- file: examples/reference-testing/gauge.pkg/src/gauge.sisu -->
+```sisu
+##! The tank's gauge, which shows the level as a percentage.
+from tank import left
+
+## How full the tank is after `used` of `full`, from 0 to 100.
+pub def percent(full: int, used: int) -> int:
+    return left(full, used) * 100 // full
+
+test "half a tank":
+    assert percent(40, 20) == 50
+
+test "more used than there was":
+    assert percent(40, 50) == 0
+```
+
+<!-- output: examples/reference-testing/gauge.console -->
+```console
+$ sisu test src/gauge.sisu
+test "gauge/half a tank" ... ok
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0
+error[D0033]: the token is for other code (content hash 9b13ffa97d89b3d8); `src/lib.sisu` has content hash 2110b7779b9271e5
+```
+
+- Each test keeps the name it has in the package's run, the module's
+  name before it (`gauge/half a tank`), and `--filter`, `--tag` and
+  `--skip-tag` choose among the module's tests only.
+- The replay line names the module's file, and `--replay` with it
+  runs the test alone.
+- A token holds the module's path with the package's code, since the
+  tests of the module and of the package are numbered apart: a token
+  of the module's run given to the package's, `sisu test --replay
+  TOKEN` without the file, is D0033, and so is one of the package's run
+  given to the module's.
+
+**Status.** In stage 0 (D-041; decision 900 of the architecture
+notes).
+
 ## Outcomes
 
 Each test ends in one of three outcomes:

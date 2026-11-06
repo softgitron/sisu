@@ -183,7 +183,7 @@ function asks about its type parameters ([Templates](#templates)).
 | `reflect.doc_of(T)` | the `##` comment of the type's declaration, a struct's, an enum's or an error set's, its attributes passed over; empty without one, and for a type of the standard library |
 | `reflect.elem_of(T)` | the element type of a list or an optional value |
 | `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret` and `provided` |
-| `reflect.attributes_of(T)` | the attributes on the type's declaration, each with `name` and `args` ([R14](attributes.md#attributes-are-data)) |
+| `reflect.attributes_of(T)` | the attributes on the type's declaration, each with `name`, `args`, the arguments' values, and `keys`, their keywords ([R14](attributes.md#attributes-are-data)) |
 | `reflect.functions_of(m)` | the functions of a module `m` that the code imports, in the order declared ([A module's functions](#a-modules-functions)) |
 | `reflect.implements(T, "Trait")` | whether the type has an impl of the trait |
 | `reflect.default_of(f)` | the default of the field `f`, evaluated where it is written |
@@ -212,7 +212,13 @@ forms:
 Reflection makes values and the code of a template, never a
 declaration: a `comptime` function cannot add a struct or a function to
 a module, and the one declaration it can write is a derive's impl
-([The derive protocol](#the-derive-protocol)).
+([The derive protocol](#the-derive-protocol)). Nor does it make a type
+yet, which 08 allows for use in expressions: the first step is planned,
+a `comptime def pick(wide: bool) -> type` whose body the compiler runs
+and a type position that calls it, but today `-> type` is E0201 and a
+call where a type goes a syntax error. How that call is written is the
+owner's question Q-81, and `@diagnostic_name`
+([R14](attributes.md#names-of-types-in-diagnostics)) waits for it.
 
 <!-- file: examples/reference-compile-time/reflect.sisu -->
 ```sisu
@@ -451,28 +457,26 @@ def main():
 $ sisu run
 heat(start: int, minutes: int) -> int
   The heat after `minutes` of firing, from `start`.
-  @unit("celsius")
+  @unit(celsius)
 ready(celsius: int) -> bool
   Whether the stove is ready for the first turn.
 80 True
 ```
 
-A table built from the descriptors, `[(a.args[0], f) for f in
+A table built from the descriptors, `comptime [(a.args[0], f) for f in
 reflect.functions_of(m) for a in reflect.attributes_of(f)]`, is
-unrolled into the list of pairs it holds, and is written without
-`comptime`: the evaluator keeps no function values, and `comptime
-[...]` around such a table stops the build with a line that has no
-code, ``beyond the slice: a failed `comptime` expression in a file of
-the standard library or one the compiler wrote``, and `sisu check` of
-it exits with 0.
+evaluated by the compiler: a function in a compile-time result is kept
+as the function it names, so the table is a list of function values at
+run time. Written without `comptime`, the comprehension is unrolled
+into the same list. A closure made at compile time cannot be kept
+(E0604).
 
 **Stage 0 differs.** Of the documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
 reflection exposes, a type's, its fields', a variant's fields' and a
 function's have theirs, but a method's and a variant's own have no
 query, and the attributes of a field none
-([R14](attributes.md#attributes-are-data)); an attribute's argument is
-its text as written, not a value. The front end written in
+([R14](attributes.md#attributes-are-data)). The front end written in
 Rust has neither `doc` nor `reflect.doc_of`, so the standard library's
 doc examples, which `sisu test --std` runs on it, read neither.
 Reflection in a refinement's `where` clause or an `invariant` is E0900.

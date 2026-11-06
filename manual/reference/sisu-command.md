@@ -1135,6 +1135,12 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   a cached test is reported `ok` as a run would report it. The cache is
   `FILE.test-cache` beside a file, or `build/debug/test-cache` in a
   package. A test that takes the real `System` is never cached.
+- `FILE`, a module under a package's `src/`, runs that module's tests
+  only, with the package compiled as `sisu test` compiles it, so the
+  module imports the modules beside it; the replay line names the
+  module's file, and a token of the package's run is D0033 for the
+  module's run and the other way round
+  ([R15](testing.md#the-tests-of-one-module)).
 - `--replay TOKEN` runs the failing test that the token names, with the
   same seeds and the same shrunk case, so that it fails in the same
   way. A token for other code is D0033, one for a test that is not
@@ -1359,7 +1365,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-189 not selected
+191 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a

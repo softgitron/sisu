@@ -533,7 +533,9 @@ SELECT name, hour FROM bookings
 ```
 
 `reflect.attributes_of(T)` gives each attribute on `T`'s declaration,
-with its `name` and `args`, the text of each argument. `select_all`
+with its `name` and `args`, the value of each argument: a string
+literal's text without its quotes, a number, `True` or `False`, and
+the text of anything else, such as the name `bookings`. `select_all`
 reads the table's name from `@table`, or makes one from the type's
 name, and writes the query once, while compiling.
 
@@ -569,14 +571,14 @@ from sauna_site import pages
 
 ## The page at `path`, from the routes that `pages` declares.
 def serve(path: str) -> String:
-    let routes: list[(str, () -> String)] = [
+    let routes: list[(str, () -> String)] = comptime [
         (a.args[0], f)
         for f in reflect.functions_of(pages)
         for a in reflect.attributes_of(f)
         if a.name == "route"
     ]
     for (route, page) in routes:
-        if route == "\"{path}\"":
+        if route == path:
             return page()
     return "no page at {path}"
 
@@ -594,14 +596,18 @@ Warm from six until ten
 no page at /menu
 ```
 
-- The comprehension in `serve` runs over compile-time lists, so the
-  compiler unrolls it into the list of pairs it makes: the text of each
-  `@route` and the function it stands on. `footer` has no `@route`, so
-  no pair holds it.
+- `comptime [...]` makes the table while the program compiles: the
+  path of each `@route` and the function it stands on. `footer` has no
+  `@route`, so no pair holds it.
 - In code that runs, `f` is the function itself, so the table is a
-  list of function values, `() -> String`, and `page()` calls one.
-- An argument's text is as it was written, quotes and all, which is why
-  `serve` compares the route with `"\"{path}\""`.
+  list of function values, `() -> String`, and `page()` calls one. A
+  closure, `() -> "..."`, cannot stand in a compile-time result
+  (E0604).
+- `a.args[0]` is the route's text without its quotes, so `serve`
+  compares it with `path` as it is.
+- An attribute's `keys` gives the keyword of each argument, empty for
+  one given by position, so `@route("/", method="GET")` has `args` of
+  `/` and `GET` and `keys` of `""` and `"method"`.
 
 ## A file in the program
 
@@ -718,7 +724,8 @@ Three parts of compile-time code are designed in
 for configuration files, checking their refinement types and
 invariants on the way (D-063). `@diagnostic_name` will let a library
 say how its types are written in diagnostics, once compile-time code
-can make types; until then it is E0900. And a `comptime` function
+can make types, whose syntax is the owner's question Q-81; until then
+it is E0900. And a `comptime` function
 that parses a string literal, a route or a query, will report a mistake
 at its place inside the literal; today a failed `comptime` call points
 at the call.

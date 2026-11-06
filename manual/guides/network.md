@@ -56,6 +56,12 @@ test "an answer that is not a number":
     assert temperature(net, "Oulu") == Err(NotANumber("cold"))
 ```
 
+`Url.parse` reads a URL that the code builds, here with the town in
+it, and fails with a `UrlError`. A URL written whole, with nothing
+interpolated, is a literal that becomes a `Url` where one is expected,
+`let home: Url = "http://weather.example/"`, and stops the program if
+it is not a URL ([chapter 6](../tutorial/06-text.md#other-string-literals)).
+
 `http.get` gives the body of a `2xx` answer, and the error
 `Status(code)` for any other status; `Network(cause)` when the
 connection fails, with the network's own `NetError` as its cause, so

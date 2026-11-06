@@ -526,22 +526,46 @@ def main():
     var rgb: Array[int, 3] = Array.filled(0)
     rgb[0] = 255
     rgb[2] = 64
-    print("{rgb}, {len(rgb)} values")
+    let grey: Array[int, 3] = [128, 128, 128]
+    print("{rgb}, {len(rgb)} values, and {grey}")
 ```
 
 <!-- output: examples/05-collections/arrays.out -->
 ```text
-[255, 0, 64], 3 values
+[255, 0, 64], 3 values, and [128, 128, 128]
 ```
 
 `Array[int, 3]` is three `int` values, no more and no fewer.
 `Array.filled(0)` makes one with every item 0, and an index assignment
-changes an item. Use an array when the number of items is part of what
-the data is, such as the three parts of a colour, and a list otherwise.
-A list literal that becomes an array, `let rgb: Array[int, 3] = [255,
-0, 64]`, is designed in
-[03](../../proposal/03-types-and-generics.md#type-inference) and is not
-in the compiler yet.
+changes an item. A list literal becomes an array where the code
+expects one, as `grey`'s annotation does, when it has as many items as
+the array. Use an array when the number of items is part of what the
+data is, such as the three parts of a colour, and a list otherwise.
+
+**Try it.** Give a literal of two items to an `Array[int, 3]`.
+
+<details>
+<summary>What Sisu says</summary>
+
+<!-- output: examples/05-collections/arrays_length.console -->
+```console
+$ sisu run arrays_length.sisu
+error[E0300]: expected `Array[int, 3]`, found `list[int]`
+  --> arrays_length.sisu:3:30
+  |
+3 |     let rgb: Array[int, 3] = [255, 0]
+  |                              ^^^^^^^^
+  |              ------------- expected because of this
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The literal stays a `list[int]`, so E0300 (`type.mismatch`) says that
+the annotation expected an `Array[int, 3]` and found a list. Add the
+third item, or build the array with `Array.filled` and fill it by
+index.
+
+</details>
 
 ## A list has one owner
 

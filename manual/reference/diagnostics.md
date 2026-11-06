@@ -2118,7 +2118,9 @@ For a dependency, add it to `sisu.toml` first
 stands beside the file, the note `resolve.module-beside` says that only
 a package makes them one program, as
 [chapter 17](../tutorial/17-modules-and-packages.md#a-module-for-each-file)
-shows.
+shows. A module under a package's `src/` is not alone: `sisu test
+src/NAME.sisu` compiles the package and runs that module's tests
+([R15](testing.md#the-tests-of-one-module)).
 
 <!-- file: examples/reference-diagnostics/e0220_import_unknown_fixed.sisu -->
 ```sisu
@@ -10387,7 +10389,7 @@ def main():
 
 <!-- output: examples/reference-diagnostics/w0022_unknown_attribute_fixed.out -->
 ```text
-Kotiharju 80, Sauna @table "saunas"
+Kotiharju 80, Sauna @table saunas
 ```
 
 Shown in [R14](attributes.md#where-an-attribute-may-stand).
@@ -11207,7 +11209,9 @@ three names
 
 `panic.missing-key`: the key {key} is not in the dict.
 
-Indexing a dict with a key it does not hold panics, naming the key.
+Indexing a dict with a key it does not hold panics, naming the key,
+at the index itself (`4:11`, `ages["Roni"]` inside the call of
+`print`), whatever the type of the key.
 
 <!-- file: examples/reference-diagnostics/r0010_missing_key.sisu -->
 ```sisu
@@ -11221,7 +11225,7 @@ def main():
 ```console
 $ sisu run r0010_missing_key.sisu
 panic: the key "Roni" is not in the dict
-  at main (r0010_missing_key.sisu:4:5)
+  at main (r0010_missing_key.sisu:4:11)
 ```
 
 Look the key up with `.get(key)`, which gives `None`, or test `key in

@@ -91,7 +91,9 @@ error[D0006]: the program was not run: errors found (1)
 
 E0220's note says why. Move both files into the `src/` of a package,
 which `sisu new` makes, and import the module by the package's name,
-as `import trip.distance` does.
+as `import trip.distance` does. A module in a package is never alone:
+`sisu test src/distance.sisu` compiles the whole package and runs the
+tests of that one module.
 
 ## Private unless pub
 
@@ -587,7 +589,9 @@ def main(sys: System) -> ! {IoError, cli.Error}:
 
 `sisu test` in the workspace's directory runs the tests of every
 member, the library's first, each list under a line that names its
-package, and `sisu run app` runs the program:
+package; `sisu test wordcount/src/text.sisu` runs the tests of one
+module, named with the module's name first; and `sisu run app` runs
+the program:
 
 <!-- output: examples/17-modules-and-packages/workspace.console -->
 ```console
@@ -598,6 +602,9 @@ test "text/words (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
 tests of `app`:
 0 passed, 0 failed, 0 blocked
+$ sisu test wordcount/src/text.sisu
+test "text/words (doc example)" ... ok
+1 passed, 0 failed, 0 blocked
 $ sisu run app -- poem.txt
    4  the
    3  is

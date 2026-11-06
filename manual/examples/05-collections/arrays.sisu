@@ -3,4 +3,5 @@ def main():
     var rgb: Array[int, 3] = Array.filled(0)
     rgb[0] = 255
     rgb[2] = 64
-    print("{rgb}, {len(rgb)} values")
+    let grey: Array[int, 3] = [128, 128, 128]
+    print("{rgb}, {len(rgb)} values, and {grey}")

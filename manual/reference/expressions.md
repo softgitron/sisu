@@ -261,9 +261,9 @@ as `xs[1:^1]` does.
   or a `str` view of the value; an index changed through it
   (`counts[name].n += 1`) makes one. Natively these lookups run in
   place, faster than a lookup that makes a `String` for each key. The
-  panic of an index by a `str` that is missing stands at the index
-  (`ages[name]`), where that of an index by a string literal, which the
-  type checker makes a `String`, stands at its statement.
+  panic of a missing key stands at the index, `ages["Roni"]` or
+  `ages[name]`, whatever the key's type and wherever the index stands
+  in its statement ([R17](diagnostics.md#r0010)).
 - A constant negative index, Python's `xs[-1]`, does not compile
   (E0344, with the fix `^1`), since it would mean the other end in
   Python; a negative index computed while the program runs panics

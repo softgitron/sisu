@@ -205,10 +205,28 @@ error[E0374]: `300` does not fit in `u8`
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#numbers)
-gives foreign code `ptrsize` and `uptrsize`, the integers as wide as a
-pointer; stage 0 has neither (E0201), and `std.ffi`'s C types, such as
-`c_size`, serve instead. 03 names no bit methods, and stage 0's take
+`ptrsize` and `uptrsize` are the integers as wide as an address, for
+foreign code only: the prelude's names of `i64` and `u64` on every
+target Sisu builds for now, so a value of one is a value of the other
+([03](../../proposal/03-types-and-generics.md#numbers)). `std.ffi`'s C
+types, such as `c_size`, name C's own.
+
+<!-- file: examples/reference-types/ptrsize.sisu -->
+```sisu
+# `ptrsize` and `uptrsize` are as wide as an address, for foreign code.
+def main():
+    let offset: ptrsize = -16
+    let length: uptrsize = 4096
+    let end: i64 = offset + 4096
+    print("{offset} {length} {end} {uptrsize.MAX == u64.MAX}")
+```
+
+<!-- output: examples/reference-types/ptrsize.out -->
+```text
+-16 4096 4080 True
+```
+
+**Stage 0 differs.** 03 names no bit methods, and stage 0's take
 Rust's names. Every integer type has its limits, `u8.MAX` and
 `i128.MIN`, and `truncate_to[T]()`, which keeps the bits that fit,
 read as `T`'s, also for a type of 128 bits
@@ -538,7 +556,9 @@ def main():
 any length and checks it at compile time, and stage 0 reads a longer one
 with `BigInt.parse`, which E0374's note names. A `Decimal` has no `/` (E0310, whose note names
 `div` and `to_ratio`), where 03 makes the quotient a `Ratio`; `div` with
-a number of places and a `Rounding` is the division stage 0 has.
+a number of places and a `Rounding` is the division stage 0 has. The
+`Ratio` waits for a `Ratio` of `BigInt`s: today's holds two `int`s, so
+the quotient of two long decimals would have none.
 
 **Status.** In stage 0 (D-076), with the differences noted.
 
@@ -684,7 +704,7 @@ Ok("hei")
 | `list[T]` | a growable sequence | `[a, b]`, `[]` |
 | `dict[K, V]` | a map from keys to values, iterated in insertion order | `{k: v}`, `{}` with a type expected |
 | `set[T]` | values without repeats, iterated in insertion order | `{a, b}` |
-| `Array[T, N]` | exactly `N` values; `N` is part of the type | `Array.filled(value)` |
+| `Array[T, N]` | exactly `N` values; `N` is part of the type | `[a, b, c]` of `N` elements, with an `Array` expected; `Array.filled(value)` |
 | `Slice[T]` | a read-only view of a run of values | a `list[T]` or a slice of one, where a `Slice` is expected |
 | `Iter[T]` | an iterator that yields `T`s | `xs.iter()`, a generator, an adapter |
 
@@ -695,7 +715,9 @@ Ok("hei")
   (E0347 otherwise).
 - An `Array[T, N]` is read and written by index with the same bounds
   check as a list (R0002), and nothing adds or removes an element.
-  `Array[int, 3]` and `Array[int, 4]` are different types.
+  `Array[int, 3]` and `Array[int, 4]` are different types, and a list
+  literal of another length than `N`, or `[]`, is no `Array[T, N]`
+  (E0300, expected `Array[int, 3]`, found `list[int]`).
 - `Slice[T]` is a view ([R7](ownership.md#views)): a function that
   takes one reads a list, a part of a list or a `bytes` alike.
 - `Iterable[T]`, as the type of a parameter, accepts a `list`, `set`,
@@ -714,7 +736,7 @@ def main():
     let scores: list[int] = [7, 9, 4]
     let ages: dict[String, int] = {"Eero": 9, "Aino": 7}
     let seen: set[char] = {'b', 'a'}
-    var counts: Array[int, 3] = Array.filled(0)
+    var counts: Array[int, 3] = [0, 0, 0]
     counts[^1] = 5
     print("{scores} {ages} {seen} {counts}")
     print("{total(scores)} {total(scores[1:])}")
@@ -726,9 +748,7 @@ def main():
 20 13
 ```
 
-**Stage 0 differs.** A list literal is not an `Array` where one is
-expected (E0300); stage 0 builds an array with `Array.filled` and
-assignments. A key type with an `Eq` or `Hash` impl of its own, rather
+**Stage 0 differs.** A key type with an `Eq` or `Hash` impl of its own, rather
 than a derived one, is E0398 in stage 0, which hashes keys by their
 structure. The allocator parameter of D-060, `list[T, A: Allocator =
 Global]`, waits for allocators ([R7](ownership.md#allocators)).
@@ -752,6 +772,7 @@ only, never to values already made.
 |---|---|
 | `String` | a string literal |
 | `Path` | a string literal: `let home: Path = "/home/aino"` |
+| `Url` (`std.net`) | a string literal, read by `Url.parse`; one that is no URL stops the program with a panic that names the form |
 | `BigInt` | an integer literal |
 | `Decimal` | an integer or a float literal, read from its digits |
 | a type of your own | whatever `impl FromLiteral[L]` it has |
@@ -759,6 +780,8 @@ only, never to values already made.
 <!-- file: examples/reference-types/literal_types.sisu -->
 ```sisu
 # A literal becomes a value of any type that implements `FromLiteral`.
+from std.net import Url
+
 struct Celsius:
     degrees: f64
 
@@ -770,20 +793,20 @@ def main():
     let home: Path = "/home/aino"
     let name: String = "Aino"
     let warm: Celsius = 21.5
-    print("{home} {name} {warm.degrees}")
+    let site: Url = "https://example.com/sauna"
+    print("{home} {name} {warm.degrees} {site.host}")
 ```
 
 <!-- output: examples/reference-types/literal_types.out -->
 ```text
-/home/aino Aino 21.5
+/home/aino Aino 21.5 example.com
 ```
 
-**Stage 0 differs.** [02](../../proposal/02-syntax.md) lists `Url` among
-the types a string literal can be; stage 0's `std.net.Url` has no
-`FromLiteral` impl (E0300), so a URL is made with `Url.parse`. A list
-literal is not an `Array` ([Collections](#collections)).
+A list literal is an `Array` where one is expected
+([Collections](#collections)), without `FromLiteral`: the compiler
+fills it.
 
-**Status.** In stage 0, with the differences noted.
+**Status.** In stage 0.
 
 ## Tuples
 
@@ -1509,8 +1532,8 @@ compares the two.
 
 ## The auto traits
 
-`Send`, `Sync` and `Escapable` are implemented by the compiler from a
-type's parts: a struct is `Send` when all its fields are. A program
+`Send`, `Sync`, `Escapable` and `Sized` are implemented by the
+compiler from a type's parts: a struct is `Send` when all its fields are. A program
 does not implement them with a plain `impl`.
 
 | Trait | A value of the type |
@@ -1518,6 +1541,7 @@ does not implement them with a plain `impl`.
 | `Send` | may move to another task |
 | `Sync` | may be shared with another task by reference |
 | `Escapable` | may leave the frame that made it: it holds no reference or view |
+| `Sized` | has a size of its own: every type but a `dyn` one |
 
 - Numbers, text, the capability handles and most library types are
   `Send` and `Sync`. A `Cell` is never `Sync`; a `Shared[T]` is `Send`
@@ -1525,10 +1549,14 @@ does not implement them with a plain `impl`.
 - A bound such as `[T: Send]` asks for them, and a task's captures are
   checked against them where it is spawned
   ([R9](concurrency.md#values-that-cross-to-a-task)).
+- `Sized`, a marker trait of the prelude, is every type but a `dyn`
+  one, whose size is not its own (`dyn Display` stands behind a `ref`
+  or a `Box`); since a `dyn` type stands nowhere else (E0395), a bound
+  `[T: Sized]` is met by every type argument.
 - `unsafe impl Send` and `unsafe impl Sync` assert them for a type
   whose parts do not ([R7](ownership.md#unsafe-code-and-raw-pointers));
-  an `impl` without `unsafe` is E0984, and `Escapable` is never asserted
-  (E0986).
+  an `impl` without `unsafe` is E0984, and `Escapable` and `Sized` are
+  never asserted (E0986).
 
 <!-- file: examples/reference-types/auto_traits.sisu -->
 ```sisu
@@ -1578,13 +1606,11 @@ it says `@derive(Copy)` and all its fields are `Copy` (E0244,
 [R17](diagnostics.md#e0244); D-007). Which types are `Copy` is
 [R7](ownership.md#copy-types-and-explicit-copies).
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#auto-traits)
-has a fourth auto trait, `Sized`, which stage 0 does not name (E0201);
-its one use, that a `dyn` has no size of its own, is E0395. `impl Copy
+**Stage 0 differs.** `impl Copy
 for T:` written by hand is accepted without a word and makes nothing
 `Copy`; `@derive(Copy)` is the way.
 
-**Status.** In stage 0 (D-007), except `Sized`.
+**Status.** In stage 0 (D-007), with the differences noted.
 
 ## Refinement types
 

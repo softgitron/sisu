@@ -136,7 +136,9 @@ An import binds names in the module that writes it:
   and E0203 offer a module of a similar name when one exists. A file
   run alone is a module of its own, so its import of a file beside it is
   E0220, whose note says that only a package makes them one program; a
-  directory without a `sisu.toml` is no package.
+  directory without a `sisu.toml` is no package. A module of a package
+  is not alone: `sisu test src/NAME.sisu` compiles the whole package and
+  runs the module's tests ([R15](testing.md#the-tests-of-one-module)).
 - `import` names a module and `from ... import` an item: an item named
   as a module, `import atlas.geo.point.Point`, is E0223
   (`resolve.not-a-module`), whose fix writes `from atlas.geo.point import

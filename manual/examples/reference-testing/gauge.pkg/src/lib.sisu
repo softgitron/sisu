@@ -1,0 +1,8 @@
+##! A water tank's level, in whole litres.
+
+## The litres left after `used` of `full`.
+pub def left(full: int, used: int) -> int:
+    return full - used
+
+test "a full tank":
+    assert left(40, 0) == 40

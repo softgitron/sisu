@@ -1,0 +1,25 @@
+$ sisu test src/gauge.sisu
+test "gauge/half a tank" ... ok
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0
+error[D0033]: the token is for other code (content hash 9b13ffa97d89b3d8); `src/lib.sisu` has content hash 2110b7779b9271e5

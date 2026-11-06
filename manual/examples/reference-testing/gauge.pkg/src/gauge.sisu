@@ -1,0 +1,12 @@
+##! The tank's gauge, which shows the level as a percentage.
+from tank import left
+
+## How full the tank is after `used` of `full`, from 0 to 100.
+pub def percent(full: int, used: int) -> int:
+    return left(full, used) * 100 // full
+
+test "half a tank":
+    assert percent(40, 20) == 50
+
+test "more used than there was":
+    assert percent(40, 50) == 0

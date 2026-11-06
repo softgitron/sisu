@@ -1,0 +1,22 @@
+# An attribute's arguments are values, and `keys` holds their keywords.
+@table("bookings", 3)
+@index(hour, unique=True)
+struct Booking:
+    name: String
+    hour: int
+
+## The table that `T` is kept in, and how many copies of it.
+def stored[T]() -> (str, int):
+    var name = ""
+    var copies = 0
+    comptime for a in reflect.attributes_of(T):
+        comptime if a.name == "table":
+            name = a.args[0]
+            copies = a.args[1]
+    return (name, copies)
+
+def main():
+    let (name, copies) = stored[Booking]()
+    print("{name} in {copies + 1} copies")
+    comptime for a in reflect.attributes_of(Booking):
+        print("@{a.name} keys {a.keys:?}")

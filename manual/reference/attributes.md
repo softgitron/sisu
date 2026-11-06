@@ -202,9 +202,12 @@ A library may define attributes of its own, since a name that Sisu
 does not read is accepted, and kept without a word in a program whose
 compile-time code reads attributes. `reflect.attributes_of(T)` gives the
 attributes on the declaration of the type `T`, in the order written,
-each with its `name` and its `args`, the text of each argument as
-written: a string's quotes are part of its text, and a keyword argument
-is `NAME=VALUE`.
+each with its `name`, its `args` and its `keys`. `args` holds each
+argument's value: a string literal's text without its quotes and
+escapes, an integer literal's number, `True` or `False`, and the text
+of anything else as written, such as the name `hour`. A keyword
+argument gives the value after its `=`, and `keys` holds each
+argument's keyword, empty for one given by position.
 
 <!-- file: examples/reference-attributes/data.sisu -->
 ```sisu
@@ -229,8 +232,48 @@ def main():
 
 <!-- output: examples/reference-attributes/data.out -->
 ```text
-Booking @table ["bookings"] @index [hour] [unique=True]
+Booking @table [bookings] @index [hour] [True]
 ```
+
+Each argument keeps its type, so compile-time code computes with it,
+and an element at a fixed index, `a.args[1]`, is that value whatever
+the types of the others:
+
+<!-- file: examples/reference-attributes/values.sisu -->
+```sisu
+# An attribute's arguments are values, and `keys` holds their keywords.
+@table("bookings", 3)
+@index(hour, unique=True)
+struct Booking:
+    name: String
+    hour: int
+
+## The table that `T` is kept in, and how many copies of it.
+def stored[T]() -> (str, int):
+    var name = ""
+    var copies = 0
+    comptime for a in reflect.attributes_of(T):
+        comptime if a.name == "table":
+            name = a.args[0]
+            copies = a.args[1]
+    return (name, copies)
+
+def main():
+    let (name, copies) = stored[Booking]()
+    print("{name} in {copies + 1} copies")
+    comptime for a in reflect.attributes_of(Booking):
+        print("@{a.name} keys {a.keys:?}")
+```
+
+<!-- output: examples/reference-attributes/values.out -->
+```text
+bookings in 4 copies
+@table keys ["", ""]
+@index keys ["", "unique"]
+```
+
+`stored` reads the table's name as a `str` and its number of copies as
+an `int`, and `keys` is empty for each argument given by position.
 
 A function's attributes are data too: `reflect.functions_of(m)` lists
 the functions of a module `m` that the code imports, and
@@ -244,9 +287,7 @@ function's descriptor holds.
 **Stage 0 differs.** `reflect.attributes_of` takes a struct, an enum,
 an error set or a function that `reflect.functions_of` gives, and gives
 an empty list for a type of the standard library. The attributes of a
-field, a method or a variant reach no compile-time code. An argument is
-its text as written, quotes included, not a value, so a route is
-compared with `"\"/hours\""`.
+field, a method or a variant reach no compile-time code.
 
 **Status.** In stage 0 (D-046, D-018), with the differences noted.
 
@@ -1286,7 +1327,10 @@ vector of exponents; `sisu explain --raw-types` shows the type itself
 ([10](../../proposal/10-tooling.md), Q-27).
 
 **Stage 0 differs.** The attribute is E0900 until compile-time code
-can make types (Q-27).
+can make types (Q-27). The first step, a `comptime def` that returns a
+`type` and a type position that calls it, is planned, and how that call
+is written is the owner's question Q-81
+([R12](compile-time.md#reflection)).
 
 **Status.** Leaning (D-065), with the types made at compile time of
 Q-27.

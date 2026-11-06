@@ -5,6 +5,9 @@ test "text/words (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
 tests of `app`:
 0 passed, 0 failed, 0 blocked
+$ sisu test wordcount/src/text.sisu
+test "text/words (doc example)" ... ok
+1 passed, 0 failed, 0 blocked
 $ sisu run app -- poem.txt
    4  the
    3  is

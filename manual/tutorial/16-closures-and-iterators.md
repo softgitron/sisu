@@ -565,6 +565,8 @@ def main():
     print(lines[:2].iter().try_map(line -> Ok(number(line)? * 2)))
     print(lines.iter().map(line -> number(line)).try_collect())
     print(lines[:2].iter().map(line -> number(line)).try_collect())
+    let firsts = lines.iter().map(line -> number(line)).take(2)
+    print(firsts.map(r -> r).try_collect())
 ```
 
 <!-- output: examples/16-closures-and-iterators/try_map.out -->
@@ -573,12 +575,15 @@ Err(NotANumber(text="x"))
 Ok([24, 14])
 Err(NotANumber(text="x"))
 Ok([12, 7])
+Ok([12, 7])
 ```
 
 `try_collect` follows a `map` directly, and it is a method of a list
 of results too. After another adapter, a `filter` or a `take`, it is
-not there yet (E0304), so such a pipeline collects first,
-`.filter(f).collect().try_collect()`, or ends with `try_map`.
+not there (E0304), so put the `map` that makes the results last, as
+in `.filter(f).map(g).try_collect()`, or add `map(r -> r)` after the
+adapter, as `firsts` does: the last line takes the first two results
+and stops before the error.
 
 ## Exercise 16.1: predict the pipelines
 

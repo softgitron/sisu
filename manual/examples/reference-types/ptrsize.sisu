@@ -1,0 +1,6 @@
+# `ptrsize` and `uptrsize` are as wide as an address, for foreign code.
+def main():
+    let offset: ptrsize = -16
+    let length: uptrsize = 4096
+    let end: i64 = offset + 4096
+    print("{offset} {length} {end} {uptrsize.MAX == u64.MAX}")
