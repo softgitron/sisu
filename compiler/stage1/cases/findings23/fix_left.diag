@@ -1,0 +1,3 @@
+9:17-9:22 E0200 resolve.undefined-name name="cuont"
+  fix resolve.similar-name 9:17-9:22 "count"
+10:11-10:26 E0305 type.argument-count name="twice" expected="1" found="2"

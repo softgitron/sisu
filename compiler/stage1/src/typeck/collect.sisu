@@ -2808,6 +2808,14 @@ impl Resolver:
                                 Msg.TypeFixInlineBody, at, at + a.name.byte_len()
                             )
                             self.warn_in(module, d.with("name", f.name.text))
+        # A fixture takes nothing, and is a free function (17; RULES.md,
+        # R200): a test names it as a parameter and receives what it returns.
+        if has_attr(f.attrs, "fixture") and (not f.params.is_empty() or owner.is_some()):
+            for a in f.attrs:
+                if a.name == "fixture" and not self.is_std(module):
+                    let at = a.range.start + 1
+                    let d = Diagnostic.new(Msg.TypeFixtureSignature, at, at + a.name.byte_len())
+                    self.warn_in(module, d.with("name", f.name.text))
         # A preview warns where it is used, as a deprecated function does
         # (RULES.md, R115).
         if has_attr(f.attrs, "preview"):

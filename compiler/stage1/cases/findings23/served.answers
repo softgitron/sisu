@@ -1,0 +1,333 @@
+answer 0
+# executable lamp
+sir 0
+source 0 "lamp.sisu"
+entry main
+
+intrinsic print
+
+fn brighter(2) source 0 @4:5-4:13 {
+    let _0: int
+    let _1: int "a" @4:14-4:20
+    let _2: int "b" @4:22-4:28
+    let _3: bool
+  bb0:
+    _3 = gt copy _1, copy _2 @5:8-5:13
+    switch copy _3 [0: bb1, else: bb2] @5:8-5:13
+  bb1:
+    _0 = copy _2 @7:12-7:13
+    return @7:5-7:13
+  bb2:
+    _0 = copy _1 @6:16-6:17
+    return @6:9-6:17
+}
+
+fn main(0) source 0 @9:5-9:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn brighter(const 40, const 60) @10:11-10:27
+    _1 = call intrinsic print(copy _2) @10:5-10:28
+    _0 = const ()
+    return
+}
+answer 0
+# executable lamp
+sir 0
+source 0 "lamp.sisu"
+entry main
+
+intrinsic print
+
+fn brighter(2) source 0 @4:5-4:13 {
+    let _0: int
+    let _1: int "a" @4:14-4:20
+    let _2: int "b" @4:22-4:28
+    let _3: bool
+  bb0:
+    _3 = gt copy _1, copy _2 @5:8-5:13
+    switch copy _3 [0: bb1, else: bb2] @5:8-5:13
+  bb1:
+    _0 = copy _2 @7:12-7:13
+    return @7:5-7:13
+  bb2:
+    _0 = copy _1 @6:16-6:17
+    return @6:9-6:17
+}
+
+fn main(0) source 0 @9:5-9:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn brighter(const 40, const 60) @10:11-10:27
+    _1 = call intrinsic print(copy _2) @10:5-10:28
+    _0 = const ()
+    return
+}
+answer 0
+# executable bright
+sir 0
+source 0 "lamp.sisu"
+entry main
+
+intrinsic print
+
+fn brighter(2) source 0 @4:5-4:13 {
+    let _0: int
+    let _1: int "a" @4:14-4:20
+    let _2: int "b" @4:22-4:28
+    let _3: bool
+  bb0:
+    _3 = gt copy _1, copy _2 @5:8-5:13
+    switch copy _3 [0: bb1, else: bb2] @5:8-5:13
+  bb1:
+    _0 = copy _2 @7:12-7:13
+    return @7:5-7:13
+  bb2:
+    _0 = copy _1 @6:16-6:17
+    return @6:9-6:17
+}
+
+fn main(0) source 0 @9:5-9:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn brighter(const 40, const 60) @10:11-10:27
+    _1 = call intrinsic print(copy _2) @10:5-10:28
+    _0 = const ()
+    return
+}
+answer 0
+# built `lamp_library.sisu`
+answer 0
+built `lamp_library.sisu`
+answer 1
+error[D0111]: `--release` builds with the native backend's release profile (09); it goes with `--native`
+error: Failed
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
+answer 0
+# executable COMPILER/stage1/cases/packages/served_build.pkg/build/debug/lamps
+sir 0
+source 0 "src/main.sisu"
+source 1 "src/dimmer.sisu"
+entry main
+
+struct lamps.dimmer.Lamp { watts: int }
+
+intrinsic print
+
+fn main(0) source 0 @5:5-5:9 {
+    let _0: ()
+    let _1: lamps.dimmer.Lamp "lamp" @6:9-6:13
+    let _2: ()
+    let _3: int
+    let _4: lamps.dimmer.Lamp
+    let _5: ref lamps.dimmer.Lamp
+  bb0:
+    _1 = struct lamps.dimmer.Lamp(const 60) @6:16-6:30
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = ref _1 @7:18-7:22
+    _4 = call fn lamps.dimmer.dimmed(copy _5, const 2) @7:11-7:26
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
+    _3 = copy _4.0 @7:11-7:32
+    _2 = call intrinsic print(copy _3) @7:5-7:33
+    goto bb5
+  bb4 (cleanup):
+    drop _4
+    goto bb2
+  bb5 (unwind bb2):
+    drop _4 @7:33-7:33
+    goto bb6
+  bb6 (unwind bb2):
+    _0 = const ()
+    goto bb7
+  bb7:
+    drop _1 @7:33-7:33
+    return
+}
+
+fn lamps.dimmer.dimmed(2) source 1 @8:9-8:15 {
+    let _0: lamps.dimmer.Lamp
+    let _1: ref lamps.dimmer.Lamp "lamp" @8:16-8:26
+    let _2: int "step" @8:28-8:37
+    let _3: int
+  bb0:
+    _3 = floordiv copy _1.*.0, copy _2 @9:23-9:41
+    _0 = struct lamps.dimmer.Lamp(copy _3) @9:12-9:42
+    return @9:5-9:42
+}
+warning[W0001]: typed hole `colour` of type `str`
+  --> src/dimmer.sisu:13:12
+   |
+13 |     return todo("colour")
+   |            ^^^^^^^^^^^^^^
+
+answer 1
+error[E0445]: a release build rejects the typed hole `todo("colour")` of type `str`: blocked is never a shipped state
+  --> src/dimmer.sisu:13:12
+   |
+13 |     return todo("colour")
+   |            ^^^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[D0006]: the program was not run: errors found (1)
+error: Failed
+answer 0
+src/dimmer.sisu:13:12: the typed hole `todo("colour")` of type `str`, in `colour`
+  in scope: `watts: int`
+  nothing in scope is of its type
+  no test reaches it
+answer 0
+src/dimmer.sisu:13:12: the typed hole `todo("colour")` of type `str`, in `colour`
+  in scope: `watts: int`
+  nothing in scope is of its type
+  no test reaches it
+answer 0
+[
+  {"at": "src/dimmer.sisu:13:12", "name": "colour", "type": "str", "function": "colour", "scope": ["watts: int"], "fits": [], "types": [], "requires": [], "ensures": [], "tests": []}
+]
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
+answer 1
+fix_left.sisu:9:17: E0200 fixed: a similar name is in scope: `count`
+  9:17-9:22 "count"
+fixes that would be applied to `fix_left.sisu`: 1, and `--dry-run` leaves it as it is
+error[D0190]: `fix_left.sisu` does not check after the fixes: errors that no fix applies to are left (1), which `sisu check` shows
+error: Exit(status=1)
+answer 0
+fix_inline_parens.sisu:22:11: W0025 fixed: write what `to_celsius` returns in the call's place: `celsius_of(sauna + 4.0)`
+  22:11-22:34 "celsius_of(sauna + 4.0)"
+fix_inline_parens.sisu:23:11: W0025 fixed: write what `warmer` returns in the call's place: `sauna + 4.0`
+  23:11-23:24 "sauna + 4.0"
+fix_inline_parens.sisu:24:11: W0025 fixed: write what `warmer` returns in the call's place: `(sauna + 4.0)`
+  24:11-24:24 "(sauna + 4.0)"
+fix_inline_parens.sisu:25:16: W0025 fixed: write what `doubled` returns in the call's place: `(3 + 1) * 2`
+  25:16-25:30 "(3 + 1) * 2"
+fix_inline_parens.sisu:26:12: W0025 fixed: write what `doubled` returns in the call's place: `(half - 1) * 2`
+  26:12-26:29 "(half - 1) * 2"
+fixes that would be applied to `fix_inline_parens.sisu`: 5, and `--dry-run` leaves it as it is
+answer 0
+4	value	[3, 5, 8]
+5	value	0
+8	output	added 3
+8	output	added 5
+8	output	added 8
+9	value	"dear"
+10	value	"dear: 16"
+11	stopped	the standard error
+answer 0
+3	value	[3, 5, 8]
+4	value	16
+5	value	0
+8	output	added 3
+8	output	added 5
+8	output	added 8
+9	value	32
+16	value	32
+17	value	3
+17	value	"prices"
+18	output	done
+answer 0
+answer 0
+-- Declarations (parser/items.sisu)
+file      := item* EOF
+item      := attribute* visibility? (fn_def | struct_def | enum_def | error_def
+             | impl_def | trait_def | import | from_import | test_def | suite_def
+             | bench_def | const_def | type_alias | extern_block)
+attribute := '@' name ('(' args ')')? NEWLINE
+fn_def    := ('pure' | 'comptime')? 'unsafe'? 'def' name generic_params? params
+             ('->' type ('from' name (',' name)*)?)? where_clause? (':' block | NEWLINE)
+struct_def:= 'view'? 'struct' name generic_params? ':' INDENT (field | fn_def | 'pass')+ DEDENT
+field     := visibility? name ':' type ('=' expr)? NEWLINE
+enum_def  := 'enum' name generic_params? ':' INDENT (variant | fn_def)+ DEDENT
+error_def := 'error' name ':' INDENT (variant | '..' NEWLINE)+ DEDENT
+variant   := name ('(' (name ':')? type (',' (name ':')? type)* ')')? NEWLINE
+impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
+trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
+             INDENT (fn_def | type_alias | trait_const)+ DEDENT
+trait_const := 'const' name ':' type ('=' expr)? NEWLINE
+import    := 'import' path ('as' name)? NEWLINE
+from_import := 'from' path 'import' name ('as' name)? (',' name ('as' name)?)* NEWLINE
+test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
+bench_def := 'bench' string ('for' patterns 'in' expr)? params? ':' block
+suite_def := 'suite' string ':' INDENT item+ DEDENT
+const_def := 'const' name ':' type '=' expr NEWLINE
+type_alias:= 'type' name generic_params? ('=' type ('where' expr)?)? NEWLINE
+extern_block := 'extern' string? ':' INDENT fn_def+ DEDENT
+visibility := 'pub' ('(' 'package' ')')?
+generic_params := '[' generic_param (',' generic_param)* ']'
+generic_param := 'const'? name (':' type ('+' type)*)? ('=' type)?
+params    := '(' (param (',' param)*)? ')'
+param     := ('mut' | 'own')? ('self' | '*' | '/' | '*' name ':' type | name ':' type ('=' expr)?)
+where_clause := 'where' type ':' type ('+' type)* (',' type ':' type ('+' type)*)*
+
+-- Statements and blocks (parser/stmts.sisu)
+block     := NEWLINE INDENT stmt+ DEDENT
+stmt      := let_stmt | return_stmt | 'break' | 'continue' | 'pass' | if_stmt
+             | while_stmt | for_stmt | assert_stmt | expect_stmt | defer_stmt
+             | with_stmt | unsafe_stmt | yield_stmt | select_stmt | comptime_stmt
+             | contract | item | expr_stmt | assign_stmt
+let_stmt  := ('let' | 'var') patterns (':' type)? ('=' exprs let_else?)? NEWLINE
+let_else  := 'else' ('as' name)? ':' (block | expr | return_stmt | 'break' | 'continue')
+if_stmt   := 'if' cond ':' block ('elif' cond ':' block)* ('else' ':' block)?
+cond      := cond_part (',' cond_part)*      cond_part := 'let' pattern '=' expr | expr
+while_stmt:= 'while' cond ':' block
+for_stmt  := 'for' patterns 'in' ('mut' | 'own')? expr ':' block
+assign_stmt := exprs ('=' | '+=' | ...) exprs NEWLINE
+return_stmt := 'return' exprs? NEWLINE
+assert_stmt := ('assert' | 'debug_assert') expr (',' expr)? NEWLINE
+expect_stmt := 'expect' expr (',' expr)? NEWLINE
+defer_stmt := 'defer' (':' block | stmt)
+with_stmt := 'with' expr ('as' name)? ':' block
+unsafe_stmt := 'unsafe' ':' block
+yield_stmt := 'yield' expr? NEWLINE
+select_stmt := 'select' ':' NEWLINE INDENT ('case' pattern '=' expr ':' block)+ DEDENT
+comptime_stmt := 'comptime' stmt
+contract  := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLINE
+
+-- Expressions, by precedence from lowest to highest (02, "Operator precedence") (parser/exprs.sisu)
+expr      := closure | coalesce
+closure   := 'own'? (name | '(' params ')') '->' expr
+coalesce  := or ('??' coalesce)?
+or        := and ('or' and)*            -- mixing with `and` needs parentheses
+and       := not ('and' not)*
+not       := 'not' not | compare
+compare   := bitwise (cmp_op bitwise)*  -- chains point one way
+bitwise   := shift (('&' | '^' | '|') shift)*   -- one operator, no arithmetic
+shift     := additive (('<<' | '>>') additive)*  -- no arithmetic operands
+additive  := mult (('+' | '-' | '+%' | '-%' | '+|' | '-|') mult)*
+mult      := unary (('*' | '/' | '//' | '%' | '*%' | '*|') unary)*
+unary     := ('-' | '~' | 'ref' 'mut'? | '^') unary | power
+power     := postfix ('**' unary)?      -- `-x ** y` needs parentheses
+postfix   := primary (call | index | '.' name | '?.' name | '?' | do_block)*
+primary   := literal | string | name | '(' ... ')' | '[' ... ']' | '{' ... '}'
+             | if_expr | match_expr
+
+-- Patterns (parser/patterns.sisu)
+patterns  := pattern (',' pattern)*          -- a bare tuple in let and for
+pattern   := primary_pattern ('|' primary_pattern)*
+primary_pattern := '_' | lower_name | literal | '-' number
+             | Upper_path ('(' pattern_arg (',' pattern_arg)* ')')?
+             | '(' patterns ')' | '[' patterns? ']' | '*' name | '..'
+pattern_arg := name '=' pattern | pattern | '..'
+
+-- Types (parser/types.sisu)
+type      := '!' error_set? | option ('!' error_set?)?
+error_set := '{' option (',' option)* '}' | option
+option    := ref_type '?'*
+ref_type  := 'ref' 'mut'? primary_type | primary_type
+primary_type := path generic_args? | 'Self' | 'pure'? '(' types? ')' ('->' type)?
+             | 'dyn' path | '{' option (',' option)* '}'
+generic_args := '[' generic_arg (',' generic_arg)* ']'
+generic_arg := const_expr | integer | type
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")

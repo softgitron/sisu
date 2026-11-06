@@ -9933,3 +9933,442 @@ program decides what an out-of-range value means.
 1089. The sized integers narrow with `truncate_to[T]()` alone, with no
       `to_u8()` and its kin; a checked narrowing compares with the
       target's bounds first. Stage 1 decides it (RULES.md, R194).
+
+## R195. `build --emit-sir` without `--for-run`: a served `sisu build`, the executable named; `check --holes` of a package (decision 1120)
+
+**The rule.** Decision 1062: `sisu build` (with `--native` too) and `sisu
+run --native` of a package stay a process of stage 1 each, since R170
+serves a run's build alone and a package's executable goes where stage 1's
+build puts it. Now:
+
+- `sisu1 build --emit-sir [--release] [--contracts=LEVEL] [--output OUT]
+  [--locked] [--features NAMES] [--no-default-features] [PATH]` is `build
+  --native` up to the point where the build hands its backend the SIR. It
+  writes the lockfile as the build writes it, and the program's
+  diagnostics on standard error in the build's order, with the build's
+  status (1 at an error, and `D0132`, "not compiled", after the errors).
+  On standard output each program of PATH (a file's, a package's, each
+  member's of a workspace, in turn) writes the line `# executable PATH`,
+  the executable the backend would make (`build/PROFILE/NAME` beside a
+  package's manifest, a file's name without `.sisu`, or `--output`'s),
+  then its SIR. A program without `main`, a library, writes `# ` and the
+  line the build prints of it, `# built `lib.sisu``. Each line is a
+  comment of the SIR, which its readers pass by, so a file's answer is
+  one SIR and a workspace's is split at those lines.
+- `--native` is implied by `--emit-sir`, so `--release` and `--contracts`
+  are taken without it, as R170 said and the build did not do (it
+  answered `D0111` and `D0009`).
+- `build --for-run --emit-sir` (R170), and with `--defer-borrow` (R189),
+  write the same line before their SIR, so that a package's `run
+  --native` finds its executable from the answer. It is a comment, so the
+  driver's reader of R170's answer reads it as before.
+- `sir --repl-serve` serves `build` with `--emit-sir`, and a `build`
+  without `--native`, which calls no backend: its output, `built ...`, as
+  the process prints it. A `build --native` without `--emit-sir`, which
+  runs the backend, is still answered as misused.
+- `check --holes` takes a package's directory, or no path for the working
+  directory's package (the nearest manifest above it), and reports the
+  holes of each of its modules, each named by its module's file as
+  `check` names a package's (`src/dimmer.sisu:13:12`), with
+  `--format=json` too. A workspace reports each member's. More than one
+  path is the usage error it was.
+
+```text
+$ printf 'build\t--emit-sir\t--dir\tlamps\n' | sisu1 sir --repl-serve
+answer 0 1342 146
+# executable /work/lamps/build/debug/lamps
+sir 0
+...
+```
+
+What the driver may rely on from 0.18.0: the request and its standard
+output, a line `# executable PATH` (or `# built ...`) before each
+program's SIR in the build's order, and its standard error and status,
+which are `build --native`'s. The same line before R170's and R189's SIR,
+and `check --holes` of a directory and of none, served. The driver
+compiles each SIR into the executable the line names, makes its directory
+and prints the backend's `built` line, as the build's backend would have.
+
+**Why.** Item 1 of the round; decision 1062, "Serving them is stage 1's to
+add".
+
+**In stage 1.** `main` (`build`'s words: `emit_sir` implies `native`;
+`build_program`'s `EMITTED_EXECUTABLE` and `EMITTED_BUILT`;
+`build_command`'s deferred answer; `repl_serve`'s served `build`;
+`holes_command` and `hole_lines`), `sisu1` (its header).
+
+**What it changes.** No output of the corpus. The cases:
+`cases/findings23/served.requests` asks `build --emit-sir` of
+`lamp.sisu`, with `--release --contracts off` and with `--output`, of
+`lamp_library.sisu` (`# built`), a plain `build` and the refused `build
+--release` and `build --native`, `build --emit-sir` and `--for-run
+--emit-sir --release` (its hole an error) of the package case
+`cases/packages/served_build.pkg`, and `check --holes` of the package
+without a path, by its directory, with `--format=json`, and of two files.
+`lamp.sisu` has its `.out`. Blessed again:
+`cases/findings20/query_assist.answers`, whose `build --emit-sir` was a
+usage error and is now the SIR, and whose request `check --holes` without
+a path, which now checks stage 1's own package, the directory's nearest,
+names two files instead; and the line before the SIR in its and
+`cases/findings22/roles.answers`'s `--for-run --emit-sir`.
+
+**Decision 1120**, for docs/architecture.md:
+
+1120. `sisu1 build --emit-sir [PATH]` writes on standard output, for each
+      program the build makes, a line `# executable PATH` (or `# built
+      ...` for a library) and the SIR the native build would hand its
+      backend, with the build's diagnostics and status, `--native`
+      implied; R170's and R189's answers carry the line too, `sir
+      --repl-serve` serves the build and a build without `--native`, and
+      `check --holes` takes a package's directory or none. `sisu1
+      --version` is 0.18.0. Stage 1 decides it (RULES.md, R195).
+
+## R196. `query values FILE`: a worksheet's inline values from stage 1's evaluator (decision 1121)
+
+**The rule.** Decision 1060 leaves worksheets' inline values to the Rust
+front end. `query values FILE` answers them as the driver's
+`evaluate_sheet` shows them. The worksheet FILE is checked as written and
+made the program `sir --worksheet` writes (R79, R95), each top-level
+statement marked and shown. That program is run by stage 1's evaluator
+(`interp`, R165), its `System` a value nothing can use, with a budget of
+100,000,000 steps. A run keeps what `print` writes (at compile time
+printing is the world). The answer is one line per value and per line
+printed, by the line the statement ends on in the file as written, R164's
+fields:
+
+```text
+4	value	[3, 5, 8]
+8	output	added 3
+11	stopped	the standard error
+```
+
+`value` is a value the statement shows (a `let`'s each name, an
+expression's value, as `{value:?}` renders it). `output` is a line the
+statement printed. Where the evaluator stops, the last line is the line
+of the statement it was running. That line is `stopped` with what it does
+not run (`the standard error`, any other use of the world, an intrinsic
+it lacks such as `list.first`, or its budget), or `panicked` with the
+panic's message. Nothing comes after it, though the driver's run would go
+on, so an editor shows those values and marks the rest as not evaluated.
+A worksheet that does not build answers nothing (`query diagnostics`
+has its errors). `sir --repl-serve` serves it as any `query`.
+
+What the driver may rely on from 0.18.0: the query, its kinds `value`,
+`output`, `stopped` and `panicked`, their lines and their order, and that
+the values and output before a `stopped` line are those `evaluate_sheet`
+shows for the same lines. A worksheet whose run reads the world stops at
+it, where the driver's interpreter runs it with `System.fake`. So the
+driver keeps its own run for the rest, or shows the mark.
+
+**Why.** Item 2 of the round: the last role of the language server on the
+Rust front end, beside `sisu.explainBorrow`, which R187 answers.
+
+**In stage 1.** `interp` (`Interp.printed`, `run_sheet`, `print`), `main`
+(`instrumented_sheet`, taken out of `worksheet_answer`; `held_input`,
+taken out of `held_build`; `sheet_values`, `SHEET_BUDGET`, `sheet_lines`;
+`query_command`'s `values`).
+
+**What it changes.** No output of the corpus. The worksheet
+`cases/repl/values.ws.sisu`, which the class `ws` renders as `sisu ws`
+does, is asked by `cases/findings23/served.requests` with
+`cases/repl/sheet.ws.sisu` (every value as `sisu ws` shows it) and
+`wrong.ws.sisu` (nothing).
+
+**Decision 1121**, for docs/architecture.md:
+
+1121. `query values FILE` answers a worksheet's values and printed lines
+      by the line each statement ends on, from the program `sir
+      --worksheet` writes run by stage 1's evaluator, with the line where
+      it stops `stopped` or `panicked`, so that the language server's
+      inline values need no Rust front end. Stage 1 decides it (RULES.md,
+      R196).
+
+## R197. `@fix_inline`'s parentheses only where precedence needs them (decision 1122)
+
+**The rule.** The manual's finding (chapter 28): R177's fix wrote an
+argument that is more than a name in parentheses wherever it landed, so
+`to_celsius(sauna + 4.0)` of `return celsius_of(f)` became
+`celsius_of((sauna + 4.0))`, which `sisu fmt` keeps. Now an argument
+stands without parentheses where its parameter's use fills a place whole:
+after `(`, `[`, `{`, `,` or a keyword argument's `=`, before `)`, `]`,
+`}` or `,`, or the expression itself. A generator keeps its parentheses,
+since a call's other arguments would take it apart. The whole expression
+is in parentheses only where it is more than a chain and the call does
+not stand alone. A call stands alone after `(`, `[`, `{`, `,`, an
+assignment's `=`, `return` or the start of its line, and before `)`,
+`]`, `}`, `,`, a comment or the end of the line. So `print(warmer(sauna))`
+becomes `print(sauna + 4.0)` and `warmer(sauna) * 2.0` becomes `(sauna +
+4.0) * 2.0`.
+
+Fixed on the way: an argument with a `-` after its start, `half - 1`, was
+taken for a negative number, written as it was and used more than once.
+`doubled(half - 1)` of `return n * 2` became `half - 1 * 2`, which means
+another thing. A `-` is a sign only as the argument's first token.
+
+**Why.** Item 3 of the round, the manual's finding of chapter 28.
+
+**In stage 1.** `typeck.fix_inline` (`InlineForm.delimited`, `inlined`,
+`placed`, `stands_alone`, `opening`, `closing`, `generator`, `plain`),
+`typeck` (`inline_call`).
+
+**What it changes.** The case `cases/findings23/fix_inline_parens.sisu`
+(its `.out`, `.diag` and `.fixed`, and `fix --dry-run` of it in
+`served.requests`). `cases/findings21/fix_inline.fixed` and its `.diag`
+are as they were: each of their fixes is a chain, or stands where
+precedence needs its parentheses. The manual's transcripts of chapter 28
+that show `celsius_of((sauna + 4.0))` are made again by its writers.
+
+The Rust front end has no `@fix_inline` (R177), so its check of the case
+has no warning.
+
+- Differs: `compiler/stage1/cases/findings23/fix_inline_parens.sisu`: ids, human
+
+**Decision 1122**, for docs/architecture.md:
+
+1122. `@fix_inline`'s fix writes an argument, and the whole expression, in
+      parentheses only where precedence needs them, not where it fills a
+      call's argument, an element or the place of a call that stands
+      alone. Stage 1 decides it (RULES.md, R197).
+
+## R198. `E0279` and `E0280`: the gap's offsets whole, and fields of numbers to fill it (decision 1123)
+
+**The rule.** The manual's finding (chapter 27): R182's note suggested a
+field `_pad1: Array[u8, 3]`. 03 does not make an `Array` of a `Copy`
+element `Copy`, and stage 1 does not, so a struct that took the note was
+`E0242` and `E0244` under its `@derive(Copy, Plain)`. The gap's offsets
+also ended at the first byte after it. Now the offsets are the gap's first
+and last byte, "at offsets 1 to 3" for the three bytes 1, 2 and 3. The
+note, `resolve.plain-padding-fill`, names fields of numbers that fill
+the gap at C's offsets, each the widest unsigned number its offset's
+alignment allows and the bytes left hold, named by its offset: "fields
+of their own there, `_pad1: u8, _pad2: u16`, make those bytes the
+struct's, or the fields ordered from the widest leave none". The struct
+that takes it derives `Plain` and `Copy`.
+
+**Why.** Item 4 of the round, the manual's finding of chapter 27.
+
+**In stage 1.** `typeck.instances` (`plain_gaps`, `padding_note`,
+`padding_fields`, with a test), the catalog (`resolve.plain-padding-fill`,
+whose parameter is `fields`, with a comment).
+
+**What it changes.** `cases/findings21/plain_padding.diag` is blessed
+again (the offsets' ends, `4` and `12` now `3` and `11`). The note is not
+in the conformance form, so the case
+`cases/findings23/plain_filled.sisu` (its `.out`) is the struct with the
+note's fields, which derives both. The manual's transcripts of chapter 27
+that show `E0279` or `E0280` are made again by its writers.
+
+The case imports `Plain` from `std.mem`, stage 1's (R5), which the Rust
+front end answers with `E0220`, as for `plain_padding.sisu` (R182).
+
+- Differs: `compiler/stage1/cases/findings23/plain_filled.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1123**, for docs/architecture.md:
+
+1123. `E0279` and `E0280` name a gap's first and last byte, and their note
+      names fields of numbers at C's offsets that fill it, which are
+      `Copy` where an `Array[u8, N]` is not. Stage 1 decides it (RULES.md,
+      R198).
+
+## R199. `fix`'s status: 1 when errors without a fix are left (decision 1124)
+
+**The rule.** The manual's finding (R16): `fix` ended with status 0 after
+applying what it could while errors without a fix were left, so a script
+could not tell a program it fixed from one that still does not compile.
+Now `fix` checks the text its fixes leave (the last round's check, or
+one more when a round stopped at a fix that undoes another or at the
+last round). When an error is left, it says so after its lines on
+standard error, `D0190`: "`fix_left.sisu` does not check after the
+fixes: errors that no fix applies to are left (1), which `sisu check`
+shows". It ends with status 1, as `check` does at an error, with
+`--dry-run` too, for the text it would write. Warnings left do not count.
+Its other statuses are as R176 gives them: 0 when the program checks
+after the fixes (or had nothing to fix and checks), 2 for another option,
+and the usage error. 10 names no status for `sisu fix`; 1 is the
+command line's status for errors (`check`, `build`).
+
+What the driver may rely on from 0.18.0: the status 1 with `D0190` and
+the file written as before.
+
+**Why.** Item 5 of the round, the manual's finding.
+
+**In stage 1.** `main` (`fix_command`), the catalog (`D0190`).
+
+**What it changes.** The case `cases/findings23/fix_left.sisu` (its
+`.diag` and `.fixed`, which holds `D0190`, and `fix --dry-run` of it in
+`served.requests`). No other case of `fix` leaves an error.
+
+**Decision 1124**, for docs/architecture.md:
+
+1124. `sisu1 fix` ends with status 1 and `D0190` when the program still
+      has an error after its fixes, 0 when it checks. Stage 1 decides it
+      (RULES.md, R199).
+
+## R200. `@fixture`: a test's parameter set up by a call and torn down by its drop; `Expectation` decided against (decision 1125)
+
+**The rule.** 17, "Fixtures": "a `fixture` function with a scope is
+requested by parameter name (pytest's model, typed)". A function marked
+`@fixture` that takes nothing is a fixture of its module. A test of the
+module (or of a suite in it) that names it as a parameter, `test
+"rejects unknown fields"(schema: Schema):`, receives what it returns. The
+front end carries it whole. The type checker's input has the parameter
+out of the test's signature, and the test's body starts with `let
+schema: Schema = schema()`, in the parameters' order. So the fixture is
+set up before the test and torn down after it, when the local is dropped
+at the body's end, also when the test fails. The runner sees a test that
+takes nothing, the real `System`, or the fakes of the capabilities it
+names, and needs nothing new. A parameter whose type is not the
+fixture's is `E0300` at the parameter. A `@fixture` with a parameter, or
+a method, is `E0281`, `type.fixture-signature`, at the attribute, and a
+test that names it is `E0702`, a parameter the runner cannot give.
+
+`scope="module"` is taken and does not change the lowering: the value is
+made for each test that names it, as a test's own would be. A value made
+once for a module's tests needs the runner to keep it between tests, which
+it runs in parallel and in random order (17, "Isolation and
+parallelism"). That is what stage 0 must do for 17's scope (below).
+
+**Decided against**, for `Expectation`: 17's `std.test.Expectation`
+"takes a compile-time expression tree (reflection over the argument
+expression), so a library can define `assert_approx` or `assert_json_eq`
+with the same output". 08's reflection has types, fields, variants,
+functions and attributes, and no expression. A tree of the argument
+expression needs a reflected expression type in `std.reflect`, its
+syntax at a call (the owner's, as compile-time types are, R155), and
+the lowering `assert` has for its parts. A struct of an expected value and
+a text, which is all `std.test` could hold now, would not be 17's form
+and would give a second spelling of `assert x == y`. So the round leaves
+it for the round that takes compile-time types.
+
+**What stage 0 must do.** Nothing for the lowering. For `scope="module"`:
+the runner would make the fixture's value once per module, before the
+first of its tests that names it, and drop it after the last. Stage 1
+would then lower such a parameter into a call the runner answers, not the
+body's `let`.
+
+**Why.** Item 6 of the round.
+
+**In stage 1.** The new module `typeck.fixtures` (`lower`,
+`fixture_names`, `lower_item`, `lower_test`), `typeck` (`check_program`
+lowers each module built with its tests), `typeck.collect` (`E0281`),
+`diag` and the catalog (`E0281`).
+
+**What it changes.** The cases `cases/findings23/fixtures.sisu` (its
+`.out` and `.tests`: two tests, one with a capability and two fixtures;
+a copy whose test fails showed `set up scratch`, the test's own line and
+`dropped scratch`, in that order, under "what the test printed") and
+`fixture_errors.sisu` (its `.diag`). The Rust front end answers a
+fixture's parameter with `E0702`.
+
+- Differs: `compiler/stage1/cases/findings23/fixtures.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings23/fixture_errors.sisu`: ids, human, doc, doc-output
+
+**Decision 1125**, for docs/architecture.md:
+
+1125. A test's parameter named after a `@fixture` function of its module
+      that takes nothing is lowered into the test's body as a `let` of
+      the fixture's call, dropped at its end; another `@fixture` is
+      `E0281`, and `scope="module"` waits for the runner. 17's
+      `Expectation` waits for reflected expressions. Stage 1 decides it
+      (RULES.md, R200).
+
+## R201. The sharing of instances in `--explain-size`: decided against (decision 1126)
+
+**The rule.** 03, "Dispatch": "A per-package instantiation budget,
+reported by `sisu build --explain-size`", and the sharing of
+instantiations "whose types have the same layout". R108 left it, and the
+manual lists it among what is missing beside 03. Stage 1's lowering makes
+each instance once per program, by its generic function and its type
+arguments (`json.field#Mood`). Every instance is shared by each package
+that asks for it, and no two of another layout are ever one. What it does
+not keep is who asked. A request's site is known while the instances are
+requested (`Request.Instance`'s `site`), but lowering does not carry it
+into the SIR, and the executable `--explain-size` reads has symbols, not
+packages. Decided against, for the round: the report needs the
+requesting packages of each instance kept through lowering and written
+in the SIR (a line per instance, which stage 0's reader and the backend's
+symbols would carry), a budget in the manifest (09 has none), and 03's
+sharing by layout, which neither lowering does. Each is a change to the
+SIR, the manifest and the backend beside the front end. With R195 the
+driver has the SIR of each build, so a count of instances per generic
+function is the driver's to print once the SIR names packages.
+
+**Why.** Item 7 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 1126**, for docs/architecture.md:
+
+1126. `--explain-size`'s instances per package and their sharing wait for
+      the SIR to name the packages that request each instance, a budget
+      in the manifest, and sharing by layout in the lowerings. Stage 1
+      decides it (RULES.md, R201).
+
+## R202. `grammar`: the parser's grammar from its `##!` comments (decision 1127)
+
+**The rule.** The manual's finding (R20): the architecture notes' grammar
+and the parser's `##!` comments are two texts that nothing checks, and
+both lacked most of the declarations and statements. `sisu1 grammar`
+prints the productions in the `##!` comments of the parser's modules, in
+one order: `items`, `stmts`, `exprs`, `patterns`, `types`. Each module is
+a line `-- TITLE (parser/NAME.sisu)`, the title the comment's first
+paragraph, then the lines of its ```` ```text ```` blocks, with a blank
+line between modules. It reads the modules at run time from the
+compiler's directory (`--home`), as it reads the catalog. Any argument is
+the usage error, and `sir --repl-serve` serves it.
+
+The comments now hold what the parser parses that they lacked:
+`bench_def`, `suite_def`, `extern_block`, visibility, generic parameters,
+parameters (`self`, `*`, `/`, `*xs: T`), `where` clauses, `-> T from a`,
+and the statements `return`, `assert` and `debug_assert`, `expect`,
+`defer`, `with`, `unsafe:`, `yield`, `select`, `comptime` and the
+contracts, each read from its function. The check of the manual's R20
+and the architecture notes against the output is theirs.
+
+**Why.** Item 8 of the round.
+
+**In stage 1.** `main` (`grammar`, `GRAMMAR_MODULES`, `grammar_text`,
+with a test; `served_command`), the `##!` comments of `parser.items` and
+`parser.stmts`.
+
+**What it changes.** No output of the corpus. The case
+`cases/findings23/served.requests` holds the grammar (`grammar`) and the
+usage error (`grammar extra`).
+
+**Decision 1127**, for docs/architecture.md:
+
+1127. `sisu1 grammar` prints the parser's grammar from its modules' `##!`
+      comments in one order, so that the manual and the architecture
+      notes can be checked against it. Stage 1 decides it (RULES.md,
+      R202).
+
+## R203. The merge's differences: the conformance suite's `holes/typed_holes` (decision 1128)
+
+**The rule.** Nothing a command prints changes. Stage 0's twentieth round
+added three conformance cases (decisions 1063 and 1065):
+
+- `holes/typed_holes.sisu` reaches its typed holes in a run, and stage
+  1's SIR prints each hole's closure there (R27), which the Rust front
+  end's does not, so its SIR differs, as `types/typed_hole`'s does.
+- `holes/holes_refused.sisu` has an error, so neither front end writes
+  its SIR, and its diagnostics are the same.
+- `eval/usage`, of the case kind `NAME.eval`, is run by the suite, not by
+  `check.sh`.
+
+The two `.holes` files are the suite's, which its runner compares with
+`sisu check --holes`. Stage 1's answer for them is the twenty-first
+round's whole report (R181), which decision 1063 says the merge blesses.
+
+**Why.** Item 9 of the round: the merge brought the cases, and `check.sh`
+found the one difference.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/holes/typed_holes.sisu`: sir
+
+**Decision 1128**, for docs/architecture.md:
+
+1128. The conformance suite's `holes/typed_holes` differs from stage 0's
+      front end in its SIR under R27 (a hole's closure, printed where a
+      run reaches it); `holes/holes_refused` and `eval/usage` do not
+      differ. Stage 1 decides it (RULES.md, R203).

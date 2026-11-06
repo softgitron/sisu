@@ -1,0 +1,6 @@
+# RULES.md, R195: a program without `main`, which `build --emit-sir` names
+# as the build that links nothing names it.
+pub def brighter(a: int, b: int) -> int:
+    if a > b:
+        return a
+    return b

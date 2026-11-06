@@ -1,0 +1,10 @@
+# RULES.md, R195: a program `build --emit-sir` builds as `sisu build
+# --native` would, its SIR on standard output after the line that names
+# its executable, with `--release` and `--contracts` and no `--native`.
+def brighter(a: int, b: int) -> int:
+    if a > b:
+        return a
+    return b
+
+def main():
+    print(brighter(40, 60))

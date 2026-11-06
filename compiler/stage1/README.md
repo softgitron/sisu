@@ -182,13 +182,16 @@ sisu run -- audit --unsafe [--std] [PATH]   # the program's unsafe code by packa
 sisu run -- lint [--format=ids] [PATH]      # `sisu lint`: the program's lints, which `check` does not print (below, "The manual's findings")
 sisu run -- test [OPTIONS] [PATH]           # the tests, built by stage 1 and run by stage 0's runner, with R27's status (below, "The third round")
 sisu run -- query KIND FILE [LINE COL [NEW]] [--text PATH]  # the language server's questions of a file and a position, as tab-separated lines (RULES.md, R164, R169)
-sisu run -- check --holes [--format=json] FILE  # each typed hole with its type, what fits it, its types, its contract and its tests (R174, R181)
-sisu run -- fix FILE [--dry-run] [--all]    # each diagnostic's preferred fix applied to the file, checked again until none applies (R176)
+sisu run -- check --holes [--format=json] [PATH]  # each typed hole with its type, what fits it, its types, its contract and its tests (R174, R181)
+sisu run -- fix FILE [--dry-run] [--all]    # each diagnostic's preferred fix applied to the file, checked again until none applies (R176), status 1 when errors are left (R199)
 sisu run -- eval FILE [--to json|toml|yaml] # a configuration module's constants, evaluated at compile time and written as JSON, TOML or YAML (R165)
 sisu run -- check --diary PATH [PATH]       # `check`, its records also appended to the diary PATH (R186)
 sisu run -- explain-borrow FILE:LINE        # every borrow live on the line, in the driver's words (R187)
 sisu run -- audit (--ownership FILE... | --caps [FILE...])  # the escape hatches of each file, a program's capabilities (R188)
 sisu run -- sir --defer-borrow [--tests] [PATH]  # the SIR of a program whose only errors are the ownership rules' (R189)
+sisu run -- build --emit-sir [--release] [--contracts=LEVEL] [--output OUT] [PATH]  # each program's SIR the native build hands its backend, after `# executable PATH` (R195)
+sisu run -- query values FILE               # a worksheet's values and output by line, from stage 1's evaluator (R196)
+sisu run -- grammar                         # the parser's grammar, from its `##!` comments (R202)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
@@ -341,6 +344,14 @@ thirteen on a quiet machine, and the formatter's classes add about five
 (the documentation's were not timed there).
 
 ## Results
+
+The twenty-third round's run (`SISU_LOWER=rust`, at a load of 7 to 13 on
+four cores) ended `total: 15867 files checked, 14011 identical, 1856
+differing (1856 listed in RULES.md or DISCREPANCIES.md, 0 not)`, with
+`served` 10 request files and `fix` 4 files as expected, `expected` 192
+files, `behaviour` 366 programs (365 as expected, 346 natively too, 1
+refused as listed) and `fixed-sir` identical. The run below is an earlier
+round's, kept for its breakdown of the classes.
 
 `./check.sh --native --names --types --sir` (`--native` implies `--self` and
 `--check`), run this round, as the rounds before it, with
@@ -2924,6 +2935,58 @@ Stage 1's version is 0.17.0. The driver may rely on `sir --tests --std`,
 and `--caps`, and `--defer-borrow`, each served. The new cases are in
 `cases/findings22/`.
 
+### The twenty-third round: a served `sisu build`, worksheets' inline values, three of the manual's findings, `@fixture`, the parser's grammar
+
+This round took what decision 1062 left stage 1 to add for a served
+`sisu build`, the last role of the language server on the Rust front end
+(decision 1060), the manual's twenty-first round's findings of
+`@fix_inline`, `Plain`'s padding and `sisu fix`, 17's fixtures, R108's
+sharing of instances and the manual's R20. RULES.md has the rules (R195 to
+R203, decisions 1120 to 1128) and their decision texts:
+
+- **`build --emit-sir`** (R195): without `--for-run` it is the native
+  build stopped where it hands its backend the SIR, `--native` implied,
+  with `--release` and `--contracts`; each program's SIR follows a line
+  `# executable PATH`, a comment of the SIR, which R170's and R189's
+  answers now carry too; the server answers it and a `build` without
+  `--native`; `check --holes` takes a package's directory or none.
+- **`query values FILE`** (R196): a worksheet's values and printed lines
+  by line, from the program `sir --worksheet` writes run by stage 1's
+  evaluator, which keeps what it prints and marks where it stops
+  (`stopped`, `panicked`).
+- **`@fix_inline`'s parentheses** (R197): only where precedence needs
+  them, so `to_celsius(sauna + 4.0)` becomes `celsius_of(sauna + 4.0)`;
+  an argument such as `half - 1` is no longer taken for a negative
+  number.
+- **`E0279` and `E0280`** (R198): the gap's offsets name its last byte,
+  and the note's fields are numbers, `_pad1: u8, _pad2: u16`, which are
+  `Copy` where `Array[u8, 3]` is not.
+- **`fix`'s status** (R199): 1 with `D0190` when errors without a fix are
+  left.
+- **`@fixture`** (R200): a test's parameter named after a fixture of its
+  module is a `let` of the fixture's call at the start of its body, torn
+  down by its drop, so the runner needs nothing new; `E0281` for a fixture
+  that takes something.
+- **`grammar`** (R202): the parser's productions from its `##!` comments,
+  which now hold the declarations and statements they lacked.
+- **The merge's differences** (R203): `holes/typed_holes`'s SIR, under
+  R27.
+
+Decided against: 17's `Expectation`, which needs a reflected expression
+08 does not have (R200), and `--explain-size`'s instances per package,
+which needs the SIR to name who requests each instance (R201). Open:
+`scope="module"`, which waits for the runner (R200's "What stage 0 must
+do"); the driver's routing of `sisu build`, `sisu run --native` of a
+package and the inline values, which is stage 0's; compile-time types
+(R155). The merge brought the conformance cases `holes/typed_holes`, whose SIR
+differs under R27 (R203), `holes/holes_refused` and `eval/usage`.
+
+Stage 1's version is 0.18.0. The driver may rely on `build --emit-sir`
+with its executable's line, the same line before `--for-run --emit-sir`'s
+SIR, `query values`, `fix`'s status 1, and `check --holes` of a package,
+each served. The new cases are in `cases/findings23/`, with
+`cases/packages/served_build.pkg` and `cases/repl/values.ws.sisu`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2961,6 +3024,7 @@ and `--caps`, and `--defer-borrow`, each served. The new cases are in
 | `typeck.exhaustive` | 662 | exhaustiveness and unreachable arms of `match`, every missing pattern (R10), and `sisu lint`'s wildcard over an enum of the package (R11) | `sisu-typeck/src/exhaustive.rs` |
 | `typeck.contracts`, `.purity`, `.tasks` | 1746 | contracts and refinements, `pure`, structured concurrency and generators, and what a channel carries (R1) | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
 | `typeck.safety` | 437 | unsafe code (R2, R3, R5): the blocks and expressions that permit the unsafe operations, the calls that are ones, the `# safety:` comments and `Safety:` lists, and the lints | stage 1's own (22) |
+| `typeck.fixtures` | 125 | a test's fixtures (17; R200): the parameters named after its module's `@fixture` functions lowered into `let`s of their calls at the start of its body | stage 1's own |
 | `typeck.generic_asserts` | 319 | `comptime assert` on `const` parameters, decided at each call | `sisu-typeck/src/generic_asserts.rs` |
 | `typeck` | 2606 | a body's checks, a program's, the inferred error sets, the driver, the typed bodies lowering reads, and the standard library's bodies, checked against the base and kept once per process (an internal error when one does not type-check, R18); a base made whole or from its cache (`BaseCache`); a file's declarations resolved alone, for the formatter | `sisu-typeck/src/lib.rs` |
 | `lower`, `lower.names`, `.func`, `.stmts`, `.exprs`, `.pats`, `.contracts`, `.glue` | 6497 | lowering the typed bodies to SIR: what `main` and the tests reach, names, functions and closures (with the value wrappers of decision 225), statements, expressions, patterns, contracts, drop glue, and the standard library's functions and what names them kept once per process | `lib.rs`, `func.rs`, `stmts.rs`, `exprs.rs`, `pats.rs`, `contracts.rs` and `glue.rs` of `sisu-lower` |
@@ -3775,6 +3839,17 @@ which reads tokens and parses but checks nothing, 0.02 s. `sir --tests
 module's text again for its items' starts, since the base keeps no syntax
 of its modules.
 
+The twenty-third round's commands cost what a build or a check does,
+natively at a load of 12 to 13 on four cores while `check.sh` ran beside
+them (the median of five as processes): `build --emit-sir` of
+`cases/findings23/lamp.sisu` 0.46 s against its `check`'s 0.36 s, and
+0.047 s served after the first request; `check --holes` of the package
+`served_build.pkg` 0.34 s; `query values` of `cases/repl/sheet.ws.sisu`
+0.47 s, where `sir --worksheet` takes 0.44 s, and 0.12 s served. It checks
+the worksheet as written and its instrumented program, as `sir
+--worksheet` does, and the evaluator's run of the worksheet is a few
+thousand steps. `grammar` reads five files, 0.016 s.
+
 The twenty-first round's commands cost what a `check` does, measured
 natively as processes at a load of about 4: `fix --dry-run --all` of the
 13-line `cases/findings21/fix_assist.sisu`, which checks it twice (the
@@ -4000,7 +4075,14 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     (R193); decided against: a function value taken for another
     parameter type (R190) and narrowing methods beside `truncate_to`
     (R194); left: compile-time types (R155) and the sharing of instances
-    with `--explain-size`. The tenth round took a variant's
+    with `--explain-size`. The twenty-third round took `@fix_inline`'s
+    parentheses (R197), `E0279`'s and `E0280`'s offsets and fill (R198),
+    `sisu fix`'s status (R199), 17's fixtures (R200) and the parser's
+    grammar as a command (R202); decided against: 17's `Expectation`,
+    which waits for reflected expressions (R200), and the sharing of
+    instances with `--explain-size`, which waits for the SIR to name the
+    packages that request them (R201); left: compile-time types (R155) and
+    a fixture's `scope="module"`, the runner's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of
@@ -4020,4 +4102,6 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     which is stage 0's: the driver may pass `--dir` and `--name` to `sir
     --repl` and `sir --worksheet`, and read `:why NAME`'s inputs from
     `parse --bindings`; the language server's inline values of a worksheet
-    (`evaluate_sheet`) can take the same SIR.
+    (`evaluate_sheet`) can take `query values` (R196), whose evaluator
+    stops at the world and at the intrinsics it lacks (`list.first`,
+    `list.slice`), where the driver's interpreter goes on.

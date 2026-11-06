@@ -1,0 +1,12 @@
+# A fixture takes nothing (RULES.md, R200): one with a parameter is
+# `E0281` at its attribute, and a test that names it is `E0702`, as a
+# parameter the runner cannot give.
+@fixture
+def sized(n: int) -> list[int]:
+    return [i for i in range(n)]
+
+test "names a fixture that takes a parameter"(sized: list[int]):
+    assert len(sized) == 0
+
+def main():
+    pass

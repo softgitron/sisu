@@ -1,0 +1,26 @@
+# `@fix_inline`'s fix writes parentheses only where precedence needs them
+# (RULES.md, R197; the manual's chapter 28): an argument that fills a
+# call's argument, a list's element or an index whole takes none, nor does
+# the whole where the call stood alone, as in `print(...)`.
+def celsius_of(f: f64) -> f64:
+    return (f - 32.0) * 5.0 / 9.0
+
+@fix_inline
+def to_celsius(f: f64) -> f64:
+    return celsius_of(f)
+
+@fix_inline
+def warmer(f: f64) -> f64:
+    return f + 4.0
+
+@fix_inline
+def doubled(n: int) -> int:
+    return n * 2
+
+def main():
+    let sauna = 176.0
+    print(to_celsius(sauna + 4.0))
+    print(warmer(sauna))
+    print(warmer(sauna) * 2.0)
+    let half = doubled(3 + 1)
+    print([doubled(half - 1), 1])

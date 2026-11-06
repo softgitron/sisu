@@ -1,0 +1,7 @@
+##! The root module of `lamps`.
+
+from lamps.dimmer import Lamp, dimmed
+
+def main():
+    let lamp = Lamp(watts=60)
+    print(dimmed(lamp, 2).watts)

@@ -1,0 +1,10 @@
+# `sisu fix`'s status (RULES.md, R199): the misspelt name has a fix, which
+# is applied, and the call with too many arguments has none, so the file
+# still does not check and `fix` ends with status 1 (`D0190`).
+def twice(n: int) -> int:
+    return n * 2
+
+def main():
+    let count = 3
+    print(twice(cuont))
+    print(twice(count, 4))

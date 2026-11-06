@@ -600,6 +600,7 @@ pub enum Msg:
     TypeDeprecated
     TypeDeprecatedPlain
     TypeFixInlineBody
+    TypeFixtureSignature
     ResolvePlainPadding
     ResolvePlainPaddingEnd
     ResolvePlainPaddingFill
@@ -1210,6 +1211,7 @@ impl Msg:
             case TypeDeprecated: "type.deprecated"
             case TypeDeprecatedPlain: "type.deprecated-plain"
             case TypeFixInlineBody: "type.fix-inline-body"
+            case TypeFixtureSignature: "type.fixture-signature"
             case ResolvePlainPadding: "resolve.plain-padding"
             case ResolvePlainPaddingEnd: "resolve.plain-padding-end"
             case ResolvePlainPaddingFill: "resolve.plain-padding-fill"

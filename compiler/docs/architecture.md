@@ -12105,3 +12105,57 @@ and 1067; stage 1's R185 to R189)
       904 and 1067) is not this round's: it waits for 1107's families,
       whose texts and bytes are the raw memory the tags would mark first.
       This changes no rule of the language.
+
+**Stage 1's twenty-third round** (stage 1's RULES.md, R195 to R203; `build --emit-sir` without `--for-run` for a served `sisu build` and `check --holes` of a package, `query values` for a worksheet's inline values, `@fix_inline`'s parentheses, the gap's offsets and fillers in `E0279` and `E0280`, `fix`'s status, `@fixture`, `grammar`, the merge's differences; `sisu1 --version` 0.18.0)
+
+1120. `sisu1 build --emit-sir [PATH]` writes on standard output, for each
+      program the build makes, a line `# executable PATH` (or `# built
+      ...` for a library) and the SIR the native build would hand its
+      backend, with the build's diagnostics and status, `--native`
+      implied; R170's and R189's answers carry the line too, `sir
+      --repl-serve` serves the build and a build without `--native`, and
+      `check --holes` takes a package's directory or none. `sisu1
+      --version` is 0.18.0. Stage 1 decides it (RULES.md, R195).
+
+1121. `query values FILE` answers a worksheet's values and printed lines
+      by the line each statement ends on, from the program `sir
+      --worksheet` writes run by stage 1's evaluator, with the line where
+      it stops `stopped` or `panicked`, so that the language server's
+      inline values need no Rust front end. Stage 1 decides it (RULES.md,
+      R196).
+
+1122. `@fix_inline`'s fix writes an argument, and the whole expression, in
+      parentheses only where precedence needs them, not where it fills a
+      call's argument, an element or the place of a call that stands
+      alone. Stage 1 decides it (RULES.md, R197).
+
+1123. `E0279` and `E0280` name a gap's first and last byte, and their note
+      names fields of numbers at C's offsets that fill it, which are
+      `Copy` where an `Array[u8, N]` is not. Stage 1 decides it (RULES.md,
+      R198).
+
+1124. `sisu1 fix` ends with status 1 and `D0190` when the program still
+      has an error after its fixes, 0 when it checks. Stage 1 decides it
+      (RULES.md, R199).
+
+1125. A test's parameter named after a `@fixture` function of its module
+      that takes nothing is lowered into the test's body as a `let` of
+      the fixture's call, dropped at its end; another `@fixture` is
+      `E0281`, and `scope="module"` waits for the runner. 17's
+      `Expectation` waits for reflected expressions. Stage 1 decides it
+      (RULES.md, R200).
+
+1126. `--explain-size`'s instances per package and their sharing wait for
+      the SIR to name the packages that request each instance, a budget
+      in the manifest, and sharing by layout in the lowerings. Stage 1
+      decides it (RULES.md, R201).
+
+1127. `sisu1 grammar` prints the parser's grammar from its modules' `##!`
+      comments in one order, so that the manual and the architecture
+      notes can be checked against it. Stage 1 decides it (RULES.md,
+      R202).
+
+1128. The conformance suite's `holes/typed_holes` differs from stage 0's
+      front end in its SIR under R27 (a hole's closure, printed where a
+      run reaches it); `holes/holes_refused` and `eval/usage` do not
+      differ. Stage 1 decides it (RULES.md, R203).

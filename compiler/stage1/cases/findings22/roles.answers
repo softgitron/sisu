@@ -224,6 +224,7 @@ fn main(0) source 0 @12:5-12:9 {
     return
 }
 answer 1
+# executable defer_borrow
 sir 0
 source 0 "defer_borrow.sisu"
 entry main
