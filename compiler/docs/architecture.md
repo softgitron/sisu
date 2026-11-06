@@ -12619,3 +12619,183 @@ R219)
       parameter K, for the runner to make once per module; a module's
       fixture returns a `Sync` value (`E0283`). Stage 1 decides it
       (RULES.md, R219).
+
+**Stage 0's twenty-fourth round: options of raw pointers as nullable
+words, the runner's half of `--cover`, stage 1's new forms used, the
+replay log's options and files, a module's fixtures dropped whole, the
+grammar in these notes, and what waits** (sections "Parsing and the
+syntax tree", "Testing", "Hot replacement", "The query layer and the
+driver", "Stage 2: the native backend", "Values", "Raw memory, foreign
+calls and the machine intrinsics"; D-085, D-086, D-089; 10, 12, 17, 22;
+decisions 302, 1101, 1142, 1201, 1202, 1204 and 1206; stage 1's R202,
+R211, R214, R216 and R219)
+
+1240. An `Option[ptr[T]]` (and an option of a `ptr mut T`) is one nullable
+      word in a value natively, the address, 0 for `None`, as C holds an
+      optional pointer, in 1101's order and at 1142's count of sites. The
+      layout tables of both lowerings give it a word and a kind of its own
+      in the type table (`Kind::Nullable`, 48, its raw pointer's type in its
+      first word for the runtime in Sisu), its `Some`'s field at offset 0; a
+      construction writes the word (0, then the address over it for `Some`),
+      `discriminant` and a downcast's test read 0 for an address and 1 for
+      0, `is_some` and `is_none` test the word inline, and `==` compares the
+      words; a foreign call passes and takes the word as it is. Of the
+      runtimes' results of an `Option[T]` written with a tag word, the
+      generated code passes room for the tag and the payload and turns them
+      into the word after the call where the result's type is such an
+      option: those of the intrinsics that make an option (`list.pop`,
+      `Iter.next`, `dict.insert`, `dict.remove`, `Arena.take`,
+      `Sender.try_send`, `Receiver.try_recv`, `Result.ok`, `Result.err` and
+      `Global.acquire`, `Intrinsic::gives_option` and `abi.gives_option`),
+      none of which then runs inline; a result that is a `T` the runtime
+      copies is laid out as its type already. The runtime in Rust reads the
+      word in `Option.or`, `expect` and `unwrap`, and the runtime in Sisu's
+      equality, order, hash and `Debug` walk it (`NULLABLE`), its copy and
+      drop being its bytes'. Debug information describes it as the word its
+      pointer is. Every type then lies in raw memory as it lies in a value,
+      so the refusal of decision 302 (a pointer to a place, or a reference
+      from a pointer, of a type whose two layouts differed) is gone with
+      `same_in_memory` from both lowerings, and `rawmem` converts nothing
+      for it; the interpreter's checked model, whose raw layout of such an
+      option was the nullable word already (decision 302), is unchanged. The
+      case `unsafe/option_pointer` (a `@repr(c)` list of nodes linked by
+      `ptr[Node]?` walked by an exported function, a pointer to a
+      `ptr[Node]?` read and written through, options of pointers in a list,
+      a tuple and a match, `pop` of a list of pointers and of a list of such
+      options, an owned loop over pointers, `unwrap`, `or` and `Debug`)
+      joins `native.list`, which has 298 cases, and holds the interpreter's
+      output in all six native modes, its executables the same bytes from
+      the SIR and the LIR paths; `unsafe/foreign`'s `malloc`, `free` and
+      `getenv` and `unsafe/layouts` are unchanged. A list of a million
+      `ptr[int]?`, filled, walked ten times and read through, peaks at
+      11 900 kB where it peaked at 18 800 kB, its elements 8 bytes where
+      they were 16, in 0.065 s where it took 0.10 to 0.14 s (the release
+      profile, the median of 11 under a load of about 12). The runtime in
+      Sisu's seed is 798 271 bytes where it was 793 152, its object as the
+      fixed point builds it 1 593 816 bytes where it was 1 583 680, and the
+      fixed point holds (sisu2-A and sisu2-B the same 31 176 856 bytes,
+      where they were 31 210 728, stage1-A and stage1-B 69 847 864, where
+      they were 69 839 472). This changes no rule of the language.
+
+1241. `sisu test --cover` (17, "Coverage and mutation") is the runner's half
+      of stage 1's `sir --tests --cover` (its R216, decision 1185) from
+      `sisu1 0.20.0`: the tests run from that SIR in the interpreter with
+      each statement's runs counted by its function and position, as the
+      counterexample mode counts them (decision 1143), and after the run's
+      summary each region whose SIR statement no test ran is printed by its
+      place and kind (`D0161`), then the regions counted, reached and not
+      (`D0162`); a region lowering wrote no statement of is left out, the
+      status is the tests' own, the test cache is not read, and nothing
+      makes it a gate (17). It is interpreted only: a native test counts no
+      statement, and counting them would be a counter at each statement of
+      every function, instrumentation of its own in both lowerings, so
+      `--cover` with `--native` or `--release`, and with `--defer-borrow`,
+      `--mutate`, `--replay` or `--from-sir`, is `D0163`; before
+      `sisu1 0.20.0` and on the Rust front end it is an unknown option
+      (`D0009`). `--mutate` (decision 1201) then counts the statements of
+      the program's own run of its tests and runs against each mutant only
+      the tests whose runs reached its line (by the file its functions' SIR
+      names), every test when the line is of no file of the program, and
+      none when no test reaches it, which survives as before: the survivors
+      are the same, and a program of 20 functions each with its test, whose
+      40 mutants ran 800 tests, runs 40 of them, in 1.9 s where it took 4.7
+      s (the release driver, the median of 3 under a load of 10 to 15), most
+      of it stage 1's writing of the mutants. The case `testing/cover` (an
+      `if` with an `elif` and an `else`, a `for`, a function no test calls)
+      holds the map, and the driver's test
+      `cover_reports_the_regions_no_test_reaches` the refusals and the
+      narrowed `--mutate`. This changes no rule of the language.
+
+1242. From `sisu1 0.20.0` the driver uses the three forms stage 1's R211
+      gives it (decision 1180). `run --defer-borrow` of a program with an
+      error that is not the ownership rules' prints the deferred build's own
+      diagnostics, the human form and `D0006`, and its status, where it
+      built the program again without the option for the words (decision
+      1106's workaround); `deferred_of_stage_1` names each finding by the
+      line `  function NAME` after it, a diagnostic without one a
+      declaration's, where it matched each finding's position with a
+      statement of the SIR, which a statement at the same place in two
+      functions (a closure's and its maker's) made the first's; and
+      `sisu.explainBorrow` asks `query explain` with `--ranges`, so the
+      editor marks each loan from its start to its last use's end, where
+      each range was the position. An older stage 1 keeps the earlier ways
+      (`Stage1::gives_the_asks`). The driver's test
+      `stage_1s_data_commands_answer_as_the_rust_front_end` holds a deferred
+      run with a type error and one with findings in two functions the same
+      served, as a process and on the Rust front end, and
+      `explain_borrow_is_a_command` the ranges' ends on both front ends.
+      This changes no rule of the language.
+
+1243. A recorded run under `--watch` on stage 1 (decision 1200) logs the
+      options its program was built with (`--locked`, `--accept-unsafe`,
+      `--features` and its names, `--no-default-features`), as `option`
+      lines of the log's header, which its replay builds each save with
+      after the contracts' level; and the files it keeps name a file outside
+      the working directory through `..`, with the manifests of the
+      program's packages (the workspace's manifest and lockfile, each
+      dependency's manifest) beside its own, and a `directory` line that
+      gives the run's directory from as high as those names climb
+      (`ws/app`), so that `sisu replay` writes the files under a directory
+      of its own at the places their names reach and builds there, where it
+      refused a log with such a file. A name that climbs above that
+      directory, or is absolute, is still a log it refuses (`D0036`). The
+      interpreter's test `a_log_reads_back_and_replays_its_calls` holds the
+      header's new lines read back. This changes no rule of the language.
+
+1244. The value of a module's fixture (decision 1202) is dropped after the
+      last test that reads it as a `drop` of its type drops it, where only a
+      type with glue was: a list, a set, a dict, a tuple, an option or a
+      result, a `dyn`, an entry or a cell of values whose type has glue
+      drops each of them, with everything it owns, before the next, in the
+      order the run loop takes them (`Interp::drop_now`, beside `drop_next`,
+      since no frame is left to queue them on); a `Shared`, a channel's end
+      and the other values the runtime keeps are let go without their drops,
+      as before. The interpreter's test
+      `a_modules_fixture_of_a_list_drops_its_elements` holds a fixture of a
+      list of two values with a `Drop`, dropped first to last after the
+      test. This changes no rule of the language.
+
+1245. The Rust front end's last roles in `sisu test` are stage 1's. `sisu
+      test --std --defer-borrow` without a program runs from stage 1's `sir
+      --tests --std --defer-borrow` (its R185 and R189), as a program's
+      deferral does (decision 1143), where it was the Rust front end's; and
+      from `sisu1 0.21.0` (its R221 and R223, decisions 1221 and 1223) `sisu
+      test --std` sends `sir --tests --std` naming no path, so that the
+      empty program written aside (decision 1144) retires, and a program
+      with transcripts is built with `sir --tests --transcripts`, whose SIR
+      holds the world of transcripts whatever stage 1 finds beside the
+      program, so its transcripts run from the SIR its tests run and never
+      from the Rust front end's build (`transcript_sir`), which stays for a
+      stage 1 older than 0.21.0 and `--front-end=rust`. `test --std
+      --defer-borrow` runs the 197 examples stage 1 lowers, every one
+      passing under the monitor, where the Rust front end ran its 199. What
+      the Rust front end has left of the driver's work is `--front-end=rust`
+      itself and building stage 1 the first time and after a source of it
+      changed, which a seed executable retires (port-debt.md). This changes
+      no rule of the language.
+
+1246. The grammar of "Parsing and the syntax tree" is the one `sisu grammar`
+      prints (decision 1204), stage 1's parser's own, where the notes
+      carried a sketch without `trait_def`'s, `suite_def`'s, `bench_def`'s
+      and `extern_block`'s productions, parameters, generics, `where`,
+      visibility, `select`, `yield`, `unsafe:`, `comptime`, contracts and
+      `expect`, which nothing checked (the manual's finding, its R20). The
+      driver's test `the_notes_carry_the_grammar_sisu_grammar_prints` holds
+      the text the notes carry the same as what `sisu grammar` prints, so a
+      change of the parser's grammar fails it until the notes print it
+      again. This changes no rule of the language.
+
+1247. The failure database of `check` (17, "Property-based testing and
+      fuzzing": failing examples saved and replayed first) and the JSON
+      event stream of `sisu test` (17, "Output and caching") are not this
+      round's: the round spent its time on 1240 to 1246. The database's
+      smallest form is a file beside the test cache keyed by the test's
+      name, holding the choices of its last failing case, which a replay
+      token already carries (decision 461), and the stream's a line of JSON
+      for each test's start and end with its result and replay token; both
+      are the runner's alone. This changes no rule of the language.
+
+1248. The intrinsic families of decisions 1107, 1148 and 1208 and
+      tagged-pointer provenance (decision 1108) are not this round's either,
+      for the reason 1247 gives; the formatting family stays the first, with
+      903's measurement. This changes no rule of the language.

@@ -690,7 +690,12 @@ impl<'p> Interp<'p, '_> {
     /// dict), each of those in the order a drop takes them (decision
     /// 1244); the failure of that drop, if it panicked.
     pub(crate) fn drop_fixture(&mut self, id: u32, function: &str) -> Option<String> {
-        let ty = self.fn_index(function).ok().and_then(|fi| self.func(fi)).and_then(|f| f.locals.first()).map(|l| l.ty.clone());
+        let ty = self
+            .fn_index(function)
+            .ok()
+            .and_then(|fi| self.func(fi))
+            .and_then(|f| f.locals.first())
+            .map(|l| l.ty.clone());
         let cell = self.heap.get_mut(id as usize)?;
         cell.strong = 0;
         let v = std::mem::replace(&mut cell.value, Value::Moved);

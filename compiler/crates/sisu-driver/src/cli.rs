@@ -1229,7 +1229,9 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 if let Some(other) = ["--native", "--release", "--defer-borrow", "--mutate"]
                     .iter()
                     .find(|o| p.flags.contains(o))
-                    .or_else(|| ["--replay", "--from-sir"].iter().find(|o| p.values.iter().any(|(k, _)| k == *o)))
+                    .or_else(|| {
+                        ["--replay", "--from-sir"].iter().find(|o| p.values.iter().any(|(k, _)| k == *o))
+                    })
                 {
                     host.stderr(&plain_error(msg::CLI_COVER_ALONE, &[("option", other.to_string())]));
                     return EXIT_USAGE;
@@ -1848,7 +1850,10 @@ fn cover_report(prog: &sisu_sir::Program, regions: &[Region], coverage: &Coverag
         }
         unreached += 1;
         let at = r.span.split('-').next().unwrap_or(&r.span).to_string();
-        out.push_str(&format!("{}\n", text(msg::CLI_COVER_UNREACHED, &[("at", at), ("kind", r.kind.clone())])));
+        out.push_str(&format!(
+            "{}\n",
+            text(msg::CLI_COVER_UNREACHED, &[("at", at), ("kind", r.kind.clone())])
+        ));
     }
     out.push_str(&format!(
         "{}\n",
@@ -2905,7 +2910,9 @@ fn stage1_command(
                             host.stderr(&r.stderr);
                             match read_sir(&r.stdout, host) {
                                 Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
-                                Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, None, None, host),
+                                Ok(prog) => {
+                                    test_from_sir(&prog, &p.flags, opts, input, true, None, None, host)
+                                }
                                 Err(code) => code,
                             }
                         }
@@ -3383,7 +3390,9 @@ fn stage1_watched(
     // The run's directory, from as high as the names climb.
     let up = kept
         .iter()
-        .map(|(n, _)| std::path::Path::new(n).components().take_while(|c| *c == std::path::Component::ParentDir).count())
+        .map(|(n, _)| {
+            std::path::Path::new(n).components().take_while(|c| *c == std::path::Component::ParentDir).count()
+        })
         .max()
         .unwrap_or(0);
     let directory = (up > 0).then(|| {
@@ -5963,7 +5972,8 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
             Some(d) => root.join(d),
             None => root.clone(),
         };
-        let depth = log.header.directory.as_deref().map_or(0, |d| std::path::Path::new(d).components().count());
+        let depth =
+            log.header.directory.as_deref().map_or(0, |d| std::path::Path::new(d).components().count());
         let stage1 = if log.header.watch {
             let outside = log.header.files.iter().find(|(name, _)| {
                 let p = std::path::Path::new(name);

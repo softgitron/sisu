@@ -2746,7 +2746,6 @@ impl<'a, 'p> Cx<'a, 'p> {
         Ok(())
     }
 
-
     /// A call of a foreign function (`extern.LIBRARY.NAME`), as C calls it:
     /// each argument converted to its C type, the result back to its Sisu
     /// one, and what the program printed so far written first, since the

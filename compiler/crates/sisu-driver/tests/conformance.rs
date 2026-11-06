@@ -1160,11 +1160,13 @@ fn the_notes_carry_the_grammar_sisu_grammar_prints() {
     if !stage1_at_least(&[0, 18, 0]) {
         return;
     }
-    let notes = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/architecture.md"))
-        .expect("the notes");
+    let notes =
+        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/architecture.md"))
+            .expect("the notes");
     let section = notes.split("\n## Parsing and the syntax tree\n").nth(1).expect("the section");
     let section = section.split("\n## ").next().unwrap_or_default();
-    let carried = section.split("```text\n").nth(1).and_then(|b| b.split("```\n").next()).expect("the grammar");
+    let carried =
+        section.split("```text\n").nth(1).and_then(|b| b.split("```\n").next()).expect("the grammar");
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
         .arg("grammar")
         .env("SISU_FRONT_END", "stage1")
@@ -1172,7 +1174,11 @@ fn the_notes_carry_the_grammar_sisu_grammar_prints() {
         .expect("sisu runs");
     assert_eq!(out.status.code(), Some(0));
     let printed = String::from_utf8_lossy(&out.stdout);
-    assert!(carried == printed, "the notes' grammar is not what `sisu grammar` prints:\n{}", first_difference(carried, &printed));
+    assert!(
+        carried == printed,
+        "the notes' grammar is not what `sisu grammar` prints:\n{}",
+        first_difference(carried, &printed)
+    );
 }
 
 /// The first line where two texts differ, with its number, for a failure.
