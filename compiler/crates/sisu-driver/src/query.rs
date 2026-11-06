@@ -375,6 +375,58 @@ impl Server {
         Some(Ok(Json::obj(vec![("line", Json::num(line)), ("loans", Json::Arr(loans))])))
     }
 
+    /// A worksheet's inline values from `query values` (`sisu1 0.18.0`, its
+    /// R196; decision 1141): the values and the printed lines of each line
+    /// a statement ends on, as `sisu ws` shows them. Where stage 1's
+    /// evaluator stops (a `stopped` line: the world, an intrinsic it lacks
+    /// or its budget), the driver's interpreter runs stage 1's program of
+    /// the worksheet against the fakes instead, as `sisu ws` does; a
+    /// `panicked` line ends the values. A document that is not a script
+    /// (stage 1 stops at its line 0) or does not build has none. None
+    /// without a stage 1 that has the query.
+    pub(crate) fn stage1_values(&mut self, uri: &str) -> Option<crate::repl::Sheet> {
+        if !self.stage1.as_ref().is_some_and(crate::front::Stage1::builds) {
+            return None;
+        }
+        let rows = self.query("values", uri, None)?;
+        let mut sheet = crate::repl::Sheet {
+            values: Default::default(),
+            outputs: Default::default(),
+            errors: String::new(),
+            status: 0,
+        };
+        for row in &rows {
+            let [line, kind, text] = row.as_slice() else { continue };
+            let Ok(line) = line.parse::<usize>() else { continue };
+            match kind.as_str() {
+                "value" => sheet.values.entry(line).or_default().push(text.clone()),
+                "output" => sheet.outputs.entry(line).or_default().push(text.clone()),
+                "stopped" if line > 0 => return Some(self.stage1_sheet_run(uri).unwrap_or(sheet)),
+                _ => break,
+            }
+        }
+        Some(sheet)
+    }
+
+    /// The driver's run of stage 1's program of a worksheet (`sir
+    /// --worksheet`, its R79), against a test's fakes and within the
+    /// language server's budget: what `query values` leaves where stage
+    /// 1's evaluator stops (decision 1141).
+    fn stage1_sheet_run(&mut self, uri: &str) -> Option<crate::repl::Sheet> {
+        let stage1 = self.stage1.as_ref()?;
+        let text = self.docs.get(uri).map(|d| d.text.clone())?;
+        let buffer = buffer_path(&uri_path(uri))?;
+        std::fs::write(&buffer, &text).ok()?;
+        let words = vec!["sir".to_string(), "--worksheet".to_string(), buffer.display().to_string()];
+        let ran = stage1.ask(&words)?;
+        if ran.status != 0 {
+            return None;
+        }
+        let prog = sisu_sir::read(&ran.stdout).ok()?;
+        let mut host = sisu_interp::TestHost::default();
+        Some(crate::repl::run_sheet(&prog, false, Some(crate::assist::SHEET_FUEL), &mut host))
+    }
+
     /// The selection ranges at each position, from `query selection`: its
     /// ranges innermost first, each the parent of the one before.
     pub(crate) fn stage1_selection(&mut self, uri: &str, positions: &[Json]) -> Option<Json> {

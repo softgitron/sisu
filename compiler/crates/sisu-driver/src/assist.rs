@@ -20,7 +20,7 @@ use std::path::Path;
 pub const EXPLAIN_BORROW: &str = "sisu.explainBorrow";
 
 /// The statements a worksheet the server runs may take.
-const SHEET_FUEL: u64 = 10_000_000;
+pub(crate) const SHEET_FUEL: u64 = 10_000_000;
 
 /// The protocol's completion item kinds.
 mod kind {
@@ -831,15 +831,13 @@ impl Server {
     /// top-level statements run, Q-48), each statement's value and what it
     /// printed, at the end of its last line, as `sisu ws` writes them; run
     /// against a test's fake `System`, so nothing reaches the world. A
-    /// document that is not a script, or does not check, has none.
+    /// document that is not a script, or does not check, has none. From
+    /// `sisu1 0.18.0` stage 1's `query values` gives them (its R196,
+    /// decision 1141), and the driver's interpreter runs stage 1's program
+    /// of the worksheet where its evaluator stops; else, and under
+    /// `--front-end=rust`, the Rust front end builds the worksheet.
     pub(crate) fn inline_values(&mut self, uri: &str) -> Json {
         let text = self.text_of(uri);
-        let parse = sisu_parser::parse(FileId(0), &text);
-        let module = sisu_syntax::ast::build::module(&parse.tree);
-        let script = module.items.iter().any(|i| matches!(i.kind, sisu_syntax::ast::ItemKind::Stmt(_)));
-        if !script {
-            return Json::Arr(Vec::new());
-        }
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::hash::DefaultHasher::new();
@@ -851,22 +849,13 @@ impl Server {
         {
             return v.clone();
         }
-        let path = uri_path(uri);
-        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut host = sisu_interp::TestHost::default();
         let lines = Lines::new(&text, self.utf8);
         let mut out = Vec::new();
-        // Fakes only, and a budget of statements, so that a loop that never
-        // ends cannot hold the server (10, "always-on evaluation").
-        if let Ok(sheet) = crate::repl::evaluate_sheet(
-            &path.display().to_string(),
-            &text,
-            &dir,
-            false,
-            Some(SHEET_FUEL),
-            &crate::repl::Checker::Rust,
-            &mut host,
-        ) {
+        let sheet = match self.stage1_values(uri) {
+            Some(sheet) => Ok(sheet),
+            None => self.rust_sheet(uri, &text),
+        };
+        if let Ok(sheet) = sheet {
             let ends: Vec<usize> = text
                 .split_inclusive('\n')
                 .scan(0, |at, l| {
@@ -896,6 +885,31 @@ impl Server {
         let v = Json::Arr(out);
         self.sheet = Some((key, v.clone()));
         v
+    }
+
+    /// A worksheet's values from the Rust front end's build of it, run by
+    /// the driver's interpreter; none for a document that is not a script.
+    fn rust_sheet(&self, uri: &str, text: &str) -> Result<crate::repl::Sheet, String> {
+        let parse = sisu_parser::parse(FileId(0), text);
+        let module = sisu_syntax::ast::build::module(&parse.tree);
+        let script = module.items.iter().any(|i| matches!(i.kind, sisu_syntax::ast::ItemKind::Stmt(_)));
+        if !script {
+            return Err(String::new());
+        }
+        let path = uri_path(uri);
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut host = sisu_interp::TestHost::default();
+        // Fakes only, and a budget of statements, so that a loop that never
+        // ends cannot hold the server (10, "always-on evaluation").
+        crate::repl::evaluate_sheet(
+            &path.display().to_string(),
+            text,
+            &dir,
+            false,
+            Some(SHEET_FUEL),
+            &crate::repl::Checker::Rust,
+            &mut host,
+        )
     }
 }
 

@@ -1206,6 +1206,18 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             if let Some(t) = &target_of_stage1 {
                 return stage1_command(cmd, &p, &opts, t, program_args, &features, locked, host);
             }
+            // `sisu test --std` without a program: the standard library's
+            // examples from `sisu1 0.17.0`'s `sir --tests --std` of an empty
+            // program (its R185, decision 1144), as the Rust front end runs
+            // them on one.
+            if front == FrontEnd::Stage1
+                && let [input] = inputs.as_slice()
+                && input.shown == "--std"
+                && !p.flags.contains(&"--defer-borrow")
+                && crate::front::stage1_takes_the_roles()
+            {
+                return std_examples_of_stage1(&p, &opts, input, host);
+            }
             // Each member of a workspace in turn (09); the worst status wins.
             let mut status = exit::OK;
             for input in &inputs {
@@ -1282,7 +1294,7 @@ fn from_sir(
     // --tests`), run in the interpreter (decision 285).
     if cmd == "test" {
         stage.set("the interpreter");
-        return test_from_sir(&prog, flags, opts, input, false, host);
+        return test_from_sir(&prog, flags, opts, input, false, None, host);
     }
     if cmd == "bench" {
         stage.set("the interpreter");
@@ -1451,19 +1463,21 @@ pub(crate) fn black_box_files(dir: &str) -> Vec<String> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn test_from_sir(
     prog: &sisu_sir::Program,
     flags: &[&str],
     opts: &Opts,
     input: &Input,
     sources: bool,
+    deferred: Option<&str>,
     host: &mut dyn Host,
 ) -> i32 {
     let has = |f: &str| flags.contains(&f);
     // The standard library's examples are among the tests of stage 1's SIR
-    // from `sisu1 0.17.0` (decision 1102), and not of a file of SIR.
-    if let Some(bad) = ["--defer-borrow", "--std"].into_iter().find(|f| has(f) && !(sources && *f == "--std"))
-    {
+    // from `sisu1 0.17.0` (decision 1102), and so is the counterexample
+    // mode's deferral (its R189, decision 1143), but not of a file of SIR.
+    if let Some(bad) = ["--defer-borrow", "--std"].into_iter().find(|f| has(f) && !sources) {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
             &[("option", bad.to_string()), ("command", "test --from-sir".to_string())],
@@ -1490,8 +1504,18 @@ fn test_from_sir(
             return exit::ERROR;
         }
     }
+    // `--defer-borrow` (decision 1143): stage 1's SIR of a program whose
+    // only errors are the ownership rules', its diagnostics in the
+    // conformance form (`deferred`), run under the monitor with each
+    // statement's runs counted for the account, as the Rust front end's
+    // build of it is.
+    let deferring = deferred.is_some();
+    if deferring {
+        host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
+    }
     let options = Options {
-        monitor: !has("--no-monitor"),
+        monitor: has("--defer-borrow") || !has("--no-monitor"),
+        coverage: deferring,
         seed: opts.seeds.first,
         strategy: opts.strategy.clone(),
         sim: opts.sim,
@@ -1576,8 +1600,9 @@ fn test_from_sir(
     }
     // The test cache (decision 242), for a run whose results the program's
     // code and these options decide: not one that searches schedules,
-    // simulates or updates snapshots.
+    // simulates, updates snapshots or defers the ownership checker.
     let cached = sources
+        && !deferring
         && !has("--no-cache")
         && crate::native_tests::chosen().is_none()
         && opts.seeds.explore.is_none()
@@ -1637,7 +1662,54 @@ fn test_from_sir(
             return code;
         }
     }
+    if let Some(stderr) = deferred {
+        let violation = reports.iter().any(|r| r.violation);
+        let coverage = merge_coverage(&reports);
+        let (declarations, findings) = deferred_of_stage_1(prog, stderr);
+        host.stderr(&defer_account(&declarations, &findings, violation, &coverage));
+    }
     code
+}
+
+/// `sisu test --std` outside a package and without a file, from stage 1
+/// (decision 1144): its `sir --tests --std` of an empty program written
+/// aside, whose tests are the standard library's examples, run as a
+/// program's are, the replay lines naming the flag as the Rust front
+/// end's run names it.
+fn std_examples_of_stage1(p: &Parsed<'_>, opts: &Opts, input: &Input, host: &mut dyn Host) -> i32 {
+    let stage1 = match crate::front::Stage1::ready(host) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let dir = std::env::temp_dir().join(format!("sisu-std-examples-{}", std::process::id()));
+    let file = dir.join("examples.sisu");
+    if std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, "")).is_err() {
+        let _ = std::fs::remove_dir_all(&dir);
+        host.stderr(&plain_error(
+            msg::CLI_CANNOT_READ,
+            &[("path", file.display().to_string()), ("reason", "it cannot be written".into())],
+        ));
+        return exit::ERROR;
+    }
+    let mut words = vec!["sir".to_string(), "--tests".to_string(), "--std".to_string()];
+    if opts.contracts_given {
+        words.push(format!("--contracts={}", opts.level.name()));
+    }
+    words.push(file.display().to_string());
+    let ran = stage1.run(&words, crate::front::Backend::Unused, host);
+    let _ = std::fs::remove_dir_all(&dir);
+    let r = match ran {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    host.stderr(&r.stderr);
+    if r.status != exit::OK || r.stdout.is_empty() {
+        return r.status.max(exit::ERROR);
+    }
+    match read_sir(&r.stdout, host) {
+        Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, None, host),
+        Err(code) => code,
+    }
 }
 
 /// The SIR a program's transcripts run (17): the program as the Rust front
@@ -1756,7 +1828,13 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
                 && (p.file.is_some()
                     || crate::package::locate(None, &std::env::current_dir().unwrap_or_default()).is_some())
                 && crate::front::stage1_takes_the_roles();
-            !p.flags.iter().any(|f| *f == "--defer-borrow" || (*f == "--std" && !std_from_stage1))
+            // `test --defer-borrow` from `sisu1 0.17.0`'s deferred SIR (its
+            // R189, decision 1143), when stage 1 reports the program itself.
+            let defers = cmd == "test"
+                && !has_ids(&p.flags)
+                && crate::front::stage1_takes_the_roles()
+                && crate::front::stage1_sir_reports();
+            !p.flags.iter().any(|f| (*f == "--defer-borrow" && !defers) || (*f == "--std" && !std_from_stage1))
                 && !value("--from-sir")
                 && (!features || crate::front::stage1_sir_reports())
         }
@@ -1862,7 +1940,9 @@ fn errors_line(errors: &str, lowered: bool) -> Option<String> {
 /// `sisu check --holes FILE` (decision 1063): stage 1's, which lists each
 /// typed hole of the program that holds the file (its R174), when it has
 /// it; `D0009` before `sisu1 0.15.0`. One readable file is the command's
-/// path; none, a directory or more than one is its usage (`D0151`).
+/// path; none, a directory or more than one is its usage (`D0151`), but
+/// from `sisu1 0.18.0`, whose `check --holes` takes a package's directory
+/// or none for the working directory's package (its R195, decision 1140).
 fn holes(rest: &[String], host: &mut dyn Host) -> i32 {
     let stage1 = match crate::front::Stage1::ready(host) {
         Ok(s) => s,
@@ -1896,6 +1976,17 @@ fn holes(rest: &[String], host: &mut dyn Host) -> i32 {
                     &[("path", file.to_string()), ("reason", e.to_string())],
                 ));
                 return exit::ERROR;
+            }
+            stage1_as_is("check", rest, host)
+        }
+        [] | [_] if stage1.builds() => {
+            // A package's directory, or the working directory's package,
+            // found as for the other commands of a package (`D0064`).
+            let target = paths.first().map(|p| p.as_str());
+            if crate::package::locate(target, &cwd).is_none() {
+                let dir = target.map(str::to_string).unwrap_or_else(|| cwd.display().to_string());
+                host.stderr(&plain_error(msg::CLI_NO_PACKAGE, &[("dir", dir), ("command", "check".into())]));
+                return EXIT_USAGE;
             }
             stage1_as_is("check", rest, host)
         }
@@ -2110,8 +2201,17 @@ fn stage1_command(
             // its file, so a replay runs that file alone.
             let black_box =
                 cmd == "test" && once && opts.token.is_none() && module.is_none() && stage1.black_box_tests();
-            let sir_words = |path: &str| {
+            // `test --defer-borrow` from `sisu1 0.17.0`'s `sir --tests
+            // --defer-borrow` (its R189, decision 1143): status 3 is a
+            // deferred error, whose diagnostics in the conformance form are
+            // the account's; any other error is reported by the build without
+            // the option, as `run --defer-borrow` reports it (decision 1106).
+            let defer = cmd == "test" && has("--defer-borrow");
+            let sir_words_with = |path: &str, defer: bool| {
                 let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                if defer {
+                    words.push("--defer-borrow".into());
+                }
                 if module.is_some() {
                     words.push("--modules".into());
                 }
@@ -2135,6 +2235,29 @@ fn stage1_command(
                 }
                 words.push(path.to_string());
                 words
+            };
+            let sir_words = |path: &str| sir_words_with(path, defer);
+            // The tests of an answer of `sir --tests`, or its errors: under
+            // `--defer-borrow` an error not deferred as the plain build
+            // reports it, and the deferred diagnostics not shown but read.
+            let answered = |host: &mut dyn Host, r: &crate::front::Ran, path: &str| -> Result<Option<String>, i32> {
+                let deferring = defer && r.status == DEFERRED;
+                if defer && r.status != exit::OK && !deferring {
+                    let plain = run(host, &sir_words_with(path, false), Backend::Unused)?;
+                    if plain.status != exit::OK {
+                        host.stderr(&plain.stderr);
+                        return Err(plain.status.max(exit::ERROR));
+                    }
+                    host.stderr(&r.stderr);
+                    return Err(r.status.max(exit::ERROR));
+                }
+                if !defer || r.stdout.is_empty() {
+                    host.stderr(&r.stderr);
+                }
+                if (r.status != exit::OK && !deferring) || r.stdout.is_empty() {
+                    return Err(r.status.max(exit::ERROR));
+                }
+                Ok(deferring.then(|| r.stderr.clone()))
             };
             let mut status = exit::OK;
             // When the run has more than one program (a workspace's members,
@@ -2164,11 +2287,9 @@ fn stage1_command(
                     };
                     // Its diagnostics, and the line `sisu run` ends with when
                     // it fails; its warnings before the report.
-                    host.stderr(&r.stderr);
-                    let mut code = if r.status != exit::OK || r.stdout.is_empty() {
-                        r.status.max(exit::ERROR)
-                    } else {
-                        match read_sir(&r.stdout, host) {
+                    let mut code = match answered(host, &r, program) {
+                        Err(code) => code,
+                        Ok(deferred) => match read_sir(&r.stdout, host) {
                             Ok(mut prog) if cmd == "bench" => {
                                 if let Some((_, file)) = &module {
                                     keep_module_benches(&mut prog, &r.stdout, file);
@@ -2179,10 +2300,10 @@ fn stage1_command(
                                 if let Some((_, file)) = &module {
                                     keep_module_tests(&mut prog, &r.stdout, file);
                                 }
-                                test_from_sir(&prog, &p.flags, opts, input, true, host)
+                                test_from_sir(&prog, &p.flags, opts, input, true, deferred.as_deref(), host)
                             }
                             Err(code) => code,
-                        }
+                        },
                     };
                     if black_box && input.package.is_some() {
                         for path in black_box_files(&input.shown) {
@@ -2193,14 +2314,20 @@ fn stage1_command(
                                 Ok(r) => r,
                                 Err(c) => return c,
                             };
-                            host.stderr(&r.stderr);
-                            let c = if r.status != exit::OK || r.stdout.is_empty() {
-                                r.status.max(exit::ERROR)
-                            } else {
-                                match read_sir(&r.stdout, host) {
-                                    Ok(prog) => test_from_sir(&prog, &p.flags, opts, &file, true, host),
+                            let c = match answered(host, &r, &path) {
+                                Err(c) => c,
+                                Ok(deferred) => match read_sir(&r.stdout, host) {
+                                    Ok(prog) => test_from_sir(
+                                        &prog,
+                                        &p.flags,
+                                        opts,
+                                        &file,
+                                        true,
+                                        deferred.as_deref(),
+                                        host,
+                                    ),
                                     Err(c) => c,
-                                }
+                                },
                             };
                             code = worse(code, c);
                         }
@@ -2283,7 +2410,7 @@ fn stage1_command(
                             host.stderr(&r.stderr);
                             match read_sir(&r.stdout, host) {
                                 Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
-                                Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),
+                                Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, None, host),
                                 Err(code) => code,
                             }
                         }
@@ -2295,6 +2422,32 @@ fn stage1_command(
         }
         "build" => {
             let native = has("--native");
+            // From `sisu1 0.18.0` a native build's SIR comes from the served
+            // `build --emit-sir` (its R195, decision 1140), each program
+            // compiled here into the executable its line names, as the
+            // build would have handed it to this executable as its backend;
+            // a plain build is served as it is.
+            if native && stage1.builds() {
+                let mut words = ["build", "--emit-sir"].map(String::from).to_vec();
+                if opts.release {
+                    words.push("--release".into());
+                }
+                words.extend(contracts);
+                if let Some(o) = &opts.output {
+                    words.push("--output".into());
+                    words.push(o.clone());
+                }
+                program(&mut words);
+                let r = match run(host, &words, Backend::Unused) {
+                    Ok(r) => r,
+                    Err(code) => return code,
+                };
+                host.stderr(&r.stderr);
+                if r.status != exit::OK {
+                    return r.status;
+                }
+                return build_emitted(&r.stdout, crate::native::Profile::of(opts.release), host);
+            }
             let mut words = vec!["build".to_string()];
             if native {
                 words.push("--native".into());
@@ -2341,8 +2494,10 @@ fn stage1_command(
             // `build --for-run --emit-sir` (its R170), compiled here, where
             // the build would hand it to this executable as its backend
             // (decision 1061). A package's executable goes where stage 1's
-            // build puts it, so its run asks stage 1 for the build.
-            if let Some(e) = exe.as_ref().filter(|_| stage1.assists()) {
+            // build puts it, which from `sisu1 0.18.0` the answer's line
+            // `# executable PATH` names (its R195, decision 1140); an older
+            // stage 1 is asked for the build.
+            if stage1.assists() && (exe.is_some() || stage1.builds()) {
                 let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
                 if opts.release {
                     words.push("--release".into());
@@ -2367,8 +2522,15 @@ fn stage1_command(
                 if prog.entry.is_none() {
                     return no_main(target, host);
                 }
+                let Some(e) = exe.clone().or_else(|| emitted(&r.stdout).into_iter().find_map(|(p, _)| p))
+                else {
+                    return no_main(target, host);
+                };
+                let e = e.as_path();
                 let profile = crate::native::Profile::of(opts.release);
-                let _ = std::fs::create_dir_all(&aside);
+                if let Some(dir) = e.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
                 let code = match crate::native::build(crate::native::Code::Sir(&prog), e, profile, host) {
                     Ok(()) => {
                         let how = crate::native::Run {
@@ -2577,6 +2739,51 @@ fn stage1_command(
 
 /// `sisu run` of a program without `main`: a file's, or a library
 /// package's.
+/// The programs of an answer of `build --emit-sir` (stage 1's R195), in
+/// the build's order: for each, the executable its line `# executable
+/// PATH` names and its SIR, or none and the line a library's `# built
+/// ...` gives, which the build prints of it.
+fn emitted(stdout: &str) -> Vec<(Option<std::path::PathBuf>, String)> {
+    let mut out: Vec<(Option<std::path::PathBuf>, String)> = Vec::new();
+    for line in stdout.split_inclusive('\n') {
+        let bare = line.trim_end_matches(['\n', '\r']);
+        if let Some(path) = bare.strip_prefix("# executable ") {
+            out.push((Some(std::path::PathBuf::from(path)), String::new()));
+        } else if let Some(built) = bare.strip_prefix("# ").filter(|l| l.starts_with("built ")) {
+            out.push((None, built.to_string()));
+        } else if let Some((Some(_), sir)) = out.last_mut() {
+            sir.push_str(line);
+        }
+    }
+    out
+}
+
+/// `sisu build --native` from a served `build --emit-sir` (stage 1's R195,
+/// decision 1140): each program's SIR compiled into the executable its
+/// line names, whose directory is made, with the backend's `built` line
+/// (and `--explain-size`'s parts), and a library's line as the build
+/// prints it; the first program that fails stops the build.
+fn build_emitted(stdout: &str, profile: crate::native::Profile, host: &mut dyn Host) -> i32 {
+    for (exe, text) in emitted(stdout) {
+        let Some(exe) = exe else {
+            host.stdout(&format!("{text}\n"));
+            continue;
+        };
+        let prog = match read_sir(&text, host) {
+            Ok(p) => p,
+            Err(code) => return code,
+        };
+        if let Some(dir) = exe.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let code = crate::native::build_command(crate::native::Code::Sir(&prog), &exe, profile, host);
+        if code != exit::OK {
+            return code;
+        }
+    }
+    exit::OK
+}
+
 fn no_main(target: &Stage1Target, host: &mut dyn Host) -> i32 {
     let name = target.dir.as_ref().and_then(|d| {
         let text = std::fs::read_to_string(d.join(crate::package::MANIFEST)).ok()?;
@@ -4206,7 +4413,8 @@ pub(crate) fn text_line(id: sisu_diag::MsgId, params: &[(&str, String)]) -> Stri
 /// The tests at `which`, those the cache holds taken from it (each prints
 /// what it printed when it ran), the others run; the cache then holds the
 /// tests that passed (decision 242). When every test ran (`all`), a key
-/// no test has any more goes.
+/// no test has any more goes. Beside each result, whether the cache gave
+/// it, which its line says (decision 1145).
 fn cached_tests(
     prog: &sisu_sir::Program,
     host: &mut dyn Host,
@@ -4215,7 +4423,7 @@ fn cached_tests(
     path: &std::path::Path,
     salt: &str,
     all: bool,
-) -> Vec<(String, TestResult, sisu_interp::RunReport)> {
+) -> (Vec<(String, TestResult, sisu_interp::RunReport)>, Vec<bool>) {
     let have = crate::testcache::read(path);
     let keys: Vec<Option<u64>> = which.iter().map(|&k| crate::testcache::key(prog, k, salt)).collect();
     let held = |k: &Option<u64>| k.and_then(|k| have.get(&k).map(|e| (k, e.clone())));
@@ -4225,7 +4433,9 @@ fn cached_tests(
     let mut fresh = sisu_interp::run_tests_report_at(prog, &mut quiet, options, &to_run).into_iter();
     let mut keep = if all { std::collections::BTreeMap::new() } else { have.clone() };
     let mut out = Vec::new();
+    let mut from_cache = Vec::new();
     for (&w, k) in which.iter().zip(&keys) {
+        from_cache.push(held(k).is_some());
         let (name, result, report) = match held(k) {
             Some((key, (o, e))) => {
                 keep.insert(key, (o.clone(), e.clone()));
@@ -4245,7 +4455,8 @@ fn cached_tests(
     if keep != have {
         crate::testcache::write(path, &keep);
     }
-    out
+    from_cache.truncate(out.len());
+    (out, from_cache)
 }
 
 /// The tests at these indices run, in the interpreter or, under `sisu test
@@ -4288,9 +4499,12 @@ fn run_tests(
     // (decision 386).
     let ran = match &run.cache {
         Some((path, salt)) => Ok(cached_tests(prog, host, options, &which, path, salt, run.only.is_none())),
-        None => test_runs(prog, host, options, &which),
+        None => test_runs(prog, host, options, &which).map(|r| {
+            let n = r.len();
+            (r, vec![false; n])
+        }),
     };
-    let mut results = match ran {
+    let (mut results, from_cache) = match ran {
         Ok(r) => r,
         Err(code) => return (code, Vec::new()),
     };
@@ -4361,6 +4575,11 @@ fn run_tests(
     let mut failures = String::new();
     for (i, (name, r, report)) in results.iter().enumerate() {
         let outcome = match r {
+            // A result the cache gave says so (decision 1145).
+            TestResult::Passed if from_cache.get(i).copied().unwrap_or(false) => {
+                passed += 1;
+                text(msg::CLI_TEST_CACHED, &[])
+            }
             TestResult::Passed => {
                 passed += 1;
                 "ok".to_string()

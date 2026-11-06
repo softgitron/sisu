@@ -735,6 +735,74 @@ fn range_formatting_and_worksheet_values_on(front: &str) {
     c.stop();
 }
 
+/// A worksheet's inline values on both front ends (decision 1141): from
+/// `sisu1 0.18.0` stage 1's `query values`, and where its evaluator stops
+/// at a use of the world (`print_err`), the driver's run of stage 1's
+/// program of the worksheet, so that every statement's value shows as the
+/// Rust front end's build of it shows them; a document that is not a
+/// script has none on either.
+#[test]
+fn worksheet_values_answer_as_the_rust_front_end() {
+    let sheet = "let prices = [3, 5, 8]\nvar total = 0\nfor p in prices:\n    total += p\n    \
+                 print(\"added {p}\")\nlet label = if total > 10: \"dear\" else: \"cheap\"\n\
+                 \"{label}: {total}\"\nprint_err(\"to standard error\")\ntotal + 1\n";
+    let (uri, _dir) = document("values.sisu", sheet);
+    let (plain, _dir2) = document("plain.sisu", "def main():\n    print(1)\n");
+    let mut answers = Vec::new();
+    for front in FRONTS {
+        let mut c = Client::start_on(front);
+        c.open(&uri, sheet);
+        c.open(&plain, "def main():\n    print(1)\n");
+        answers.push((front, inline_values(&mut c, &uri, 12), inline_values(&mut c, &plain, 2)));
+        c.stop();
+    }
+    let (_, rust, rust_plain) = &answers[0];
+    assert_eq!(
+        rust,
+        &vec![
+            (0, "# => [3, 5, 8]".to_string()),
+            (1, "# => 0".to_string()),
+            (4, "# | added 3  # | added 5  # | added 8".to_string()),
+            (5, "# => \"dear\"".to_string()),
+            (6, "# => \"dear: 16\"".to_string()),
+            (8, "# => 17".to_string()),
+        ]
+    );
+    assert!(rust_plain.is_empty(), "{rust_plain:?}");
+    for (front, values, plain) in &answers[1..] {
+        assert_eq!((values, plain), (rust, rust_plain), "{front}");
+    }
+}
+
+/// The inline values of the document's first `lines` lines, by the line
+/// each is shown on.
+fn inline_values(c: &mut Client, uri: &str, lines: u32) -> Vec<(u64, String)> {
+    let r = c.request(
+        "textDocument/inlineValue",
+        Json::obj(vec![
+            ("textDocument", Json::obj(vec![("uri", Json::str(uri))])),
+            (
+                "range",
+                Json::obj(vec![
+                    ("start", Json::obj(vec![("line", Json::num(0)), ("character", Json::num(0))])),
+                    ("end", Json::obj(vec![("line", Json::num(lines)), ("character", Json::num(0))])),
+                ]),
+            ),
+            ("context", Json::obj(vec![("frameId", Json::num(0))])),
+        ]),
+    );
+    r.as_array()
+        .unwrap_or(&[])
+        .iter()
+        .map(|v| {
+            (
+                v.at(&["range", "start", "line"]).and_then(Json::as_u64).unwrap_or(99),
+                v.get("text").and_then(Json::as_str).unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
 /// Where a body in the middle of a file starts: its first statement.
 fn middle_body(text: &str) -> Option<usize> {
     let parse = sisu_parser::parse(sisu_diag::FileId(0), text);
@@ -765,7 +833,12 @@ fn middle_body(text: &str) -> Option<usize> {
 /// 100 ms an editor allows (10, "Compile speed as a requirement"). The
 /// numbers are printed (`cargo test --release --test lsp latency --
 /// --nocapture`); the test fails only past ten times that, since a debug
-/// build on a busy machine is not the measure.
+/// build on a busy machine is not the measure, and only when the answer is
+/// that slow again: a change or a hover past the bound is measured twice
+/// more, the change with another body each time (two `pass` lines, then
+/// three), so that a pause of the machine (another test suite at once,
+/// decision 1146) is not taken for the server's time, and the fastest of
+/// the three is held to the bound.
 #[test]
 fn latency() {
     let mut c = Client::start();
@@ -784,21 +857,39 @@ fn latency() {
         let start = std::time::Instant::now();
         c.open(&uri, &text);
         let open = start.elapsed();
-        let changed = match middle_body(&text) {
+        // The text with `passes` lines of `pass` at the start of a body.
+        let changed = |passes: usize| match middle_body(&text) {
             Some(at) => {
                 let line_start = text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
-                format!("{}{}pass\n{}", &text[..line_start], &text[line_start..at], &text[line_start..])
+                let indent = &text[line_start..at];
+                let lines = vec![format!("{indent}pass\n"); passes].concat();
+                format!("{}{lines}{}", &text[..line_start], &text[line_start..])
             }
-            None => format!("{text}\n"),
+            None => format!("{text}{}", "\n".repeat(passes)),
         };
-        let start = std::time::Instant::now();
-        c.change(&uri, 2, &changed);
-        let change = start.elapsed();
+        let bound = std::time::Duration::from_millis(1000);
+        let mut version = 2;
+        let mut change = std::time::Duration::MAX;
+        for passes in 1..=3 {
+            let start = std::time::Instant::now();
+            c.change(&uri, version, &changed(passes));
+            version += 1;
+            change = change.min(start.elapsed());
+            if change < bound {
+                break;
+            }
+        }
         // A hover in the middle of the file.
         let line = (text.lines().count() / 2) as u32;
-        let start = std::time::Instant::now();
-        let _ = c.at("textDocument/hover", &uri, line, 8);
-        let hover = start.elapsed();
+        let mut hover = std::time::Duration::MAX;
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let _ = c.at("textDocument/hover", &uri, line, 8);
+            hover = hover.min(start.elapsed());
+            if hover < bound {
+                break;
+            }
+        }
         println!(
             "std/{name}: open {} ms, change {} ms, hover {} ms",
             open.as_millis(),
@@ -808,7 +899,7 @@ fn latency() {
         if change.as_millis() > worst.0 {
             worst = (change.as_millis(), name.clone());
         }
-        assert!(change.as_millis() < 1000 && hover.as_millis() < 1000, "{name}: too slow");
+        assert!(change < bound && hover < bound, "{name}: too slow, three times");
         c.notify(
             "textDocument/didClose",
             Json::obj(vec![("textDocument", Json::obj(vec![("uri", Json::str(&uri))]))]),

@@ -1222,14 +1222,40 @@ pub(crate) fn evaluate_sheet(
             (prog, Some(spans))
         }
     };
+    let sheet = run_sheet(&prog, real, fuel, host);
+    let Some((spans, shift)) = spans else {
+        return Ok(sheet);
+    };
+    // By each statement's last line, in the file as written.
+    let Sheet { mut values, mut outputs, errors, status } = sheet;
+    let mut sheet_out = Sheet { values: Default::default(), outputs: Default::default(), errors, status };
+    for (first, end) in spans {
+        let Some(at) = end.checked_sub(shift).filter(|n| *n > 0) else { continue };
+        if let Some(vs) = values.remove(&first) {
+            sheet_out.values.entry(at).or_default().extend(vs);
+        }
+        if let Some(os) = outputs.remove(&first) {
+            sheet_out.outputs.entry(at).or_default().extend(os);
+        }
+    }
+    Ok(sheet_out)
+}
+
+/// The run of a worksheet's program, its statements marked (`sir
+/// --worksheet`'s, or the driver's for the Rust front end), against a
+/// test's fake `System` or the real one when `real`, for at most `fuel`
+/// statements when given: the values and the printed lines by the line
+/// each marker names. The language server runs stage 1's program of a
+/// worksheet so where stage 1's evaluator stops (decision 1141).
+pub(crate) fn run_sheet(prog: &sisu_sir::Program, real: bool, fuel: Option<u64>, host: &mut dyn Host) -> Sheet {
     let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
     let report = {
         let mut live = WithArgs { inner: &mut cap, args: Vec::new(), watch: Vec::new() };
         let options = Options { fuel, ..Options::default() };
         if real {
-            sisu_interp::run_main_report(&prog, &mut live, &options)
+            sisu_interp::run_main_report(prog, &mut live, &options)
         } else {
-            sisu_interp::run_main_faked(&prog, &mut live, &options)
+            sisu_interp::run_main_faked(prog, &mut live, &options)
         }
     };
     let (printed, errors) = (cap.out, cap.err);
@@ -1247,22 +1273,7 @@ pub(crate) fn evaluate_sheet(
             outputs.entry(current).or_default().push(l.to_string());
         }
     }
-    let Some((spans, shift)) = spans else {
-        return Ok(Sheet { values, outputs, errors, status: report.status });
-    };
-    // By each statement's last line, in the file as written.
-    let mut sheet_out =
-        Sheet { values: Default::default(), outputs: Default::default(), errors, status: report.status };
-    for (first, end) in spans {
-        let Some(at) = end.checked_sub(shift).filter(|n| *n > 0) else { continue };
-        if let Some(vs) = values.remove(&first) {
-            sheet_out.values.entry(at).or_default().extend(vs);
-        }
-        if let Some(os) = outputs.remove(&first) {
-            sheet_out.outputs.entry(at).or_default().extend(os);
-        }
-    }
-    Ok(sheet_out)
+    Sheet { values, outputs, errors, status: report.status }
 }
 
 /// Each statement's first and last line in the Rust front end's worksheet

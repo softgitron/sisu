@@ -10,8 +10,9 @@
 //! comment, a reordering or a new test reruns nothing. A test's
 //! capabilities are in its signature: one that takes the real `System`
 //! touches the world and is never cached, and one that names capabilities
-//! gets fakes, which the key's code covers. A cached test reports `ok` as
-//! a run would; nothing printed depends on the cache.
+//! gets fakes, which the key's code covers. A cached test reports `ok
+//! (cached)` where a run reports `ok`, so that what the cache remembered
+//! shows (decision 1145); nothing else printed depends on the cache.
 
 use sisu_sir::{Callee, Const, FnKind, Operand, Program, Rvalue, StatementKind, Terminator};
 use std::collections::{BTreeMap, BTreeSet, HashMap};

@@ -440,9 +440,10 @@ fn the_test_cache_keeps_what_passed() {
     let held = std::fs::read_to_string(&cache).unwrap_or_default();
     assert_eq!(held.lines().count(), 2, "{held}");
     assert!(held.contains("\"out\":\"ran\\n\""), "{held}");
-    // The same output from the cache.
+    // The same output from the cache, each line saying what the cache gave
+    // (decision 1145).
     let (code, second) = cli(&["test", &f]);
-    assert_eq!((code, second.out.as_str()), (0, first.out.as_str()));
+    assert_eq!((code, second.out.clone()), (0, first.out.replace(" ... ok\n", " ... ok (cached)\n")));
     // An edit of what `another` reaches runs it again, and it fails now;
     // the first test stays cached.
     let source = std::fs::read_to_string(&f).unwrap_or_default();
@@ -450,6 +451,7 @@ fn the_test_cache_keeps_what_passed() {
     let (code, third) = cli(&["test", &f]);
     assert_eq!(code, 1);
     assert!(third.out.contains("test \"another\" ... FAILED"), "{}", third.out);
+    assert!(third.out.contains("test \"prints and passes\" ... ok (cached)\n"), "{}", third.out);
     // A passing test's output is held, and shown with a failure alone
     // (decision 466).
     assert!(!third.out.contains("ran\n"), "{}", third.out);

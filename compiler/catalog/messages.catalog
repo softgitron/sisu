@@ -1198,3 +1198,7 @@ D0184 cli     cli.hole-requires           given: `{clause}`
 D0185 cli     cli.hole-ensures            to keep: `{clause}`
 D0186 cli     cli.hole-tests              reached by the tests {tests}
 D0187 cli     cli.hole-tests-none         no test reaches it
+# A test whose result `sisu test` took from the test cache (17, "Output
+# and caching"; decision 1145; the manual's finding from chapter 19 and
+# R16): its line says so, where it said `ok` as a run does.
+D0152 cli     cli.test-cached             ok (cached)

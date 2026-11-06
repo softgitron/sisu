@@ -618,6 +618,16 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= ROLES_SINCE)
     }
 
+    /// Whether this stage 1's `build --emit-sir` writes each program's SIR
+    /// after a line naming its executable, `# executable PATH` (or `#
+    /// built ...` for a library), and serves a plain `build`, whose `check
+    /// --holes` takes a package's directory or none, and whose `query
+    /// values` answers a worksheet's inline values (its R195 and R196):
+    /// `sisu1 0.18.0` and later (decisions 1140 to 1142).
+    pub fn builds(&self) -> bool {
+        self.version().is_some_and(|v| v >= BUILDS_SINCE)
+    }
+
     /// The environment a run of stage 1 gets: none of the runtime's or the
     /// driver's own switches, the lowering and backend the command chose,
     /// and the working directory as the shell's `PWD`.
@@ -724,6 +734,7 @@ impl Stage1 {
             && (crate::serve::served(args)
                 || (matches!(args.first().map(String::as_str), Some("eval" | "query")) && self.evaluates())
                 || (emits_sir(args) && self.assists())
+                || (builds(args) && self.builds())
                 || (args.first().is_some_and(|a| a == "fix") && self.fixes())
                 || (matches!(args.first().map(String::as_str), Some("explain-borrow" | "audit"))
                     && self.takes_the_roles()))
@@ -859,6 +870,14 @@ fn emits_sir(args: &[String]) -> bool {
     args.first().is_some_and(|a| a == "build")
         && args.iter().any(|a| a == "--for-run")
         && args.iter().any(|a| a == "--emit-sir")
+}
+
+/// Whether `args` are a `build` that `sisu1 0.18.0`'s `sir --repl-serve`
+/// serves (its R195, decision 1140): with `--emit-sir`, or without
+/// `--native`, which calls no backend.
+fn builds(args: &[String]) -> bool {
+    args.first().is_some_and(|a| a == "build")
+        && (args.iter().any(|a| a == "--emit-sir") || !args.iter().any(|a| a == "--native"))
 }
 
 /// The line that starts an answer of `sir --repl-serve`, `answer STATUS
@@ -1363,6 +1382,12 @@ const FIX_SINCE: (u32, u32, u32) = (0, 16, 0);
 /// --ownership` and `--caps`, `--defer-borrow` (its R185 to R189;
 /// decisions 1102 to 1106).
 const ROLES_SINCE: (u32, u32, u32) = (0, 17, 0);
+
+/// The first stage 1 whose `build --emit-sir` names each program's
+/// executable before its SIR, whose plain `build` is served, whose `check
+/// --holes` takes a package, and which has `query values` (its R195 and
+/// R196; decisions 1140 to 1142).
+const BUILDS_SINCE: (u32, u32, u32) = (0, 18, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.

@@ -713,9 +713,18 @@ fn stage_1s_usage_errors_are_shown_as_the_commands_usage() {
     let eval = "usage: sisu eval <file>\n\nthe constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator\n";
     assert_eq!(sisu(&["eval"]), (eval.to_string(), Some(2)));
     assert_eq!(sisu(&["eval", "conf.sisu", "--to", "xml"]), (eval.to_string(), Some(2)));
-    let (check, status) = sisu(&["check", "--holes"]);
+    let (check, status) = sisu(&["check", "--holes", "conf.sisu", "conf.sisu"]);
     assert!(check.starts_with("usage: sisu check [<file>]\n\nreport diagnostics"), "{check}");
     assert!(check.contains("`--holes <file>`"), "{check}");
+    assert_eq!(status, Some(2));
+    // From `sisu1 0.18.0` no path is the working directory's package (its
+    // R195, decision 1140), which a directory without one does not have.
+    let (none, status) = sisu(&["check", "--holes"]);
+    if stage1_at_least(&[0, 18, 0]) {
+        assert!(none.starts_with("error[D0064]: there is no `sisu.toml` in"), "{none}");
+    } else {
+        assert_eq!(none, check);
+    }
     assert_eq!(status, Some(2));
     for (err, _) in [sisu(&["eval"]), sisu(&["check", "--holes"])] {
         assert!(!err.contains("Usage("), "{err}");
