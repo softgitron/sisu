@@ -185,6 +185,10 @@ sisu run -- query KIND FILE [LINE COL [NEW]] [--text PATH]  # the language serve
 sisu run -- check --holes [--format=json] FILE  # each typed hole with its type, what fits it, its types, its contract and its tests (R174, R181)
 sisu run -- fix FILE [--dry-run] [--all]    # each diagnostic's preferred fix applied to the file, checked again until none applies (R176)
 sisu run -- eval FILE [--to json|toml|yaml] # a configuration module's constants, evaluated at compile time and written as JSON, TOML or YAML (R165)
+sisu run -- check --diary PATH [PATH]       # `check`, its records also appended to the diary PATH (R186)
+sisu run -- explain-borrow FILE:LINE        # every borrow live on the line, in the driver's words (R187)
+sisu run -- audit (--ownership FILE... | --caps [FILE...])  # the escape hatches of each file, a program's capabilities (R188)
+sisu run -- sir --defer-borrow [--tests] [PATH]  # the SIR of a program whose only errors are the ownership rules' (R189)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
@@ -2872,6 +2876,54 @@ Stage 1's version is 0.16.0: the driver may rely on `fix` (R176), the
 holes' JSON form and `query holes`'s four new fields (R181). The new cases
 are in `cases/findings21/`.
 
+### The twenty-second round: the Rust front end's remaining roles, a named function in `filter`, three diagnostics' words, a pattern's fields, `Decode`'s enum field
+
+This round took the roles port-debt.md's "The Rust front end's roles still
+to replace" leaves to stage 1, as commands of stage 1 in the driver's
+forms, and the manual's findings in "The standard library" and
+"Diagnostics without fixes", R179's open item and the coordinator's G7.
+RULES.md has the rules (R185 to R194, decisions 1080 to 1089) and their
+decision texts:
+
+- **`sir --tests --std` and `test --std`** (R185): the standard library's
+  doc examples are tests, `std.core/zip (doc example)`, in stage 0's order
+  and before the program's own. There are 197 of them, each once, where
+  the Rust front end lists `std.net`'s two twice, and all pass from stage
+  1's SIR.
+- **`check --diary PATH`** (R186): the driver's `check`, `diagnostic` and
+  `resolved` records, with the texts kept by hash in `PATH.d/`. A diary
+  either front end writes reads the same to the other, but for the
+  toolchain.
+- **`explain-borrow FILE:LINE` and `query explain`** (R187): the loans live
+  on a line, from stage 1's ownership checker, in the driver's words.
+- **`audit --ownership` and `audit --caps`** (R188): the driver's lines,
+  from stage 1's tokens and SIR. They match on the corpus but where a rule
+  of RULES.md changes a case's errors.
+- **`--defer-borrow`** (R189): `sir` and `build --for-run --emit-sir` print
+  the SIR of a program whose only errors are the ownership rules', with
+  its diagnostics on standard error and status 3.
+- **A named function in `filter`** (R190): its fix, the closure that calls
+  it, now compiles for a `str` parameter too. Accepting the function
+  itself is decided against.
+- **Three diagnostics' words** (R191): `E0117`'s kind of token without its
+  article, `E0241`'s member, and one `E0333` per chain of adapters.
+- **A struct pattern's field names** (R192) are references of the field.
+- **`Decode` of a struct with an enum field** (R193) is `E0608` at the
+  derive, where the run stopped at `E0501`. The instance that failed was
+  asked from the derived module, whose errors the program does not show.
+
+Decided against: a function value of another parameter type in `filter`
+(R190), and narrowing methods beside `truncate_to` (R194). `D0181` and
+`D0183`, which nothing named whole, are now named by the hole report
+(R181's note). Open: the driver's routing of these commands, which is stage
+0's; the `.select` of `std/doc_examples`, which is blessed again once the
+driver sends `test --std` to stage 1; compile-time types (R155).
+
+Stage 1's version is 0.17.0. The driver may rely on `sir --tests --std`,
+`check --diary`, `explain-borrow` and `query explain`, `audit --ownership`
+and `--caps`, and `--defer-borrow`, each served. The new cases are in
+`cases/findings22/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3713,6 +3765,16 @@ cores; a rename is a search of references, which parses each module of
 the program's own packages again and now each import line's module path
 too. `check --holes` as a process takes 0.29 s, a `check`'s cost.
 
+The twenty-second round's commands cost what a `check` does too,
+natively as processes at a load of about 5: `explain-borrow` of
+`cases/findings22/explain_borrow.sisu` 0.28 s against its `check`'s 0.30
+s, `audit --caps` 0.27 s, `check --diary` 0.26 s, and `audit --ownership`,
+which reads tokens and parses but checks nothing, 0.02 s. `sir --tests
+--std` takes 3.3 s where `sir --tests` takes 0.26 s. It checks and lowers
+197 examples and every std module `doc --std` documents, parsing each
+module's text again for its items' starts, since the base keeps no syntax
+of its modules.
+
 The twenty-first round's commands cost what a `check` does, measured
 natively as processes at a load of about 4: `fix --dry-run --all` of the
 13-line `cases/findings21/fix_assist.sisu`, which checks it twice (the
@@ -3932,7 +3994,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     `days_in_month`'s home (R183); decided against: the inliner of a body
     of several statements (R177) and a test's values at a hole (R181);
     left: compile-time types (R155) and the sharing of instances with
-    `--explain-size`. The tenth round took a variant's
+    `--explain-size`. The twenty-second round took the closure for a
+    named function in `filter` (R190), `E0117`'s, `E0241`'s and
+    `E0333`'s words (R191) and `Decode` of a struct with an enum field
+    (R193); decided against: a function value taken for another
+    parameter type (R190) and narrowing methods beside `truncate_to`
+    (R194); left: compile-time types (R155) and the sharing of instances
+    with `--explain-size`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

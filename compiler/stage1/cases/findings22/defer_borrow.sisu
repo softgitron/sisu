@@ -1,0 +1,7 @@
+# `sir --defer-borrow` (RULES.md, R189): the SIR of a program whose only
+# error is the ownership checker's, with the error on standard error.
+def main():
+    var xs = [1, 2, 3]
+    let first = ref xs[0]
+    xs.push(4)
+    print(first)

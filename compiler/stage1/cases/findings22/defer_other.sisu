@@ -1,0 +1,5 @@
+# `sir --defer-borrow` (RULES.md, R189): a program with an error that is not
+# the ownership rules' prints no SIR.
+def main():
+    let x: int = "a"
+    print(x)

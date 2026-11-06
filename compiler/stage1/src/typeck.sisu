@@ -511,7 +511,18 @@ pub pure def check_file(
     let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[])
     let features = [Features.none()]
     return check_program(
-        base, [module], [package], catalog, name_error, [], embedded, keep, False, True, features
+        base,
+        [module],
+        [package],
+        catalog,
+        name_error,
+        [],
+        embedded,
+        keep,
+        False,
+        True,
+        features,
+        False,
     )
 
 ## The declarations of a program of one file, the root module, resolved
@@ -557,6 +568,7 @@ pub pure def check_program(
     multi: bool,
     tests: bool,
     features: list[Features],
+    std_tests: bool,
 ) -> Checked:
     var syntaxes: list[list[Diagnostic]] = []
     var parsed: list[Module] = []
@@ -590,6 +602,8 @@ pub pure def check_program(
         var r = base.resolver.copy()
         r.prog.embedded = embedded.copy()
         r.tests = tests
+        if std_tests:
+            r.std_doc_texts = base.texts.copy()
         for q in requests:
             if let Request.Promote(d) = q:
                 _ = r.promoted.add(d)

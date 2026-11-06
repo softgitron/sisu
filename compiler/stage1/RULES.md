@@ -9363,6 +9363,14 @@ the types show; and fits through two calls, which would enumerate.
 --holes`, its JSON, `query holes`); `cases/findings20/query_assist.answers`
 is blessed again (the holes' new lines and fields).
 
+*Amended in the twenty-second round.* `D0181` (`cli.hole-struct-empty`)
+and `D0183` (`cli.hole-enum-empty`) are kept, not retired: `holes_command`
+now names each one whole, for a struct without fields and an enum without
+variants. Before, it made the identifier by adding `-empty` to the
+plain one, and the catalog's test of its entries (`every_entry_is_used`)
+could not find them. The case is `cases/findings22/hole_empty.sisu`,
+asked by `roles.requests`. Nothing it prints changes.
+
 **Decision 1045**, for docs/architecture.md:
 
 1045. `check --holes` and `query holes` also give the expressions that fit
@@ -9483,3 +9491,432 @@ brought the cases, and `check.sh` found what they change.
       `unsafe/narrow_pointer` differ from stage 0's front end under the
       rules that already decide their constructs (R48, R152, R4). Stage 1
       decides it (RULES.md, R184).
+
+## R185. `sir --tests --std` and `test --std`: the standard library's doc examples as tests (decision 1080)
+
+**The rule.** port-debt.md: "the standard library's doc examples are the
+Rust front end's tests of `compiler/std`". With `--std`, `sir --tests`
+lowers the examples of the standard library's `##` documentation as
+tests, and so does stage 1's `test --std`. Each fenced example is a test,
+as the root package's are (10, "Testing"; R138's `doc_examples`), named as
+the Rust front end names it: the prelude's are `std.core/NAME (doc
+example)`, a module's `std.NAME/ITEM (doc example)`, a method's
+`Type.method`, a second example of an item `(doc example 2)`. They come
+in stage 0's order, the prelude's first and then `doc --std`'s modules
+(`DOCUMENTED`), and they come before the program's own tests. A module the base has not loaded is
+loaded as an import loads it. The base keeps no syntax of its modules, so
+the items' starts are read from each module's text. What an example
+expects is checked as the root package's examples are, by the asserts
+`doc_test_module` writes. The program's own tests come after them.
+`--std` without `--tests` changes nothing.
+
+Against the Rust front end's `sisu test --std` of a small program (the
+conformance case `std/doc_examples`'s `.select`, 199 lines), stage 1's
+`sir --tests --std` has 197 of the standard library's tests, every one
+passing when `sisu test --from-sir` runs them. They have the same names,
+and the two missing lines are `std.net/Url.parse (doc example)` and
+`std.net/Url.from_literal (doc example)`, which the Rust front end lists
+twice. It declares `std.net`'s examples once when `std.http`'s import loads
+the module and again when its loop reaches `net`. Stage 1 declares each
+example once, at its module's place in the order. The `.select` is the
+driver's and stays as it is while the driver sends `test --std` to the
+Rust front end. Once it sends it to stage 1, the case is blessed again
+with 197 tests, and `std.net`'s two tests move after `std.math`'s.
+
+What the driver may rely on from 0.17.0: `sir --tests --std [PATH]`, the
+SIR `sir --tests` prints with the doc examples' tests among `test` lines.
+The answer and statuses are those of `sir --tests` (R46, R47), and `sir
+--repl-serve` serves it as it serves `sir`. `sisu1 --version` is 0.17.0
+(the round's items R185 to R189 add a form each).
+
+**Why.** Item 1 of the round: the last part of `sisu test` that only the
+Rust front end could run.
+
+**In stage 1.** `typeck.collect` (`std_doc_texts`,
+`declare_std_doc_tests`, `std_module_named`, `declare_doc_tests_in`,
+`item_starts`), `typeck` (`check_program`'s `std_tests`), `main`
+(`Input.std_tests`, `sir_with`, `test_command`), `check.sh` (a `.tests`
+case's `# test-options:` line).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings22/std_doc_tests.sisu` (its `.tests`: `test --std`, 198
+tests).
+
+**Decision 1080**, for docs/architecture.md:
+
+1080. `sir --tests --std` and `test --std` lower the standard library's
+      doc examples as tests named `std.core/zip (doc example)`, in stage
+      0's order before the program's own, each example once. `sisu1
+      --version` is 0.17.0. Stage 1 decides it (RULES.md, R185).
+
+## R186. `check --diary PATH`: the diagnostics as data (decision 1081)
+
+**The rule.** 18, Phase 3, and 20, I-3. `check --diary PATH` (or
+`--diary=PATH`) appends to PATH the records the driver's `diary.rs`
+appends, in its order and form, one JSON object per line:
+
+- a `check` record: the time (RFC 3339, UTC), the tool `sisu check`, the
+  toolchain, the root package's own files each with the FNV-1a hash of its
+  text, and the number of diagnostics;
+- a `diagnostic` record per diagnostic in `check`'s order: its file and the
+  file's hash, the code and catalog identifier, the severity, the message
+  and its parameters, the span in lines and columns and in bytes, the
+  labels, and the fixes with their edits;
+- a `resolved` record for each diagnostic of a file's previous check (the
+  last `check` record that names it) that this check no longer has at the
+  place the change moved it to. It holds the diagnostic as it was, the one
+  edit between the two texts (the bytes of the old text that differ and
+  what replaced them), and the identifier of the fix it applied when that
+  fix's edits make the new text, else `null`.
+
+The texts are kept by their hashes in `PATH.d/`, made with the
+directories above it when they are missing. A program with several files
+hashes its own package's modules, and a workspace appends a check per
+member. The one field that differs from the driver's is `toolchain`,
+which is stage 1's version (`0.17.0`) where the driver writes its crate's
+version. A diary written by either front end reads the same to the
+other: the case below appended its checks to one diary started by the
+Rust front end, and the records matched but for the time and the
+toolchain. A diary that cannot be written is `D0013`, and the check
+fails. `sir --repl-serve` serves the command, which writes the diary as it
+does when it is run alone. Stage 1 reads a previous line with its own
+JSON reader, and a line that is not JSON is skipped.
+
+What the driver may rely on from 0.17.0: the option, the records, the
+files in `PATH.d/`, and that `check`'s own output and status are what
+they are without the option.
+
+**Why.** Item 2 of the round: port-debt.md's `sisu check --diary`.
+
+**In stage 1.** The new module `diary` (`timestamp`, `write`, `parse`,
+`records`, `wanted`, `change`, `apply`), `main` (`check`'s `--diary`,
+`check_with`, `append_diary`, `Report.ours`).
+
+**What it changes.** No output of the corpus. Its tests are `diary`'s
+own (`sisu1 test`): the time, JSON read back as written, the one change.
+A case of `check.sh` would compare a time, so the round compared the
+diaries by hand, a fix applied and a type error resolved, against the
+driver's (above).
+
+**Decision 1081**, for docs/architecture.md:
+
+1081. `check --diary PATH` appends the driver's `check`, `diagnostic` and
+      `resolved` records to PATH, keeping each text by its hash in
+      `PATH.d/`, so that a diary either front end writes reads the same.
+      Stage 1 decides it (RULES.md, R186).
+
+## R187. `explain-borrow FILE:LINE` and `query explain FILE LINE` (decision 1082)
+
+**The rule.** 10, "Language server", has the command "explain this
+borrow". `explain-borrow FILE:LINE` prints every borrow live on the line,
+as the driver's `explain_borrow` prints it (the form is `sisu-borrowck`'s
+`explain.rs`), in the driver's words: `D0014` heads each function with a
+statement on the line, then one line per loan. `D0015` names the loan's
+kind (`D0019` or `D0020`), its place, where it starts, who holds it and
+where it is last used, and `D0016` is for a loan only temporaries hold.
+`D0017` says no borrow is live. The loans are those stage 1's ownership
+checker finds (`Analysis.live_at_line`, a transcription of stage 0's) in
+the program that holds FILE, as `query` finds it: before or after each of
+the line's statements, ordered by where they start. The holders are the
+named locals that hold a loan on the line, and a loan of a temporary that
+only temporaries hold is left out. A program with an error of the front
+end has its diagnostics reported as `check` reports them, then `D0006`,
+with status 1. Ownership errors do not stop it, as they do not stop the
+driver. Without `FILE:LINE` it is `D0018` with status 2, and a file that
+cannot be read is `D0001` with status 1.
+
+`query explain FILE LINE` gives the same loans as an answer, one line per
+loan: `FUNCTION\tKIND\tPLACE\tSTART\tHOLDERS\tEND`, KIND `shared` or
+`mut`, START and END `LINE:COL`, HOLDERS the holders separated by `, `
+(empty for a temporary), as R164's fields are written. It is nothing for a
+program with an error of the front end or for a line with no loan. `sir
+--repl-serve` serves both.
+
+What the driver may rely on from 0.17.0: both commands, their lines and
+their statuses, for `sisu explain-borrow` and the language server's
+`sisu.explainBorrow`.
+
+**Why.** Item 3 of the round.
+
+**In stage 1.** `borrowck.loans` (`live_at_line`, `LoanReport`,
+`loc_order`), `borrowck` (`live_at`, `FunctionLoans`), `main`
+(`explain_command`, `owned_program`, `explained`, `query_explain`,
+`query_command`'s `explain`), and `sisu1` (the status).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings22/explain_borrow.sisu` (its `.out`) is asked by
+`roles.requests`: two lines with loans, one without, no line, a program
+with an error, and `query explain`. Its answers are the driver's, byte
+for byte, for each of its lines and for every line of `b.sisu` the round
+tried.
+
+**Decision 1082**, for docs/architecture.md:
+
+1082. `explain-borrow FILE:LINE` prints the loans stage 1's ownership
+      checker finds live on the line in the driver's words (`D0014` to
+      `D0020`), and `query explain FILE LINE` answers them as
+      tab-separated lines. Stage 1 decides it (RULES.md, R187).
+
+## R188. `audit --ownership FILE...` and `audit --caps [FILE...]` (decision 1083)
+
+**The rule.** 18, Phase 3, T1.1 and T1.2, and the driver's `audit.rs`.
+
+- `audit --ownership FILE...` counts the escape hatches in each file from
+  its tokens. These are `Shared`, `Weak`, `Cell`, `Arena` and `Key` where
+  they mean std's types (not after a `.`, and not in a file that declares
+  the name), the calls `.copy()`, and the keyword `unsafe`, and `lines`
+  counts the lines on which a token starts that is not trivia or layout.
+  Each file gets one line, `FILE lines=N Shared=N Weak=N Cell=N Arena=N
+  Key=N copy=N unsafe=N`.
+- `audit --caps [FILE...]` reads each program's SIR, built with its tests.
+  For each of its own functions that does I/O it prints `caps=`, the
+  number of parameters that hold a capability, with `io=direct` or
+  `io=calls` and the depth from `main`. Then each use of a capability, the
+  structs that bundle three or more capability types, and a summary.
+  Every line starts with the file's name, and a test is named `test
+  "NAME"` or `closure in test "NAME"`. Without a file it audits the
+  package of the working directory, each workspace member's program
+  named by its directory. A program with an error has its errors
+  reported, then `D0006`, with status 1.
+
+An option the driver's `audit` does not know is `D0009`, none or both of
+the two is `D0022`, and `--ownership` without a file is `D0004`, all with
+status 2. `audit --unsafe` (R7) is as it was. `sir --repl-serve` now
+serves `audit`, every form of it.
+
+The round compared both with the driver's. `--ownership` matched on the
+1,112 `.sisu` files of the conformance suite, the standard library, stage
+1's sources and cases and the proposal's examples, in one run each.
+`--caps` matched on every conformance case (560 files) that the Rust
+front end checks without an error, but `eval/stops`, whose failing
+constant R178 makes an error. The cases that differ are those whose
+errors differ under the rules of RULES.md (stage 1's diagnostics, R16,
+R24 and the others) and those the Rust front end refuses where stage 1
+accepts (R48, R152 and R4), which then print a summary of their own.
+
+What the driver may rely on from 0.17.0: both forms, their lines, their
+messages and statuses.
+
+**Why.** Item 4 of the round.
+
+**In stage 1.** `audit` (`ownership_line`, `declared_names`,
+`caps_report`, `capability_types`, `cap_place_type`, `caps_name`,
+`shown_fn`), `main` (`audit_counts`, `audit_caps`, `own_structs`;
+`audit_command` writes to the command's output, so that it is served),
+and `sisu1` (the status).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings22/audit_counts.sisu` (its `.out`) is asked by
+`roles.requests` with both forms and each misuse.
+
+**Decision 1083**, for docs/architecture.md:
+
+1083. `audit --ownership FILE...` and `audit --caps [FILE...]` print what
+      the driver's `audit.rs` prints, from stage 1's tokens and SIR, with
+      its messages and statuses. Stage 1 decides it (RULES.md, R188).
+
+## R189. `--defer-borrow`: the SIR of a program the ownership checker rejects (decision 1084)
+
+**The rule.** port-debt.md: "the deferral is the Rust ownership
+checker's". `sir --defer-borrow [--tests] [PATH]`, and `build --for-run
+--emit-sir --defer-borrow` (R170), print the SIR of a program whose only
+errors are the ownership rules', as the driver's `run --defer-borrow`
+and `test --defer-borrow` lower it for the counterexample mode. The
+ownership rules' errors are the front end's `E04` codes and the ownership
+checker's findings, but not purity's (`E0333`, `E0392`, `E0393`) or a
+second assignment of a `let` (`E0367`), which the monitor does not
+observe. The program is lowered and put through the ownership checker
+despite those errors, simplified, and its holes closed. Its `comptime`
+values are baked in when the checker found nothing, and a failed one
+stops it. Standard error then holds every diagnostic of the program in
+the conformance form (`check --format=ids`), and the status is 3 when an
+error was deferred, 0 when the program has none. A program with any other
+error, or one beyond the slice, prints no SIR. Its stopping errors go to
+standard error, in the form `--format` asks for (the human one for
+`build`'s, which takes no `--format`), then `D0006`, with status 1. A
+program without `main` prints no SIR from `build --emit-sir`, as R170
+says. The SIR is the Rust front end's for the case below, byte for byte,
+and stage 0's monitor finds its conflict when it runs it (`sisu run
+--monitor --from-sir`).
+
+What the driver may rely on from 0.17.0: the option on both commands,
+standard output, standard error and the statuses 0, 1 and 3, served by
+`sir --repl-serve`.
+
+**Why.** Item 5 of the round.
+
+**In stage 1.** `main` (`Deferred`, `deferred_program`, `not_deferred`,
+`deferred_answer`; `sir_with`, `build_command` and `BuildHow.deferring`),
+and `sisu1` (the status of `sir` and `build` with the option).
+
+**What it changes.** No output of the corpus. The cases
+`cases/findings22/defer_borrow.sisu` and `defer_other.sisu` (their
+`.diag`s) are asked by `roles.requests`: both commands, a program with a
+type error, and one without an error.
+
+**Decision 1084**, for docs/architecture.md:
+
+1084. `sir --defer-borrow` and `build --for-run --emit-sir --defer-borrow`
+      print the SIR of a program whose only errors are the ownership
+      rules', with every diagnostic in the conformance form and status 3,
+      for stage 0's counterexample mode. Stage 1 decides it (RULES.md,
+      R189).
+
+## R190. A named function in `filter`: the closure that calls it, which now reads `ref ref str` as `str` (decision 1085)
+
+**The rule.** An adapter's function takes a reference to each item (11,
+`filter(keep: (ref Item) -> bool)`). A function whose parameter is one
+level of reference short of that, `def is_big(x: ref int)` for an
+`Iter[ref int]`, is not a function of that type. It stays `E0300` with
+R63's fix, `x -> is_big(x)`, a closure that calls it and lets the call
+read through the reference. The fix is now offered for a function that
+takes `str` too, `filter(is_long)` over a list of `str` (shown `(str) ->
+bool`, since `ref str` is the view `str`). That closure now compiles: a
+reference to a reference to text where `str` is expected is read through
+both, as `ref ref int` is read as `ref int` where `ref int` is expected.
+
+Decided against: accepting the function value itself. A function value
+is the function, and taking one of another parameter type would need a
+wrapper the program did not write, a second function behind the name.
+04's references are written where they are taken, and a call's reborrow
+is the closure's. The spelling that works is the fix's, `filter(x ->
+is_big(x))`. The adapters' signatures stay 11's.
+
+**Why.** Item 6 of the round, the manual's finding in "The standard
+library": the closure the manual wrote for an `int` predicate was refused
+for a `str` one.
+
+**In stage 1.** `typeck.expr` (`coerce`: a `ref ref str` as `str`;
+`by_value_closure`: a `str` parameter).
+
+**What it changes.** The cases `cases/findings22/filter_named.sisu` (its
+`.out`, both closures) and `filter_named_errors.sisu` (its `.diag`, both
+fixes). The Rust front end refuses the first case's `str` closure (`E0300`) and gives no fix
+for the second case's `str` function.
+
+**Decision 1085**, for docs/architecture.md:
+
+1085. A function named where an adapter expects a function of references
+      to its parameter type is `E0300` with the closure that calls it as
+      its fix, for a `str` parameter too, and a `ref ref str` is read as
+      the `str` a call expects. Stage 1 decides it (RULES.md, R190).
+
+## R191. Three diagnostics' words: `E0117`'s token, `E0241`'s member, one `E0333` per chain (decision 1086)
+
+**The rule.** The manual's "Diagnostics without fixes":
+
+- `E0117` names a kind of token without an article, "unexpected string
+  after the end of the statement" (`found="string"`). Before, it read
+  "unexpected a string". A token's own text is as it was ("unexpected
+  `2`").
+- `E0241` says "its member `SIDES` cannot be used through it". Before, it
+  called a trait's constant (R37) a method that cannot be called. The
+  catalog's text changes, so the driver's Rust front end, whose E0241 is
+  always a method's, prints "member" too.
+- In a `pure` function, the consumer or adapter after an impure adapter is
+  the same chain. `count()` of `split_whitespace().filter(...).count()` is
+  no second `E0333`: the adapter's error, with the note
+  `type.pure-adapter` (R102), is the one.
+
+**Why.** Item 7 of the round.
+
+**In stage 1.** `parser.state` (`end_stmt`), the catalog (`E0241`, with a
+comment), `borrowck.purity` (`adapted`).
+
+**What it changes.** The cases `cases/findings22/f_string_trailing.sisu`,
+`diagnostic_words.sisu` and `pure_chain.sisu` (their `.diag`s);
+`cases/findings10/f_string_let.diag` is blessed again (the parameter).
+The manual's transcripts that show `E0117` for a kind of token or any
+`E0241` are made again by the manual's writers.
+
+**Decision 1086**, for docs/architecture.md:
+
+1086. `E0117` names a kind of token without its article, `E0241` calls
+      what a `dyn` value cannot use a member, and a `pure` function's
+      chain after an impure adapter is one `E0333`, the adapter's. Stage
+      1 decides it (RULES.md, R191).
+
+## R192. A struct pattern's field names in `references` and `rename` (decision 1087)
+
+**The rule.** R179's open item. In a struct pattern, `case Point(x=a,
+y=b)`, the name before `=` names the field, as a construction's keyword
+argument does (R179). `query references` lists it among the field's
+uses, `query rename` renames it, and `hover`, `definition` and
+`references` asked there answer for the field. The name is read from the
+narrowest struct pattern of the program's bodies at it. A variant's
+pattern names a variant's field, which has no reference of its own, and
+is not counted.
+
+**Why.** Item 8 of the round.
+
+**In stage 1.** `query` (`pattern_field`, which `references` and
+`target_of` ask).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings22/pattern_refs.sisu` (its `.out`) is asked by
+`roles.requests` (the references of `x`, and its rename from the
+pattern).
+
+**Decision 1087**, for docs/architecture.md:
+
+1087. A field's name in a struct pattern is a reference of the field,
+      which `query references` lists and `query rename` renames. Stage 1
+      decides it (RULES.md, R192).
+
+## R193. `@derive(Decode)` of a struct with a field of an enum (decision 1088)
+
+**The rule.** This is the coordinator's item, the manual's G7. Take a
+struct that derives `Decode` with a field whose type is (or holds, as a
+list's or an option's element) an enum of the program. It passed `check`,
+and `run` stopped before `main` with `E0501`, "invalid SIR in
+`json.field#Mood`: bb3: calls missing function json.from_json". Now the
+derive stops at compile time with `E0608`: "deriving `Decode` for `Day`
+stopped at compile time: its field `mood` holds `Mood`, an enum, whose
+variants `json.decode` cannot make".
+
+The fault was the instances'. `json.from_json[Mood]` reaches the template's
+`comptime panic` ("no JSON form for `Mood`"). The instance that failed was
+asked first from the derived impl's module, `<derive>/NAME.sisu`, whose
+errors the program does not show. Lowering then left the failed instance
+out, while `json.field#Mood` still called it. The SIR's check of missing
+functions was right to stop it, and the template (`std.json`'s) is as it
+should be. Stage 1 now stops the derive itself, where the field is
+written, as R62 stopped `Decode` of an enum. A call of `json.decode` of
+such a struct then also has `E0609` at the call, which it had already
+without the derive.
+
+**Why.** The coordinator's item of the round.
+
+**In stage 1.** `typeck.instances` (`check_derives`, `undecodable`).
+
+**What it changes.** The case `cases/findings22/decode_enum_field.sisu`
+(its `.diag`).
+
+**Decision 1088**, for docs/architecture.md:
+
+1088. `@derive(Decode)` of a struct with a field that holds an enum is
+      `E0608` at the derive, naming the field, where the run stopped at an
+      invalid SIR. Stage 1 decides it (RULES.md, R193).
+
+## R194. Narrowing methods of the sized integers: decided against (decision 1089)
+
+**The rule.** The manual's finding: `to_u8()` of a `u32` is `E0304`, so
+the manual narrows a `u32` through `to_int()`. Neither 03 nor 11 gives
+`to_u8`, `to_i8`, `to_u16`, `to_i16`, `to_u32` or `to_i32`. 01's tour
+spells every lossy conversion with its target as a type argument,
+`x.truncate_to[u8]()`, which every sized integer has (R115), and a
+widening one is implicit. Decided against: a method per target width
+would be a second spelling of `truncate_to`, which 00's "one way to do
+it" rules out. A checked narrowing is the comparison against the target's
+bounds, `if x.to_int() <= u8.MAX.to_int(): x.truncate_to[u8]()`, written where the
+program decides what an out-of-range value means.
+
+**Why.** Item 9 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 1089**, for docs/architecture.md:
+
+1089. The sized integers narrow with `truncate_to[T]()` alone, with no
+      `to_u8()` and its kin; a checked narrowing compares with the
+      target's bounds first. Stage 1 decides it (RULES.md, R194).

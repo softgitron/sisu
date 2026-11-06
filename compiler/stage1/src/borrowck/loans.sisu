@@ -2170,6 +2170,124 @@ impl Analysis:
             case LoanKind.Local(place, _, _): place_name(types, f, shorten(place))
             case LoanKind.Param(i): Arg.Text(local_name(f, LocalId(index=i + 1)))
 
+    # ---------------------------------------------------------------- explain
+
+    ## For `explain-borrow` (RULES.md, R187): the loans live before or after
+    ## each statement at `line`, with the named locals holding them there
+    ## and the last position where each is live, in the order of where
+    ## they start (stage 0's `live_at_line`).
+    pub pure def live_at_line(
+        self, p: Program, f: Function, types: Types, line: int
+    ) -> list[LoanReport]:
+        var found: list[int] = []
+        # Each block's states and live locals, found once.
+        var all_states: list[list[State]] = []
+        var all_lives: list[list[BitSet]] = []
+        var reached: list[bool] = []
+        for b in range(len(f.blocks)):
+            var states: list[State] = []
+            var lives: list[BitSet] = []
+            var ok = False
+            if not f.blocks[b].cleanup:
+                if let Some(st) = self.states(p, f, types, b):
+                    states = st
+                    lives = self.live_before_each(f, types, b, self.live_out(f, b))
+                    ok = True
+            all_states.push(states)
+            all_lives.push(lives)
+            reached.push(ok)
+        for b in range(len(f.blocks)):
+            if not reached[b]:
+                continue
+            let states = ref all_states[b]
+            let lives = ref all_lives[b]
+            for si in range(len(f.blocks[b].stmts)):
+                let s = ref f.blocks[b].stmts[si]
+                let at = s.loc else:
+                    continue
+                if at.line != line:
+                    continue
+                for l in self.live_loans(states[si], lives[si]).items():
+                    if not found.contains(l) and self.loans[l].place().is_some():
+                        found.push(l)
+                for l in self.live_loans(states[si + 1], lives[si + 1]).items():
+                    if not found.contains(l) and self.loans[l].place().is_some():
+                        found.push(l)
+        found.sort_by(
+            (a, b) -> loc_order(self.loans[a].loc, a).cmp(loc_order(self.loans[b].loc, b))
+        )
+        var out: list[LoanReport] = []
+        for l in found:
+            # Holders and the last position where the loan is live.
+            var holders: list[String] = []
+            var until: Loc? = None
+            for b in range(len(f.blocks)):
+                if not reached[b]:
+                    continue
+                let states = ref all_states[b]
+                let lives = ref all_lives[b]
+                for si in range(len(f.blocks[b].stmts)):
+                    let s = ref f.blocks[b].stmts[si]
+                    let st = ref states[si]
+                    var on_line = False
+                    if let Some(at) = s.loc:
+                        on_line = at.line == line
+                    # The holders are the names holding it on the line,
+                    # before or after one of its statements.
+                    if on_line:
+                        for k in [si, si + 1]:
+                            for v in lives[k].items():
+                                if states[k].holds.contains(v, l) and is_named(f, LocalId(index=v)):
+                                    let n = local_name(f, LocalId(index=v))
+                                    if not holders.contains(n.copy()):
+                                        holders.push(n)
+                    # The last position where it is live.
+                    var live = False
+                    for v in lives[si].items():
+                        if st.holds.contains(v, l):
+                            live = True
+                            break
+                    if live:
+                        if let Some(at) = s.loc:
+                            var later = True
+                            if let Some(u) = until:
+                                later = (at.line, at.col) > (u.line, u.col)
+                            if later:
+                                until = Some(at)
+            holders.sort()
+            let place = self.loans[l].place() else:
+                continue
+            # A borrow of a temporary that only temporaries hold is the
+            # machinery of one expression (a formatting buffer), not a
+            # borrow the programmer wrote.
+            if not is_named(f, place.local) and holders.is_empty():
+                continue
+            out.push(
+                LoanReport(
+                    place=place_name(types, f, shorten(place)),
+                    mutable=self.loans[l].mutable(),
+                    start=self.loans[l].loc,
+                    until=until,
+                    holders=holders,
+                )
+            )
+        return out
+
+## A loan live at a line, for `explain-borrow`.
+pub struct LoanReport:
+    pub place: Arg
+    pub mutable: bool
+    pub start: Loc?
+    pub until: Loc?
+    pub holders: list[String]
+
+## A loan's place in the order `live_at_line` lists them: by where it
+## starts (none first), then by its number.
+pure def loc_order(loc: Loc?, l: int) -> (int, int, int, int, int, int):
+    let at = loc else:
+        return (0, 0, 0, 0, 0, l)
+    return (1, at.line, at.col, at.end_line, at.end_col, l)
+
 ## Whether a result type holds a view of text, which `.copy()` copies as the
 ## view it is (RULES.md, R24).
 pure def holds_text_view(t: Type) -> bool:

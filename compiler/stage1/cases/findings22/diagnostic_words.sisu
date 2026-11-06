@@ -1,0 +1,11 @@
+# Three diagnostics' words (RULES.md, R191): a trait's constant is a member
+# of it, not a method (E0241).
+trait Shape:
+    const SIDES: int
+    def area(self) -> int
+
+def show(s: ref dyn Shape) -> int:
+    return s.area()
+
+def main():
+    pass

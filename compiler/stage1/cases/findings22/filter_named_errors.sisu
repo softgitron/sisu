@@ -1,0 +1,15 @@
+# A named function in `filter` (RULES.md, R190) is not a function of the
+# references the adapter passes: E0300, with the closure as its fix, for a
+# `str` parameter too.
+def is_big(x: ref int) -> bool:
+    return x > 2
+
+def is_long(word: ref str) -> bool:
+    return len(word) > 2
+
+def main():
+    let xs = [1, 2, 3, 4]
+    let words = ["a", "bcd"]
+    let big = xs.iter().filter(is_big).count()
+    let long = words.iter().filter(is_long).count()
+    print("{big} {long}")

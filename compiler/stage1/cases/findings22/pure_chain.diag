@@ -1,0 +1,2 @@
+5:12-5:59 E0333 type.impure-call callee="filter" name="words"
+  label 4:10-4:15 type.declared-pure-here name="words"

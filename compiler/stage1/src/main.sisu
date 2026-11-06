@@ -74,6 +74,7 @@ import stage1.borrowck
 import stage1.borrowck.holes
 import stage1.cfg
 import stage1.config
+import stage1.diary
 import stage1.diff
 import stage1.doc
 import stage1.fmt
@@ -87,8 +88,10 @@ import stage1.sir
 import stage1.sir.simplify
 import stage1.sir.write
 import stage1.typeck
-from stage1.audit import AuditModule, AuditPackage, module_hash, unsafe_report
-from stage1.borrowck.finding import span_of
+from stage1.audit import (
+    AuditModule, AuditPackage, caps_report, module_hash, ownership_line, unsafe_report
+)
+from stage1.borrowck.finding import Arg, span_of
 from stage1.cfg import Features
 from stage1.diag import (
     Catalog,
@@ -126,9 +129,9 @@ from stage1.syntax.kinds import KindNames
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage, StdMarks
-from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
+from stage1.typeck.program import DefKind, Embedded, ModuleId, Program, ROOT_PACKAGE
 from stage1.typeck.std_sources import display_path, documented, importable, std_file, target_for
-from stage1.typeck.ty import TyKey
+from stage1.typeck.ty import DefId, TyKey
 
 error UsageError:
     Usage(text: String)
@@ -148,7 +151,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.16.0"
+const VERSION: str = "0.17.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -404,6 +407,8 @@ def run_command(
             "--accept-unsafe",
             "--tests",
             "--modules",
+            "--std",
+            "--defer-borrow",
             "--locked",
             "--no-default-features",
             "--format=ids",
@@ -518,7 +523,23 @@ def run_command(
         # `--features NAMES` and `--no-default-features` choose the root
         # package's features (decision 250).
         let ids = rest.contains("--format=ids")
-        let (request, words) = feature_request(rest, target_runtime(sys))
+        # `--diary PATH` (18, Phase 3; RULES.md, R186): the diagnostics, and
+        # what resolved the last check's, appended to the log.
+        var diary: String? = None
+        var given: list[String] = []
+        var k = 0
+        while k < len(rest):
+            if rest[k] == "--diary" and k + 1 < len(rest):
+                diary = Some(rest[k + 1].copy())
+                k += 2
+                continue
+            if rest[k].starts_with("--diary="):
+                diary = Some(rest[k].byte_slice(8, rest[k].byte_len()).to_string())
+                k += 1
+                continue
+            given.push(rest[k].copy())
+            k += 1
+        let (request, words) = feature_request(given, target_runtime(sys))
         let flags = [
             "--format=ids", "--format=human", "--locked", "--no-default-features", "--accept-unsafe"
         ]
@@ -541,10 +562,10 @@ def run_command(
         # The served base, or one made for this command (RULES.md, R158).
         match served.base:
             case Some(b):
-                return check_with(sys, home, path, ids, request, b, catalog, mut o)
+                return check_with(sys, home, path, ids, request, b, catalog, mut o, diary)
             case None:
                 let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-                return check_with(sys, home, path, ids, request, base, catalog, mut o)
+                return check_with(sys, home, path, ids, request, base, catalog, mut o, diary)
     if command == "lint":
         # `sisu lint` (10: "lints beyond the compiler's warnings, with
         # fix-its"; RULES.md, R11): the lints of a program the front end
@@ -654,6 +675,7 @@ def run_command(
             "--accept-unsafe",
             "--for-run",
             "--emit-sir",
+            "--defer-borrow",
         ]
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
@@ -693,7 +715,11 @@ def run_command(
         let locked = words.contains("--locked")
         let accept = words.contains("--accept-unsafe")
         let how = BuildHow(
-            native=native or emit_sir, release=release, for_run=for_run, emit_sir=emit_sir
+            native=native or emit_sir,
+            release=release,
+            for_run=for_run,
+            emit_sir=emit_sir,
+            deferring=emit_sir and words.contains("--defer-borrow"),
         )
         return build_command(
             sys, home, path, how, (locked, accept), level, output, request, catalog, mut o, served
@@ -706,9 +732,16 @@ def run_command(
         if status != 0:
             return Err(Exit(status=status))
         return Ok(())
+    if command == "audit" and not rest.contains("--unsafe"):
+        # `audit --ownership FILE...` and `audit --caps [FILE...]` (18,
+        # Phase 3; RULES.md, R188).
+        return audit_counts(sys, home, rest, catalog, mut o)
     if command == "audit":
         # `audit --unsafe [--std] [PATH]` (22, "The audit and the lints").
-        return audit_command(sys, home, rest, catalog)
+        return audit_command(sys, home, rest, catalog, mut o)
+    if command == "explain-borrow":
+        # `explain-borrow FILE:LINE` (10, "Language server"; RULES.md, R187).
+        return explain_command(sys, home, rest, catalog, mut o, served)
     if command == "doc":
         # `doc [PATH] [--output DIR]` and `doc --std [MODULE...]`: what
         # `sisu doc` does, its exit status given as `Exit(status=N)`.
@@ -909,6 +942,22 @@ def sir_with(
     # `sisu bench` run it, its tests' tags and its benchmarks written
     # (decision 285).
     let tests = words.contains("--tests")
+    if words.contains("--defer-borrow") and not partial:
+        # `--defer-borrow`: the SIR of a program whose only errors are the
+        # ownership rules', for stage 0's counterexample mode (RULES.md,
+        # R189).
+        let input = app_input(sys, home, path, tests, request, mut env, catalog)? else:
+            return Ok(())
+        var built = input.copy()
+        built.contracts = level
+        built.roots = transcript_roots(sys, built.disk, tests)
+        built.std_tests = tests and words.contains("--std")
+        let d = deferred_program(base, built, path, catalog, mut kept, words.contains("--modules"))
+        let (sir, errs, status) = deferred_answer(d, catalog, words.contains("--format=ids"))
+        o.emit(sir, errs)
+        if status != 0:
+            return Err(Exit(status=status))
+        return Ok(())
     if tests and not partial:
         # What `sisu test` runs (decision 357), from one check of the
         # program: a program with an error of a phase is not run, as
@@ -921,6 +970,7 @@ def sir_with(
         var built = input.copy()
         built.contracts = level
         built.roots = transcript_roots(sys, built.disk, True)
+        built.std_tests = words.contains("--std")
         # `--modules`: each test's and benchmark's module beside it
         # (RULES.md, R142), which the driver reads to run one module's.
         let modules = words.contains("--modules")
@@ -965,6 +1015,7 @@ def check_with(
     base: typeck.Base,
     catalog: Catalog,
     mut o: Out,
+    diary: String?,
 ) -> ! {IoError, UsageError, CommandError}:
     var kept = Kept.new()
     var env = base.environment()
@@ -974,6 +1025,17 @@ def check_with(
     var out = String.new()
     var why = String.new()
     var failed = False
+    if let Some(log) = diary:
+        for r in reports:
+            if r.ours == 0:
+                continue
+            if let Some(reason) = append_diary(sys, log, r, catalog):
+                let params = [
+                    Param(name="path".to_string(), value=log.copy()),
+                    Param(name="reason".to_string(), value=reason),
+                ]
+                o.emit("", catalog.plain_error("cli.cannot-write", params))
+                return Err(Failed)
     for r in reports:
         if ids:
             out.push(r.ids(catalog))
@@ -991,6 +1053,34 @@ def check_with(
     if failed:
         return Err(Failed)
     return Ok(())
+
+## Appends a check's records to the diary at `log` (RULES.md, R186), and
+## keeps its files' texts by their hashes in `LOG.d/`; why it could not,
+## when it could not.
+def append_diary(sys: System, log: str, r: Report, catalog: Catalog) -> String?:
+    let store = "{log}.d"
+    var previous = String.new()
+    if let Ok(t) = sys.fs.read_to_string(Path.new(log)):
+        previous = t
+    var kept: dict[String, String] = {}
+    for h in diary.wanted(previous, r.files, r.ours):
+        if let Ok(t) = sys.fs.read_to_string(Path.new("{store}/{h}")):
+            _ = kept.insert(h.copy(), t)
+    let time = diary.timestamp(sys.clock.now().unix_seconds())
+    let lines = diary.records(previous, kept, time, VERSION, r.ours, r.files, r.diags, catalog)
+    if let Err(e) = make_dirs(sys, store):
+        return Some(io_reason(e))
+    for k in range(r.ours):
+        let p = "{store}/{diary.hash(r.files[k].1)}"
+        if not sys.fs.exists(Path.new(p)):
+            if let Err(e) = sys.fs.write_text(Path.new(p), r.files[k].1):
+                return Some(io_reason(e))
+    var text = previous.copy()
+    for l in lines:
+        text.push("{l}\n")
+    if let Err(e) = sys.fs.write_text(Path.new(log), text):
+        return Some(io_reason(e))
+    return None
 
 ## `lint` of the program at `path` with the base `base`, in the form `ids`
 ## asks for.
@@ -1119,6 +1209,9 @@ struct Input:
     ## For a REPL session's program, the lines of each input it holds, which
     ## its SIR names and numbers as the input's own (RULES.md, R123).
     regions: list[session.Region]
+    ## `sir --tests --std`: the standard library's doc examples are tests
+    ## too (RULES.md, R185).
+    std_tests: bool
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
@@ -1186,6 +1279,7 @@ def file_input(
             contracts=CONTRACTS_ALL,
             runtime="full".to_string(),
             roots=[],
+            std_tests=False,
             regions=[],
         )
     )
@@ -1353,6 +1447,7 @@ def held_layout_input(
             contracts=CONTRACTS_ALL,
             runtime=runtime,
             roots=[],
+            std_tests=False,
             regions=[],
         )
     )
@@ -1576,7 +1671,7 @@ pure def unsafe_levels(layout: Layout, named: list[NamedModule]) -> list[(int, p
 ## hash, then the lints and the rules of unsafe code that `check` reports;
 ## `audit --unsafe --std` the standard library's own unsafe code.
 def audit_command(
-    sys: System, home: str, rest: list[String], catalog: Catalog
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out
 ) -> ! {IoError, UsageError, CommandError}:
     let flags = ["--unsafe", "--std"]
     if not rest.contains("--unsafe"):
@@ -1601,7 +1696,7 @@ def audit_command(
                 package=0, path=display_path(n), file="<std>/{n}.sisu", text=text
             )
             modules.push(module)
-        emit(unsafe_report(packages, modules, []), "")
+        o.emit(unsafe_report(packages, modules, []), "")
         return Ok(())
     var path = path_of(rest, flags) else:
         return Err(Usage(text=usage()))
@@ -1674,8 +1769,310 @@ def audit_command(
                 lints.push(line.to_string())
     var out = unsafe_report(packages, modules, lints)
     out.push("std (toolchain)   unsafe = \"extern\"   see `sisu audit --unsafe --std`\n")
-    emit(out, "")
+    o.emit(out, "")
     return Ok(())
+
+## The front end's report of a program, and when it has no error of the
+## front end its SIR as the ownership checker leaves it (drops placed,
+## simplified, its `comptime` values baked in when the checker found
+## nothing), with the SIR source of the input's module `at`: what stage
+## 0's `explain-borrow` reads (`db.lowered`'s program), whose ownership
+## errors do not stop it (RULES.md, R187).
+pure def owned_program(
+    base: typeck.Base, input: Input, at: int, name: str, catalog: Catalog
+) -> (Report, sir.Program?, int):
+    var kept = Kept.new()
+    let checked = check_input(base, input, catalog, True)
+    let report = front_report(input, checked, name, catalog)
+    if report.has_error:
+        return (report, None, 0)
+    let files = program_files(input, checked)
+    let lowered = lower_of(checked, base, input, catalog, mut kept) else:
+        return (report, None, 0)
+    if not lowered.beyond.is_empty():
+        return (report, None, 0)
+    var done = borrowck.check_with(lowered.program, True, mut kept.placed)
+    simplify.program(mut done.program)
+    if done.findings.is_empty():
+        _ = interp.evaluate(mut done.program, catalog)
+    var source = 0
+    let by_source = files_by_source(lowered, files)
+    for k in range(len(by_source)):
+        if let Some((i, _)) = by_source[k]:
+            if i == at:
+                source = k
+                break
+    return (report, Some(done.program), source)
+
+## The loans `explain-borrow` and `query explain` show of `line`: each
+## function with a loan live there, and each loan as text (its kind, its
+## place, where it starts, its holders, where it ends).
+pure def explained(
+    p: sir.Program, source: int, line: int, text: str
+) -> list[(String, list[ExplainedLoan])]:
+    let lines = Lines.of(text)
+    var out: list[(String, list[ExplainedLoan])] = []
+    for fl in borrowck.live_at(p, source, line):
+        if fl.loans.is_empty():
+            continue
+        var each: list[ExplainedLoan] = []
+        for l in fl.loans:
+            var place = String.new()
+            match l.place:
+                case Arg.Text(t):
+                    place = t.copy()
+                case Arg.Source(loc):
+                    let (start, end) = span_of(text, lines, Some(loc))
+                    if start <= end and end <= text.byte_len():
+                        place = text.byte_slice(start, end).to_string()
+            each.push(
+                ExplainedLoan(
+                    mutable=l.mutable,
+                    place=place,
+                    start=loc_text(l.start),
+                    end=loc_text(l.until),
+                    holders=l.holders.copy(),
+                )
+            )
+        out.push((fl.function.copy(), each))
+    return out
+
+## A loan as `explain-borrow` shows it.
+struct ExplainedLoan:
+    mutable: bool
+    place: String
+    start: String
+    end: String
+    holders: list[String]
+
+## A position as `LINE:COL`, or empty for none.
+pure def loc_text(l: sir.Loc?) -> String:
+    let at = l else:
+        return String.new()
+    return "{at.line}:{at.col}"
+
+## `explain-borrow FILE:LINE` (10, "Language server": the "explain this
+## borrow" command; RULES.md, R187): every borrow live on the line, with
+## where it starts, who holds it and where it is last used, in the
+## driver's words, from the program that holds FILE (its package's, or
+## the file's alone); a program with an error of the front end has its
+## diagnostics reported as `check` reports them, and fails.
+def explain_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> ! {IoError, UsageError, CommandError}:
+    var target: (String, int)? = None
+    if len(rest) >= 2:
+        let a = rest[1].copy()
+        var k = a.byte_len() - 1
+        while k >= 0:
+            if a.byte_at(k) == 58:
+                if let Some(n) = a.byte_slice(k + 1, a.byte_len()).parse_int():
+                    if n >= 0:
+                        target = Some((a.byte_slice(0, k).to_string(), n))
+                break
+            k -= 1
+    let (file, line) = target else:
+        o.emit("", catalog.plain_error("cli.explain-borrow-usage", []))
+        return Err(Exit(status=2))
+    var text = String.new()
+    match sys.fs.read_to_string(Path.new(file.copy())):
+        case Ok(t):
+            text = t
+        case Err(e):
+            o.emit("", cannot_read(file, e, catalog))
+            return Err(Exit(status=1))
+    var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
+    var env = base.environment()
+    let (input, at, _) = query_input(sys, home, file, text, mut env, catalog)?
+    let (report, program, source) = owned_program(base, input, at, file, catalog)
+    let p = program else:
+        var err = String.new()
+        if report.has_error:
+            err = report.human(catalog)
+            let n = Param(name="count".to_string(), value="{report.errors(catalog)}")
+            err.push(catalog.plain_error("cli.errors-found", [n]))
+        else:
+            err = "the program is beyond the slice stage 1 lowers\n".to_string()
+        o.emit("", err)
+        return Err(Exit(status=1))
+    var out = String.new()
+    for (function, loans) in explained(p, source, line, text):
+        let header = [
+            Param(name="line".to_string(), value="{line}"),
+            Param(name="file".to_string(), value=file.copy()),
+            Param(name="function".to_string(), value=function.copy()),
+        ]
+        out.push("{catalog.render("cli.explain-borrow-header", header)}\n")
+        for l in loans:
+            var kind = catalog.render("cli.explain-borrow-shared", [])
+            if l.mutable:
+                kind = catalog.render("cli.explain-borrow-mut", [])
+            var holders: list[String] = []
+            for h in l.holders:
+                holders.push("`{h}`")
+            var id = "cli.explain-borrow-loan"
+            if holders.is_empty():
+                id = "cli.explain-borrow-temporary"
+            let params = [
+                Param(name="kind".to_string(), value=kind),
+                Param(name="place".to_string(), value=l.place.copy()),
+                Param(name="start".to_string(), value=l.start.copy()),
+                Param(name="holders".to_string(), value=holders.join(", ")),
+                Param(name="end".to_string(), value=l.end.copy()),
+            ]
+            out.push("  {catalog.render(id, params)}\n")
+    if out.is_empty():
+        let params = [
+            Param(name="line".to_string(), value="{line}"),
+            Param(name="file".to_string(), value=file.copy()),
+        ]
+        out.push("{catalog.render("cli.explain-borrow-none", params)}\n")
+    o.emit(out, "")
+    return Ok(())
+
+## `query explain FILE LINE` (RULES.md, R187): `explain-borrow`'s loans as
+## an answer, one line per loan, `FUNCTION\tKIND\tPLACE\tSTART\tHOLDERS\tEND`,
+## KIND `shared` or `mut`, START and END `LINE:COL`, HOLDERS the names
+## that hold it separated by `, ` (empty for a temporary); nothing for a
+## program with an error of the front end, or a line with no loan.
+pure def query_explain(
+    base: typeck.Base, input: Input, at: int, file: str, text: str, line: int, catalog: Catalog
+) -> String:
+    let (_, program, source) = owned_program(base, input, at, file, catalog)
+    let p = program else:
+        return String.new()
+    var out = String.new()
+    for (function, loans) in explained(p, source, line, text):
+        for l in loans:
+            var kind = "shared"
+            if l.mutable:
+                kind = "mut"
+            let fields = [
+                query.field(function),
+                kind.to_string(),
+                query.field(l.place),
+                l.start.copy(),
+                query.field(l.holders.join(", ")),
+                l.end.copy(),
+            ]
+            out.push("{fields.join("\t")}\n")
+    return out
+
+## `audit --ownership FILE...` and `audit --caps [FILE...]` (18, Phase 3,
+## T1.1 and T1.2; RULES.md, R188), as the driver's `audit` takes them:
+## an option it does not know is `D0009`, none or both `D0022`, both with
+## status 2; `--ownership` without a file `D0004`.
+def audit_counts(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out
+) -> ! {IoError, UsageError, CommandError}:
+    var flags: list[String] = []
+    var files: list[String] = []
+    for k in range(1, len(rest)):
+        if rest[k].starts_with("--"):
+            flags.push(rest[k].copy())
+        else:
+            files.push(rest[k].copy())
+    for f in flags:
+        if f != "--ownership" and f != "--caps":
+            let params = [
+                Param(name="option".to_string(), value=f.copy()),
+                Param(name="command".to_string(), value="audit".to_string()),
+            ]
+            o.emit("", catalog.plain_error("cli.unknown-option", params))
+            return Err(Exit(status=2))
+    if len(flags) != 1:
+        o.emit("", catalog.plain_error("cli.audit-usage", []))
+        return Err(Exit(status=2))
+    if flags[0] == "--caps":
+        return audit_caps(sys, home, files, catalog, mut o)
+    if files.is_empty():
+        let params = [Param(name="command".to_string(), value="audit".to_string())]
+        o.emit("", catalog.plain_error("cli.missing-file", params))
+        return Err(Exit(status=2))
+    var out = String.new()
+    for file in files:
+        match sys.fs.read_to_string(Path.new(file.copy())):
+            case Ok(text):
+                out.push("{ownership_line(file, text)}\n")
+            case Err(e):
+                o.emit(out, cannot_read(file, e, catalog))
+                return Err(Exit(status=1))
+    o.emit(out, "")
+    return Ok(())
+
+## `audit --caps [FILE...]`: each program checked and lowered, then its
+## capability audit, read from its SIR; without a file the package of the
+## working directory, each member of a workspace's in turn, named by its
+## directory (decision 429); a program with an error has its errors
+## reported, and fails.
+def audit_caps(
+    sys: System, home: str, files: list[String], catalog: Catalog, mut o: Out
+) -> ! {IoError, UsageError, CommandError}:
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    var env = base.environment()
+    var inputs: list[(String, Input)] = []
+    if files.is_empty():
+        var direct = Out.direct()
+        let found = nearest_package(sys, "audit", catalog, mut direct) else:
+            return Err(Failed)
+        let cwd = absolute(sys, ".")
+        for layout in layouts_of(sys, found, False, build_request(sys)) ?? []:
+            if layout.modules.is_empty():
+                continue
+            var shown = layout.modules[0].name.copy()
+            if let Some(p) = layout.packages.first():
+                if not p.name.is_empty():
+                    shown = package.relative(cwd, p.dir)
+                    if shown.is_empty():
+                        shown = ".".to_string()
+            inputs.push((shown, layout_input(sys, home, layout, True, mut env, catalog)?))
+    else:
+        for f in files:
+            match sys.fs.read_to_string(Path.new(f.copy())):
+                case Ok(text):
+                    inputs.push((f.copy(), file_input(sys, home, f, text, True, mut env, catalog)?))
+                case Err(e):
+                    o.emit("", cannot_read(f, e, catalog))
+                    return Err(Exit(status=1))
+    var out = String.new()
+    for (shown, input) in inputs:
+        if True:
+            var kept = Kept.new()
+            let (report, done) = report_program(base, input, shown, catalog, mut kept)
+            let d = done else:
+                var errors = report.front(catalog, Some(True))
+                var all: list[Filed] = []
+                for x in report.diags:
+                    if catalog.is_error(x.diag.msg):
+                        all.push(x.copy())
+                errors.diags = all
+                var err = errors.human(catalog)
+                if not report.has_error:
+                    err = "the program is beyond the slice stage 1 lowers\n".to_string()
+                else:
+                    let n = Param(name="count".to_string(), value="{len(errors.diags)}")
+                    err.push(catalog.plain_error("cli.errors-found", [n]))
+                o.emit(out, err)
+                return Err(Exit(status=1))
+            out.push(caps_report(shown, d.program, own_structs(base, input, catalog)))
+    o.emit(out, "")
+    return Ok(())
+
+## The structs the program declares, by their SIR names (std's and the
+## dependencies' are not the program's design), for `audit --caps`.
+pure def own_structs(base: typeck.Base, input: Input, catalog: Catalog) -> list[String]:
+    var out: list[String] = []
+    let checked = check_input(base, input, catalog, False)
+    let typed = checked.typed else:
+        return out
+    let prog = ref typed.prog
+    for i in range(len(prog.defs)):
+        if let DefKind.Struct(_) = prog.defs[i].kind():
+            let m = prog.defs[i].module
+            if m.index < len(prog.modules):
+                if prog.package_of(m) == ROOT_PACKAGE:
+                    out.push(prog.qualified_name(DefId(index=i)))
+    return out
 
 ## Whether a line of `check --format=ids` is one of the rules of unsafe
 ## code (22): an `unsafe.` lint or error, a package's level, the root's
@@ -1730,6 +2127,7 @@ pure def check_input(
         input.multi,
         input.tests,
         input.features,
+        input.std_tests,
     )
 
 ## The type diagnostics of a program, with the ownership checker's `type.`
@@ -2100,6 +2498,9 @@ struct Report:
     ## The lints of `sisu lint` (RULES.md, R11), which `check` does not
     ## print.
     lints: list[Filed]
+    ## How many of `files` are the root package's own modules, the first
+    ## (at least one), which `check --diary` hashes (RULES.md, R186).
+    ours: int
 
 impl Report:
     ## The number of errors among the diagnostics.
@@ -2194,6 +2595,7 @@ pure def problems_report(layout: Layout, catalog: Catalog) -> Report:
         failed=[],
         has_error=has_error,
         lints=[],
+        ours=0,
     )
 
 ## What `check` makes of one program (stage 0's `Db::checked` and
@@ -2310,6 +2712,146 @@ pure def report_program(
     if evaluated_all and not report.has_error and report.beyond.is_empty():
         return (report, Some(done))
     return (report, None)
+
+## What `--defer-borrow` makes of a program (RULES.md, R189): its SIR when
+## its only errors are the ownership rules' (the front end's `E04` codes
+## and the ownership checker's findings but purity's and a second
+## assignment of a `let`), which the SIR is written despite; the report of
+## every diagnostic, and the errors that stop it otherwise.
+struct Deferred:
+    ## The SIR, empty when an error stops it.
+    sir: String
+    ## Every diagnostic of the program, the deferred errors among them.
+    report: Report
+    ## The errors that stop it, and the message that ends their report.
+    stopping: Report
+    stopped: String
+    ## Whether an error was deferred.
+    deferred: bool
+    ## Whether the SIR has an entry, a `main` to run.
+    entry: bool
+
+## The purity rules and a `let` assigned twice, which the monitor does not
+## observe, so that `--defer-borrow` does not defer them.
+pure def not_deferred(id: str) -> bool:
+    return id == "type.impure-call"
+        or id == "type.impure-value-call"
+        or id == "type.impure-drop"
+        or id == "type.reassign-let"
+
+## `--defer-borrow` (stage 0's counterexample mode): the program checked,
+## and lowered and through the ownership checker despite the errors of
+## the ownership rules, as stage 0's `run --defer-borrow` lowers it.
+pure def deferred_program(
+    base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept, modules: bool
+) -> Deferred:
+    let checked = check_input(base, input, catalog, True)
+    var report = front_report(input, checked, name, catalog)
+    var out = Deferred(
+        sir=String.new(),
+        report=report.copy(),
+        stopping=report.copy(),
+        stopped="cli.errors-found".to_string(),
+        deferred=False,
+        entry=False,
+    )
+    # The front end's errors but the ownership rules' stop it.
+    var stopping: list[Filed] = []
+    for x in report.diags:
+        if catalog.is_error(x.diag.msg):
+            if catalog.code(x.diag.msg).starts_with("E04"):
+                out.deferred = True
+            else:
+                stopping.push(x.copy())
+    if not stopping.is_empty() or not report.beyond.is_empty():
+        out.stopping.diags = stopping
+        return out
+    if checked.typed.is_none():
+        out.stopping.diags = []
+        return out
+    let program = program_files(input, checked)
+    var consuming: dict[String, String] = {}
+    if let Some(typed) = checked.typed:
+        consuming = consuming_methods(typed.prog)
+    let lowered = lower_of(checked, base, input, catalog, mut kept) else:
+        out.stopping.diags = []
+        return out
+    if not lowered.beyond.is_empty():
+        for b in lowered.beyond:
+            out.stopping.beyond.push("beyond the slice of lowering: {b}")
+        out.stopping.diags = []
+        return out
+    var done = borrowck.check_with(lowered.program, True, mut kept.placed)
+    let by_source = files_by_source(lowered, program)
+    var owned: list[Filed] = []
+    match borrowck.diagnostics_by_file(done.findings, by_source, len(program), catalog):
+        case Some(per_file):
+            for k in range(len(per_file)):
+                for d in per_file[k]:
+                    owned.push(Filed(file=k, diag=consume_note(d, consuming), label_files=[]))
+        case None:
+            out.stopping.beyond.push(
+                "an ownership finding in a file of the standard library or one the compiler wrote"
+            )
+            out.stopping.diags = []
+            return out
+    sort_filed(mut owned, catalog, True)
+    var impure: list[Filed] = []
+    for x in owned:
+        if catalog.is_error(x.diag.msg):
+            if not_deferred(x.diag.msg.id()):
+                impure.push(x.copy())
+            else:
+                out.deferred = True
+        report.diags.push(x.copy())
+    sort_filed(mut report.diags, catalog, True)
+    out.report = report.copy()
+    if not impure.is_empty():
+        out.stopping.diags = impure
+        return out
+    simplify.program(mut done.program)
+    if done.findings.is_empty():
+        let evaluated = interp.evaluate(mut done.program, catalog)
+        if not evaluated.beyond.is_empty():
+            for why in evaluated.beyond:
+                out.stopping.beyond.push(why.copy())
+            out.stopping.diags = []
+            return out
+        var failed: list[Filed] = []
+        for e in evaluated.errors:
+            if let Some((k, d)) = comptime_diagnostic(e, done.program, by_source):
+                failed.push(Filed(file=k, diag=d, label_files=[]))
+        if not evaluated.errors.is_empty():
+            out.stopping.diags = failed
+            return out
+    let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
+    holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
+    if not input.regions.is_empty():
+        session.name_regions(mut done.program, input.regions)
+    out.sir = write.write_as(done.program, modules)
+    out.entry = done.program.entry.is_some()
+    out.stopping.diags = []
+    return out
+
+## What `--defer-borrow` prints: the SIR on standard output and every
+## diagnostic in the conformance form on standard error, with status 3
+## when an error was deferred and 0 when the program has none; or the
+## errors that stop it, in the form `ids` asks for, with status 1 and no
+## SIR (RULES.md, R189).
+pure def deferred_answer(d: Deferred, catalog: Catalog, ids: bool) -> (String, String, int):
+    if d.sir.is_empty():
+        var errs = shown_report(d.stopping, catalog, ids)
+        let n = d.stopping.errors(catalog)
+        if n > 0:
+            let count = Param(name="count".to_string(), value="{n}")
+            errs.push(catalog.plain_error(d.stopped, [count]))
+        for b in d.stopping.beyond:
+            errs.push("beyond the slice: {b}\n")
+        return (String.new(), errs, 1)
+    var status = 0
+    if d.deferred:
+        status = 3
+    return (d.sir.copy(), d.report.ids(catalog), status)
 
 ## A `const` item of the program's own modules (RULES.md, R178): its
 ## module's index among the input's, its function's name in SIR, its name
@@ -2462,6 +3004,7 @@ pure def front_report(input: Input, checked: typeck.Checked, name: str, catalog:
         failed=[],
         has_error=checked.has_error,
         lints=lints,
+        ours=max(input.own_modules, 1),
     )
     let errors = report.errors(catalog)
     if errors > 0:
@@ -2630,6 +3173,22 @@ def build_command(
         case None:
             for input in inputs_of(sys, home, path, False, False, request, mut env, catalog)?:
                 programs.push(input.copy())
+    # `--emit-sir --defer-borrow`: the SIR of a program whose only errors
+    # are the ownership rules', and its diagnostics, for `sisu run
+    # --defer-borrow` (RULES.md, R189).
+    if how.emit_sir and how.deferring and not failed:
+        for input in programs:
+            var built = input.copy()
+            built.contracts = level ?? CONTRACTS_ALL
+            let d = deferred_program(base, built, path, catalog, mut kept, False)
+            let (sir, errs, status) = deferred_answer(d, catalog, True)
+            var shown = sir.copy()
+            if not d.entry:
+                shown = String.new()
+            o.emit(shown, errs)
+            if status != 0:
+                return Err(Exit(status=status))
+            return Ok(())
     for input in programs:
         if not build_program(
             sys, home, path, input, how, level, output, base, mut env, catalog, mut kept, mut o
@@ -2647,6 +3206,8 @@ struct BuildHow:
     for_run: bool
     ## The SIR written on standard output rather than built (R170).
     emit_sir: bool
+    ## With `emit_sir`, despite the errors of the ownership rules (R189).
+    deferring: bool
 
 ## A program built as stage 0's `sisu build` builds it, without its tests
 ## (decision 243): its diagnostics in the human form, and the build stopped
@@ -2998,7 +3559,7 @@ def serve_one(
 ## REPL's (RULES.md, R158).
 pure def served_command(command: str) -> bool:
     return match command:
-        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval" | "fix": True
+        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval" | "fix" | "explain-borrow" | "audit": True
         case _: False
 
 ## What the run time prints of an I/O error that stops `main`, without the
@@ -3247,12 +3808,25 @@ def query_command(
         or kind == "selection"
         or kind == "actions"
     let renames = kind == "rename" and len(words) == 5
-    if not (whole and len(words) == 2) and not (at and len(words) == 4) and not renames:
+    # `query explain FILE LINE` (RULES.md, R187): a line, not a position.
+    let explains = kind == "explain" and len(words) == 3
+    if not (whole and len(words) == 2)
+            and not (at and len(words) == 4)
+            and not renames
+            and not explains:
         return Err(Usage(text=usage()))
     let file = words[1].copy()
     let text = sys.fs.read_to_string(Path.new(given ?? file.copy()))?
     if kind == "symbols":
         o.emit(query.symbols(text, catalog), "")
+        return Ok(())
+    if explains:
+        let line = words[2].parse_int() else:
+            return Err(Usage(text=usage()))
+        var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
+        var env = base.environment()
+        let (input, module, _) = query_input(sys, home, file, text, mut env, catalog)?
+        o.emit(query_explain(base, input, module, file, text, line, catalog), "")
         return Ok(())
     var offset = 0
     if at or renames:
@@ -3317,9 +3891,9 @@ def holes_command(
     let (input, at, _) = query_input(sys, home, file, text, mut env, catalog)?
     let checked = check_input(base, input, catalog, True)
     let typed = checked.typed else:
-        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o)
+        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o, None)
     if checked.has_error:
-        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o)
+        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o, None)
     var out = String.new()
     var objects: list[String] = []
     for i in range(len(input.modules)):
@@ -3371,11 +3945,16 @@ def holes_command(
                 var each: list[String] = []
                 for x in t.members:
                     each.push("`{x}`")
+                # Each named whole, so that the catalog's test of its entries
+                # finds them (RULES.md, R181, amended in the twenty-second
+                # round).
                 var id = "cli.hole-enum".to_string()
-                if t.is_struct:
+                if t.is_struct and t.members.is_empty():
+                    id = "cli.hole-struct-empty".to_string()
+                elif t.is_struct:
                     id = "cli.hole-struct".to_string()
-                if t.members.is_empty():
-                    id.push("-empty")
+                elif t.members.is_empty():
+                    id = "cli.hole-enum-empty".to_string()
                 let ps = [
                     Param(name="name".to_string(), value=t.name.copy()),
                     Param(name="members".to_string(), value=each.join(", ")),
@@ -4247,7 +4826,10 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
             continue
         words.push(given[k].copy())
         k += 1
-    let flags = ["--locked", "--no-default-features", "--accept-unsafe"]
+    let flags = ["--locked", "--no-default-features", "--accept-unsafe", "--std"]
+    # `--std`: the standard library's doc examples are tests too, as `sisu
+    # test --std` runs them (RULES.md, R185).
+    let std_tests = words.contains("--std")
     var path = path_of(words, flags) else:
         emit("", "{usage()}\n")
         return Ok(2)
@@ -4282,6 +4864,9 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
         case None:
             for input in inputs_of(sys, home, path, False, True, request, mut env, catalog)?:
                 programs.push((input.copy(), path.copy()))
+    if std_tests:
+        for k in range(len(programs)):
+            programs[k].0.std_tests = True
     # Then each package's black-box tests, `tests/*.sisu` (17), a program
     # each whose dependency is the package (RULES.md, R65).
     for file in black_box_files(sys, path):

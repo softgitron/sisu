@@ -1,0 +1,4 @@
+13:32-13:38 E0300 type.mismatch expected="(ref ref int) -> bool" found="(ref int) -> bool"
+  fix type.call-with-value 13:32-13:38 "x -> is_big(x)"
+14:36-14:43 E0300 type.mismatch expected="(ref ref str) -> bool" found="(str) -> bool"
+  fix type.call-with-value 14:36-14:43 "x -> is_long(x)"

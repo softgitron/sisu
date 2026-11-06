@@ -389,7 +389,14 @@ impl Parser:
             self.report(d)
         else:
             let (start, end) = self.error_span()
-            let found = self.found()
+            # What `unexpected {found}` names: a token's text, or a kind of
+            # token without its article, `unexpected string` (RULES.md,
+            # R191).
+            var found = self.found()
+            if found.starts_with("a "):
+                found = found.byte_slice(2, found.byte_len()).to_string()
+            elif found.starts_with("an "):
+                found = found.byte_slice(3, found.byte_len()).to_string()
             let d = Diagnostic.new(Msg.ParseTrailingTokens, start, end).with("found", found)
             self.report(self.with_habit(d))
         self.recover_line()

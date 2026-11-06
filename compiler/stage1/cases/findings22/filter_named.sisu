@@ -1,0 +1,15 @@
+# A named function in `filter` (RULES.md, R190): the closure that calls it,
+# `x -> is_long(x)`, reads a list of `str`'s `ref ref str` as the `str` the
+# function takes, as it reads a `ref ref int` as a `ref int`.
+def is_big(x: ref int) -> bool:
+    return x > 2
+
+def is_long(word: str) -> bool:
+    return len(word) > 2
+
+def main():
+    let xs = [1, 2, 3, 4]
+    let words = ["a", "bcd", "efgh"]
+    let big = xs.iter().filter(x -> is_big(x)).count()
+    let long = words.iter().filter(x -> is_long(x)).count()
+    print("{big} {long}")

@@ -48,6 +48,17 @@
 #   sisu1 doc --std [MODULE...]                  as `sisu doc` writes it, with its exit status
 #   sisu1 lint [--format=ids] [PATH]             the program's lints, which `check` does not
 #                                                print (RULES.md, R11)
+#   sisu1 check --diary PATH [PATH...]           also appends the check's records to the diary PATH,
+#                                                as `sisu check --diary` does (RULES.md, R186)
+#   sisu1 explain-borrow FILE:LINE               every borrow live on the line (RULES.md, R187), and
+#                                                `query explain FILE LINE` its loans as an answer
+#   sisu1 audit (--ownership FILE... | --caps [FILE...])
+#                                                the escape hatches of each file, or a program's
+#                                                capabilities, as `sisu audit` prints them (R188)
+#   sisu1 sir --defer-borrow [--tests] [PATH]    the SIR of a program whose only errors are the
+#                                                ownership rules', status 3 when it defers one (R189)
+#   sisu1 sir --tests --std [PATH]               with the standard library's doc examples as tests,
+#                                                and `test --std` runs them (RULES.md, R185)
 #   sisu1 --version                              stage 1's version, `sisu1 VERSION` (RULES.md, R56)
 #   sisu1 test [OPTIONS] [PATH]                  the tests, built by stage 1 and run by stage 0's
 #                                                runner (`sisu test --from-sir`), exiting 1 when
@@ -99,8 +110,30 @@ if ! stamped || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -print -qu
         exit 1
     fi
 fi
+# A command that ends with a status of its own, which stage 1 returns as
+# the error `Exit(status=N)`: the run time prints it as the last line of
+# standard error, which goes, and N is the exit status.
+with_status() {
+    local err status last
+    err=$(mktemp)
+    "$exe" --home "$compiler" "$@" 2> "$err"
+    status=$?
+    last=$(tail -n 1 "$err")
+    case "$last" in
+        "error: Exit(status="*")")
+            status=${last#error: Exit(status=}
+            status=${status%)}
+            sed '$d' "$err" >&2
+            ;;
+        *) cat "$err" >&2 ;;
+    esac
+    rm -f "$err"
+    exit "$status"
+}
 # `build` is the native build: `sisu1 build --release` is `sisu build
-# --native --release`, stage 1's own `build` taking stage 0's options.
+# --native --release`, stage 1's own `build` taking stage 0's options;
+# `--emit-sir --defer-borrow` ends with the status that says the SIR is
+# deferred (RULES.md, R189).
 if [ "${1:-}" = build ]; then
     shift
     native=0
@@ -108,15 +141,19 @@ if [ "${1:-}" = build ]; then
         [ "$a" = --native ] && native=1
     done
     [ "$native" = 1 ] || set -- --native "$@"
+    [[ " $* " == *" --defer-borrow "* ]] && with_status build "$@"
     exec "$exe" --home "$compiler" build "$@"
 fi
+[ "${1:-}" = sir ] && [[ " $* " == *" --defer-borrow "* ]] && with_status "$@"
 # `fmt` and `doc` exit with stage 0's status (2 for a usage error, 70 for
-# a file the formatter refused as changed), and `test` with the status that
+# a file the formatter refused as changed), and so do `explain-borrow`,
+# `audit --ownership` and `audit --caps` (RULES.md, R187, R188), and `test` with the status that
 # says how the tests ended (3 when none failed and one is blocked by a typed
 # hole, RULES.md, R27), which stage 1 returns as the error
 # `Exit(status=N)`: the run time prints it as the last line of standard
 # error, which goes, and N is the exit status.
-if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ] || [ "${1:-}" = test ] || [ "${1:-}" = fix ]; then
+if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ] || [ "${1:-}" = test ] || [ "${1:-}" = fix ] ||
+        [ "${1:-}" = explain-borrow ] || { [ "${1:-}" = audit ] && [[ " $* " != *" --unsafe "* ]]; }; then
     err=$(mktemp)
     trap 'rm -f "$err"' EXIT
     "$exe" --home "$compiler" "$@" 2> "$err"

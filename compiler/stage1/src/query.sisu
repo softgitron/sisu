@@ -18,7 +18,7 @@ from stage1.syntax.ast import Mode, Vis
 from stage1.syntax.kinds import SyntaxKind, keyword_kind
 from stage1.syntax.tree import Element, Tree
 from stage1.typeck.program import DefKind, ModuleId, Program
-from stage1.typeck.thir import ArgMode, Callee, TBody, TExprKind
+from stage1.typeck.thir import ArgMode, Callee, TBody, TExprKind, TPatKind
 from stage1.typeck.ty import DefId, Ty, TyData, TyKey, Types
 
 ## The keywords a statement or a declaration starts with, which a
@@ -502,6 +502,12 @@ pub pure def references(
                 if found == target:
                     out.push("{field(path)}\t{range_of(text, lines, t.start, t.end)}\tuse\n")
                 continue
+            # A field's name in a struct pattern, `x` of `Point(x=a)`, means
+            # the field (RULES.md, R192).
+            if let Some(found) = pattern_field(typed, module, tree, text, k):
+                if found == target:
+                    out.push("{field(path)}\t{range_of(text, lines, t.start, t.end)}\tuse\n")
+                continue
             if let Some(found) = target_at(typed, module, t.start):
                 means = found == target
             # A type's name written in a type means the type.
@@ -873,6 +879,8 @@ pub pure def target_of(
                 return None
             if let Some(found) = keyword_field(typed, m, tree, text, k):
                 return Some(found)
+            if let Some(found) = pattern_field(typed, m, tree, text, k):
+                return Some(found)
     return target_at(typed, m, offset)
 
 ## The field that the name `k` of a keyword argument names, `x` of
@@ -889,6 +897,48 @@ pure def keyword_field(typed: typeck.Typed, m: ModuleId, tree: Tree, text: str, 
     let (bi, ei) = expr_at(typed, m, t.start) else:
         return None
     let TExprKind.Struct(d, _) = typed.bodies[bi].exprs[ei].kind.copy() else:
+        return None
+    let s = typed.prog.struct_info(d) else:
+        return None
+    let name = text.byte_slice(t.start, t.end)
+    for i in range(len(s.fields)):
+        if s.fields[i].name == name:
+            return Some(Target.Field(d, i))
+    return None
+
+## The field that the name `k` of a struct pattern names, `x` of `case
+## Point(x=a)`: a name before `=` among a struct pattern's fields
+## (RULES.md, R192), which `references` and `rename` count among the
+## field's uses, as they count a construction's keyword arguments (R179).
+pure def pattern_field(typed: typeck.Typed, m: ModuleId, tree: Tree, text: str, k: int) -> Target?:
+    var next = k + 1
+    while next < len(tree.tokens) and tree.tokens[next].kind.is_trivia():
+        next += 1
+    if next >= len(tree.tokens) or tree.tokens[next].kind != SyntaxKind.Eq:
+        return None
+    let t = tree.tokens[k]
+    # The narrowest struct pattern there, of a body of the module.
+    var best: (int, int)? = None
+    var best_width = 0
+    for bi in range(len(typed.bodies)):
+        if body_module(typed, bi) != m:
+            continue
+        let body = ref typed.bodies[bi]
+        if not within(extent(body), t.start):
+            continue
+        for pi in range(len(body.pats)):
+            let r = body.pats[pi].span
+            var structural = False
+            if let TPatKind.Struct(_, _) = body.pats[pi].kind:
+                structural = True
+            if not structural:
+                continue
+            if within(r, t.start) and (best.is_none() or width(r) <= best_width):
+                best = Some((bi, pi))
+                best_width = width(r)
+    let (bi, pi) = best else:
+        return None
+    let TPatKind.Struct(d, _) = typed.bodies[bi].pats[pi].kind.copy() else:
         return None
     let s = typed.prog.struct_info(d) else:
         return None

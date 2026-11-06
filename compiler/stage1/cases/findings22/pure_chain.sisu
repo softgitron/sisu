@@ -1,0 +1,8 @@
+# Three diagnostics' words (RULES.md, R191): in a `pure` function, a chain
+# after an impure adapter is one error, the adapter's with its note (E0333),
+# not a second one at the consumer.
+pure def words(text: str) -> int:
+    return text.split_whitespace().filter(w -> len(w) > 2).count()
+
+def main():
+    print(words("a bcd efg"))

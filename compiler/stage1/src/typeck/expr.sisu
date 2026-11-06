@@ -189,6 +189,14 @@ impl Checker:
                 self.infer.rollback(snap)
             if exp_is_str and self.resolved(inner) == Ty.str():
                 return self.wrap(x, Coercion.DerefCopy, Ty.str())
+            # A reference to a reference to text, a filter's `ref ref str`
+            # of a list of `str`, where `str` is expected: read through both
+            # (RULES.md, R190), as a `ref ref int` is read as a `ref int`.
+            if exp_is_str:
+                if let TyData.Ref(text, _) = self.data(inner):
+                    if self.resolved(text) == Ty.str():
+                        let once = self.wrap(x, Coercion.DerefCopy, self.resolved(inner))
+                        return self.wrap(once, Coercion.DerefCopy, Ty.str())
         # `T ! A` where `T ! {A, B}` is expected.
         if let Some((t1, e1)) = self.as_result(cx, actual):
             if let Some((t2, e2)) = self.as_result(cx, exp):
@@ -406,6 +414,13 @@ impl Checker:
                 if w == h and self.is_copy(cx, h):
                     any = True
                     continue
+                # A function that takes `str` where a reference to a `ref
+                # str` is passed (RULES.md, R190).
+                if h == Ty.str():
+                    if let TyData.Ref(text, False) = self.data(w):
+                        if self.resolved(text) == Ty.str():
+                            any = True
+                            continue
                 return None
             if not self.infer.try_unify(mut self.types, h, w):
                 return None

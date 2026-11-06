@@ -1,0 +1,284 @@
+answer 0
+borrows live on line 14 of explain_borrow.sisu, in `main`:
+  a shared borrow of `xs[...]` from 14:17, held by `first`, used until 15:17
+answer 0
+borrows live on line 21 of explain_borrow.sisu, in `main`:
+  a shared borrow of `s` from 21:21, held by `l`, used until 22:21
+  a shared borrow of `t` from 21:24, held by `l`, used until 22:21
+answer 0
+no borrow is live on line 3 of explain_borrow.sisu
+answer 1
+error[D0018]: `sisu explain-borrow` takes FILE:LINE, as in `sisu explain-borrow main.sisu:12`
+error: Exit(status=2)
+answer 1
+error[E0300]: expected `int`, found `str`
+  --> defer_other.sisu:4:18
+  |
+4 |     let x: int = "a"
+  |                  ^^^
+  |            --- expected because of this
+
+error[D0006]: the program was not run: errors found (1)
+error: Exit(status=1)
+answer 0
+main	shared	s	21:21	l	22:21
+main	shared	t	21:24	l	22:21
+answer 0
+answer 0
+audit_counts.sisu lines=9 Shared=2 Weak=0 Cell=2 Arena=0 Key=0 copy=1 unsafe=0
+explain_borrow.sisu lines=18 Shared=0 Weak=0 Cell=0 Arena=0 Key=0 copy=0 unsafe=0
+answer 0
+audit_counts.sisu function main caps=1 io=calls depth=0
+audit_counts.sisu function stamp caps=1 io=direct depth=1
+audit_counts.sisu use stamp ClockOps.now depth=1
+audit_counts.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
+answer 1
+error[E0300]: expected `int`, found `str`
+  --> defer_other.sisu:4:18
+  |
+4 |     let x: int = "a"
+  |                  ^^^
+  |            --- expected because of this
+
+error[D0006]: the program was not run: errors found (1)
+error: Exit(status=1)
+answer 1
+error[D0004]: `sisu audit` needs a file
+error: Exit(status=2)
+answer 1
+error[D0022]: `sisu audit` needs one of its audits: `sisu audit --ownership FILE...` or `sisu audit --caps FILE...`
+error: Exit(status=2)
+answer 1
+error[D0009]: unknown option `--counts` for `sisu audit`
+error: Exit(status=2)
+answer 1
+sir 0
+source 0 "defer_borrow.sisu"
+entry main
+
+intrinsic list.push pure own 1 keeps 0 1
+intrinsic print
+
+fn main(0) source 0 @3:5-3:9 {
+    let _0: ()
+    let _1: list[int] "xs" @4:9-4:11
+    let _2: ref int "first" @5:9-5:14
+    let _3: int
+    let _4: ()
+    let _5: ref mut list[int]
+    let _6: ()
+  bb0:
+    _1 = list(const 1, const 2, const 3) @4:14-4:23
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = const 0 @5:24-5:25
+    _2 = ref _1[_3] @5:17-5:26
+    _5 = ref mut _1 @6:5-6:7
+    _4 = call intrinsic list.push(copy _5, const 4) @6:5-6:15
+    _6 = call intrinsic print(copy _2) @7:5-7:17
+    _0 = const ()
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3:
+    drop _1 @7:17-7:17
+    return
+}
+6:5-6:15 E0405 borrow.mut-while-borrowed name="xs" line="5" end="7"
+  label 5:17-5:26 borrow.borrowed-by borrower="first"
+  label 7:5-7:17 borrow.later-used
+error: Exit(status=3)
+answer 1
+error[E0300]: expected `int`, found `str`
+  --> defer_other.sisu:4:18
+  |
+4 |     let x: int = "a"
+  |                  ^^^
+  |            --- expected because of this
+
+error[D0006]: the program was not run: errors found (1)
+error: Exit(status=1)
+answer 0
+sir 0
+source 0 "explain_borrow.sisu"
+entry main
+
+struct Point { x: int, y: int }
+
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic len pure
+intrinsic print
+intrinsic str.to_string pure
+
+fn longest(2) source 0 from 0 1 @7:5-7:12 {
+    let _0: str
+    let _1: str "a" @7:13-7:23
+    let _2: str "b" @7:25-7:35
+    let _3: bool
+    let _4: int
+    let _5: int
+  bb0:
+    _4 = call intrinsic len(copy _1) @8:8-8:14
+    _5 = call intrinsic len(copy _2) @8:17-8:23
+    _3 = gt copy _4, copy _5 @8:8-8:23
+    switch copy _3 [0: bb1, else: bb2] @8:8-8:23
+  bb1:
+    _0 = copy _2 @10:12-10:13
+    return @10:5-10:13
+  bb2:
+    _0 = copy _1 @9:16-9:17
+    return @9:9-9:17
+}
+
+fn main(0) source 0 @12:5-12:9 {
+    let _0: ()
+    let _1: list[int] "xs" @13:9-13:11
+    let _2: ref int "first" @14:9-14:14
+    let _3: int
+    let _4: int "total" @15:9-15:14
+    let _5: int
+    let _6: Point "p" @16:9-16:10
+    let _7: ref mut Point "q" @17:9-17:10
+    let _8: int
+    let _9: String "s" @19:9-19:10
+    let _10: String "t" @20:9-20:10
+    let _11: str "l" @21:9-21:10
+    let _12: str
+    let _13: str
+    let _14: ()
+    let _15: String
+    let _16: ref mut String
+    let _17: ()
+    let _18: ref String
+  bb0:
+    _1 = list(const 1, const 2, const 3) @13:14-13:23
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = const 0 @14:24-14:25
+    _2 = ref _1[_3] @14:17-14:26
+    _5 = copy _2.* @15:17-15:22
+    _4 = add copy _5, const 1 @15:17-15:26
+    _6 = struct Point(const 1, const 2) @16:13-16:28
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
+    _7 = ref mut _6 @17:13-17:22
+    _8 = add copy _7.*.0, const 1 @18:5-18:13
+    _7.*.0 = move _8 @18:5-18:13
+    _9 = call intrinsic str.to_string(const "hello") @19:13-19:32
+    goto bb5
+  bb4 (cleanup):
+    drop _6
+    goto bb2
+  bb5 (unwind bb6):
+    _10 = call intrinsic str.to_string(const "hi") @20:13-20:29
+    goto bb7
+  bb6 (cleanup):
+    drop _9
+    goto bb4
+  bb7 (unwind bb8):
+    _12 = strview _9 @21:21-21:22
+    _13 = strview _10 @21:24-21:25
+    _11 = call fn longest(copy _12, copy _13) @21:13-21:26
+    _15 = call intrinsic fmt.new() @22:11-22:30
+    _16 = ref mut _15 @22:11-22:30
+    _17 = call intrinsic fmt.display(copy _16, copy _4, const "") @22:13-22:18
+    _17 = call intrinsic fmt.text(copy _16, const " ") @22:11-22:30
+    _17 = call intrinsic fmt.display(copy _16, copy _11, const "") @22:21-22:22
+    _17 = call intrinsic fmt.text(copy _16, const " ") @22:11-22:30
+    _17 = call intrinsic fmt.display(copy _16, copy _6.0, const "") @22:25-22:28
+    goto bb9
+  bb8 (cleanup):
+    drop _10
+    goto bb6
+  bb9 (unwind bb10):
+    _18 = ref _15 @22:11-22:30
+    _14 = call intrinsic print(copy _18) @22:5-22:31
+    goto bb11
+  bb10 (cleanup):
+    drop _15
+    goto bb8
+  bb11 (unwind bb8):
+    drop _15 @22:31-22:31
+    goto bb12
+  bb12 (unwind bb8):
+    dead _15 @22:31-22:31
+    _0 = const ()
+    goto bb13
+  bb13 (unwind bb6):
+    drop _10 @22:31-22:31
+    goto bb14
+  bb14 (unwind bb4):
+    drop _9 @22:31-22:31
+    goto bb15
+  bb15 (unwind bb2):
+    drop _6 @22:31-22:31
+    goto bb16
+  bb16:
+    drop _1 @22:31-22:31
+    return
+}
+answer 1
+sir 0
+source 0 "defer_borrow.sisu"
+entry main
+
+intrinsic list.push pure own 1 keeps 0 1
+intrinsic print
+
+fn main(0) source 0 @3:5-3:9 {
+    let _0: ()
+    let _1: list[int] "xs" @4:9-4:11
+    let _2: ref int "first" @5:9-5:14
+    let _3: int
+    let _4: ()
+    let _5: ref mut list[int]
+    let _6: ()
+  bb0:
+    _1 = list(const 1, const 2, const 3) @4:14-4:23
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = const 0 @5:24-5:25
+    _2 = ref _1[_3] @5:17-5:26
+    _5 = ref mut _1 @6:5-6:7
+    _4 = call intrinsic list.push(copy _5, const 4) @6:5-6:15
+    _6 = call intrinsic print(copy _2) @7:5-7:17
+    _0 = const ()
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3:
+    drop _1 @7:17-7:17
+    return
+}
+6:5-6:15 E0405 borrow.mut-while-borrowed name="xs" line="5" end="7"
+  label 5:17-5:26 borrow.borrowed-by borrower="first"
+  label 7:5-7:17 borrow.later-used
+error: Exit(status=3)
+answer 0
+hole_empty.sisu:11:12: the typed hole `todo()` of type `Marker`, in `make`
+  nothing is in scope
+  nothing in scope is of its type
+  `Marker` is a struct without fields
+  no test reaches it
+hole_empty.sisu:14:12: the typed hole `todo()` of type `Void`, in `nothing`
+  nothing is in scope
+  nothing in scope is of its type
+  `Void` is an enum without variants
+  no test reaches it
+answer 0
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	4:5-4:6	declaration
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	9:20-9:21	use
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	13:19-13:20	use
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	14:23-14:24	use
+answer 0
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	4:5-4:6	col
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	9:20-9:21	col
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	13:19-13:20	col
+COMPILER/stage1/cases/findings22/pattern_refs.sisu	14:23-14:24	col

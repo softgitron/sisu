@@ -1400,7 +1400,10 @@ while read -r f; do
     mkdir -p "$box"
     cp -r "$f" "$box/"
     name=$(basename "$f")
-    stage1 test "$box/$name" > "$box/out" 2> "$box/err"
+    # A case's `# test-options: ...` line, `--std` (RULES.md, R185).
+    opts=$(sed -n 's/^# test-options: //p' "$f" 2> /dev/null | head -n 1)
+    # shellcheck disable=SC2086
+    stage1 test $opts "$box/$name" > "$box/out" 2> "$box/err"
     { cat "$box/out"; echo "--- stderr"; cat "$box/err"; } | sed "s|$box/||g" |
         sed -E 's/(--replay [0-9]+-)[0-9a-f]+-/\1HASH-/' > "$box/all"
     if cmp -s "$base.tests" "$box/all"; then
