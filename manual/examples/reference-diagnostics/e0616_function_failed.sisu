@@ -1,0 +1,4 @@
+# A reflection query in `main` given a value, where it takes a type.
+def main():
+    let heat = 80
+    print(comptime reflect.name_of(heat))

@@ -1,0 +1,12 @@
+# A grapheme is a character as a reader sees it.
+from std.string import Graphemes
+
+def main():
+    let word = "Sa\u{308}a\u{308}"
+    var chars = 0
+    for _ in word.chars():
+        chars += 1
+    var shown: list[str] = []
+    for g in word.graphemes():
+        shown.push(g)
+    print("{chars} characters, {len(shown)} graphemes: {shown:?}")

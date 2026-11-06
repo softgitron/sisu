@@ -1,0 +1,13 @@
+# A syntax error in a template's body, reported once, at its line.
+struct Point:
+    x: int
+    y: int
+
+def show[T](v: T) -> String:
+    var out = String.new()
+    comptime for f in reflect.fields_of(T):
+        out.push("{if f.index > 0: ", " else: ""}{f.name}")
+    return out
+
+def main():
+    print(show(Point(x=1, y=2)))

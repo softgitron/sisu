@@ -927,7 +927,7 @@ checked, and recheck such an edit within the target.
 ### sisu build
 
 - `sisu build [PACKAGE OPTIONS] [FILE]`
-- `sisu build --native [--release] [--contracts=LEVEL] [--output PATH] [FILE]`
+- `sisu build --native [--release] [--contracts=LEVEL] [--explain-size] [--output PATH] [FILE]`
 - `sisu build --native --from-sir FILE.sir | --from-lir FILE.lir`
 
 `sisu build` checks and lowers the program without its tests, writes
@@ -958,6 +958,42 @@ error[E0200]: cannot find `totl` in this scope
   = fix: a similar name is in scope: `total`
 
 error[D0132]: the program was not compiled: errors found (1)
+```
+
+`--explain-size` says, after the `built` line, how large the
+executable is (D0139) and what its bytes are, in seven parts that add
+up to its size, each with its share (D0140 to D0146): the program's own
+code (its functions, the standard library's instances among them), the
+runtime written in Sisu, the runtime written in Rust, Rust's standard
+library and the rest of the code, the debug information, the symbols,
+and the data, the unwinding tables and the headers. The driver reads
+them from the linked file. The numbers change with the runtime and
+with how the `sisu` command itself was built (a debug build of `sisu`
+links a runtime that is not optimised), so this output, from a debug
+build of `sisu`, is an example rather than a check:
+
+<!-- unchecked: the sizes differ between builds of the runtime and of sisu -->
+```console
+$ sisu build --native --explain-size hello.sisu
+built `hello`
+`hello` is 20819000 bytes:
+        1106 bytes (0.0%), the program's own code
+      526944 bytes (2.5%), the runtime in Sisu's code
+      517827 bytes (2.5%), the runtime in Rust's code
+      393626 bytes (1.9%), Rust's standard library's code and the rest of the code
+    18286972 bytes (87.8%), the debug information
+      516541 bytes (2.5%), the symbols
+      575984 bytes (2.8%), the data, the unwinding tables and the headers
+```
+
+The option explains a native executable, so it goes with `--native`
+(D0148, `cli.explain-size-native`, status 2), and a file that is not a
+64-bit ELF executable, which is what the driver reads, is D0147:
+
+<!-- output: examples/reference-sisu-command/explain_size.console -->
+```console
+$ sisu build --explain-size hello.sisu
+error[D0148]: `--explain-size` explains the size of a native executable: it goes with `--native`
 ```
 
 **Stage 0 differs.** [09](../../proposal/09-modules-packages-and-build.md)
@@ -1305,6 +1341,14 @@ bench "fib of 15" ... 1.8 ms an iteration, the median of 10 samples of 100 itera
 A wide interval, or many outliers, says that the machine was busy
 while it timed: run again with more samples before comparing.
 
+In a package, `sisu bench` runs the benchmarks of all its modules, and
+`sisu bench src/MODULE.sisu` those that one module declares, the
+package compiled as the whole run compiles it, so the module's imports
+of the package's other modules resolve, as `sisu test src/MODULE.sisu`
+does ([sisu test](#sisu-test)); each benchmark of a module other than
+the root is named after its module, `matched/a match`
+([G27](../guides/bench.md#3-run-one-modules-benchmarks) runs one).
+
 **Stage 0 differs.** Stage 0 times the interpreter, and has no
 `--native`. [17](../../proposal/17-testing.md) also reports the results
 in a stable JSON form that CI can follow, which is not begun.
@@ -1365,7 +1409,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-191 not selected
+195 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -2159,7 +2203,9 @@ and shows the survivors for a person to choose.
   changed region; `--format` writes TAP or JUnit XML. Designed
   ([17](../../proposal/17-testing.md)).
 - `sisu build --target TARGET` cross-compiles, and `--explain-size`
-  reports what monomorphisation cost. Designed
+  reports what monomorphisation cost, the copies of each package, beside
+  the parts of the executable that stage 0's `--explain-size` gives
+  ([sisu build](#sisu-build)). Designed
   ([09](../../proposal/09-modules-packages-and-build.md),
   [12](../../proposal/12-interop-and-targets.md),
   [03](../../proposal/03-types-and-generics.md)).
@@ -2201,6 +2247,7 @@ a command line can produce, by what they report:
 | D0057 to D0059, [D0136](diagnostics.md#d0136) | `sisu bench`. |
 | D0064 to D0067, D0112 | Packages, lockfiles, workspaces and features. |
 | D0070 to [D0073](diagnostics.md#d0073) | `sisu build` and `sisu new`. |
+| D0139 to D0147, [D0148](diagnostics.md#d0148) | `sisu build --native --explain-size`. |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |

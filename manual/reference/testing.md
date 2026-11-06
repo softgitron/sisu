@@ -944,7 +944,9 @@ time of one turn, the 95% interval of the mean of the samples that are
 not outliers, and the number of outliers
 ([R16](sisu-command.md#sisu-bench)). `black_box(x)` of `std.test` uses a
 value in a way that nothing can see through, so that the work that made
-it is kept.
+it is kept. As with tests, `sisu bench src/MODULE.sisu` in a package
+runs one module's benchmarks, named after the module, with the package
+compiled around it.
 
 **Stage 0 differs.** 17's stable JSON report of the results is not
 begun, and stage 0 times its interpreter.

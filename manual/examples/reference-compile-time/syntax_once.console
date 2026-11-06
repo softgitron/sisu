@@ -1,0 +1,8 @@
+$ sisu run syntax_once.sisu
+error[E0103]: expected an expression, found FORMAT_SPEC
+  --> syntax_once.sisu:9:35
+  |
+9 |         out.push("{if f.index > 0: ", " else: ""}{f.name}")
+  |                                   ^
+
+error[D0006]: the program was not run: errors found (1)

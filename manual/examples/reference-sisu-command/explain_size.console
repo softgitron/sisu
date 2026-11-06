@@ -1,0 +1,2 @@
+$ sisu build --explain-size hello.sisu
+error[D0148]: `--explain-size` explains the size of a native executable: it goes with `--native`

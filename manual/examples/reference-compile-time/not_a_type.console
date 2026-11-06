@@ -1,11 +1,11 @@
 $ sisu run not_a_type.sisu
-error[E0609]: making `main` stopped at compile time: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`
+error[E0616]: the compile-time code of `main` stopped: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`
   --> not_a_type.sisu:2:5
   |
 2 | def main():
   |     ^^^^
   |
 4 |     print(comptime reflect.name_of(degrees))
-  |                                    ------- the template, where it stopped
+  |                                    ------- the compile-time code, where it stopped
 
 error[D0006]: the program was not run: errors found (1)

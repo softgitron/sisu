@@ -127,6 +127,47 @@ as in chapter 5, gives a new list. A `Slice[int]` parameter accepts a
 list as well, as the last call shows, so a function that reads a run of
 values can take a `Slice` and serve both.
 
+A slice holds no values of its own: it is the place of the first value
+it views and how many it views, so making one copies nothing, however
+long the run. Nor does it drop anything when it ends. The values stay
+the list's, and the list drops them when it ends:
+
+<!-- file: examples/12-views/towels.sisu -->
+```sisu
+# A slice views the list's values; only the list drops them.
+struct Towel:
+    name: String
+
+impl Drop for Towel:
+    def drop(mut self):
+        print("{self.name} put away")
+
+def count(towels: Slice[Towel]) -> int:
+    return len(towels)
+
+def main():
+    let towels = [Towel("Aino's"), Towel("Eero's"), Towel("Roni's")]
+    let all = towels.as_slice()
+    for _ in range(2):
+        let first_two = all[:2]
+        print("{count(first_two)} towels in view")
+    print("the list ends")
+```
+
+<!-- output: examples/12-views/towels.out -->
+```text
+2 towels in view
+2 towels in view
+the list ends
+Aino's put away
+Eero's put away
+Roni's put away
+```
+
+Each turn of the loop makes a slice of two towels and ends it, and no
+towel is put away until `towels` itself ends, after the last line of
+`main`.
+
 ## Structs that borrow
 
 A plain struct owns all of its fields. A `view struct` may hold views

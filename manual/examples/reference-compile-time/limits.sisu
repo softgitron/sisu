@@ -3,11 +3,11 @@ def greet(name: str) -> String:
     print("greeting {name}")
     return "Hei, {name}!"
 
-def adder(n: int) -> (int) -> int:
-    return own x -> x + n
+def shift(by: (int, int)) -> (int) -> int:
+    return own x -> x + by.0 - by.1
 
 const GREETING: String = comptime greet("Aino")
-const ADD_TWO: (int) -> int = comptime adder(2)
+const SHIFT: (int) -> int = comptime shift((5, 3))
 
 def main():
     print(GREETING)

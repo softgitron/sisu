@@ -1,0 +1,26 @@
+# Handlers routed by their methods' attributes, read while compiling.
+struct Sauna:
+    celsius: int
+
+impl Sauna:
+    @route("/heat")
+    def heat(self) -> String:
+        return "{self.celsius} degrees"
+
+    @route("/ready")
+    def ready(self) -> String:
+        return "ready: {self.celsius >= 70}"
+
+## What the method whose `@route` names `path` answers, called on `s`.
+def route[T](s: T, path: str) -> String:
+    comptime for m in reflect.methods_of(T):
+        comptime for a in reflect.attributes_of(m):
+            comptime if a.name == "route":
+                if path == a.args[0]:
+                    return s.[m]()
+    return "no route for {path}"
+
+def main():
+    let sauna = Sauna(celsius=80)
+    for path in ["/heat", "/ready", "/cool"]:
+        print(route(sauna, path))

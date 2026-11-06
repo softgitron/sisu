@@ -1,2 +1,2 @@
 9:26-9:48 E0601 comptime.io what="the standard output"
-10:31-10:48 E0604 comptime.not-kept what="a function"
+10:29-10:51 E0604 comptime.not-kept what="a closure that captures a tuple"

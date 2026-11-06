@@ -1,0 +1,21 @@
+# A field's and a variant's attributes are data too.
+struct Booking:
+    @column("guest")
+    name: String
+    hour: int
+
+enum Heat:
+    @label("cold")
+    Cold
+    @label("ready for löyly")
+    Ready
+
+def main():
+    comptime for f in reflect.fields_of(Booking):
+        var column = f.name
+        comptime for a in f.attributes:
+            column = a.args[0]
+        print("{f.name} is stored as {column}")
+    comptime for v in reflect.variants_of(Heat):
+        comptime for a in v.attributes:
+            print("{v.name}: {a.args[0]}")

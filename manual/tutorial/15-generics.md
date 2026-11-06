@@ -425,8 +425,11 @@ makes the program too large (D-017). The compiler is to share the
 copies whose types have the same layout, and to report the copies of
 each package with `sisu build --explain-size`; both are designed in
 [03](../../proposal/03-types-and-generics.md#dispatch) and are not in
-the compiler yet. Stage 0's interpreter runs one copy of every
-function and passes the types along.
+the compiler yet, whose `--explain-size` reports the parts of a native
+executable, the program's own code among them
+([chapter 27](27-systems.md#what-is-still-to-come)). Stage 0's
+interpreter runs one copy of every function and passes the types
+along.
 
 ## Traits that cannot be dyn
 

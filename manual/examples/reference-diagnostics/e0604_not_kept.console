@@ -1,8 +1,9 @@
 $ sisu run e0604_not_kept.sisu
-error[E0604]: a function made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
-  --> e0604_not_kept.sisu:5:31
+error[E0604]: a closure that captures a tuple made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+  --> e0604_not_kept.sisu:5:29
   |
-5 | const ADD_TWO: (int) -> int = comptime adder(2)
-  |                               ^^^^^^^^^^^^^^^^^
+5 | const SHIFT: (int) -> int = comptime shift((5, 3))
+  |                             ^^^^^^^^^^^^^^^^^^^^^^
+  = note: a function is kept as the function it names, and a closure as that closure when it captures nothing or only numbers, text, booleans and characters; a closure that captures a binding would reach the compile-time code's bindings, which run time does not have
 
 error[D0006]: the program was not run: errors found (1)

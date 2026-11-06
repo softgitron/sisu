@@ -284,10 +284,79 @@ compile time, as 08 has it do. [Chapter
 table of routes, and [R12](compile-time.md#reflection) lists what a
 function's descriptor holds.
 
+A field's, a variant's and a method's attributes are data in the same
+form: `f.attributes` of each field that `reflect.fields_of` gives,
+`v.attributes` of each variant that `reflect.variants_of` gives, and
+`reflect.attributes_of(m)` of each method that `reflect.methods_of`
+gives. A variant's field has none. Here a field takes its column's
+name from a `@column`, and a variant its text from a `@label`:
+
+<!-- file: examples/reference-attributes/members.sisu -->
+```sisu
+# A field's and a variant's attributes are data too.
+struct Booking:
+    @column("guest")
+    name: String
+    hour: int
+
+enum Heat:
+    @label("cold")
+    Cold
+    @label("ready for löyly")
+    Ready
+
+def main():
+    comptime for f in reflect.fields_of(Booking):
+        var column = f.name
+        comptime for a in f.attributes:
+            column = a.args[0]
+        print("{f.name} is stored as {column}")
+    comptime for v in reflect.variants_of(Heat):
+        comptime for a in v.attributes:
+            print("{v.name}: {a.args[0]}")
+```
+
+<!-- output: examples/reference-attributes/members.console -->
+```console
+$ sisu run members.sisu
+warning[W0022]: `@column` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> members.sisu:3:6
+  |
+3 |     @column("guest")
+  |      ^^^^^^
+
+warning[W0022]: `@label` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> members.sisu:8:6
+  |
+8 |     @label("cold")
+  |      ^^^^^
+
+warning[W0022]: `@label` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> members.sisu:10:6
+   |
+10 |     @label("ready for löyly")
+   |      ^^^^^
+
+name is stored as guest
+hour is stored as hour
+Cold: cold
+Ready: ready for löyly
+```
+
+The program reads the attributes and prints what they say, but warns
+of each first, W0022, since the warning looks for a call of
+`reflect.attributes_of` and finds none: a program that reads only
+`f.attributes` and `v.attributes` gets the warning it does not need, a
+finding for the compiler's maintainers. A method's attributes route a
+call to it, `s.[m]()`, as [chapter
+25](../tutorial/25-compile-time.md#attributes-of-methods-and-fields)
+does.
+
 **Stage 0 differs.** `reflect.attributes_of` takes a struct, an enum,
-an error set or a function that `reflect.functions_of` gives, and gives
-an empty list for a type of the standard library. The attributes of a
-field, a method or a variant reach no compile-time code.
+an error set, a method that `reflect.methods_of` gives or a function
+that `reflect.functions_of` gives, and gives an empty list for a type
+of the standard library and its declarations. W0022 counts only calls
+of `reflect.attributes_of` as reading attributes.
 
 **Status.** In stage 0 (D-046, D-018), with the differences noted.
 

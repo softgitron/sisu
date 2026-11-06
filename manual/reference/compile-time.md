@@ -95,9 +95,13 @@ same bits whether it is computed while compiling or while running
   function's type parameters.
 - Its value must have a literal form, for the program to keep it:
   numbers, text, booleans, characters, and lists, sets, dicts, tuples,
-  optional values, results, structs and enums of them. A function, a
-  reference, a `Shared` or another handle is E0604
-  (`comptime.not-kept`).
+  optional values, results, structs and enums of them. A function is
+  kept as the function it names, and a closure as that closure when it
+  captures nothing or only numbers, text, booleans and characters; a
+  closure that captures anything else (a tuple, a list, a struct, or a
+  binding of the compile-time code), a reference, a `Shared` or another
+  handle is E0604 (`comptime.not-kept`), whose message names what it
+  captures and whose note `comptime.kept-functions` says what is kept.
 - A panic, a failed `comptime assert` included, is E0602
   (`comptime.panicked`) with its message. An expression that uses one
   that failed is not evaluated again: its error is that one's.
@@ -117,11 +121,11 @@ def greet(name: str) -> String:
     print("greeting {name}")
     return "Hei, {name}!"
 
-def adder(n: int) -> (int) -> int:
-    return own x -> x + n
+def shift(by: (int, int)) -> (int) -> int:
+    return own x -> x + by.0 - by.1
 
 const GREETING: String = comptime greet("Aino")
-const ADD_TWO: (int) -> int = comptime adder(2)
+const SHIFT: (int) -> int = comptime shift((5, 3))
 
 def main():
     print(GREETING)
@@ -136,11 +140,12 @@ error[E0601]: the compile-time evaluation of this expression used the standard o
 9 | const GREETING: String = comptime greet("Aino")
   |                          ^^^^^^^^^^^^^^^^^^^^^^
 
-error[E0604]: a function made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
-  --> limits.sisu:10:31
+error[E0604]: a closure that captures a tuple made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+  --> limits.sisu:10:29
    |
-10 | const ADD_TWO: (int) -> int = comptime adder(2)
-   |                               ^^^^^^^^^^^^^^^^^
+10 | const SHIFT: (int) -> int = comptime shift((5, 3))
+   |                             ^^^^^^^^^^^^^^^^^^^^^^
+  = note: a function is kept as the function it names, and a closure as that closure when it captures nothing or only numbers, text, booleans and characters; a closure that captures a binding would reach the compile-time code's bindings, which run time does not have
 
 error[D0006]: the program was not run: errors found (2)
 ```
@@ -178,12 +183,12 @@ function asks about its type parameters ([Templates](#templates)).
 |---|---|
 | `reflect.name_of(T)` | the type's name |
 | `reflect.is_struct(T)`, `is_enum`, `is_trait`, `is_int`, `is_float`, `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`, `is_option`, `is_tuple` | whether the type is of that kind |
-| `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty`, `default`, whether it has a default, and `doc`, its `##` comment (empty without one); an empty list for a type declared without fields, such as `int` |
-| `reflect.variants_of(T)` | an enum's variants, each with `name`, `index` and `fields`, whose fields have a `name`, a `ty` and a `doc` |
+| `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty`, `default`, whether it has a default, `doc`, its `##` comment (empty without one), and `attributes`, the field's attributes; an empty list for a type declared without fields, such as `int` |
+| `reflect.variants_of(T)` | an enum's variants, each with `name`, `index`, `fields`, whose fields have a `name`, a `ty` and a `doc`, and `attributes`, the variant's attributes |
 | `reflect.doc_of(T)` | the `##` comment of the type's declaration, a struct's, an enum's or an error set's, its attributes passed over; empty without one, and for a type of the standard library |
 | `reflect.elem_of(T)` | the element type of a list or an optional value |
-| `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret` and `provided` |
-| `reflect.attributes_of(T)` | the attributes on the type's declaration, each with `name`, `args`, the arguments' values, and `keys`, their keywords ([R14](attributes.md#attributes-are-data)) |
+| `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret`, `provided` and `attributes`, the method's attributes |
+| `reflect.attributes_of(T)` | the attributes on the type's declaration, or on a method `m` that `methods_of` gives, or a function `f` that `functions_of` gives, each with `name`, `args`, the arguments' values, and `keys`, their keywords ([R14](attributes.md#attributes-are-data)) |
 | `reflect.functions_of(m)` | the functions of a module `m` that the code imports, in the order declared ([A module's functions](#a-modules-functions)) |
 | `reflect.implements(T, "Trait")` | whether the type has an impl of the trait |
 | `reflect.default_of(f)` | the default of the field `f`, evaluated where it is written |
@@ -200,7 +205,8 @@ forms:
   branch, and both branches are checked; a condition on `T` narrows
   `T` inside the branch, which is the one way a generic body depends on
   the shape of its type;
-- `value.[f]` is the field of `value` that the compile-time `f` names;
+- `value.[f]` is the field of `value` that the compile-time `f` names,
+  and `value.[m]` the method that `m` names, so `value.[m]()` calls it;
   a variant's field is reached inside the arm `case V(..)` that
   `comptime for V in reflect.variants_of(T)` makes among a `match`'s
   arms, where it is the arm's binding;
@@ -370,8 +376,12 @@ bool
 
 A query takes a type, a type parameter or a type or trait in scope,
 and a module for `functions_of`. Given anything else, a run-time value
-or a name of nothing, it is E0609 at the function, whose reason says
-what the query takes, with a label at the argument:
+or a name of nothing, the function's compile-time code stops: in a
+function without type parameters, made once, it is E0616
+(`comptime.function-failed`) at the function, whose reason says what
+the query takes, with the label `comptime.function-here` at the
+argument, and in a template it is E0609 at the call that made the
+instance ([Templates](#templates)):
 
 <!-- file: examples/reference-compile-time/not_a_type.sisu -->
 ```sisu
@@ -384,21 +394,20 @@ def main():
 <!-- output: examples/reference-compile-time/not_a_type.console -->
 ```console
 $ sisu run not_a_type.sisu
-error[E0609]: making `main` stopped at compile time: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`
+error[E0616]: the compile-time code of `main` stopped: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`
   --> not_a_type.sisu:2:5
   |
 2 | def main():
   |     ^^^^
   |
 4 |     print(comptime reflect.name_of(degrees))
-  |                                    ------- the template, where it stopped
+  |                                    ------- the compile-time code, where it stopped
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-`main` takes no type parameter, so "making `main`" and "the template"
-stand for the function itself. Give the query the type, `int` here,
-or a type parameter of a generic function that takes the value.
+Give the query the type, `int` here, or a type parameter of a generic
+function that takes the value.
 
 ### A module's functions
 
@@ -468,15 +477,24 @@ reflect.functions_of(m) for a in reflect.attributes_of(f)]`, is
 evaluated by the compiler: a function in a compile-time result is kept
 as the function it names, so the table is a list of function values at
 run time. Written without `comptime`, the comprehension is unrolled
-into the same list. A closure made at compile time cannot be kept
-(E0604).
+into the same list. A closure in the table is kept when it captures
+constants only ([What compile-time code may do](#what-compile-time-code-may-do)).
+
+The attributes of a field, a variant and a method are data too:
+`f.attributes` of a field that `reflect.fields_of` gives and of a
+variant that `reflect.variants_of` gives, and `reflect.attributes_of(m)`
+(or `m.attributes`) of a method that `reflect.methods_of` gives, each
+in the form of a type's ([R14](attributes.md#attributes-are-data)); a
+variant's field has none. `value.[m]()` calls the method `m` names, so
+a template routes a request to the method whose attribute names it, as
+[chapter 25](../tutorial/25-compile-time.md#attributes-of-methods-and-fields)
+does.
 
 **Stage 0 differs.** Of the documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
 reflection exposes, a type's, its fields', a variant's fields' and a
 function's have theirs, but a method's and a variant's own have no
-query, and the attributes of a field none
-([R14](attributes.md#attributes-are-data)). The front end written in
+query. The front end written in
 Rust has neither `doc` nor `reflect.doc_of`, so the standard library's
 doc examples, which `sisu test --std` runs on it, read neither.
 Reflection in a refinement's `where` clause or an `invariant` is E0900.
@@ -514,6 +532,10 @@ instance is checked on its own, for the types really used.
   `reflect.construct`, adds a note that such a parameter is taken `own`.
 - A typed hole in a derive's template is reported once, at the hole,
   however many types derive it.
+- A syntax error in a template's body, such as a `:` that an
+  interpolation reads as a format spec, is reported once, at its line
+  in the template's file, however many copies the `comptime for`
+  unrolls, as the last example of this section shows.
 - An interpolated literal of compile-time values only, `var out =
   "{reflect.name_of(T)}"`, stays the `String` it is in the template.
 - A template that calls itself with ever more types is E0610
@@ -594,6 +616,41 @@ error[E0609]: making `blank[int]` stopped at compile time: `int` is not a struct
 
 error[D0006]: the program was not run: errors found (1)
 ```
+
+A syntax error in a template's body is the template's own:
+
+<!-- file: examples/reference-compile-time/syntax_once.sisu -->
+```sisu
+# A syntax error in a template's body, reported once, at its line.
+struct Point:
+    x: int
+    y: int
+
+def show[T](v: T) -> String:
+    var out = String.new()
+    comptime for f in reflect.fields_of(T):
+        out.push("{if f.index > 0: ", " else: ""}{f.name}")
+    return out
+
+def main():
+    print(show(Point(x=1, y=2)))
+```
+
+<!-- output: examples/reference-compile-time/syntax_once.console -->
+```console
+$ sisu run syntax_once.sisu
+error[E0103]: expected an expression, found FORMAT_SPEC
+  --> syntax_once.sisu:9:35
+  |
+9 |         out.push("{if f.index > 0: ", " else: ""}{f.name}")
+  |                                   ^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The error stands once, at the template's line, for both of `Point`'s
+fields. In parentheses, `{(if f.index > 0: ", " else: "")}`, the `if`
+is an expression again, and the `:` no longer starts a format spec.
 
 **Status.** In stage 0 (D-018).
 
@@ -883,7 +940,8 @@ inside the literal.
 | [E0605](diagnostics.md#e0605) | `comptime.only` | [Asking for compile-time evaluation](#asking-for-compile-time-evaluation) |
 | E0600, [E0601](diagnostics.md#e0601), [E0602](diagnostics.md#e0602), [E0604](diagnostics.md#e0604), E0615 | `comptime.not-constant`, `comptime.io`, `comptime.panicked`, `comptime.not-kept`, `comptime.unsafe-written` | [What compile-time code may do](#what-compile-time-code-may-do) |
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Budgets](#budgets) |
-| [E0200](diagnostics.md#e0200), [E0900](diagnostics.md#e0900) | `resolve.undefined-name`, `stage0.unsupported` | [Reflection](#reflection) |
+| [E0200](diagnostics.md#e0200), [E0900](diagnostics.md#e0900), [E0616](diagnostics.md#e0616) | `resolve.undefined-name`, `stage0.unsupported`, `comptime.function-failed` | [Reflection](#reflection) |
+| [E0103](diagnostics.md#e0103) | `parse.expected-expression` | [Templates](#templates) |
 | [E0609](diagnostics.md#e0609), E0610, E0611 | `comptime.instance-failed`, `comptime.instances-unbounded`, `comptime.template-value` | [Templates](#templates) |
 | [E0607](diagnostics.md#e0607), [E0608](diagnostics.md#e0608) | `comptime.derive-template`, `comptime.derive-failed` | [The derive protocol](#the-derive-protocol) |
 | [E0612](diagnostics.md#e0612), [E0613](diagnostics.md#e0613) | `comptime.embed-failed`, `comptime.embed-path` | [Embedding a file](#embedding-a-file) |

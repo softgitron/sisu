@@ -109,7 +109,72 @@ error[D0136]: `--samples` takes 2 or more, not 1: the interval of the mean needs
 - Keep the benchmarks with the code, so that the comparison can be made
   again after a change.
 
-## 3. Find where the time goes
+## 3. Run one module's benchmarks
+
+In a package, `sisu bench` runs the benchmarks of every module, and
+`sisu bench src/MODULE.sisu` runs those of one module only, with the
+package compiled around it, as `sisu test src/MODULE.sisu` runs one
+module's tests. Here the package `letters` has a benchmark in each of
+its two modules:
+
+<!-- file: examples/guide-bench/letters.pkg/src/lib.sisu -->
+```sisu
+##! Counting the vowels of words, with a benchmark of the count.
+from std.test import Bench, black_box
+
+## The number of vowels in `word`, looked up in a list.
+pub def vowels(word: str) -> int:
+    var n = 0
+    for c in word.chars():
+        if c in ['a', 'e', 'i', 'o', 'u', 'y', 'ä', 'ö']:
+            n += 1
+    return n
+
+bench "a list"(b: Bench):
+    for _ in b.loop():
+        black_box(vowels("lentokonesuihkuturbiinimoottori"))
+```
+
+<!-- file: examples/guide-bench/letters.pkg/src/matched.sisu -->
+```sisu
+##! The same count by a `match`, with its own test and benchmark.
+from letters import vowels
+from std.test import Bench, black_box
+
+## The number of vowels in `word`, by a `match` on each character.
+pub def vowels_matched(word: str) -> int:
+    var n = 0
+    for c in word.chars():
+        match c:
+            case 'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'ä' | 'ö':
+                n += 1
+            case _:
+                pass
+    return n
+
+test "both ways agree":
+    for word in ["sauna", "löyly", ""]:
+        assert vowels(word) == vowels_matched(word)
+
+bench "a match"(b: Bench):
+    for _ in b.loop():
+        black_box(vowels_matched("lentokonesuihkuturbiinimoottori"))
+```
+
+At the package's root, the second module's benchmark runs alone, named
+after its module as a test is:
+
+<!-- unchecked: sisu bench prints times that differ on every run -->
+```console
+$ sisu bench src/matched.sisu
+bench "matched/a match" ... 42.8 µs an iteration, the median of 10 samples of 100 iterations (95% interval of the mean 37.1 µs to 45.8 µs, 3 outliers)
+1 benchmarks, 0 failed (stage 0 times the interpreter: compare benchmarks with each other, not with compiled code)
+```
+
+Run the module you changed while you work on it, and the whole
+package's before you compare the two ways.
+
+## 4. Find where the time goes
 
 A profiler that runs a program and reports where its time went, `sisu
 run --profile`, is designed and not in stage 0. `--stats` counts what
@@ -131,8 +196,8 @@ Until the profiler lands, benchmark the parts of a slow program one at
 a time: a function whose benchmark grows fastest with its input is
 where to look first.
 
-**Status.** `bench` blocks, `black_box` and `sisu bench` are in stage 0,
-timing the interpreter; 17's JSON report of the results is designed.
+**Status.** `bench` blocks, `black_box` and `sisu bench`, of a file, a
+package or one of its modules, are in stage 0, timing the interpreter; 17's JSON report of the results is designed.
 `sisu run --profile` (D0009 in stage 0) and the warning of
 [06](../../proposal/06-concurrency-and-capabilities.md#data-parallelism)
 when a parallel loop is slower than its serial form are designed.

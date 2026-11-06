@@ -1,6 +1,8 @@
-# `/` between two decimals, which D-076 makes a `Ratio`.
+# `/` between two decimals gives the exact quotient, a `BigRatio`.
 from std.num import Decimal
 
 def main():
     let bill: Decimal = 249.99
-    print(bill / Decimal.of(3))
+    let third = bill / Decimal.of(3)
+    let tenth = bill / 10
+    print("{third} {tenth} {tenth.floor()}")

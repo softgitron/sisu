@@ -1,0 +1,11 @@
+$ sisu run e0616_function_failed.sisu
+error[E0616]: the compile-time code of `main` stopped: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `heat`
+  --> e0616_function_failed.sisu:2:5
+  |
+2 | def main():
+  |     ^^^^
+  |
+4 |     print(comptime reflect.name_of(heat))
+  |                                    ---- the compile-time code, where it stopped
+
+error[D0006]: the program was not run: errors found (1)

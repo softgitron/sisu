@@ -1,0 +1,8 @@
+# Two spellings of one text, made equal by a normal form.
+from std.string import Normalize
+
+def main():
+    let composed = "S\u{e4}\u{e4}"
+    let decomposed = "Sa\u{308}a\u{308}"
+    print("{composed == decomposed} {composed.nfd() == decomposed}")
+    print("{decomposed.nfc() == composed} {"\u{fb01}le".nfkc()}")

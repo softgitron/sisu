@@ -1,0 +1,14 @@
+##! Counting the vowels of words, with a benchmark of the count.
+from std.test import Bench, black_box
+
+## The number of vowels in `word`, looked up in a list.
+pub def vowels(word: str) -> int:
+    var n = 0
+    for c in word.chars():
+        if c in ['a', 'e', 'i', 'o', 'u', 'y', 'ä', 'ö']:
+            n += 1
+    return n
+
+bench "a list"(b: Bench):
+    for _ in b.loop():
+        black_box(vowels("lentokonesuihkuturbiinimoottori"))

@@ -188,30 +188,32 @@ numerator or denominator is beyond `int`. Each share is rounded once,
 `HalfEven`, so a tie such as Roni's 41.665 goes to the even cent, and
 here the three amounts add up to the bill.
 
-**Status.** `Decimal`, `Ratio` and the named roundings are in stage 0
-(D-076). D-076 makes `/` between two decimals a `Ratio`; stage 0 does
-not have it, since its `Ratio` holds two `int`s and the quotient of two
-long decimals would not fit, so `/` waits for a `Ratio` of `BigInt`s.
-Its E0310 says in a note what to write instead, `div` or `to_ratio`:
+`/` between two decimals rounds nothing: it gives their exact quotient,
+a `BigRatio`, a fraction of two `BigInt`s, which holds the quotient of
+decimals of any length where a `Ratio` of two `int`s could not:
 
 <!-- file: examples/guide-money/divide.sisu -->
 ```sisu
-# `/` between two decimals, which D-076 makes a `Ratio`.
+# `/` between two decimals gives the exact quotient, a `BigRatio`.
 from std.num import Decimal
 
 def main():
     let bill: Decimal = 249.99
-    print(bill / Decimal.of(3))
+    let third = bill / Decimal.of(3)
+    let tenth = bill / 10
+    print("{third} {tenth} {tenth.floor()}")
 ```
 
-<!-- output: examples/guide-money/divide.console -->
-```console
-$ sisu check divide.sisu
-error[E0310]: `/` cannot be applied to `num.Decimal` and `num.Decimal`
-  --> divide.sisu:6:11
-  |
-6 |     print(bill / Decimal.of(3))
-  |           ^^^^^^^^^^^^^^^^^^^^
-  = note: a quotient of `Decimal`s has as many digits as it is given: `a.div(b, places, mode)` rounds it to `places` digits after the point by `mode` (`Rounding.HalfEven`, ...), and `a.to_ratio()` makes the exact fraction
-
+<!-- output: examples/guide-money/divide.out -->
+```text
+8333/100 24999/1000 24
 ```
+
+Use `/` for a quotient that later arithmetic needs exact, and `div` for
+the amount that is paid, rounded where the money is.
+
+**Status.** `Decimal`, `Ratio`, `BigRatio` and the named roundings are
+in stage 0 (D-076). D-076 makes `/` between two decimals a `Ratio`;
+stage 0 gives a `BigRatio`, since its `Ratio` holds two `int`s, and
+whether the two should be one type of any size is
+[Q-82](../../open-questions.md#q-82-is-ratio-one-type-of-any-size-or-two).

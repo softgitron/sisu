@@ -1,0 +1,2 @@
+2:5-2:9 E0616 comptime.function-failed name="main" reason="`reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `heat`"
+  label 4:36-4:40 comptime.function-here

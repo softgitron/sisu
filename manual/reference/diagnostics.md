@@ -7504,7 +7504,7 @@ Shown in [chapter 14](../tutorial/14-traits.md#types-that-each-impl-chooses).
 
 ## Compile-time evaluation
 
-Codes E0600 to E0615. The compiler runs `comptime` code, templates and
+Codes E0600 to E0616. The compiler runs `comptime` code, templates and
 derives in its interpreter, with a budget of steps and no way to the
 world ([R12](compile-time.md)).
 
@@ -7698,46 +7698,52 @@ time; numbers, text, booleans, characters, and lists, sets, dicts,
 tuples, options, results, structs and enums of them can.
 
 The program keeps a compile-time value as a literal, so the value needs
-a literal form; a function, a reference or a handle has none.
+a literal form. A function is kept as the function it names, and a
+closure as that closure when it captures nothing or only numbers, text,
+booleans and characters; a closure that captures more, a reference or
+a handle has no such form. The message names what the value is, such
+as "a closure that captures a tuple", and the note
+`comptime.kept-functions` says what a result keeps of functions.
 
 <!-- file: examples/reference-diagnostics/e0604_not_kept.sisu -->
 ```sisu
-# A closure made at compile time, which a program cannot keep.
-def adder(n: int) -> (int) -> int:
-    return own x -> x + n
+# A closure that captures a tuple, made at compile time.
+def shift(by: (int, int)) -> (int) -> int:
+    return own x -> x + by.0 - by.1
 
-const ADD_TWO: (int) -> int = comptime adder(2)
+const SHIFT: (int) -> int = comptime shift((5, 3))
 
 def main():
-    print(ADD_TWO(5))
+    print(SHIFT(5))
 ```
 
 <!-- output: examples/reference-diagnostics/e0604_not_kept.console -->
 ```console
 $ sisu run e0604_not_kept.sisu
-error[E0604]: a function made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
-  --> e0604_not_kept.sisu:5:31
+error[E0604]: a closure that captures a tuple made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+  --> e0604_not_kept.sisu:5:29
   |
-5 | const ADD_TWO: (int) -> int = comptime adder(2)
-  |                               ^^^^^^^^^^^^^^^^^
+5 | const SHIFT: (int) -> int = comptime shift((5, 3))
+  |                             ^^^^^^^^^^^^^^^^^^^^^^
+  = note: a function is kept as the function it names, and a closure as that closure when it captures nothing or only numbers, text, booleans and characters; a closure that captures a binding would reach the compile-time code's bindings, which run time does not have
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Compute the data at compile time, and make the function when the
+Compute the data at compile time, and make the closure when the
 program runs.
 
 <!-- file: examples/reference-diagnostics/e0604_not_kept_fixed.sisu -->
 ```sisu
 # The number is computed while compiling, the closure while running.
-def adder(n: int) -> (int) -> int:
-    return own x -> x + n
+def shift(by: (int, int)) -> (int) -> int:
+    return own x -> x + by.0 - by.1
 
-const STEP: int = comptime 1 + 1
+const BY: (int, int) = comptime (5, 3)
 
 def main():
-    let add_two = adder(STEP)
-    print(add_two(5))
+    let shift_two = shift(BY)
+    print(shift_two(5))
 ```
 
 <!-- output: examples/reference-diagnostics/e0604_not_kept_fixed.out -->
@@ -8048,11 +8054,9 @@ at the call that needed it, with a label where the template stopped.
 When it stopped at a plain `for` over a list that only compile time
 has, such as `reflect.fields_of(T)`, the fix writes `comptime` before
 the `for`, which unrolls it ([chapter 25](../tutorial/25-compile-time.md)).
-A reflection query given what compile time knows no type by, a
-run-time value or a name of nothing, is this error too, at the function
-that holds it, with a reason that says what the query takes and a label
-at its argument ([R12](compile-time.md#reflection)); a type of the
-prelude, `int` or `str`, is a type it takes.
+A reflection query given what compile time knows no type by, inside a
+template, is this error too; in a function without type parameters it
+is [E0616](#e0616).
 
 <!-- file: examples/reference-diagnostics/e0609_instance_failed.sisu -->
 ```sisu
@@ -8227,6 +8231,62 @@ pulla 2
 ```
 
 Shown in the guide [Embed a file at compile time](../guides/embed.md).
+
+### E0616
+
+`comptime.function-failed`: the compile-time code of `{name}` stopped:
+{reason}.
+
+A function without type parameters, `main` or a test among them, is
+made once, and its compile-time code runs when it is made. When that
+code stops, as a reflection query given a run-time value or a name of
+nothing does, the error stands at the function, with a reason that says
+what stopped it and the label `comptime.function-here` ("the
+compile-time code, where it stopped") at the place. In a template,
+made for each list of types, the same stop is E0609
+([R12](compile-time.md#reflection)). A type of the prelude, `int` or
+`str`, is a type a query takes.
+
+<!-- file: examples/reference-diagnostics/e0616_function_failed.sisu -->
+```sisu
+# A reflection query in `main` given a value, where it takes a type.
+def main():
+    let heat = 80
+    print(comptime reflect.name_of(heat))
+```
+
+<!-- output: examples/reference-diagnostics/e0616_function_failed.console -->
+```console
+$ sisu run e0616_function_failed.sisu
+error[E0616]: the compile-time code of `main` stopped: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `heat`
+  --> e0616_function_failed.sisu:2:5
+  |
+2 | def main():
+  |     ^^^^
+  |
+4 |     print(comptime reflect.name_of(heat))
+  |                                    ---- the compile-time code, where it stopped
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Give the query the type, or a type parameter of a generic function that
+takes the value.
+
+<!-- file: examples/reference-diagnostics/e0616_function_failed_fixed.sisu -->
+```sisu
+# The query given the value's type, which compile time knows.
+def main():
+    let heat = 80
+    print("{heat} is an {comptime reflect.name_of(int)}")
+```
+
+<!-- output: examples/reference-diagnostics/e0616_function_failed_fixed.out -->
+```text
+80 is an int
+```
+
+Shown in [R12](compile-time.md#reflection).
 
 ## Capabilities
 
@@ -10338,6 +10398,10 @@ and no compile-time code of the program reads attributes
 An attribute is data ([R14](attributes.md#attributes-are-data)). One
 whose name Sisu does not read means something only to compile-time code
 that reads it, and a program with no such code cannot read it at all.
+Stage 0 counts only a call of `reflect.attributes_of` as such code, so
+a program that reads a field's or a variant's attributes through
+`f.attributes` alone still gets the warning
+([R14](attributes.md#attributes-are-data) shows one).
 
 <!-- file: examples/reference-diagnostics/w0022_unknown_attribute.sisu -->
 ```sisu
@@ -11741,7 +11805,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0138. The messages of the `sisu` command itself
+Codes D0001 to D0148. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -12047,9 +12111,9 @@ exported function, "a `Reading` by value (a parameter of the exported
 function `sauna_load`)", a raw pointer to a struct with a field
 narrower than a word, such as an `i32` or a `u8`, or the pointer of a
 `CString`, `as_ptr`, which the interpreter gives. The native backend
-keeps each field of a value in a word of its own, where C packs a
-narrow field at its width, so these wait for layouts chosen for each
-type (D-086).
+keeps each field of a value, and each `u8` that a slice holds, in a
+word of its own, where C packs a narrow field and a byte at its width,
+so these wait for layouts chosen for each type (D-086).
 
 Run the program without `--native`, or change it to what the backend
 compiles: pass a struct to an exported function by a pointer, and give
@@ -12339,6 +12403,22 @@ Name the capabilities the test uses, `test "..."(fs: Fs):`, and it
 runs on simulated ones, which faults reach and a token replays.
 
 Example: [R15](testing.md#simulation).
+
+### D0148
+
+`cli.explain-size-native`: `--explain-size` explains the size of a
+native executable: it goes with `--native`.
+
+`sisu build --explain-size` without `--native` builds no executable, so
+there is nothing whose size it could explain; the status is 2. With
+`--native`, the build prints the executable's size (D0139) and its
+seven parts (D0140 to D0146) after the `built` line, and D0147 says
+that the file it built is not a 64-bit ELF executable, the one form the
+driver reads.
+
+Add `--native`: `sisu build --native --explain-size FILE`.
+
+Example: [R16](sisu-command.md#sisu-build).
 
 ## Every code
 
@@ -12661,6 +12741,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0613](#e0613) | `comptime.embed-path` | `embed` takes the path of a file as a string literal |
 | E0614 | `comptime.no-fake` | `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature |
 | E0615 | `comptime.unsafe-written` | code that compile-time evaluation writes holds no `unsafe`, so that every unsafe block stays in a source file, where `sisu audit --unsafe` shows it |
+| [E0616](#e0616) | `comptime.function-failed` | the compile-time code of `{name}` stopped: {reason} |
 
 ### Capabilities, every code
 
@@ -13060,4 +13141,14 @@ it. `sisu explain CODE` prints the same line.
 | [D0136](#d0136) | `cli.bench-samples` | `--samples` takes 2 or more, not {value}: the interval of the mean needs two samples |
 | [D0137](#d0137) | `cli.test-program` | tests of `{program}`: |
 | [D0138](#d0138) | `cli.replay-no-token-sim` | no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones |
+| D0139 | `native.size-total` | `{output}` is {bytes} bytes: |
+| D0140 | `native.size-program` | {bytes} bytes ({share}%), the program's own code |
+| D0141 | `native.size-rt-sisu` | {bytes} bytes ({share}%), the runtime in Sisu's code |
+| D0142 | `native.size-rt-rust` | {bytes} bytes ({share}%), the runtime in Rust's code |
+| D0143 | `native.size-other-code` | {bytes} bytes ({share}%), Rust's standard library's code and the rest of the code |
+| D0144 | `native.size-debug` | {bytes} bytes ({share}%), the debug information |
+| D0145 | `native.size-symbols` | {bytes} bytes ({share}%), the symbols |
+| D0146 | `native.size-rest` | {bytes} bytes ({share}%), the data, the unwinding tables and the headers |
+| D0147 | `native.size-unread` | `--explain-size` reads the parts of a 64-bit ELF executable, which `{output}` is not |
+| [D0148](#d0148) | `cli.explain-size-native` | `--explain-size` explains the size of a native executable: it goes with `--native` |
 

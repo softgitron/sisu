@@ -1,0 +1,3 @@
+3:6-3:12 W0022 resolve.unknown-attribute name="column"
+8:6-8:11 W0022 resolve.unknown-attribute name="label"
+10:6-10:11 W0022 resolve.unknown-attribute name="label"

@@ -67,6 +67,14 @@ The link leaves out the code that nothing reaches from `main`, so a
 ten-line program is 6.25 MB, nearly all of it the runtime's code and
 its debug information, and 1.74 MB once `strip` takes the debug
 information out ([R22](../reference/targets.md#binary-size-and-startup)).
+`sisu build --native --explain-size FILE` prints, after the `built`
+line, the executable's size and the seven parts that add up to it: the
+program's own code, the runtime written in Sisu, the runtime written in
+Rust, Rust's standard library and the rest of the code, the debug
+information, the symbols, and the data with the headers. The numbers
+change with every build of the runtime, so [R16](../reference/sisu-command.md#sisu-build)
+shows one run's as an example; without `--native`, the option is
+D0148.
 
 ## 2. Build for release
 

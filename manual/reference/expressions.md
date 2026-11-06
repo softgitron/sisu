@@ -302,7 +302,10 @@ True
 A `Slice` and `bytes` are indexed and sliced as a list is, `^` included:
 `values[^1]` is a reference to the last value a `Slice` views, `b[^2]`
 the byte before the last, and `values[1:^1]` a view of all but the two
-ends. The base is evaluated once, so a call before the brackets runs
+ends. Slicing a `Slice` copies nothing: the new slice views the same
+list in place, and when a slice ends it drops none of the values it
+views, which stay the list's ([chapter 12](../tutorial/12-views.md#a-view-of-part-of-a-list)).
+Slicing a list or `bytes` makes a new one of copies. The base is evaluated once, so a call before the brackets runs
 once:
 
 <!-- file: examples/reference-expressions/from_end.sisu -->

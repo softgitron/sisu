@@ -1,0 +1,22 @@
+##! The same count by a `match`, with its own test and benchmark.
+from letters import vowels
+from std.test import Bench, black_box
+
+## The number of vowels in `word`, by a `match` on each character.
+pub def vowels_matched(word: str) -> int:
+    var n = 0
+    for c in word.chars():
+        match c:
+            case 'a' | 'e' | 'i' | 'o' | 'u' | 'y' | 'ä' | 'ö':
+                n += 1
+            case _:
+                pass
+    return n
+
+test "both ways agree":
+    for word in ["sauna", "löyly", ""]:
+        assert vowels(word) == vowels_matched(word)
+
+bench "a match"(b: Bench):
+    for _ in b.loop():
+        black_box(vowels_matched("lentokonesuihkuturbiinimoottori"))

@@ -349,11 +349,14 @@ links dynamically to the C library and `libgcc_s` (`libm` only when it
 is needed) and keeps its debug information. A ten-line program is
 6.25 MB in either build profile when the `sisu` command is a release
 build (21 MB when it is a debug build, whose runtime is not optimised),
-and 1.74 MB stripped. What is left is the runtime: 0.45 MB of the
-runtime written in Sisu, 0.50 MB of the runtime written in Rust and
-0.37 MB of Rust's standard library, 3.8 MB of their debug information,
-which a debugger and a panic's lines need, and 0.4 MB of symbols; the
-program's own code is a few kilobytes. Static linking and the
+and 1.74 MB stripped. What is left is the runtime, as `sisu build
+--native --explain-size` reports, part by part
+([R16](sisu-command.md#sisu-build)): of a two-line program's 6.32 MB, 0.53 MB
+of the runtime written in Sisu, 0.47 MB of the runtime written in Rust
+and 0.37 MB of Rust's standard library and the rest of the code,
+4.1 MB of debug information, which a debugger and a panic's lines need,
+0.44 MB of symbols and 0.43 MB of data, unwinding tables and headers;
+the program's own code is about a kilobyte. Static linking and the
 `release-size` profile, stripped and with the runtime's debug
 information left out, are still to come. `Lazy[T]` is E0201
 (`resolve.undefined-type`).

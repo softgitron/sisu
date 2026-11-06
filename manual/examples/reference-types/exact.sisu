@@ -9,4 +9,5 @@ def main():
     let price: Decimal = 19.99
     print(price * 3 + 0.03)
     print(price.div(Decimal.of(3), 2, Rounding.HalfEven))
+    print(price / 3)
     print(Ratio.of(1, 3) + Ratio.of(1, 6))

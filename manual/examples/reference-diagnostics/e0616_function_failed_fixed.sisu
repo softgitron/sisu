@@ -1,0 +1,4 @@
+# The query given the value's type, which compile time knows.
+def main():
+    let heat = 80
+    print("{heat} is an {comptime reflect.name_of(int)}")

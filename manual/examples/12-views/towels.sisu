@@ -1,0 +1,18 @@
+# A slice views the list's values; only the list drops them.
+struct Towel:
+    name: String
+
+impl Drop for Towel:
+    def drop(mut self):
+        print("{self.name} put away")
+
+def count(towels: Slice[Towel]) -> int:
+    return len(towels)
+
+def main():
+    let towels = [Towel("Aino's"), Towel("Eero's"), Towel("Roni's")]
+    let all = towels.as_slice()
+    for _ in range(2):
+        let first_two = all[:2]
+        print("{count(first_two)} towels in view")
+    print("the list ends")

@@ -295,14 +295,73 @@ panic: the byte index 1 is inside a character of the text
   at main (half_letter.sisu:4:11)
 ```
 
-Iterating over the user-perceived characters, the graphemes, where a
-letter and its accent count as one, is designed in
-[03](../../proposal/03-types-and-generics.md#strings-and-text) and is
-not in the compiler yet.
-
 > **From Python.** `for c in word` goes through the characters in
 > Python. In Sisu, write `for c in word.chars()`: a `for` loop does not
 > go through text by itself, because it could mean characters or bytes.
+
+## Characters as a reader sees them
+
+A `char` is one Unicode code point, and a letter with an accent can be
+written as two: the letter and a combining mark. Unicode has a name
+for what a reader takes for one character, a grapheme, and
+`graphemes()` goes through those. It is a method of the trait
+`Graphemes` of `std.string`, which you import to call it:
+
+<!-- file: examples/06-text/graphemes.sisu -->
+```sisu
+# A grapheme is a character as a reader sees it.
+from std.string import Graphemes
+
+def main():
+    let word = "Sa\u{308}a\u{308}"
+    var chars = 0
+    for _ in word.chars():
+        chars += 1
+    var shown: list[str] = []
+    for g in word.graphemes():
+        shown.push(g)
+    print("{chars} characters, {len(shown)} graphemes: {shown:?}")
+```
+
+<!-- output: examples/06-text/graphemes.out -->
+```text
+5 characters, 3 graphemes: ["S", "ä", "ä"]
+```
+
+`a\u{308}` is `a` followed by the combining diaeresis, which a reader
+sees as `ä`. Each grapheme is a `str` that views the text. Flags, a
+`\r\n` line end and emoji joined into one picture are a grapheme each
+too. Some of Unicode's rarer rules are not in `graphemes()` yet, such
+as the joined consonants of Indic scripts, so text in those scripts
+can split where a reader would not.
+
+The same `ä` written two ways is two different texts, so `==` tells
+them apart. A normal form writes every text one way, and the trait
+`Normalize` gives the four of Unicode: `nfc()` composes a letter and
+its marks where one code point exists for them, `nfd()` takes them
+apart, and `nfkc()` and `nfkd()` also replace look-alike forms, such
+as the ligature `ﬁ`, with plain letters:
+
+<!-- file: examples/06-text/normal_forms.sisu -->
+```sisu
+# Two spellings of one text, made equal by a normal form.
+from std.string import Normalize
+
+def main():
+    let composed = "S\u{e4}\u{e4}"
+    let decomposed = "Sa\u{308}a\u{308}"
+    print("{composed == decomposed} {composed.nfd() == decomposed}")
+    print("{decomposed.nfc() == composed} {"\u{fb01}le".nfkc()}")
+```
+
+<!-- output: examples/06-text/normal_forms.out -->
+```text
+False True
+True file
+```
+
+Normalise text that comes from outside, with `nfc()`, before you
+compare it or use it as a key.
 
 ## Other string literals
 
@@ -903,7 +962,8 @@ When every test passes, compare your answer with
   leave it as it was.
 - `chars()` and `bytes()` go through text. Text has no integer index;
   `byte_slice` cuts it between byte positions that fall between
-  characters.
+  characters. `graphemes()` goes through the characters as a reader
+  sees them, and `nfc()` and its kin write a text one way.
 - Raw, multi-line and byte literals; a literal becomes a `Path` or a
   `Url` where one is expected.
 - `String()`, `push` and `Builder` build text, and `parse_int` and

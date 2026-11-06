@@ -1,8 +1,8 @@
-# A closure made at compile time, which a program cannot keep.
-def adder(n: int) -> (int) -> int:
-    return own x -> x + n
+# A closure that captures a tuple, made at compile time.
+def shift(by: (int, int)) -> (int) -> int:
+    return own x -> x + by.0 - by.1
 
-const ADD_TWO: (int) -> int = comptime adder(2)
+const SHIFT: (int) -> int = comptime shift((5, 3))
 
 def main():
-    print(ADD_TWO(5))
+    print(SHIFT(5))

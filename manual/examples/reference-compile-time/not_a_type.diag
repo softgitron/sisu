@@ -1,2 +1,2 @@
-2:5-2:9 E0609 comptime.instance-failed name="main" reason="`reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`"
-  label 4:36-4:43 comptime.instance-here
+2:5-2:9 E0616 comptime.function-failed name="main" reason="`reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`"
+  label 4:36-4:43 comptime.function-here

@@ -638,9 +638,11 @@ error[D0103]: the native backend does not compile `mem.slice.as_ptr` of a `u8`, 
 
 `löyly`, the steam of a sauna, is five letters and six bytes, since
 `ö` takes two. The native backend does not compile `as_ptr` of a
-`CString` yet (D0103): a native slice of its bytes is a copy, a word
-for each byte, where C needs the pointer to view the bytes in place, so
-such a program runs in the interpreter only.
+`CString` yet (D0103): a native slice views its list in place, but
+the bytes of a `CString` are a byte each and a slice's elements a word
+each, so the slice of them is still a copy, where C needs the pointer
+to view the bytes themselves. Such a program runs in the interpreter
+only until a `u8` is laid out as one byte everywhere.
 
 **Try it.** Give `is_set` a first parameter `env: Env`.
 
@@ -811,7 +813,8 @@ wait for the runtime of [12](../../proposal/12-interop-and-targets.md)
 ([R22](../reference/targets.md#runtime-profiles)). A native executable
 leaves out the code that nothing reaches, but links the C library
 dynamically and keeps its debug information: a ten-line program is
-6.25 MB, 1.74 MB stripped, nearly all of it the runtime
+6.25 MB, 1.74 MB stripped, nearly all of it the runtime, as `sisu build
+--native --explain-size` shows part by part
 ([R22](../reference/targets.md#binary-size-and-startup)). A native debug build
 checks raw memory as the interpreter does, the memory C gives out
 included, except where the interpreter alone knows enough: which

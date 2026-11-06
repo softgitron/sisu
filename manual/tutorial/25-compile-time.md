@@ -187,8 +187,39 @@ tries. Two more rules hold:
   (`comptime.not-constant`).
 - The value must have a literal form for the program to keep: numbers,
   text, booleans, characters, and lists, sets, dicts, tuples, optional
-  values, results, structs and enums of them. A closure or a reference
-  made at compile time is E0604 (`comptime.not-kept`).
+  values, results, structs and enums of them. A function is kept as the
+  function it names, and a closure as that closure when it captures
+  nothing or only numbers, text, booleans and characters. A closure
+  that captures more, or a reference made at compile time, is E0604
+  (`comptime.not-kept`).
+
+So a table of steps can be made while compiling, closures and all:
+
+<!-- file: examples/25-compile-time/kept_closures.sisu -->
+```sisu
+# A closure in a compile-time result is kept when it captures constants.
+def scaled(k: int) -> (int) -> int:
+    return own (x: int) -> x * k
+
+def main():
+    let steps = comptime [
+        ("add one", (x: int) -> x + 1),
+        ("triple", scaled(3)),
+    ]
+    for (name, step) in steps:
+        print("{name}: {step(5)}")
+```
+
+<!-- output: examples/25-compile-time/kept_closures.out -->
+```text
+add one: 6
+triple: 15
+```
+
+`(x: int) -> x + 1` captures nothing, and the closure that
+`scaled(3)` returns captures the number 3, so both are kept. Had
+`scaled` captured a tuple, the program could not keep its closure, and
+E0604's note says what a result keeps of functions.
 
 ## A budget of steps
 
@@ -601,13 +632,64 @@ no page at /menu
   `@route`, so no pair holds it.
 - In code that runs, `f` is the function itself, so the table is a
   list of function values, `() -> String`, and `page()` calls one. A
-  closure, `() -> "..."`, cannot stand in a compile-time result
-  (E0604).
+  closure that captures nothing, `() -> "..."`, could stand there too.
 - `a.args[0]` is the route's text without its quotes, so `serve`
   compares it with `path` as it is.
 - An attribute's `keys` gives the keyword of each argument, empty for
   one given by position, so `@route("/", method="GET")` has `args` of
   `/` and `GET` and `keys` of `""` and `"method"`.
+
+## Attributes of methods and fields
+
+A type's methods have attributes too, so a handler can be a method,
+and a template routes a request to it. `reflect.methods_of(T)` lists
+`T`'s methods, `reflect.attributes_of(m)` gives a method's attributes,
+and `s.[m]()` calls the method `m` on `s`, as `value.[f]` reads a
+field:
+
+<!-- file: examples/25-compile-time/handlers.sisu -->
+```sisu
+# Handlers routed by their methods' attributes, read while compiling.
+struct Sauna:
+    celsius: int
+
+impl Sauna:
+    @route("/heat")
+    def heat(self) -> String:
+        return "{self.celsius} degrees"
+
+    @route("/ready")
+    def ready(self) -> String:
+        return "ready: {self.celsius >= 70}"
+
+## What the method whose `@route` names `path` answers, called on `s`.
+def route[T](s: T, path: str) -> String:
+    comptime for m in reflect.methods_of(T):
+        comptime for a in reflect.attributes_of(m):
+            comptime if a.name == "route":
+                if path == a.args[0]:
+                    return s.[m]()
+    return "no route for {path}"
+
+def main():
+    let sauna = Sauna(celsius=80)
+    for path in ["/heat", "/ready", "/cool"]:
+        print(route(sauna, path))
+```
+
+<!-- output: examples/25-compile-time/handlers.out -->
+```text
+80 degrees
+ready: True
+no route for /cool
+```
+
+`route` is made once for `Sauna`: the `comptime for` writes one `if`
+for each method with a `@route`, and the method's own attribute says
+which path calls it. A field's and a variant's attributes are
+`f.attributes` and `v.attributes`, in the same form, so a column can
+take its name from a `@column` on its field
+([R14](../reference/attributes.md#attributes-are-data)).
 
 ## A file in the program
 
@@ -1276,7 +1358,7 @@ When every test passes, compare your answer with
   a `comptime def` runs only then (E0605).
 - Compile-time code reaches nothing in the world (E0601), sees only
   what is known while compiling (E0600), and keeps only values with a
-  literal form (E0604).
+  literal form, functions, and closures that capture constants (E0604).
 - Each `comptime` expression has a budget of a million steps;
   `@comptime_budget(steps=N)` raises an item's budget (E0603).
 - `reflect` gives a type's name, fields and variants; `comptime for`
@@ -1285,9 +1367,11 @@ When every test passes, compare your answer with
   for each type it is called with (E0609 when one cannot be made).
 - A trait's `comptime def derive` returns `impl Trait for T:`, which
   `@derive(Trait)` writes for a type and the compiler checks.
-- Attributes are data that `reflect.attributes_of` reads, a type's
-  and a function's, and `reflect.functions_of` lists a module's
-  functions, so a table of routes is made while compiling; `embed`
+- Attributes are data that `reflect.attributes_of` reads, a type's,
+  a function's and a method's (a field's and a variant's are
+  `f.attributes`), and `reflect.functions_of` lists a module's
+  functions, so a table of routes is made while compiling and a
+  template routes to a method, `s.[m]()`; `embed`
   makes a file part of the program; `target`, `if comptime` and `@cfg`
   choose code for a target, for the tests or for a feature.
 

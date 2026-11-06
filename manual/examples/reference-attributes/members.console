@@ -1,0 +1,23 @@
+$ sisu run members.sisu
+warning[W0022]: `@column` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> members.sisu:3:6
+  |
+3 |     @column("guest")
+  |      ^^^^^^
+
+warning[W0022]: `@label` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> members.sisu:8:6
+  |
+8 |     @label("cold")
+  |      ^^^^^
+
+warning[W0022]: `@label` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> members.sisu:10:6
+   |
+10 |     @label("ready for löyly")
+   |      ^^^^^
+
+name is stored as guest
+hour is stored as hour
+Cold: cold
+Ready: ready for löyly

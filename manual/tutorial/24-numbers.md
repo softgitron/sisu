@@ -555,12 +555,42 @@ Down: 2.34
   zero), `Up`, `Floor` and `Ceiling`. Python's `decimal` has an eighth,
   `ROUND_05UP`, which `Rounding` leaves out.
 
-`/` between two decimals, which 03 designs to give a `Ratio`, is not
-in the compiler yet, and waits for a `Ratio` that holds `BigInt`s: it
-is E0310, whose note names `div`, which says where to round, and
-`to_ratio`, which gives the exact fraction. A
-literal keeps the places it is written with, so `3.50` prints as
+A literal keeps the places it is written with, so `3.50` prints as
 `3.50`, as `Decimal.parse("3.50")` does.
+
+`/` between two decimals rounds nothing either: it gives their exact
+quotient, a `BigRatio`, which is a fraction of two `BigInt`s and so
+holds the quotient of decimals of any length:
+
+<!-- file: examples/24-numbers/quotient.sisu -->
+```sisu
+# `/` between two decimals is their exact quotient, a `BigRatio`.
+from std.num import Decimal, Rounding
+
+def main():
+    let distance: Decimal = 1.5
+    let time: Decimal = 0.4
+    let speed = distance / time
+    print("{speed} {speed.floor()} {speed.to_f64()}")
+    let bill: Decimal = 100
+    let third = bill / 3
+    print("{third} {third + third + third == bill.to_big_ratio()}")
+    print(bill.div(Decimal.of(3), 2, Rounding.HalfEven))
+```
+
+<!-- output: examples/24-numbers/quotient.out -->
+```text
+15/4 3 3.75
+100/3 True
+33.33
+```
+
+`1.5 / 0.4` is `15/4` exactly; `floor()` gives the whole part and
+`to_f64()` the nearest float. A hundred divided by three is `100/3`,
+and three of them are the hundred again, which no rounded share gives;
+`div` is still the division that rounds to money. A `Ratio` holds two
+`int`s and a `BigRatio` two `BigInt`s; whether they should be one type
+of any size is the open question Q-82.
 
 > **From Python.** Python's `decimal` rounds every result to the
 > precision of a context, 28 digits unless changed, and the context is
@@ -1232,8 +1262,9 @@ When every test passes, compare your answer with
   fusing but `mul_add`, and `sum` in a fixed pairwise shape.
 - NaN compares `False` with everything; `f64` is not `Ord`, and
   `cmp` panics on a NaN.
-- `BigInt`, `Ratio` and `Decimal` of `std.num` are exact; a `Decimal`
-  rounds only in `div` and `round`, with a named `Rounding`.
+- `BigInt`, `Ratio`, `BigRatio` and `Decimal` of `std.num` are exact;
+  a `Decimal` rounds only in `div` and `round`, with a named
+  `Rounding`, and `/` gives its exact quotient as a `BigRatio`.
 
 Chapter 25 is about code that runs while the program compiles:
 `comptime` values and functions, reflection over a type's fields,

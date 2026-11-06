@@ -508,13 +508,14 @@ sorts floats and is not yet the key of a `dict` that
 
 ## Exact numbers
 
-`std.num` has three types for arithmetic that must not round (D-076):
+`std.num` has four types for arithmetic that must not round (D-076):
 
 | Type | Holds | Arithmetic |
 |---|---|---|
 | `BigInt` | an integer of any size | `+`, `-`, `*`, `%`, unary `-`; `floor_div` and `divmod` |
 | `Ratio` | an exact fraction of two `int`s, in lowest terms | `+`, `-`, `*`, `/`, unary `-` |
-| `Decimal` | a base-10 number, held as an integer and a count of places | `+`, `-`, `*` exactly; `div` and `round` with a named `Rounding` |
+| `BigRatio` | an exact fraction of two `BigInt`s, in lowest terms | `+`, `-`, `*`, `/`, unary `-`; `floor`, `to_ratio`, `to_f64` |
+| `Decimal` | a base-10 number, held as an integer and a count of places | `+`, `-`, `*` exactly; `/` exactly, giving a `BigRatio`; `div` and `round` with a named `Rounding` |
 
 They take ordinary literals with no suffix, through `FromLiteral`
 ([Literals that take the type expected](#literals-that-take-the-type-expected)):
@@ -539,6 +540,7 @@ def main():
     let price: Decimal = 19.99
     print(price * 3 + 0.03)
     print(price.div(Decimal.of(3), 2, Rounding.HalfEven))
+    print(price / 3)
     print(Ratio.of(1, 3) + Ratio.of(1, 6))
 ```
 
@@ -548,17 +550,18 @@ def main():
 0.3 0.30000000000000004
 60.00
 6.66
+1999/300
 1/2
 ```
 
 **Stage 0 differs.** A `BigInt` literal must fit in an `int` (E0374);
 [03](../../proposal/03-types-and-generics.md#numbers) takes a literal of
 any length and checks it at compile time, and stage 0 reads a longer one
-with `BigInt.parse`, which E0374's note names. A `Decimal` has no `/` (E0310, whose note names
-`div` and `to_ratio`), where 03 makes the quotient a `Ratio`; `div` with
-a number of places and a `Rounding` is the division stage 0 has. The
-`Ratio` waits for a `Ratio` of `BigInt`s: today's holds two `int`s, so
-the quotient of two long decimals would have none.
+with `BigInt.parse`, which E0374's note names. 03 makes a `Decimal`'s
+quotient a `Ratio`; stage 0's `Ratio` holds two `int`s, so `a / b` of
+`Decimal`s gives a `BigRatio`, which holds any quotient exactly (`1.5 /
+0.4` is `15/4`), and `a.to_big_ratio()` makes the exact fraction of
+one. Whether `Ratio` should be one type of any size instead is Q-82.
 
 **Status.** In stage 0 (D-076), with the differences noted.
 
@@ -657,11 +660,29 @@ error[E0345]: `str` cannot be indexed by position; use `.chars()`, `.bytes()` or
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#strings-and-text)
-has `s.graphemes()`, an iterator over the characters as a reader sees
-them, one method away from `chars()`; stage 0 lacks it (E0304).
+`s.graphemes()` goes through the characters as a reader sees them,
+Unicode's graphemes (UAX #29), each a `str` that views `s`: a base
+with the marks after it, `\r\n`, a Hangul syllable written in jamo, a
+flag of two regional indicators and a sequence joined by U+200D are
+one grapheme each, and a control character is one of its own. The
+normal forms of UAX #15 are `s.nfc()`, `s.nfd()`, `s.nfkc()` and
+`s.nfkd()`, each a new `String`: the canonical or the compatibility
+decomposition, its marks in canonical order, composed again for `nfc`
+and `nfkc`. Both are methods of traits of `std.string`, `Graphemes`
+and `Normalize`, implemented for `str` and called after `from
+std.string import Graphemes` (or `Normalize`); their tables come from
+Unicode 15.1.0 ([chapter 6](../tutorial/06-text.md#characters-as-a-reader-sees-them)
+shows both).
 
-**Status.** In stage 0 (D-034), except `graphemes`.
+**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#strings-and-text)
+has `s.graphemes()` one method away from `chars()`, with no import.
+Stage 0's graphemes leave out three rules of UAX #29: `Prepend`, a
+character kept with what follows it; the Indic conjuncts joined across
+a virama (GB9c); and the condition that U+200D joins only pictographs
+(GB11), so it joins any two characters; the few characters that extend
+a grapheme without being marks, such as U+200C, do not extend one.
+
+**Status.** In stage 0 (D-034), with the differences noted.
 
 ## Bytes
 
@@ -1436,9 +1457,13 @@ instance for each list of them ([R16](sisu-command.md#compiling-and-running-nati
 **Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#dispatch)
 shares the instances whose types have the same layout and budgets them
 per package, reported by `sisu build --explain-size`; stage 0 has
-neither the sharing nor the report.
+neither the sharing nor that report, and its `--explain-size` gives the
+parts of a native executable instead, in which the standard library's
+instances are counted with the program's own code
+([R16](sisu-command.md#sisu-build)).
 
-**Status.** In stage 0 (D-017), except sharing and `--explain-size`.
+**Status.** In stage 0 (D-017), except sharing and the report of
+instances.
 
 ## Trait objects
 

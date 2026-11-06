@@ -1,0 +1,11 @@
+# A closure in a compile-time result is kept when it captures constants.
+def scaled(k: int) -> (int) -> int:
+    return own (x: int) -> x * k
+
+def main():
+    let steps = comptime [
+        ("add one", (x: int) -> x + 1),
+        ("triple", scaled(3)),
+    ]
+    for (name, step) in steps:
+        print("{name}: {step(5)}")

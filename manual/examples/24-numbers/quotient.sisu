@@ -1,0 +1,12 @@
+# `/` between two decimals is their exact quotient, a `BigRatio`.
+from std.num import Decimal, Rounding
+
+def main():
+    let distance: Decimal = 1.5
+    let time: Decimal = 0.4
+    let speed = distance / time
+    print("{speed} {speed.floor()} {speed.to_f64()}")
+    let bill: Decimal = 100
+    let third = bill / 3
+    print("{third} {third + third + third == bill.to_big_ratio()}")
+    print(bill.div(Decimal.of(3), 2, Rounding.HalfEven))

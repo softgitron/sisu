@@ -1,1 +1,1 @@
-5:31-5:48 E0604 comptime.not-kept what="a function"
+5:29-5:51 E0604 comptime.not-kept what="a closure that captures a tuple"
