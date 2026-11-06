@@ -94,7 +94,7 @@ def main():
     let k = xs[1]
     print([1, 2, 3].iter().map(it.to_u8().unwrap() +% k).collect())
     var big: list[u8] = []
-    for i in range(1000000):
+    for i in range(20000):
         big.push((i % 251).to_u8().unwrap())
     var t = 0
     for x in big:

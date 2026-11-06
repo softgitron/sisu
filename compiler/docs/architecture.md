@@ -11577,7 +11577,7 @@ server"; D-085, D-086; 08, 10, 12, 22; decisions 188, 823, 864, 940, 941,
       the interpreter is unchanged: its raw layouts were these already
       (decision 302), and the debug profile's checks of raw memory take
       any bits of a narrow number's width as one of its values. `std/bytes` (a `list[u8]` of a
-      million bytes, its pushes, pops, inserts, slices, sort, sets and
+      twenty thousand bytes, its pushes, pops, inserts, slices, sort, sets and
       dicts, a `Slice[u8]` of a list and of `bytes`, boxes, options, enums
       and closures of `u8`s) and `std/narrow` (lists, structs, payloads,
       keys and tuples of `i8`, `u16`, `i32` and `f32`, their signs and
