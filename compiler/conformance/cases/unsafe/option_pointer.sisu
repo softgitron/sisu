@@ -1,0 +1,86 @@
+# An option of a raw pointer is one nullable word in a value too (decision
+# 1240): `None` is the address 0 and `Some` the address, as C holds an
+# optional pointer, so a pointer to a `ptr[Node]?`, and to a `@repr(c)`
+# struct that holds one, compiles natively, and what a function reads
+# through it is what C reads; such options in lists, tuples and matches,
+# and the options the runtime gives of raw pointers, are any option's.
+from std.mem import Layout, ptr
+
+@repr(c)
+struct Node:
+    value: int
+    next: ptr[Node]?
+
+## The sum of the values of the list that starts at `head`.
+@export("node_total")
+def total(head: ptr[Node]) -> int:
+    var sum = 0
+    var at: ptr[Node]? = Some(head)
+    while let Some(p) = at:
+        # safety: valid, aligned: each node is live and nothing changes it
+        #   while the reference lives.
+        let n = unsafe p.as_ref()
+        sum += n.value
+        at = n.next
+    return sum
+
+## The node after `head`, if there is one.
+def after(head: ptr[Node]) -> ptr[Node]?:
+    # safety: valid, aligned: the node is live.
+    return unsafe head.as_ref().next
+
+## The address an option holds, 0 for `None`.
+def address(p: ptr[Node]?) -> int:
+    match p:
+        case Some(q):
+            return q.addr()
+        case None:
+            return 0
+
+def main():
+    var last = Node(value=3, next=None)
+    var middle = Node(value=20, next=Some(ptr.of(ref last)))
+    var first = Node(value=100, next=Some(ptr.of(ref middle)))
+    let l = Layout.of[Node]()
+    print("{l.size} {l.align}")
+    print(total(ptr.of(ref first)))
+    print("{after(ptr.of(ref last)).is_none()} {after(ptr.of(ref first)).is_some()}")
+    # A pointer to the option, read and written through.
+    var slot: ptr[Node]? = None
+    let at = ptr.of_mut(mut slot)
+    # safety: valid, aligned, writable: `slot` is live, and nothing else
+    #   reaches it while the pointer is used.
+    unsafe:
+        print(at.read().is_none())
+        at.write(Some(ptr.of(ref last)))
+        print(address(at.read()) == ptr.of(ref last).addr())
+    print("{address(slot) == ptr.of(ref last).addr()} {slot.is_some()}")
+    match slot:
+        case Some(p):
+            # safety: valid, aligned: `last` is live.
+            print(unsafe p.as_ref().value)
+        case None:
+            print("none")
+    # Lists, tuples and the results the runtime gives.
+    var ps: list[ptr[Node]?] = [None, Some(ptr.of(ref first)), None]
+    print("{len(ps)} {address(ps[0])} {address(ps[1]) == ptr.of(ref first).addr()}")
+    match ps.pop():
+        case Some(None):
+            print("a None")
+        case _:
+            print("other")
+    var raw = [ptr.of(ref first), ptr.of(ref middle)]
+    let top = raw.pop()
+    print("{address(top) == ptr.of(ref middle).addr()} {top.is_some()}")
+    print("{raw.pop().is_some()} {raw.pop().is_none()}")
+    let empty: ptr[Node]? = None
+    print(empty)
+    let pair = (7, slot)
+    print("{pair.0} {pair.1.is_some()}")
+    var sum = 0
+    for p in [ptr.of(ref first), ptr.of(ref last)]:
+        # safety: valid, aligned: both nodes are live.
+        sum += unsafe p.as_ref().value
+    print(sum)
+    print(slot.unwrap().addr() == ptr.of(ref last).addr())
+    print(empty.or(ptr.of(ref first)).addr() == ptr.of(ref first).addr())

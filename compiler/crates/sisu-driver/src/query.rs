@@ -317,8 +317,10 @@ impl Server {
     /// `sisu.explainBorrow` of line `line` of a document, from `query
     /// explain` (`sisu1 0.17.0` and later, its R187; decision 1104): a loan a
     /// line, `FUNCTION KIND PLACE START HOLDERS END`, each with the line the
-    /// CLI prints for it. The query gives where a loan starts and where it
-    /// is last used as positions, so each range is that position. A program
+    /// CLI prints for it. From `sisu1 0.20.0` the query is asked with
+    /// `--ranges` (its R211, decision 1242), whose two fields more are where
+    /// the loan starts and is last used as ranges with their ends, which the
+    /// editor marks whole; before it each range is the position. A program
     /// with an error has none to show, as `query diagnostics` says.
     pub(crate) fn stage1_explain_borrow(&mut self, uri: &str, line: u32) -> Option<Result<Json, String>> {
         if !self.stage1.as_ref().is_some_and(crate::front::Stage1::takes_the_roles) {
@@ -328,12 +330,21 @@ impl Server {
         if diagnostics.iter().any(|r| r.get(3).is_some_and(|s| s == "error")) {
             return Some(Err(crate::cli::text(sisu_diag::msg::LSP_HAS_ERRORS, &[])));
         }
-        let rows = self.query_with("explain", uri, None, &[line.to_string()])?;
+        let ranges = self.stage1.as_ref().is_some_and(crate::front::Stage1::gives_the_asks);
+        let mut more = vec![line.to_string()];
+        if ranges {
+            more.push("--ranges".into());
+        }
+        let rows = self.query_with("explain", uri, None, &more)?;
         let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
         let lines = Lines::new(&text, self.utf8);
         let mut loans = Vec::new();
         for row in &rows {
-            let [function, kind, place, start, holders, end] = row.as_slice() else { continue };
+            let (function, kind, place, start, holders, end, spans) = match row.as_slice() {
+                [f, k, p, s, h, e] => (f, k, p, s, h, e, None),
+                [f, k, p, s, h, e, from, until] => (f, k, p, s, h, e, Some((from, until))),
+                _ => continue,
+            };
             let mutable = kind == "mut";
             let holders: Vec<String> =
                 holders.split(", ").filter(|h| !h.is_empty()).map(str::to_string).collect();
@@ -362,12 +373,17 @@ impl Server {
                 ],
             );
             let at = |p: &str| range(&format!("{p}-{p}"), &lines).unwrap_or(Json::Null);
+            let whole = |r: &str| range(r, &lines).unwrap_or(Json::Null);
+            let (from, until) = match spans {
+                Some((from, until)) => (whole(from), whole(until)),
+                None => (at(start), at(end)),
+            };
             loans.push(Json::obj(vec![
                 ("function", Json::str(function.clone())),
                 ("mutable", Json::Bool(mutable)),
                 ("place", Json::str(place.clone())),
-                ("start", at(start)),
-                ("until", at(end)),
+                ("start", from),
+                ("until", until),
                 ("holders", Json::Arr(holders.into_iter().map(Json::str).collect())),
                 ("message", Json::str(message)),
             ]));

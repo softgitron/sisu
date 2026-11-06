@@ -50,6 +50,21 @@ pub pure def arg(args: list[Type], i: int) -> Type:
         return args[i].copy()
     return Type.Unit
 
+## Whether the type is an option of a raw pointer, `ptr[T]?` or `(ptr mut
+## T)?`, which is one nullable word, its address or 0 for `None`, as C holds
+## an optional pointer (decision 1240).
+pub pure def nullable(t: Type) -> bool:
+    if let Type.Named(n, args) = t:
+        return n == "Option" and nullable_ptr(args)
+    return False
+
+## Whether the arguments of an `Option` make it a nullable word: a raw
+## pointer's.
+pure def nullable_ptr(args: list[Type]) -> bool:
+    if let Type.Named(p, _) = arg(args, 0):
+        return p == "ptr" or p == "ptr_mut"
+    return False
+
 pub pure def named0(n: str) -> Type:
     return Type.Named(name=n.to_string(), args=[])
 
@@ -329,6 +344,10 @@ impl Types:
         if abi.is_capability(n):
             return Ok(w)
         if n == "Option":
+            # An option of a raw pointer is one nullable word (decision
+            # 1240).
+            if nullable_ptr(args):
+                return Ok(w)
             return Ok(w + self.room(arg(args, 0))?)
         if n == "Result":
             let a = self.room(arg(args, 0))?
@@ -353,42 +372,6 @@ impl Types:
                         off += self.room(ft.subst(args))?
                     s = max(s, off)
                 return Ok(s)
-
-    ## Whether a value of the type lies in raw memory as it lies in a value
-    ## (the runtime's `rawmem::layout`, decision 302): no option of a raw
-    ## pointer is among the parts it holds in place. A narrow number is its
-    ## width, and a struct its fields and a tuple its parts at C's offsets,
-    ## in a value as in raw memory (decisions 1020, 1021 and 1100). A
-    ## reference into raw memory is only made to such a value, since the
-    ## code reads a reference's value as a value is laid out.
-    pub pure def same_in_memory(self, t: Type) -> bool:
-        return self.same_in_memory_at(t, 0)
-
-    pure def same_in_memory_at(self, t: Type, depth: int) -> bool:
-        if depth > 64:
-            return False
-        match t:
-            case Type.Tuple(items):
-                for x in items:
-                    if not self.same_in_memory_at(x, depth + 1):
-                        return False
-                return True
-            case Type.Named(n, args):
-                if n == "Option":
-                    if let Type.Named(pn, _) = arg(args, 0):
-                        return pn != "ptr" and pn != "ptr_mut"
-                    return True
-                # A builtin that SIR declares as a struct has no fields.
-                let d = self.decl(n) else:
-                    return True
-                let decl = d.copy()
-                if let TypeDecl.Struct(_, _, fields, _, _, _) = decl:
-                    for f in fields:
-                        if not self.same_in_memory_at(f.ty.subst(args), depth + 1):
-                            return False
-                return True
-            case _:
-                return True
 
     ## The number of a concrete type, if a value of it was made.
     pub pure def known_id(self, t: Type) -> int?:
@@ -531,6 +514,10 @@ impl Types:
                 let v = self.id(arg(args, 1))?
                 return Ok(TypeEntry(size=w + ks, kind=Kind.Entry(k, v)))
             case "Option":
+                # The nullable word of an option of a raw pointer (decision
+                # 1240): the address, 0 for `None`.
+                if nullable_ptr(args):
+                    return Ok(TypeEntry(size=w, kind=Kind.Nullable(self.id(arg(args, 0))?)))
                 let (p, size) = self.part(arg(args, 0))?
                 return Ok(TypeEntry(size=w + size, kind=Kind.Option(p)))
             case "Result":
@@ -838,7 +825,10 @@ impl Types:
                     let pi = if n == "Option" or v == 0: 0 else: 1
                     if pi >= len(args) or i != 0:
                         return no_field(t, i)
-                    return Ok((WORD, args[pi].copy()))
+                    # A nullable word's `Some` is the word itself (decision
+                    # 1240).
+                    let off = if n == "Option" and nullable_ptr(args): 0 else: WORD
+                    return Ok((off, args[pi].copy()))
                 if n == "System" and variant.is_none():
                     let caps = abi.capabilities()
                     if i >= len(caps):

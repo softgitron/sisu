@@ -14,7 +14,7 @@ import stage2.abi
 from stage1.sir import Type, TypeDecl
 from stage2.abi import WORD
 from stage2.gen import Cg
-from stage2.layout import arg, fat, named0
+from stage2.layout import arg, fat, named0, nullable
 from stage2.lir import quote_text
 
 impl Cg:
@@ -185,7 +185,9 @@ impl Cg:
             let to = self.describe(arg(args, 0))
             self.dtypes[k] = "pointer {quote_text(name)} t{to}"
             return k
-        if n == "Option" or n == "Result":
+        # An option of a raw pointer is its nullable word (decision 1240), a
+        # word as the pointer is.
+        if (n == "Option" and not nullable(t)) or n == "Result":
             var variants: list[(String, list[(String, Type, int)])] = []
             if n == "Option":
                 variants.push(("Some".to_string(), [("__0".to_string(), arg(args, 0), WORD)]))

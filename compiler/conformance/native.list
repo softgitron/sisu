@@ -293,6 +293,7 @@ unsafe/misaligned checked
 unsafe/narrow_pointer
 unsafe/mistyped checked
 unsafe/no_memory checked
+unsafe/option_pointer
 unsafe/out_of_bounds checked
 unsafe/overwrite checked
 unsafe/plain_casts

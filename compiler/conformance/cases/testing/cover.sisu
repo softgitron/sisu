@@ -1,0 +1,33 @@
+# `sisu test --cover` (17, "Coverage and mutation"; decision 1241): stage
+# 1's regions of the program (its R216) that no test reaches, by their
+# places, after the run: the `else` of `grade` and the statement in it,
+# and the statements of `spare` and `main`, which no test calls; the
+# `elif` and the loop's body are reached. A map of what is untested, never
+# a gate: the run passes.
+# select --cover
+def grade(score: int) -> str:
+    if score >= 90:
+        return "A"
+    elif score >= 50:
+        return "pass"
+    else:
+        return "fail"
+
+def total(xs: list[int]) -> int:
+    var sum = 0
+    for x in xs:
+        sum += x
+    return sum
+
+def spare() -> int:
+    return 1
+
+test "grades":
+    assert grade(95) == "A"
+    assert grade(60) == "pass"
+
+test "totals":
+    assert total([1, 2]) == 3
+
+def main():
+    print(grade(10))

@@ -6,8 +6,8 @@
 //! program computes the same sizes either way: a sized integer narrower than
 //! 64 bits and an `f32` take their own width, a struct and a tuple their
 //! parts in C's order with their padding, an option of a raw pointer one
-//! word (null for `None`), and every other type the words of its value
-//! (decision 188). A value whose layout in memory is its layout as a value
+//! word (null for `None`), as it is in a value too (decision 1240), and
+//! every other type the words of its value (decision 188). A value whose layout in memory is its layout as a value
 //! is read and written as its bytes; another is converted part by part. The
 //! interpreter checks every access against its checked memory model (D-085);
 //! native code makes none of those checks, as 22 has it: the raw memory
@@ -69,9 +69,6 @@ fn compute(types: &[TypeEntry], memo: &mut [Option<Layout>], t: u32, depth: u32)
                 Layout { size: w, align: w, same: entry.size as u64 == w }
             }
             Kind::F32 => Layout { size: 4, align: 4, same: entry.size == 4 },
-            Kind::Option(p) if matches!(types.get(*p as usize).map(|e| &e.kind), Some(Kind::Ptr(_))) => {
-                Layout { size: 8, align: 8, same: false }
-            }
             Kind::Tuple(slots) => {
                 let parts: Vec<(u32, u32)> = slots.iter().map(|s| (s.ty, s.offset)).collect();
                 c_layout(types, memo, &parts, entry.size, depth)
@@ -161,10 +158,6 @@ pub(crate) unsafe fn to_memory(dst: *mut u8, src: *const u8, t: u32) {
         match &entry.kind {
             Kind::Sized(n) => mem::copy(dst, src, width(n) as usize),
             Kind::F32 => mem::copy(dst, src, 4),
-            Kind::Option(_) => {
-                let p = if mem::word(src, 0) == 0 { mem::word(src, 8) } else { 0 };
-                (dst as *mut u64).write_unaligned(p);
-            }
             Kind::Tuple(_) | Kind::Struct { .. } => {
                 for (moff, voff, pt) in parts(entry) {
                     to_memory(dst.add(moff as usize), src.add(voff as usize), pt);
@@ -205,11 +198,6 @@ pub(crate) unsafe fn to_value(dst: *mut u8, src: *const u8, t: u32) {
                 let mut b = [0u8; 4];
                 std::ptr::copy_nonoverlapping(src, b.as_mut_ptr(), 4);
                 mem::set_word(dst, 0, u64::from(u32::from_le_bytes(b)));
-            }
-            Kind::Option(_) => {
-                let p = (src as *const u64).read_unaligned();
-                mem::set_word(dst, 0, u64::from(p == 0));
-                mem::set_word(dst, 8, p);
             }
             Kind::Tuple(_) | Kind::Struct { .. } => {
                 for (moff, voff, pt) in parts(entry) {

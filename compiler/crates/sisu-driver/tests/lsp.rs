@@ -609,7 +609,8 @@ def main():
 }
 
 /// On both front ends: stage 1's `query explain` from `sisu1 0.17.0`
-/// (decision 1104), the Rust ownership checker's loans before it.
+/// (decision 1104), with each loan's ranges whole from `sisu1 0.20.0`
+/// (decision 1242), the Rust ownership checker's loans before it.
 #[test]
 fn explain_borrow_is_a_command() {
     for front in FRONTS {
@@ -648,6 +649,11 @@ fn explain_borrow_is_a_command_on(front: &str) {
     // Where it starts, as a range of the document (line 15, column 29).
     assert_eq!(loans[0].at(&["start", "start", "line"]).and_then(Json::as_u64), Some(14));
     assert_eq!(loans[0].at(&["start", "start", "character"]).and_then(Json::as_u64), Some(28));
+    // Each range whole, to where it ends (stage 1's `--ranges`, decision
+    // 1242, and the Rust front end's spans): `text` and `words.`.
+    assert_eq!(loans[0].at(&["start", "end", "character"]).and_then(Json::as_u64), Some(32), "{front}");
+    assert_eq!(loans[0].at(&["until", "end", "line"]).and_then(Json::as_u64), Some(17), "{front}");
+    assert_eq!(loans[0].at(&["until", "end", "character"]).and_then(Json::as_u64), Some(19), "{front}");
     // A program with an error has no loans to show.
     let broken = format!("{text}\ndef broken() -> int:\n    return \"no\"\n");
     let (uri, _dir) = document("broken.sisu", &broken);

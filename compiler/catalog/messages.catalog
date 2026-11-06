@@ -1224,3 +1224,10 @@ D0157 cli     cli.mutate-tests-fail       the mutants were not run: the tests fa
 D0158 cli     cli.mutate-no-region        the lines changed since `{since}` could not be read from git: {reason}
 D0159 cli     cli.mutate-alone            `--mutate` runs the tests against each mutant of the program; it does not combine with `{option}`
 D0160 cli     cli.since-without-mutate    `--since REV` names the changed region of `--mutate`; it goes with `--mutate`
+# `sisu test --cover` (17, "Coverage and mutation"; decision 1241): the
+# runner's half of stage 1's `sir --tests --cover` (its R216), each region
+# no test reached by its place and kind, the count, and what the mode does
+# not combine with.
+D0161 cli     cli.cover-unreached         {at}: no test reaches this {kind}
+D0162 cli     cli.cover-summary           regions: {count}, {reached} reached by the tests and {unreached} not
+D0163 cli     cli.cover-alone             `--cover` counts the regions the tests reach in the interpreter; it does not combine with `{option}`

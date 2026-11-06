@@ -11,6 +11,7 @@ import stage2.abi
 from stage1.sir import Callee, LocalId, Operand, Place, Program, Type
 from stage2.abi import WORD
 from stage2.gen import Cg, Target
+from stage2.layout import nullable
 from stage2.lir import LirError, internal, unsupported
 from stage2.rvalue import is_text
 from stage2.scan import element_type, sized_op, target_type, wide_op
@@ -387,32 +388,6 @@ impl Cg:
             return self.call_foreign(p, dest, name.strip_prefix("extern."), args)
         if name.starts_with("rt."):
             return self.machine_intrinsic(p, dest, name, args)
-        # A place of the program holds a value as it is laid out, and a
-        # reference into raw memory is read so: a pointer to a place, and a
-        # reference made from a pointer, are only made to a type that raw
-        # memory holds as a value is laid out (decision 302).
-        var pointee: Type? = None
-        match name:
-            case "mem.ptr.as_ref" | "mem.ptr.as_mut" | "mem.slice.as_ptr":
-                pointee = self.raw_pointee(args)?
-            case "mem.ptr.of" | "mem.ptr.of_mut":
-                if not args.is_empty():
-                    match args[0]:
-                        case Operand.Copy(pl) | Operand.Move(pl):
-                            let t = self.place_type(pl)?
-                            if let Type.Ref(inner, _) = t:
-                                pointee = Some(inner[0].copy())
-                            else:
-                                pointee = Some(t)
-                        case _:
-                            pass
-            case _:
-                pass
-        if let Some(t) = pointee:
-            if not self.types.same_in_memory(t):
-                return unsupported(
-                    "`{name}` of a `{write.ty(t)}`, which raw memory holds otherwise than a value of it"
-                )
         let i = self.intrinsic(name) else:
             return unsupported("the intrinsic `{name}`")
         self.note_intrinsic(name, targs)?
@@ -425,10 +400,16 @@ impl Cg:
                 if k < len(args) and k < len(argv):
                     if let Operand.Copy(_) = args[k]:
                         self.count_at(argv[k].0, argv[k].1)?
-        # The commonest intrinsics run inline (decision 253).
-        var fast = self.frame_iterator(p, i, dest, argv)?
-        if let Fast.No = fast:
-            fast = self.inline_intrinsic(p, i, dest, argv)?
+        # The commonest intrinsics run inline (decision 253). An option of a
+        # raw pointer the runtime makes it writes as any option, a tag word
+        # and the address, which becomes the nullable word after (decision
+        # 1240); no inline form writes one.
+        let wide = abi.gives_option(i) and nullable(dest_ty)
+        var fast = Fast.No
+        if not wide:
+            fast = self.frame_iterator(p, i, dest, argv)?
+            if let Fast.No = fast:
+                fast = self.inline_intrinsic(p, i, dest, argv)?
         var done: int? = None
         match fast:
             case Fast.Done:
@@ -451,7 +432,7 @@ impl Cg:
         for k in range(n):
             self.store_word(argv[k].0, arr, k * 8)
         let rsize = self.size(dest_ty)?
-        let ret = self.slot(rsize)
+        let ret = self.slot(if wide: 2 * WORD else: rsize)
         let st = self.rt_status(abi.SYM_INTRINSIC, [daddr, ret, arr])?
         # A value moved into a parameter the intrinsic neither owns nor lets
         # its result hold was only read: it is dropped now, when nothing
@@ -481,33 +462,15 @@ impl Cg:
                 _ = self.rt_status(abi.SYM_DROP, [argv[k].0, idv])?
         self.check(st)
         let (addr, _) = self.place(p, dest, None)?
-        self.copy_bytes(addr, ret, rsize)
+        if wide:
+            let word = self.nullable_of(ret)
+            self.store_word(word, addr, 0)
+        else:
+            self.copy_bytes(addr, ret, rsize)
         if let Some(d) = done:
             self.b.jump(d, [])
             self.b.switch_to_block(d)
         return Ok(())
-
-    ## The type a raw pointer operand (or a slice operand, through
-    ## references), the first of `args`, holds values of.
-    pure def raw_pointee(mut self, args: list[Operand]) -> Type? ! LirError:
-        if args.is_empty():
-            return Ok(None)
-        var t = Type.Unit
-        match args[0]:
-            case Operand.Copy(pl) | Operand.Move(pl):
-                t = self.place_type(pl)?
-            case _:
-                return Ok(None)
-        while True:
-            let Type.Ref(inner, _) = t.copy() else:
-                break
-            t = inner[0].copy()
-        if let Type.Named(n, targs) = t:
-            if n == "ptr" or n == "ptr_mut" or n == "Slice" or n == "list":
-                if targs.is_empty():
-                    return Ok(None)
-                return Ok(Some(targs[0].copy()))
-        return Ok(None)
 
     ## A call of a foreign function (`extern.LIBRARY.NAME`), as C calls it:
     ## each argument converted to its C type, the result back to its Sisu
@@ -563,12 +526,6 @@ impl Cg:
         let ct = rets[0].copy()
         let (d, _) = self.place(p, dest, None)?
         var word = v
-        if named_in(dest_ty, ["Option"]):
-            let none = self.b.icmp_imm("eq", v, 0)
-            let tag = self.b.convert("uextend", "i64", none)
-            self.store_word(tag, d, 0)
-            self.store_word(v, d, 8)
-            return Ok(())
         if named_in(dest_ty, ["f32"]):
             let bits = self.b.convert("bitcast", "i32", v)
             word = self.b.convert("uextend", "i64", bits)
@@ -580,19 +537,24 @@ impl Cg:
             word = self.b.convert("uextend", "i64", v)
         return self.store_scalar(word, d, dest_ty)
 
+    ## The nullable word of an option of a raw pointer the runtime wrote at
+    ## `at` as any option, a tag word and the address (decision 1240).
+    pure def nullable_of(mut self, at: int) -> int:
+        let tag = self.load(at, 0)
+        let payload = self.load(at, 8)
+        let some = self.b.icmp_imm("eq", tag, 0)
+        let zero = self.iconst(0)
+        return self.b.select(some, payload, zero)
+
     ## An argument of a foreign call as its C type: its value loaded from
-    ## `addr` and narrowed, an option of a raw pointer as a nullable one.
+    ## `addr` and narrowed; an option of a raw pointer is its nullable word
+    ## (decision 1240).
     pure def c_argument(mut self, addr: int, t: Type, symbol: str) -> (String, int) ! LirError:
         let ct = c_type(t) else:
             return unsupported(
                 "an argument of the foreign function `{symbol}` of type `{write.ty(t)}`"
             )
         let word = self.load(addr, 0)
-        if named_in(t, ["Option"]):
-            let payload = self.load(addr, 8)
-            let some = self.b.icmp_imm("eq", word, 0)
-            let zero = self.iconst(0)
-            return Ok((ct, self.b.select(some, payload, zero)))
         if t == Type.Float:
             return Ok((ct, self.b.convert("bitcast", "f64", word)))
         if named_in(t, ["f32"]):
@@ -920,7 +882,9 @@ impl Cg:
             return Ok(Fast.Done)
         if (i == abi.I_OPTION_IS_SOME or i == abi.I_OPTION_IS_NONE) and named_in(bt, ["Option"]):
             let tag = self.load(b, 0)
-            let cc = if i == abi.I_OPTION_IS_SOME: "eq" else: "ne"
+            # A nullable word holds `Some` when it is not 0 (decision 1240),
+            # where a tag word holds it at 0.
+            let cc = if (i == abi.I_OPTION_IS_SOME) != nullable(bt): "eq" else: "ne"
             let is = self.b.icmp_imm(cc, tag, 0)
             let w = self.b.convert("uextend", "i64", is)
             let (d, _) = self.place(p, dest, None)?

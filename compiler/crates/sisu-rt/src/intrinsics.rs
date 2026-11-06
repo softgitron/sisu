@@ -510,20 +510,20 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }
             I::OptionIsSome | I::ResultIsOk => {
-                let (p, _) = c.place(0);
-                c.set_bool(mem::word(p, 0) == 0);
+                let (p, t) = c.place(0);
+                c.set_bool(holding(p, t).0);
             }
             I::OptionIsNone | I::ResultIsErr => {
-                let (p, _) = c.place(0);
-                c.set_bool(mem::word(p, 0) != 0);
+                let (p, t) = c.place(0);
+                c.set_bool(!holding(p, t).0);
             }
             I::OptionExpect | I::ResultExpect | I::OptionUnwrap | I::ResultUnwrap => return expect(c, i),
             I::OptionOr | I::ResultOr => {
                 let (p, t) = c.place(0);
                 let entry = ty(t);
                 let size = ty(c.ret_ty).size;
-                if mem::word(p, 0) == 0 {
-                    mem::copy(c.ret, p.add(8), size as usize);
+                if let (true, payload) = holding(p, t) {
+                    mem::copy(c.ret, payload, size as usize);
                     return value::drop_value(c.arg(1), c.ty(1));
                 }
                 if let Kind::Result(_, err) = entry.kind {
@@ -1135,14 +1135,29 @@ unsafe fn min_max(c: &Call<'_>, min: bool) -> u8 {
 ///
 /// # Safety
 /// As [`call`].
+/// Whether the option or result at `p`, of type `t`, holds `Some` (or
+/// `Ok`), and where its payload is: after the tag word, or the word itself
+/// for an option of a raw pointer, whose `None` is 0 (decision 1240).
+///
+/// # Safety
+/// `p` must hold a value of type `t`.
+unsafe fn holding(p: *mut u8, t: u32) -> (bool, *mut u8) {
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        if let Kind::Nullable(_) = ty(t).kind {
+            return (mem::word(p, 0) != 0, p);
+        }
+        (mem::word(p, 0) == 0, p.add(8))
+    }
+}
+
 unsafe fn expect(c: &Call<'_>, i: Intrinsic) -> u8 {
     // SAFETY: the arguments are of their types.
     unsafe {
         let (p, t) = c.place(0);
         let entry = ty(t);
-        let first = mem::word(p, 0) == 0;
-        if first {
-            mem::copy(c.ret, p.add(8), ty(c.ret_ty).size as usize);
+        if let (true, payload) = holding(p, t) {
+            mem::copy(c.ret, payload, ty(c.ret_ty).size as usize);
             return abi::OK;
         }
         let m = if matches!(i, Intrinsic::OptionUnwrap | Intrinsic::ResultUnwrap) {

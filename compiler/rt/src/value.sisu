@@ -63,6 +63,7 @@ from rt.types import LIST
 from rt.types import MUTEX
 from rt.types import NAME
 from rt.types import NEEDS_DROP
+from rt.types import NULLABLE
 from rt.types import OPTION
 from rt.types import PARTS
 from rt.types import PATH
@@ -273,7 +274,9 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             return enum_equal(ts, a, concrete(ts, a, ta), b, concrete(ts, b, tb))
         if k != l:
             return False
-        if k == U64 or k == BOOL or k == CHAR or k == DATETIME:
+        # Two nullable words are equal when they are the same word (decision
+        # 1240).
+        if k == U64 or k == BOOL or k == CHAR or k == DATETIME or k == NULLABLE:
             return aw.read() == bw.read()
         if k == I128 or k == U128:
             return aw.read() == bw.read() and aw.offset(1).read() == bw.offset(1).read()
@@ -543,6 +546,16 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
                     return o
                 i += 1
             return signed_order(na, nb)
+        # A nullable word's `Some` orders before its `None`, as an option's
+        # tags order them, and two of `Some` by their pointers (decision
+        # 1240).
+        if k == NULLABLE:
+            let (sa, sb) = (aw.read() != 0, bw.read() != 0)
+            if sa != sb:
+                return if sa: LESS else: GREATER
+            if sa:
+                return order(ts, a, x.offset(A).read(), b, y.offset(A).read())
+            return EQUAL
         if k == OPTION or k == RESULT:
             let (tx, ty) = (aw.read(), bw.read())
             if tx != ty:
@@ -685,6 +698,14 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
             let s = (state ^ tag) *% PRIME
             if tag == 0:
                 return hash(ts, s, p.offset(8), h.offset(A).read())
+            return s
+        # A nullable word hashes as an option's tag and payload would
+        # (decision 1240).
+        if k == NULLABLE:
+            let tag = if w.read() == 0: 1 else: 0
+            let s = (state ^ tag) *% PRIME
+            if tag == 0:
+                return hash(ts, s, p, h.offset(A).read())
             return s
         if k == RESULT:
             let tag = w.read()

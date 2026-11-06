@@ -125,6 +125,15 @@ pub struct Header {
     /// What the front end printed before the run (its warnings), which a
     /// replay without a front end prints first.
     pub warnings: String,
+    /// The options the run's program was built with (`--locked`,
+    /// `--accept-unsafe`, `--features` and its names), which a replay of a
+    /// run under `--watch` builds its saves with (decision 1243).
+    pub options: Vec<String>,
+    /// Under `--watch`, the directory the run was in, from the deepest
+    /// directory its files are in (`ws/app` for a member whose workspace's
+    /// manifest is `../sisu.toml`), so that a replay writes the files that
+    /// are outside it where their names reach (decision 1243).
+    pub directory: Option<String>,
 }
 
 impl Header {
@@ -153,6 +162,12 @@ impl Header {
         }
         if !self.warnings.is_empty() {
             out.push_str(&format!("warnings {}\n", q(&self.warnings)));
+        }
+        for o in &self.options {
+            out.push_str(&format!("option {}\n", q(o)));
+        }
+        if let Some(d) = &self.directory {
+            out.push_str(&format!("directory {}\n", q(d)));
         }
         out
     }
@@ -549,6 +564,8 @@ impl Log {
             watch: false,
             sir: false,
             warnings: String::new(),
+            options: Vec::new(),
+            directory: None,
         };
         let mut header = header;
         let mut records = Vec::new();
@@ -576,6 +593,14 @@ impl Log {
                 }
                 "warnings" if records.is_empty() => {
                     header.warnings = str_at(&f, 1);
+                    continue;
+                }
+                "option" if records.is_empty() => {
+                    header.options.push(str_at(&f, 1));
+                    continue;
+                }
+                "directory" if records.is_empty() => {
+                    header.directory = Some(str_at(&f, 1));
                     continue;
                 }
                 _ => {}
@@ -1140,6 +1165,8 @@ mod tests {
             watch: false,
             sir: false,
             warnings: String::new(),
+            options: vec!["--features".into(), "fast, small".into()],
+            directory: Some("ws/app".into()),
             toolchain: "0.0.1".into(),
             file: "a.sisu".into(),
             hash: 0xabc,

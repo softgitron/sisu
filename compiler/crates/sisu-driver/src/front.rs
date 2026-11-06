@@ -641,6 +641,23 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= FIXTURES_SINCE)
     }
 
+    /// Whether this stage 1's `sir --tests --transcripts` keeps the world
+    /// of transcripts on the driver's word and its `sir --tests --std`
+    /// names no path for the examples alone (its R221 and R223): `sisu1
+    /// 0.21.0` and later (decision 1245).
+    pub fn keeps_the_world(&self) -> bool {
+        self.version().is_some_and(|v| v >= WORLD_SINCE)
+    }
+
+    /// Whether this stage 1 gives the driver's three asks of its R211:
+    /// `build --for-run --emit-sir --defer-borrow`'s stopping errors in the
+    /// human form, `query explain --ranges`, and the line `  function NAME`
+    /// after each deferred finding; `sisu1 0.20.0` and later (decision
+    /// 1242).
+    pub fn gives_the_asks(&self) -> bool {
+        self.version().is_some_and(|v| v >= FIXTURES_SINCE)
+    }
+
     /// The environment a run of stage 1 gets: none of the runtime's or the
     /// driver's own switches, the lowering and backend the command chose,
     /// and the working directory as the shell's `PWD`.
@@ -1410,8 +1427,16 @@ const DIGESTS_SINCE: (u32, u32, u32) = (0, 19, 0);
 
 /// The version whose `sir --tests --module-fixtures` names each test's
 /// fixtures on its line and gives a module's as a `ref T` parameter (its
-/// R219; decision 1202).
+/// R219; decision 1202), and which gives the driver's asks of its R211 and
+/// the regions of `sir --tests --cover` (its R216; decisions 1241 and
+/// 1242).
 const FIXTURES_SINCE: (u32, u32, u32) = (0, 20, 0);
+
+/// The version whose `sir --tests --transcripts` keeps the world of
+/// transcripts whatever is beside the program, and whose `sir --tests
+/// --std` naming no path lowers the standard library's examples alone (its
+/// R221 and R223; decision 1245).
+const WORLD_SINCE: (u32, u32, u32) = (0, 21, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.

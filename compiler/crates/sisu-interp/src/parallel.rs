@@ -212,8 +212,8 @@ fn run_group(
         };
         for (f, _) in last.iter().filter(|(_, at)| *at == pos) {
             let Some(at) = made.iter().position(|(g, _)| g == f) else { continue };
-            let (_, id) = made.remove(at);
-            if let Some(m) = i.drop_fixture(id)
+            let (function, id) = made.remove(at);
+            if let Some(m) = i.drop_fixture(id, function)
                 && !matches!(r, TestResult::Failed(_))
             {
                 r = TestResult::Failed(m);

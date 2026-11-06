@@ -171,85 +171,125 @@ literal keeps it as written.
 
 The parser is hand-written recursive descent, one function per rule.
 Every production can produce an `ERROR` node; recovery synchronises at
-`NEWLINE` and `DEDENT`. The grammar:
+`NEWLINE` and `DEDENT`. The grammar is the parser's own: `sisu grammar`
+prints it (decision 1204), stage 1's productions read from the `##!`
+comments of its parser's modules, each beside the function that reads it
+(stage 1's R202 and R214), and these notes carry what it prints, which
+the driver's test `the_notes_carry_the_grammar_sisu_grammar_prints`
+holds the same (decision 1246). The Rust parser, the oracle, reads the
+same language but for the differences stage 1's RULES.md lists.
 
 ```text
+-- Declarations (parser/items.sisu)
 file      := item* EOF
-item      := attribute* visibility? (fn_def | struct_def | enum_def | error_def
-             | impl_def | trait_def | import | from_import | test_def | suite_def
-             | bench_def | const_def | type_alias | extern_block)
-attribute := '@' name ('(' args ')')? NEWLINE
-fn_def    := ('pure' | 'comptime')? 'def' name generic_params? params ('->' type)?
-             where_clause? (':' block | NEWLINE)
-struct_def:= 'view'? 'struct' name generic_params? ':' INDENT (field | fn_def | 'pass')+ DEDENT
-field     := visibility? name ':' type ('=' expr)? NEWLINE
-enum_def  := 'enum' name generic_params? ':' INDENT (variant | fn_def)+ DEDENT
-error_def := 'error' name ':' INDENT (variant | '..' NEWLINE)+ DEDENT
-variant   := name ('(' (name ':')? type (',' (name ':')? type)* ')')? NEWLINE
-impl_def  := 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
-import    := 'import' path ('as' name)? NEWLINE
-from_import := 'from' path 'import' name ('as' name)? (',' name ('as' name)?)* NEWLINE
+item      := attribute* visibility? item_body
+item_body := fn_def | struct_def | enum_def | error_def | impl_def | trait_def
+             | import | from_import | test_def | suite_def | bench_def
+             | const_def | type_alias | extern_block
+attribute := '@' name ('.' name)* ('(' args? ')')? NEWLINE
+fn_def    := ('pure' | 'comptime')? 'unsafe'? 'def' name generic_params? params
+             ('->' type ('from' name (',' name)*)?)? where_clause? (':' block | NEWLINE)
+struct_def:= 'view'? 'struct' name generic_params? ':' INDENT struct_member+ DEDENT
+struct_member := attribute* visibility? (field | item_body | 'pass' NEWLINE)
+             | contract                      -- `invariant e`
+field     := name ':' type ('=' expr)? NEWLINE
+enum_def  := 'enum' name generic_params? ':' INDENT variant_member+ DEDENT
+error_def := 'error' name generic_params? ':' INDENT variant_member+ DEDENT
+variant_member := attribute* (variant | '..' NEWLINE | 'pass' NEWLINE | item_body)
+variant   := name ('(' variant_field (',' variant_field)* ')')? NEWLINE
+variant_field := (name ':')? type
+impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT member+ DEDENT
+trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
+             INDENT member+ DEDENT
+extern_block := 'extern' string? ':' INDENT member+ DEDENT
+member    := attribute* visibility? ('pass' NEWLINE | item_body | trait_const)
+trait_const := 'const' name (':' type)? ('=' expr)? NEWLINE   -- in a trait's body
+import    := 'import' (path | 'c' string) ('as' name)?
+             ('with' name '=' expr (',' name '=' expr)*)? NEWLINE
+from_import := 'from' path 'import' (import_names | '(' import_names ')') NEWLINE
+import_names := name ('as' name)? (',' name ('as' name)?)*
 test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
-const_def := 'const' name ':' type '=' expr NEWLINE
+bench_def := 'bench' string ('for' patterns 'in' expr)? params? ':' block
+suite_def := 'suite' string ':' INDENT item+ DEDENT
+const_def := 'const' name (':' type)? '=' expr NEWLINE   -- without its type, E0219
 type_alias:= 'type' name generic_params? ('=' type ('where' expr)?)? NEWLINE
+visibility := 'pub' ('(' 'package' ')')?
+generic_params := '[' generic_param (',' generic_param)* ']'
+generic_param := 'const'? name (':' type ('+' type)*)? ('=' type)?
+params    := '(' (param (',' param)*)? ')'
+param     := ('mut' | 'own')? ('self' (':' type)? | '*' | '/' | '*' name ':' type
+             | name ':' type ('=' expr)?)
+where_clause := 'where' type ':' type ('+' type)* (',' type ':' type ('+' type)*)*
 
+-- Statements and blocks (parser/stmts.sisu)
 block     := NEWLINE INDENT stmt+ DEDENT
 stmt      := let_stmt | return_stmt | 'break' | 'continue' | 'pass' | if_stmt
-             | while_stmt | for_stmt | assert_stmt | defer_stmt | with_stmt
-             | item | expr_stmt | assign_stmt
+             | while_stmt | for_stmt | assert_stmt | expect_stmt | defer_stmt
+             | with_stmt | unsafe_stmt | yield_stmt | select_stmt | comptime_stmt
+             | contract | item | expr_stmt | assign_stmt
 let_stmt  := ('let' | 'var') patterns (':' type)? ('=' exprs let_else?)? NEWLINE
 let_else  := 'else' ('as' name)? ':' (block | expr | return_stmt | 'break' | 'continue')
 if_stmt   := 'if' cond ':' block ('elif' cond ':' block)* ('else' ':' block)?
-cond      := cond_part (',' cond_part)*
-cond_part := 'let' pattern '=' expr | expr
+cond      := cond_part (',' cond_part)*      cond_part := 'let' pattern '=' expr | expr
 while_stmt:= 'while' cond ':' block
 for_stmt  := 'for' patterns 'in' ('mut' | 'own')? expr ':' block
-assert_stmt := 'assert' expr (',' expr)? NEWLINE
-defer_stmt:= 'defer' ':' block
+assign_stmt := exprs ('=' | '+=' | ...) exprs NEWLINE
+return_stmt := 'return' exprs? NEWLINE
+assert_stmt := ('assert' | 'debug_assert') expr (',' expr)? NEWLINE
+expect_stmt := 'expect' expr (',' expr)? NEWLINE
+defer_stmt := 'defer' (':' block | stmt)
 with_stmt := 'with' expr ('as' name)? ':' block
-assign_stmt := exprs ('=' | '+=' | '-=' | ... ) exprs NEWLINE
+unsafe_stmt := 'unsafe' ':' block
+yield_stmt := 'yield' expr? NEWLINE
+select_stmt := 'select' ':' NEWLINE INDENT ('case' pattern '=' expr ':' block)+ DEDENT
+comptime_stmt := 'comptime' stmt
+contract  := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLINE
 
+-- Expressions, by precedence from lowest to highest (02, "Operator precedence") (parser/exprs.sisu)
 expr      := closure | coalesce
 closure   := 'own'? (name | '(' params ')') '->' expr
 coalesce  := or ('??' coalesce)?
-or        := and ('or' and)*           -- mixing `and` and `or` needs parentheses
+or        := and ('or' and)*            -- mixing with `and` needs parentheses
 and       := not ('and' not)*
 not       := 'not' not | compare
-compare   := bitwise (cmp_op bitwise)* -- a chain points one way: a < b <= c
-bitwise   := shift (('&' | '^' | '|') shift)*     -- one operator, no arithmetic operands
-shift     := additive (('<<' | '>>') additive)*
+compare   := bitwise (cmp_op bitwise)*  -- chains point one way
+bitwise   := shift (('&' | '^' | '|') shift)*   -- one operator, no arithmetic
+shift     := additive (('<<' | '>>') additive)*  -- no arithmetic operands
 additive  := mult (('+' | '-' | '+%' | '-%' | '+|' | '-|') mult)*
 mult      := unary (('*' | '/' | '//' | '%' | '*%' | '*|') unary)*
 unary     := ('-' | '~' | 'ref' 'mut'? | '^') unary | power
-power     := postfix ('**' unary)?     -- `-x ** y` needs parentheses
+power     := postfix ('**' unary)?      -- `-x ** y` needs parentheses
 postfix   := primary (call | index | '.' name | '?.' name | '?' | do_block)*
-do_block  := 'do' ('own'? params)? ':' block      -- only at the end of a logical line
 primary   := literal | string | name | '(' ... ')' | '[' ... ']' | '{' ... '}'
              | if_expr | match_expr
-if_expr   := 'if' expr ':' expr ('elif' expr ':' expr)* 'else' ':' expr
-match_expr:= 'match' expr ':' INDENT ('case' pattern ('if' expr)? ':' (expr NEWLINE | block))+ DEDENT
 
-type      := '!' error_set? | option ('!' error_set?)?
-error_set := '{' option (',' option)* '}' | option
-option    := ref_type '?'*
-ref_type  := 'ref' 'mut'? primary_type | primary_type
-primary_type := path generic_args? | 'Self' | 'pure'? '(' types? ')' ('->' type)? | 'dyn' path
-generic_args := '[' generic_arg (',' generic_arg)* ']'
-generic_arg := const_expr | integer | type  -- an expression where one starts and no type does,
-                                            -- or a path, integer or (...) followed by an operator or `(`
-
-patterns  := pattern (',' pattern)*    -- a bare tuple in `let` and `for`
+-- Patterns (parser/patterns.sisu)
+patterns  := pattern (',' pattern)*          -- a bare tuple in let and for
 pattern   := primary_pattern ('|' primary_pattern)*
 primary_pattern := '_' | lower_name | literal | '-' number
              | Upper_path ('(' pattern_arg (',' pattern_arg)* ')')?
              | '(' patterns ')' | '[' patterns? ']' | '*' name | '..'
 pattern_arg := name '=' pattern | pattern | '..'
+
+-- Types (parser/types.sisu)
+type      := '!' error_set? | option ('!' error_set?)?
+error_set := '{' option (',' option)* '}' | option
+option    := ref_type '?'*
+ref_type  := 'ref' 'mut'? primary_type | primary_type
+primary_type := path_type | fn_type | tuple_type | '(' type ')' | 'dyn' primary_type
+             | 'ptr' 'mut' primary_type | 'impl' type ('for' type)?
+             | '{' option (',' option)* '}'
+path_type := (name | 'Self' | 'type') ('.' name)* generic_args?
+fn_type   := 'pure'? '(' (type_element (',' type_element)*)? ')' '->' type
+tuple_type := '(' ')' | '(' type_element ',' ')' | '(' type_element (',' type_element)+ ')'
+type_element := (name ':')? type
+generic_args := '[' generic_arg (',' generic_arg)* ']'
+generic_arg := const_expr | integer | type
 ```
 
 A lowercase name in a pattern binds; a capitalised one names a variant or
-a constant, so the parser decides by spelling. The forms of later phases
-(`select`, `yield`, contracts, `comptime`, `extern`, `x.[f]`) parse so
-that every example in the proposal produces a tree without syntax errors.
+a constant, so the parser decides by spelling. Every form the proposal's
+examples use parses, so that each produces a tree without syntax errors.
 
 **The tree** is lossless: every byte belongs to exactly one token and
 every token to exactly one node, so `sisu parse --print` reproduces the
@@ -2559,10 +2599,12 @@ declares, the package compiled as `sisu test` compiles it, which stage 1's
   `Fs` with the files of `tests/NAME/`, a clock frozen at the epoch,
   `Rand.seeded(0)` and no network (`transcript_world` and
   `transcript_system` in the prelude, which stage 1's `sir --tests` of
-  0.11.0 and later keeps for a program that has transcripts, so the
-  transcripts run on the SIR the tests run, decision 722; for an older
-  stage 1 the Rust front end's lowering keeps them for this run only, so
-  the transcripts run on its SIR of the program, decision 380). A difference
+  0.11.0 and later keeps for a program that has transcripts, and from
+  0.21.0 its `sir --tests --transcripts` on the driver's word when the
+  driver finds them, so the transcripts run on the SIR the tests run,
+  decisions 722 and 1245; for an older stage 1 the Rust front end's
+  lowering keeps them for this run only, so the transcripts run on its
+  SIR of the program, decision 380). A difference
   fails with a diff (`D0061`); `--update` rewrites the file.
 - **Benchmarks**: `bench "name"(b: Bench):` is checked like a test and
   run by `sisu bench FILE [--iterations N] [--samples K]`, which times
@@ -2582,12 +2624,21 @@ declares, the package compiled as `sisu test` compiles it, which stage 1's
   0.20.0` one with `scope="module"` is a `ref T` parameter of the test's
   function that the runner gives, the tests that share it run in one
   interpreter, in turn, the value made before the first and dropped
-  after the last (`run_group` in `parallel.rs`, decision 1202).
-- **Mutants**: `sisu test --mutate [--since REV]` runs the tests against
-  each of stage 1's mutants of the program (its R208), those on the
-  lines changed since REV with `--since`, and prints the ones every test
-  passes against as suggestions; the status is the tests' own (decision
-  1201).
+  after the last as a `drop` of its type drops it, a list of values with
+  a `Drop` element by element (`run_group` in `parallel.rs`, decisions
+  1202 and 1244).
+- **Coverage**: `sisu test --cover` runs the tests with each statement's
+  runs counted, as the counterexample mode counts them, and prints each
+  region of stage 1's `sir --tests --cover` (its R216: a statement, or a
+  branch's body) whose first SIR statement no test ran, by its place
+  (`D0161`), then the count (`D0162`); a map of what is untested, never
+  a gate (17), interpreted only (decision 1241).
+- **Mutants**: `sisu test --mutate [--since REV]` runs against each of
+  stage 1's mutants of the program (its R208), those on the lines
+  changed since REV with `--since`, the tests whose runs on the program
+  reached its line, and prints the ones every such test passes against
+  as suggestions; the status is the tests' own (decisions 1201 and
+  1241).
 
 ## Simulation, schedulers and replay
 
@@ -2926,9 +2977,11 @@ stays in the run for the frames and values of earlier epochs. The run
 ends when the program does. Under `--record`, each save is an `edit`
 record of the capability log at the poll that saw it, so `sisu replay`
 applies the same saves at the same points and publishes the same epochs;
-a run on stage 1 logs the program's files as it began, and its replay
-has stage 1 build each save in a directory of those files (decision
-1200). `--watch` does not combine with `--sir`, `--defer-borrow`, `--explore` or
+a run on stage 1 logs the program's files as it began, with its
+packages' manifests, a workspace's and a dependency's outside the
+working directory named through `..`, and the options it was built with,
+and its replay has stage 1 build each save with those options in a
+directory of those files (decisions 1200 and 1243). `--watch` does not combine with `--sir`, `--defer-borrow`, `--explore` or
 the exhaustive scheduler (`D0078`), which run a program more than once
 or not from source. The suite's `.watch` cases save their own next versions from
 `NAME.files/`.
@@ -3420,7 +3473,7 @@ where the parts are:
 | `dyn Trait` | 2 | the number of the type of the value it holds, and the address of a heap cell holding the value, which the `dyn` owns |
 | `ref dyn Trait` | 2 | the same two words, borrowed: the address is of the value the `dyn` holds |
 | `Box[T]` | 1 | the address of a heap cell holding the value |
-| `T?` | 1 + T | a tag (0 `Some`, 1 `None`), then the payload |
+| `T?` | 1 + T | a tag (0 `Some`, 1 `None`), then the payload; an option of a raw pointer is one word (below) |
 | `Result[T, E]` | 1 + the larger | a tag (0 `Ok`, 1 `Err`), then the payload |
 | a tuple | C's | the parts at C's offsets, as a struct's fields (decision 1100) |
 | a struct | C's | the fields at C's offsets, each aligned to its width (a narrow number's, a struct's widest field's, a word for the rest), the size a multiple of the widest (decision 1021) |
@@ -3446,7 +3499,8 @@ where the parts are:
 | `Cell[T]` | T | the value |
 | `Arena[T]` | 1 | the address of a runtime object holding the slots, each a generation, whether it holds a value, and the value |
 | `ref Iterable[T]` | 2 | the number of the type of what the caller passed, and its address (decision 210) |
-| `ptr[T]`, `ptr mut T` | 1 | the address (decision 302); an option of one is a tag and the address, as any option, and a nullable word only in raw memory and at a foreign call |
+| `ptr[T]`, `ptr mut T` | 1 | the address (decision 302) |
+| `ptr[T]?`, `(ptr mut T)?` | 1 | the address, 0 for `None`, as C holds an optional pointer, in a value as in raw memory and at a foreign call (decision 1240) |
 
 A union of error sets holds a value of one of its member enums, as that
 enum lays it out; the first word says which. A dict or set is a table of
@@ -3896,11 +3950,11 @@ ones so that theirs stay what they were), and `ptr[T]` and `ptr mut T` are
 a word whose type table entry names what they point to (`Kind::Ptr`). The
 runtime computes each type's layout in raw memory from the type table when
 the program starts, the interpreter's rule ("The checked memory model"):
-a value whose layout in memory is its layout as a value (most types) is
-read and written as its bytes, a narrow number and a struct of them among
-them since decisions 1020, 1021 and 1100, and a tuple of them; another
-(an option of a raw pointer, or a struct or a tuple holding one) is
-converted part by part, each part at its C offset and width.
+a value whose layout in memory is its layout as a value is read and
+written as its bytes, which since decision 1240, when an option of a raw
+pointer became one nullable word in a value too, is every type's: a
+narrow number at its width and a struct or a tuple at C's offsets
+(decisions 1020, 1021 and 1100) among them.
 `Global.acquire` is `posix_memalign` with the layout's alignment, counted
 among the program's allocations, and `Global.release` frees it;
 `drop_in_place` converts the value back and drops it by its type, its glue
@@ -3916,19 +3970,15 @@ in place (decisions 940 and 1020).
 A place of the program holds its value as a value is laid out, and a
 reference is read so, so a pointer to a place (`ptr.of`, `ptr.of_mut`, a
 slice's `as_ptr`) and a reference made from a pointer (`as_ref`,
-`as_mut`) are made only to a type that raw memory holds as a value is laid
-out, which since decisions 1020, 1021 and 1100 are a narrow number and a
-struct or a tuple of them too (so a `CString`'s `as_ptr()`, `mem.slice.as_ptr` of its bytes'
-slice, compiles, and so does `ptr.of` of a `@repr(c)` struct with `u8`
-and `i32` fields, or of an `(int, u8)`); another, an option of a raw
-pointer or what holds one in place, is `D0103` when the program is built,
-naming the operation and the type, and the interpreter runs the program. A foreign call
+`as_mut`) point to what raw memory holds of the type, for every type
+since decision 1240: a `CString`'s `as_ptr()`, `ptr.of` of a `@repr(c)`
+struct with `u8` and `i32` fields, of an `(int, u8)`, of a `ptr[u8]?` or
+of a struct holding one compile, where the last two were `D0103`. A foreign call
 (`extern.LIBRARY.NAME`) is a call of the C function `NAME`, imported from
 the C library the executable is linked with, in C's convention: each
 argument loaded from its slot and narrowed to its C type (an integer or
-float of its width, a raw pointer, an option of one as a nullable
-pointer), the result widened back (sign-extended for a signed type) or
-made an option, and the runtime's buffered standard output written first,
+float of its width, a raw pointer, an option of one, which is its
+nullable word), the result widened back (sign-extended for a signed type), and the runtime's buffered standard output written first,
 since the function may write to the same streams. Two calls that give one
 function different C signatures are `D0103`. The machine intrinsics are
 the backend's: `rt.stack_pointer` reads the stack pointer in place,

@@ -596,9 +596,9 @@ driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 `--front-end=rust` and `SISU_FRONT_END=rust`, and still does these, each a
 role to replace before it can be deleted, when the flag and the Rust
 branches of `cli.rs` go with it. With a stage 1 of 0.17.0 or later, what
-it has left since decision 1200 is what the second item below lists of
-`sisu test` (a program's transcripts and `sisu test --std
---defer-borrow`) and building stage 1 itself:
+it has left since decision 1245 is building stage 1 itself, the last
+item below; with a stage 1 older than 0.21.0 a program's transcripts are
+still its (the second item):
 
 - (Done: **hot replacement**, `sisu run --watch` and a run under it
   recorded and replayed, is stage 1's from `sisu1 0.17.0`, each save
@@ -633,32 +633,32 @@ it has left since decision 1200 is what the second item below lists of
   front end reads it from the working directory: stage 1 told the
   program's directory apart from its file's (a `--dir` of `sir`) would
   serve both.
-- **A program's transcripts and `--features`**: a program's tests and benchmarks run
-  from stage 1's SIR (decision 357), and so do those of a program with
-  transcripts, but those of a run that asks for a package's features run on
-  the Rust front end until stage 1's `sir` took `--features` and
-  `--locked` (its R47, decision 400; the driver finds that it does and
-  serves them from stage 1, decision 424), and
-  the transcripts themselves run against a world of transcripts
-  (`transcript_world`, `transcript_system`) that only the Rust front end's
-  `sir_with` adds to the SIR, so they run on its build of the program,
-  which must check (`D0128` otherwise; decision 380). The standard
-  library's doc examples are stage 1's from `sisu1 0.17.0` (`sir --tests
-  --std`, its R185, decisions 1102 and 1144), `sisu test --std` without a
-  program too, from an empty program written aside, and so is a test
-  run's deferral (`sir --tests --defer-borrow`, its R189, decision 1143),
-  its account read from stage 1's diagnostics as `run --defer-borrow`'s
-  is. What the Rust front end has left of `sisu test` is a program's
-  transcripts, `sisu test --std --defer-borrow`, a stage 1 that does not
-  report its program itself (decision 424), and stage 1's own tests, which
-  run on it too. *Pay*: stage 1's `sir --tests` writing the world of
-  transcripts (`--transcripts`, rooting the two functions).
+- (Done: **a program's transcripts and `--features`**: a program's tests
+  and benchmarks run from stage 1's SIR (decision 357), a run that asks
+  for a package's features too (its R47, decisions 400 and 424), and from
+  `sisu1 0.21.0` a program with transcripts is built with `sir --tests
+  --transcripts`, whose SIR holds the world of transcripts
+  (`transcript_world`, `transcript_system`) whatever stage 1 finds
+  beside the program (its R223), so the transcripts run on the SIR the
+  tests run (decision 1245); the standard library's doc examples are
+  stage 1's from `sisu1 0.17.0` (`sir --tests --std`, its R185,
+  decisions 1102 and 1144), from `sisu1 0.21.0` without a program
+  written aside (its R221), and `--defer-borrow` with them and without a
+  program too (decision 1245), as a test run's deferral (`sir --tests
+  --defer-borrow`, its R189, decision 1143). A stage 1 older than 0.21.0
+  whose SIR lacks the world, older than 0.11.0, or one that does not
+  report its program itself (decision 424) still has the Rust front end
+  build the program for its transcripts (`transcript_sir`), and stage 1's
+  own tests run on it too. *Pay*: `transcript_sir` and the
+  `keeps_transcripts` probe deleted with the older stage 1.)
 - (Done: **`sisu run --defer-borrow`**, **`sisu check --diary`**,
   **`sisu explain-borrow`** and **`sisu audit --ownership`** and
   **`--caps`** are stage 1's from `sisu1 0.17.0`, its R186 to R189,
   decisions 1103 to 1106; `sisu parse --shape` is stage 1's, decision
   622. An older stage 1 and `--front-end=rust` keep the Rust front end's.)
-- **Building stage 1** the first time and after a source of it changed:
+- **Building stage 1** the first time and after a source of it changed,
+  the Rust front end's one role left with a stage 1 of 0.21.0 or later
+  (decision 1245):
   `compiler/target/stage1/sisu1` is built by the Rust front end (`sisu
   build --native` in `compiler/stage1`), so stage 1's own sources must stay
   within the language the Rust front end knows. *Pay*: once they need a
@@ -782,14 +782,13 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   facts prove (decision 270) inline, as the release profile's. *Pay*: the other widths and structs inline, and one layout for
   values and raw memory in the backend in Sisu (each part at its own
   width), when it replaces decision 188's.
-- **A pointer to a place, and a reference from a pointer, of a type whose
-  two layouts differ** (an option of a raw pointer, a struct or a tuple
-  holding one) are `D0103`, since a place holds a value's layout, where
-  the option has a tag word. A narrow number is its width, and a struct
-  its fields and a tuple its parts at C's offsets, in both since decisions
-  1020, 1021 and 1100, so a C struct of them is pointed to in place.
-  *Pay*: options of raw pointers as nullable words, one layout, in
-  decision 1101's order.
+- (Done: **a pointer to a place, and a reference from a pointer, of any
+  type**: a narrow number is its width, a struct its fields and a tuple
+  its parts at C's offsets (decisions 1020, 1021 and 1100), and an option
+  of a raw pointer one nullable word (decision 1240), in a value as in raw
+  memory, so a C struct of them, and an optional pointer, are pointed to
+  in place; the refusal of decision 302 is gone with the last type whose
+  two layouts differed.)
 - **Foreign calls**: a C function's signature is taken from the call's
   operands and result, `@blocking` does not move a call off the task's
   thread, there is no header import (`import c`), and a struct is not

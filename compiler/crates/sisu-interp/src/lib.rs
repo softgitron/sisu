@@ -683,23 +683,95 @@ impl<'p> Interp<'p, '_> {
         }))
     }
 
-    /// Drops the value of a module's fixture after the last test that
-    /// read it, by its type's glue (its `Drop`, then its fields); the
-    /// failure of that drop, if it panicked.
-    pub(crate) fn drop_fixture(&mut self, id: u32) -> Option<String> {
+    /// Drops the value of a module's fixture, made by `function`, after the
+    /// last test that read it, as a `drop` of its type drops it: by its
+    /// glue (its `Drop`, then its fields), or, for a type without glue
+    /// that holds values with one (a list of them, an option, a tuple, a
+    /// dict), each of those in the order a drop takes them (decision
+    /// 1244); the failure of that drop, if it panicked.
+    pub(crate) fn drop_fixture(&mut self, id: u32, function: &str) -> Option<String> {
+        let ty = self.fn_index(function).ok().and_then(|fi| self.func(fi)).and_then(|f| f.locals.first()).map(|l| l.ty.clone());
         let cell = self.heap.get_mut(id as usize)?;
         cell.strong = 0;
         let v = std::mem::replace(&mut cell.value, Value::Moved);
-        let glue = match &v {
-            Value::Struct(a) | Value::Variant(a) => self.glue.get(&*a.ty).copied(),
-            _ => None,
-        }?;
-        match self.call_fn(glue, vec![v]) {
-            Ok(_) => None,
+        match self.drop_now(v, ty) {
+            Ok(()) => None,
             Err(Unwind::Panic(p)) => Some(panic_report(&p)),
             Err(Unwind::Abort(m)) => Some(m),
             Err(_) => Some("a task switch escaped the run loop".into()),
         }
+    }
+
+    /// Drops `v`, of type `ty` when it is known, now, outside any frame's
+    /// pending drops: what [`Interp::drop_next`] does, each part dropped
+    /// with everything it owns before the next, a declared type's glue run
+    /// as a call of its own. A value that holds no declared type's value
+    /// (a `Shared`, a channel's end) is let go as its cell is.
+    fn drop_now(&mut self, v: Value, ty: Option<sir::Type>) -> Result<(), Unwind> {
+        let arg = |i: usize| match &ty {
+            Some(sir::Type::Named(_, a)) => a.get(i).cloned(),
+            _ => None,
+        };
+        match v {
+            v @ (Value::Struct(_) | Value::Variant(_)) => {
+                let name = match &v {
+                    Value::Struct(a) | Value::Variant(a) => a.ty.clone(),
+                    _ => return Ok(()),
+                };
+                if let Some(&fi) = self.glue.get(&*name) {
+                    let tys = match &ty {
+                        Some(sir::Type::Named(n, args)) if **n == *name => args.clone(),
+                        _ => Vec::new(),
+                    };
+                    return self.call_fn_tys(fi, vec![v], tys).map(|_| ());
+                }
+                let (Value::Struct(a) | Value::Variant(a)) = v else { return Ok(()) };
+                let payload = match (&*a.ty, a.variant) {
+                    ("Option", 0) | ("Result", 0) => arg(0),
+                    ("Result", 1) => arg(1),
+                    _ => return Ok(()),
+                };
+                for f in a.fields {
+                    self.drop_now(f, payload.clone())?;
+                }
+            }
+            Value::Tuple(xs) => {
+                let tys: Vec<Option<sir::Type>> = match &ty {
+                    Some(sir::Type::Tuple(ts)) => ts.iter().cloned().map(Some).collect(),
+                    _ => Vec::new(),
+                };
+                for (i, x) in xs.into_iter().enumerate().rev() {
+                    self.drop_now(x, tys.get(i).cloned().flatten())?;
+                }
+            }
+            Value::List(xs) => {
+                if matches!(&ty, Some(sir::Type::Named(n, _)) if n == "Slice") {
+                    return Ok(());
+                }
+                let t = arg(0);
+                for x in xs {
+                    self.drop_now(x, t.clone())?;
+                }
+            }
+            Value::Set(s) => {
+                let t = arg(0);
+                for x in s.items {
+                    self.drop_now(x, t.clone())?;
+                }
+            }
+            Value::Dict(d) => {
+                let (k, t) = (arg(0), arg(1));
+                for (key, val) in d.entries {
+                    self.drop_now(val, t.clone())?;
+                    self.drop_now(key, k.clone())?;
+                }
+            }
+            Value::Dyn(d) => self.drop_now(d.value, Some(d.ty))?,
+            Value::Entry(e) => self.drop_now(e.key, arg(0))?,
+            Value::Cell(x) => self.drop_now(*x, arg(0))?,
+            _ => {}
+        }
+        Ok(())
     }
 
     /// The body at index `i` of the run's function table.

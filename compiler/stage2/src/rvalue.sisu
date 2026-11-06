@@ -26,7 +26,7 @@ from stage1.sir import (
 )
 from stage2.abi import WORD
 from stage2.gen import Arg, Cg, Val, float_bits
-from stage2.layout import arg, fat, named0
+from stage2.layout import arg, fat, named0, nullable
 from stage2.lir import LirError, internal, unsupported
 from stage2.scan import deref_type, element_type, target_type
 
@@ -89,6 +89,15 @@ pub pure def is_text(t: Type) -> bool:
 
 impl Cg:
     # ------------------------------------------------------------- places
+
+    ## The tag of a value of type `t` whose tag word is `word`: the word, or
+    ## for an option of a raw pointer 0 (`Some`) when the nullable word is an
+    ## address and 1 (`None`) when it is 0 (decision 1240).
+    pub pure def tag_of(mut self, word: int, t: Type) -> int:
+        if not nullable(t):
+            return word
+        let none = self.b.icmp_imm("eq", word, 0)
+        return self.b.convert("uextend", "i64", none)
 
     ## The type of a place, without computing its address.
     pub pure def place_type(mut self, p: Place) -> Type ! LirError:
@@ -197,7 +206,8 @@ impl Cg:
                 case Proj.Downcast(v):
                     if let Some(sk) = skip:
                         let off = if self.types.is_error(ty): abi.ERROR_TAG else: 0
-                        let tag = self.load(addr, off)
+                        let word = self.load(addr, off)
+                        let tag = self.tag_of(word, ty)
                         let is = self.b.icmp_imm("eq", tag, v)
                         let cont = self.b.create_block()
                         self.b.brif(is, cont, [], sk, [])
@@ -482,7 +492,8 @@ impl Cg:
                         case _:
                             break
                 let off = if self.types.is_error(ty): abi.ERROR_TAG else: 0
-                return Ok(Val.Words([self.load(addr, off)]))
+                let word = self.load(addr, off)
+                return Ok(Val.Words([self.tag_of(word, ty)]))
             case Rvalue.Closure(name, tys, ops):
                 return self.closure(p, name, tys, ops)
             case Rvalue.CopyOf(pl):
@@ -738,6 +749,10 @@ impl Cg:
     pub pure def eq_shape(mut self, t: Type) -> list[Same]? ! LirError:
         let Type.Named(n, args) = t else:
             return Ok(None)
+        # Two nullable words are equal when they are the same word (decision
+        # 1240).
+        if nullable(t):
+            return Ok(Some([Same.Tag, Same.Tag]))
         var variants: list[list[Type]] = []
         if n == "Option":
             var some: list[Type] = []
@@ -1136,7 +1151,9 @@ impl Cg:
                     self.store_word(idv, out, abi.ERROR_DECL)
                     let zero = self.iconst(0)
                     self.store_word(zero, out, abi.ERROR_TRACE)
-                let tag = self.iconst(index)
+                # A nullable word's `None` is 0, and its `Some` the address
+                # written over it (decision 1240).
+                let tag = self.iconst(if nullable(ety): 0 else: index)
                 self.store_word(tag, out, if error_: abi.ERROR_TAG else: 0)
                 for i in range(len(ops)):
                     let (off, ft) = self.types.field(ety, Some(index), i)?

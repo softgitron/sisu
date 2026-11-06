@@ -400,3 +400,41 @@ fn alone(0) test source 0 {{
     assert_eq!(outs, vec![("first", "made\nseen 7\n"), ("alone", ""), ("second", "seen 7\ndrop 7\n")]);
     assert!(results.iter().all(|(_, r, _)| matches!(r, TestResult::Passed)), "{results:?}");
 }
+
+/// A module's fixture of a type without glue that holds values with a
+/// `Drop` (decision 1244): the list's elements are dropped after the last
+/// test that reads it, first to last, as a `drop` of the list drops them.
+#[test]
+fn a_modules_fixture_of_a_list_drops_its_elements() {
+    let text = format!(
+        "{NOISY}
+fn fresh(0) source 0 {{
+    let _0: list[Noisy]
+    let _1: Noisy
+    let _2: Noisy
+  bb0:
+    _1 = struct Noisy(const 7)
+    _2 = struct Noisy(const 8)
+    _0 = list(move _1, move _2)
+    return
+}}
+
+fn t#0(1) test source 0 {{
+    let _0: ()
+    let _1: ref list[Noisy] \"n\"
+    let _2: ()
+  bb0:
+    _2 = call intrinsic print(const \"read\")
+    _0 = const ()
+    return
+}}
+"
+    )
+    .replacen("entry main\n", "test \"only\" t#0 fixture n fresh module 0\n", 1);
+    let p = program(&text);
+    let mut host = TestHost::default();
+    let results = run_tests_report_at(&p, &mut host, &Options::default(), &[0]);
+    let outs: Vec<(&str, &str)> = results.iter().map(|(n, _, r)| (n.as_str(), r.out.as_str())).collect();
+    assert_eq!(outs, vec![("only", "read\ndrop 7\ndrop 8\n")]);
+    assert!(results.iter().all(|(_, r, _)| matches!(r, TestResult::Passed)), "{results:?}");
+}

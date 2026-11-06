@@ -799,7 +799,9 @@ fn fix_applies_the_preferred_fixes_with_stage_1() {
 /// `sisu1 0.17.0` (its R186 to R189; decisions 1103 to 1106), served and
 /// as a process, and print what the Rust front end prints: the same lines
 /// and statuses, and a diary of the same records but for the time and the
-/// toolchain.
+/// toolchain. A deferred run's error that is not the ownership rules' is
+/// the build's own from `sisu1 0.20.0`, and its findings are named by the
+/// functions stage 1 writes after them (its R211, decision 1242).
 #[test]
 fn stage_1s_data_commands_answer_as_the_rust_front_end() {
     let dir = std::env::temp_dir().join(format!("sisu-roles-{}", std::process::id()));
@@ -812,6 +814,13 @@ fn stage_1s_data_commands_answer_as_the_rust_front_end() {
     std::fs::write(dir.join("d.sisu"), deferred).expect("a file");
     let unreached = "def main():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    if len(xs) > 5:\n        xs.push(4)\n    print(first)\n";
     std::fs::write(dir.join("u.sisu"), unreached).expect("a file");
+    // An error that is not the ownership rules', which stops the build in
+    // the human form (stage 1's R211, decision 1242), and findings in two
+    // functions, each named by the line stage 1 writes after it.
+    let typed = "def main():\n    let n: int = \"no\"\n    print(n)\n";
+    std::fs::write(dir.join("t.sisu"), typed).expect("a file");
+    let two = "def grow():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    xs.push(4)\n    print(first)\n\ndef main():\n    var ys = [1]\n    let r = ref ys[0]\n    ys.push(2)\n    print(r)\n    grow()\n";
+    std::fs::write(dir.join("f.sisu"), two).expect("a file");
     let sisu = |args: &[&str], serve: &str| {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
             .args(args)
@@ -826,10 +835,12 @@ fn stage_1s_data_commands_answer_as_the_rust_front_end() {
         )
     };
     let _ = sisu(&["check", "b.sisu"], "1");
-    let asks: [&[&str]; 9] = [
+    let asks: [&[&str]; 11] = [
         &["run", "--defer-borrow", "d.sisu"],
         &["run", "--defer-borrow", "u.sisu"],
         &["run", "--defer-borrow", "b.sisu"],
+        &["run", "--defer-borrow", "t.sisu"],
+        &["run", "--defer-borrow", "f.sisu"],
         &["explain-borrow", "b.sisu:10"],
         &["explain-borrow", "b.sisu:12"],
         &["explain-borrow"],
@@ -1088,4 +1099,91 @@ fn the_digest_the_grammar_and_the_mutants_are_stage_1s() {
     assert!(err.starts_with("error[D0160]"), "{err}");
     assert_eq!(status, Some(2));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `sisu test --cover` reports the regions of stage 1's `sir --tests
+/// --cover` (its R216) that no test reaches, from `sisu1 0.20.0`, an
+/// unknown option on the Rust front end and refused with what it does not
+/// combine with (decision 1241); and `--mutate` runs against each mutant
+/// only the tests that reach its line, the same survivors printed.
+#[test]
+fn cover_reports_the_regions_no_test_reaches() {
+    let dir = std::env::temp_dir().join(format!("sisu-cover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(
+        dir.join("grade.sisu"),
+        "def grade(score: int) -> str:\n    if score >= 90:\n        return \"A\"\n    return \"B\"\n\ndef spare() -> int:\n    return 1\n\ntest \"top\":\n    assert grade(95) == \"A\"\n\ntest \"spare\":\n    assert spare() == 1\n",
+    )
+    .expect("a module");
+    let sisu = |args: &[&str], front: &str| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .env("SISU_FRONT_END", front)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let (_, err, status) = sisu(&["test", "--cover", "grade.sisu"], "rust");
+    assert!(err.starts_with("error[D0009]: unknown option `--cover`"), "{err}");
+    assert_eq!(status, Some(2));
+    if !stage1_at_least(&[0, 20, 0]) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
+    let (out, _, status) = sisu(&["test", "--cover", "grade.sisu"], "stage1");
+    assert!(out.contains("grade.sisu:4:5: no test reaches this statement\n"), "{out}");
+    assert!(!out.contains("grade.sisu:3:"), "{out}");
+    assert!(!out.contains("grade.sisu:7:"), "{out}");
+    assert!(out.ends_with(" reached by the tests and 1 not\n"), "{out}");
+    assert_eq!(status, Some(0));
+    let (_, err, status) = sisu(&["test", "--cover", "--native", "grade.sisu"], "stage1");
+    assert!(err.starts_with("error[D0163]"), "{err}");
+    assert_eq!(status, Some(2));
+    let (out, _, status) = sisu(&["test", "--mutate", "--no-cache", "grade.sisu"], "stage1");
+    assert!(out.contains("grade.sisu:2:14: a mutant survived, the boundary changed: `>=` to `>`"), "{out}");
+    assert_eq!(status, Some(0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The grammar the architecture notes carry ("Parsing and the syntax
+/// tree") is the one `sisu grammar` prints, the parser's own, read from its
+/// modules (stage 1's R202 and R214; decisions 1204 and 1246), so that the
+/// two cannot drift.
+#[test]
+fn the_notes_carry_the_grammar_sisu_grammar_prints() {
+    if !stage1_at_least(&[0, 18, 0]) {
+        return;
+    }
+    let notes = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/architecture.md"))
+        .expect("the notes");
+    let section = notes.split("\n## Parsing and the syntax tree\n").nth(1).expect("the section");
+    let section = section.split("\n## ").next().unwrap_or_default();
+    let carried = section.split("```text\n").nth(1).and_then(|b| b.split("```\n").next()).expect("the grammar");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+        .arg("grammar")
+        .env("SISU_FRONT_END", "stage1")
+        .output()
+        .expect("sisu runs");
+    assert_eq!(out.status.code(), Some(0));
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(carried == printed, "the notes' grammar is not what `sisu grammar` prints:\n{}", first_difference(carried, &printed));
+}
+
+/// The first line where two texts differ, with its number, for a failure.
+fn first_difference(a: &str, b: &str) -> String {
+    let (mut la, mut lb) = (a.lines(), b.lines());
+    let mut n = 1;
+    loop {
+        match (la.next(), lb.next()) {
+            (None, None) => return "they differ only in their line ends".into(),
+            (x, y) if x == y => n += 1,
+            (x, y) => return format!("line {n}: the notes have {x:?}, `sisu grammar` {y:?}"),
+        }
+    }
 }

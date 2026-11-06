@@ -843,6 +843,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 ],
                 "test" => &[
                     "--mutate",
+                    "--cover",
                     "--native",
                     "--release",
                     "--no-monitor",
@@ -1208,6 +1209,32 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     return EXIT_USAGE;
                 }
             }
+            // `sisu test --cover` (decision 1241): the regions of stage 1's
+            // `sir --tests --cover` (its R216, `sisu1 0.20.0`) the tests
+            // reach in the interpreter; an unknown option before that stage
+            // 1 and on the Rust front end (`D0009`).
+            if p.flags.contains(&"--cover") {
+                let served = front == FrontEnd::Stage1
+                    && match crate::front::Stage1::ready(host) {
+                        Ok(stage1) => stage1.gives_the_asks() && stage1.sir_reports(),
+                        Err(code) => return code,
+                    };
+                if !served {
+                    host.stderr(&plain_error(
+                        msg::CLI_UNKNOWN_OPTION,
+                        &[("option", "--cover".into()), ("command", cmd.clone())],
+                    ));
+                    return EXIT_USAGE;
+                }
+                if let Some(other) = ["--native", "--release", "--defer-borrow", "--mutate"]
+                    .iter()
+                    .find(|o| p.flags.contains(o))
+                    .or_else(|| ["--replay", "--from-sir"].iter().find(|o| p.values.iter().any(|(k, _)| k == *o)))
+                {
+                    host.stderr(&plain_error(msg::CLI_COVER_ALONE, &[("option", other.to_string())]));
+                    return EXIT_USAGE;
+                }
+            }
             if p.flags.contains(&"--watch")
                 && let Some(other) = ["--explore", "--defer-borrow", "--sir", "--from-sir"]
                     .iter()
@@ -1284,8 +1311,8 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             if front == FrontEnd::Stage1
                 && let [input] = inputs.as_slice()
                 && input.shown == "--std"
-                && !p.flags.contains(&"--defer-borrow")
                 && crate::front::stage1_takes_the_roles()
+                && (!p.flags.contains(&"--defer-borrow") || crate::front::stage1_sir_reports())
             {
                 return std_examples_of_stage1(&p, &opts, input, host);
             }
@@ -1365,7 +1392,7 @@ fn from_sir(
     // --tests`), run in the interpreter (decision 285).
     if cmd == "test" {
         stage.set("the interpreter");
-        return test_from_sir(&prog, flags, opts, input, false, None, host);
+        return test_from_sir(&prog, flags, opts, input, false, None, None, host);
     }
     if cmd == "bench" {
         stage.set("the interpreter");
@@ -1550,6 +1577,7 @@ fn test_from_sir(
     input: &Input,
     sources: bool,
     deferred: Option<&str>,
+    regions: Option<&[Region]>,
     host: &mut dyn Host,
 ) -> i32 {
     let has = |f: &str| flags.contains(&f);
@@ -1593,8 +1621,10 @@ fn test_from_sir(
         host.stderr(&format!("{}\n", text(msg::DEFER_HEADER, &[])));
     }
     let options = Options {
-        monitor: has("--defer-borrow") || !has("--no-monitor"),
-        coverage: deferring,
+        // `--cover` counts each statement's runs as the account does
+        // (decision 1241).
+        monitor: has("--defer-borrow") || regions.is_some() || !has("--no-monitor"),
+        coverage: deferring || regions.is_some(),
         seed: opts.seeds.first,
         strategy: opts.strategy.clone(),
         sim: opts.sim,
@@ -1684,6 +1714,7 @@ fn test_from_sir(
     // to keep it beside (decision 1144).
     let cached = sources
         && !deferring
+        && regions.is_none()
         && input.shown != "--std"
         && !has("--no-cache")
         && crate::native_tests::chosen().is_none()
@@ -1744,13 +1775,93 @@ fn test_from_sir(
             return code;
         }
     }
+    if let Some(regions) = regions {
+        host.stdout(&cover_report(prog, regions, &merge_coverage(&reports)));
+    }
     if let Some(stderr) = deferred {
         let violation = reports.iter().any(|r| r.violation);
         let coverage = merge_coverage(&reports);
-        let (declarations, findings) = deferred_of_stage_1(prog, stderr);
+        let named = crate::front::Stage1::built().is_some_and(|s| s.gives_the_asks());
+        let (declarations, findings) = deferred_of_stage_1(prog, stderr, named);
         host.stderr(&defer_account(&declarations, &findings, violation, &coverage));
     }
     code
+}
+
+/// A region of `sir --tests --cover` (stage 1's R216): a statement's or a
+/// branch's span, `FILE:LINE:COL-LINE:COL`, its kind, and the SIR
+/// statement that starts it, its function, block and place in the block,
+/// none when lowering wrote no statement of it.
+struct Region {
+    span: String,
+    kind: String,
+    at: Option<(String, usize, usize)>,
+}
+
+/// The regions of an answer of `sir --tests --cover`, its lines `# region
+/// SPAN KIND FUNCTION bbB:S` and `# region SPAN KIND none` after the line
+/// `# regions`, in the answer's order.
+fn regions_of(stdout: &str) -> Vec<Region> {
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let Some(rest) = line.strip_prefix("# region ") else { continue };
+        // From the end: `bbB:S` and the function, or `none`; the kind; and
+        // the span, whose file's name may hold a space.
+        let Some((head, last)) = rest.rsplit_once(' ') else { continue };
+        let (head, at) = if last == "none" {
+            (head, None)
+        } else {
+            let Some((head, function)) = head.rsplit_once(' ') else { continue };
+            let place = last.strip_prefix("bb").and_then(|p| p.split_once(':'));
+            let Some((b, k)) = place.and_then(|(b, k)| Some((b.parse().ok()?, k.parse().ok()?))) else {
+                continue;
+            };
+            (head, Some((function.to_string(), b, k)))
+        };
+        let Some((span, kind)) = head.rsplit_once(' ') else { continue };
+        out.push(Region { span: span.to_string(), kind: kind.to_string(), at });
+    }
+    out
+}
+
+/// `sisu test --cover`'s map of what the tests left untested (17,
+/// "Coverage and mutation"; decision 1241): each region whose statement no
+/// test ran, by its place, then the count; a region lowering wrote no
+/// statement of is left out. A statement ran when the run counted its
+/// position in its function, as the counterexample mode counts them.
+fn cover_report(prog: &sisu_sir::Program, regions: &[Region], coverage: &Coverage) -> String {
+    let mut out = String::new();
+    let (mut count, mut unreached) = (0, 0);
+    for r in regions {
+        let Some((function, b, k)) = &r.at else { continue };
+        let f = prog.functions.iter().find(|f| f.name == *function);
+        let block = f.and_then(|f| f.blocks.get(*b));
+        // The statement's position, or the terminator's after the last.
+        let loc = block.and_then(|bb| match bb.stmts.get(*k) {
+            Some(st) => st.loc.or_else(|| bb.stmts[*k..].iter().find_map(|s| s.loc)).or(bb.loc),
+            None => bb.loc,
+        });
+        let Some(loc) = loc else { continue };
+        count += 1;
+        if coverage.get(&(function.clone(), loc.line, loc.col)).copied().unwrap_or(0) > 0 {
+            continue;
+        }
+        unreached += 1;
+        let at = r.span.split('-').next().unwrap_or(&r.span).to_string();
+        out.push_str(&format!("{}\n", text(msg::CLI_COVER_UNREACHED, &[("at", at), ("kind", r.kind.clone())])));
+    }
+    out.push_str(&format!(
+        "{}\n",
+        text(
+            msg::CLI_COVER_SUMMARY,
+            &[
+                ("count", count.to_string()),
+                ("reached", (count - unreached).to_string()),
+                ("unreached", unreached.to_string()),
+            ],
+        )
+    ));
+    out
 }
 
 /// One mutant of `sir --tests --mutants` (stage 1's R208): its number, its
@@ -1832,11 +1943,12 @@ fn canonical(p: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// `sisu test --mutate [--since REV]` (17, "Coverage and mutation"; stage
-/// 1's R208, decision 1201): after the tests pass on the program, the
-/// mutants stage 1's `sir --tests --mutants` writes (those whose line the
-/// diff against `REV` touches, with `--since`), each run against the
-/// tests the run selects, in the interpreter as `test --from-sir` runs
-/// them, quietly; a mutant whose tests all pass survived, and is printed
+/// 1's R208, decisions 1201 and 1241): after the tests pass on the
+/// program, the mutants stage 1's `sir --tests --mutants` writes (those
+/// whose line the diff against `REV` touches, with `--since`), each run
+/// against the tests the run selects whose runs on the program reached
+/// its line, in the interpreter as `test --from-sir` runs them, quietly;
+/// a mutant whose tests all pass (or that no test reaches) survived, and is printed
 /// by its place as a suggestion, a test that fails or runs out of steps
 /// (ten times the program's own, and a million more) killed it. A
 /// place is named from `base`, the package's directory or the working
@@ -1857,8 +1969,11 @@ fn mutate_tests(
             opts.select.picks(&prog.tests[k].0, &tags)
         })
         .collect();
-    let options = Options { seed: opts.seeds.first, ..Options::default() };
-    let plain = match test_runs(prog, host, &options, &which) {
+    // The program's own run counts the statements each test reaches, so
+    // that a mutant runs only the tests that reach its line (17; decision
+    // 1241).
+    let counted = Options { seed: opts.seeds.first, monitor: true, coverage: true, ..Options::default() };
+    let plain = match test_runs(prog, host, &counted, &which) {
         Ok(r) => r,
         Err(code) => return code,
     };
@@ -1866,6 +1981,22 @@ fn mutate_tests(
         host.stderr(&plain_error(msg::CLI_MUTATE_TESTS_FAIL, &[]));
         return exit::ERROR;
     }
+    let file_of: std::collections::HashMap<&str, &str> = prog
+        .functions
+        .iter()
+        .filter_map(|f| Some((f.name.as_str(), prog.sources.get(f.source as usize)?.as_str())))
+        .collect();
+    let reached: Vec<std::collections::HashSet<(&str, u32)>> = plain
+        .iter()
+        .map(|(_, _, rep)| {
+            rep.coverage
+                .iter()
+                .filter(|(_, n)| **n > 0)
+                .filter_map(|((f, line, _), _)| Some((*file_of.get(f.as_str())?, *line)))
+                .collect()
+        })
+        .collect();
+    let options = Options { seed: opts.seeds.first, ..Options::default() };
     let region = match since.map(changed_lines) {
         None => None,
         Some(Ok(lines)) => Some(lines),
@@ -1902,7 +2033,16 @@ fn mutate_tests(
             continue;
         };
         ran += 1;
-        let results = match test_runs(&mutated, &mut quiet, &fuel, &which) {
+        // The tests whose runs reach the mutant's line; every test when the
+        // line is of no file of the program's (decision 1241).
+        let known = file_of.values().any(|f| *f == m.file);
+        let covering: Vec<usize> = which
+            .iter()
+            .zip(&reached)
+            .filter(|(_, lines)| !known || lines.contains(&(m.file.as_str(), m.line)))
+            .map(|(&k, _)| k)
+            .collect();
+        let results = match test_runs(&mutated, &mut quiet, &fuel, &covering) {
             Ok(r) => r,
             Err(code) => return code,
         };
@@ -1945,18 +2085,23 @@ fn mutate_tests(
 }
 
 /// `sisu test --std` outside a package and without a file, from stage 1
-/// (decision 1144): its `sir --tests --std` of an empty program written
-/// aside, whose tests are the standard library's examples, run as a
-/// program's are, the replay lines naming the flag as the Rust front
-/// end's run names it.
+/// (decision 1144): its `sir --tests --std` naming no path from `sisu1
+/// 0.21.0` (its R221, decision 1245), before it of an empty program
+/// written aside, whose tests are the standard library's examples, run as
+/// a program's are, the replay lines naming the flag as the Rust front
+/// end's run names it; `--defer-borrow` defers them as a program's.
 fn std_examples_of_stage1(p: &Parsed<'_>, opts: &Opts, input: &Input, host: &mut dyn Host) -> i32 {
     let stage1 = match crate::front::Stage1::ready(host) {
         Ok(s) => s,
         Err(code) => return code,
     };
+    // From `sisu1 0.21.0` `sir --tests --std` naming no path lowers the
+    // examples alone (its R221, decision 1245), and the empty program
+    // aside retires.
+    let alone = stage1.keeps_the_world();
     let dir = std::env::temp_dir().join(format!("sisu-std-examples-{}", std::process::id()));
     let file = dir.join("examples.sisu");
-    if std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, "")).is_err() {
+    if !alone && std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, "")).is_err() {
         let _ = std::fs::remove_dir_all(&dir);
         host.stderr(&plain_error(
             msg::CLI_CANNOT_READ,
@@ -1965,22 +2110,37 @@ fn std_examples_of_stage1(p: &Parsed<'_>, opts: &Opts, input: &Input, host: &mut
         return exit::ERROR;
     }
     let mut words = vec!["sir".to_string(), "--tests".to_string(), "--std".to_string()];
+    // `--defer-borrow` (decision 1245): the examples' SIR deferred as a
+    // program's is (its R189), run under the monitor; an example the
+    // ownership checker rejects is the account's.
+    let defer = p.flags.contains(&"--defer-borrow");
+    if defer {
+        words.push("--defer-borrow".into());
+    }
     if opts.contracts_given {
         words.push(format!("--contracts={}", opts.level.name()));
     }
-    words.push(file.display().to_string());
+    if !alone {
+        words.push(file.display().to_string());
+    }
     let ran = stage1.run(&words, crate::front::Backend::Unused, host);
-    let _ = std::fs::remove_dir_all(&dir);
+    if !alone {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     let r = match ran {
         Ok(r) => r,
         Err(code) => return code,
     };
-    host.stderr(&r.stderr);
-    if r.status != exit::OK || r.stdout.is_empty() {
+    let deferring = defer && r.status == DEFERRED;
+    if !deferring {
+        host.stderr(&r.stderr);
+    }
+    if (r.status != exit::OK && !deferring) || r.stdout.is_empty() {
         return r.status.max(exit::ERROR);
     }
+    let deferred = deferring.then_some(r.stderr.as_str());
     match read_sir(&r.stdout, host) {
-        Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, None, host),
+        Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, deferred, None, host),
         Err(code) => code,
     }
 }
@@ -2571,10 +2731,27 @@ fn stage1_command(
                 heading(input.package.as_ref().map_or(input.shown.as_str(), |(n, _)| n.as_str()), host);
                 let code = if once {
                     let program = module.as_ref().map_or(input.shown.as_str(), |(dir, _)| dir.as_str());
-                    let r = match run(host, &sir_words(program), Backend::Unused) {
+                    // `--cover`: the program's regions after its SIR (stage
+                    // 1's R216, decision 1241).
+                    let cover = cmd == "test" && has("--cover");
+                    let mut words = sir_words(program);
+                    if cover {
+                        words.insert(2, "--cover".into());
+                    }
+                    // A program with transcripts gets the world they run in
+                    // on the driver's word from `sisu1 0.21.0` (its R223,
+                    // decision 1245).
+                    if cmd == "test"
+                        && stage1.keeps_the_world()
+                        && !crate::transcript::find(&input.disk.display().to_string()).is_empty()
+                    {
+                        words.insert(2, "--transcripts".into());
+                    }
+                    let r = match run(host, &words, Backend::Unused) {
                         Ok(r) => r,
                         Err(code) => return code,
                     };
+                    let regions = cover.then(|| regions_of(&r.stdout));
                     // Its diagnostics, and the line `sisu run` ends with when
                     // it fails; its warnings before the report.
                     let mut code = match answered(host, &r, program) {
@@ -2597,6 +2774,7 @@ fn stage1_command(
                                     input,
                                     true,
                                     deferred.as_deref(),
+                                    regions.as_deref(),
                                     host,
                                 );
                                 if !has("--mutate") {
@@ -2640,6 +2818,7 @@ fn stage1_command(
                                         &file,
                                         true,
                                         deferred.as_deref(),
+                                        None,
                                         host,
                                     ),
                                     Err(c) => c,
@@ -2726,7 +2905,7 @@ fn stage1_command(
                             host.stderr(&r.stderr);
                             match read_sir(&r.stdout, host) {
                                 Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
-                                Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, None, host),
+                                Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, None, None, host),
                                 Err(code) => code,
                             }
                         }
@@ -2952,9 +3131,16 @@ fn stage1_command(
                 Err(code) => return code,
             };
             let deferring = defer && r.status == DEFERRED;
-            // A program with an error not deferred: `sisu1 0.17.0` writes
-            // its errors in the conformance form, so the build without the
-            // option says them as a run says them (its R170).
+            // A program with an error not deferred: from `sisu1 0.20.0` the
+            // build writes it as the build without the option does (its
+            // R211, decision 1242).
+            if defer && r.status != exit::OK && !deferring && stage1.gives_the_asks() {
+                host.stderr(&r.stderr);
+                return r.status;
+            }
+            // Before it, `sisu1 0.17.0` writes its errors in the conformance
+            // form, so the build without the option says them as a run says
+            // them (its R170).
             if defer && r.status != exit::OK && !deferring {
                 let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
                 words.extend(contracts);
@@ -2990,14 +3176,21 @@ fn stage1_command(
             // at the run's boundaries, and each save is built again by the
             // served `build --for-run --emit-sir`, as the run was.
             let watch = has("--watch");
-            let (watched, kept) = if watch {
+            let (watched, kept, directory) = if watch {
                 match inputs_for("run", target.path.as_deref(), Lock::Stage1, false, false, features, host) {
                     Ok(inputs) => stage1_watched(&inputs, target),
                     Err(code) => return code,
                 }
             } else {
-                (Vec::new(), Vec::new())
+                (Vec::new(), Vec::new(), None)
             };
+            // The options the program is built with, which a replay of the
+            // run builds its saves with (decision 1243).
+            let mut built_with = Vec::new();
+            program(&mut built_with);
+            if target.path.is_some() {
+                built_with.pop();
+            }
             let mut rebuild_words =
                 ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
             rebuild_words.extend(contracts.clone());
@@ -3022,7 +3215,8 @@ fn stage1_command(
                     h.stderr(st);
                 }
                 if deferring {
-                    let (declarations, findings) = deferred_of_stage_1(&prog, &r.stderr);
+                    let (declarations, findings) =
+                        deferred_of_stage_1(&prog, &r.stderr, stage1.gives_the_asks());
                     h.stderr(&defer_account(&declarations, &findings, report.violation, &report.coverage));
                 }
                 return report.status;
@@ -3053,6 +3247,8 @@ fn stage1_command(
                     watch,
                     sir: true,
                     warnings: r.stderr.clone(),
+                    options: built_with,
+                    directory,
                 };
                 let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                 let report = if watch {
@@ -3138,16 +3334,20 @@ fn without_run_line(stderr: &str) -> String {
 
 /// The files `sisu run --watch` on stage 1 watches (decision 1200): every
 /// file of the program, each named by its path from the working directory,
-/// with the hash of its text; and those texts, with a package's manifest
-/// and lockfile, which a recorded run's log keeps so that its replay
-/// builds its saves again.
+/// with the hash of its text; and those texts, with the manifests of the
+/// program's packages and the lockfile, which a recorded run's log keeps so
+/// that its replay builds its saves again. A file outside the working
+/// directory, a workspace's manifest or a dependency's, is named through
+/// `..`, and the run's directory is given from the deepest directory such
+/// a name reaches, which a replay writes the files under (decision 1243).
 #[allow(clippy::type_complexity)]
 fn stage1_watched(
     inputs: &[Input],
     target: &Stage1Target,
-) -> (Vec<(String, std::path::PathBuf, u64)>, Vec<(String, String)>) {
+) -> (Vec<(String, std::path::PathBuf, u64)>, Vec<(String, String)>, Option<String>) {
     let cwd = std::env::current_dir().unwrap_or_default();
-    let named = |p: &std::path::Path| p.strip_prefix(&cwd).unwrap_or(p).display().to_string();
+    let cwd = canonical(&cwd);
+    let named = |p: &std::path::Path| relative_name(&cwd, &canonical(p));
     let (mut watched, mut kept) = (Vec::new(), Vec::new());
     for (_, disk) in inputs.iter().flat_map(|i| &i.disks) {
         let name = named(disk);
@@ -3158,14 +3358,62 @@ fn stage1_watched(
         watched.push((name.clone(), disk.clone(), sisu_interp::record::content_hash(text.as_bytes())));
         kept.push((name, text));
     }
+    // The package's manifest and lockfile, its workspace's, and each
+    // dependency's manifest.
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
     if let Some(dir) = target.dir.as_ref().filter(|_| !target.file) {
+        dirs.push(dir.clone());
+        for i in inputs {
+            dirs.extend(i.build_root.iter().cloned());
+            dirs.extend(i.embed_dirs.iter().map(|(_, d)| d.clone()));
+        }
+    }
+    for dir in dirs {
         for f in ["sisu.toml", "sisu.lock"] {
-            if let Ok(text) = std::fs::read_to_string(dir.join(f)) {
-                kept.push((named(&dir.join(f)), text));
+            let path = dir.join(f);
+            let name = named(&path);
+            if kept.iter().any(|(n, _): &(String, String)| *n == name) {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                kept.push((name, text));
             }
         }
     }
-    (watched, kept)
+    // The run's directory, from as high as the names climb.
+    let up = kept
+        .iter()
+        .map(|(n, _)| std::path::Path::new(n).components().take_while(|c| *c == std::path::Component::ParentDir).count())
+        .max()
+        .unwrap_or(0);
+    let directory = (up > 0).then(|| {
+        let parts: Vec<String> =
+            cwd.components().rev().take(up).map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+        parts.into_iter().rev().collect::<Vec<_>>().join("/")
+    });
+    (watched, kept, directory)
+}
+
+/// The name of `path` from `from`, through `..` where it is outside it;
+/// the path itself when the two share no root.
+fn relative_name(from: &std::path::Path, path: &std::path::Path) -> String {
+    if let Ok(inside) = path.strip_prefix(from) {
+        return inside.display().to_string();
+    }
+    let a: Vec<_> = from.components().collect();
+    let b: Vec<_> = path.components().collect();
+    let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    if common <= 1 {
+        return path.display().to_string();
+    }
+    let mut out = std::path::PathBuf::new();
+    for _ in common..a.len() {
+        out.push("..");
+    }
+    for c in &b[common..] {
+        out.push(c.as_os_str());
+    }
+    out.display().to_string()
 }
 
 /// `sisu run` of a program without `main`: a file's, or a library
@@ -4254,6 +4502,8 @@ fn command(
                             watch,
                             sir: false,
                             warnings: String::new(),
+                            options: Vec::new(),
+                            directory: None,
                         };
                         let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                         let report = if watch {
@@ -4328,18 +4578,36 @@ struct Deferred {
 /// the conformance form (`LINE:COL-LINE:COL CODE ID ...`, after the file
 /// for a program of several): a finding of the ownership checker is at a
 /// statement of the SIR, of the function that has it; any other is a rule
-/// about a declaration.
-fn deferred_of_stage_1(prog: &sisu_sir::Program, stderr: &str) -> (Vec<Deferred>, Vec<Deferred>) {
+/// about a declaration. With `named`, from `sisu1 0.20.0` (its R211,
+/// decision 1242), each finding's line is followed by `  function NAME`,
+/// and a diagnostic without one is a declaration's; before it the finding
+/// is the one at the position of a statement of the SIR.
+fn deferred_of_stage_1(
+    prog: &sisu_sir::Program,
+    stderr: &str,
+    named: bool,
+) -> (Vec<Deferred>, Vec<Deferred>) {
     let mut at: std::collections::HashMap<(u32, u32), String> = std::collections::HashMap::new();
-    for f in &prog.functions {
-        for b in &f.blocks {
-            for loc in b.stmts.iter().map(|s| s.loc).chain([b.loc]).flatten() {
-                at.entry((loc.line, loc.col)).or_insert_with(|| f.name.clone());
+    if !named {
+        for f in &prog.functions {
+            for b in &f.blocks {
+                for loc in b.stmts.iter().map(|s| s.loc).chain([b.loc]).flatten() {
+                    at.entry((loc.line, loc.col)).or_insert_with(|| f.name.clone());
+                }
             }
         }
     }
-    let (mut declarations, mut findings) = (Vec::new(), Vec::new());
-    for line in stderr.lines().filter(|l| !l.starts_with(' ')) {
+    let mut all: Vec<(Deferred, u32)> = Vec::new();
+    for line in stderr.lines() {
+        if let Some(rest) = line.strip_prefix(' ') {
+            if let (true, Some(name), Some((d, col))) =
+                (named, rest.trim_start().strip_prefix("function "), all.last_mut())
+                && d.at.is_none()
+            {
+                d.at = Some((name.to_string(), *col));
+            }
+            continue;
+        }
         let mut words = line.split(' ');
         let (Some(span), Some(code), Some(id)) = (words.next(), words.next(), words.next()) else { continue };
         if !code.starts_with('E') {
@@ -4352,6 +4620,10 @@ fn deferred_of_stage_1(prog: &sisu_sir::Program, stderr: &str) -> (Vec<Deferred>
         let function = at.get(&(l, col)).cloned();
         let d =
             Deferred { line: l, code: code.to_string(), id: id.to_string(), at: function.map(|f| (f, col)) };
+        all.push((d, col));
+    }
+    let (mut declarations, mut findings) = (Vec::new(), Vec::new());
+    for (d, _) in all {
         if d.at.is_some() { findings.push(d) } else { declarations.push(d) }
     }
     (declarations, findings)
@@ -5684,11 +5956,21 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         // A run under `--watch` on stage 1 (decision 1200): its saves built
         // again by stage 1 in a directory of the log's files, each written
         // there as the run saw it, so that the same epochs are published.
-        let mirror = std::env::temp_dir().join(format!("sisu-replay-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("sisu-replay-{}", std::process::id()));
+        // The run's directory under it, from as high as the files' names
+        // climb (decision 1243): a workspace's manifest, a dependency.
+        let mirror = match &log.header.directory {
+            Some(d) => root.join(d),
+            None => root.clone(),
+        };
+        let depth = log.header.directory.as_deref().map_or(0, |d| std::path::Path::new(d).components().count());
         let stage1 = if log.header.watch {
             let outside = log.header.files.iter().find(|(name, _)| {
                 let p = std::path::Path::new(name);
-                p.is_absolute() || p.components().any(|c| matches!(c, std::path::Component::ParentDir))
+                let up = p.components().take_while(|c| *c == std::path::Component::ParentDir).count();
+                p.is_absolute()
+                    || up > depth
+                    || p.components().skip(up).any(|c| matches!(c, std::path::Component::ParentDir))
             });
             if let Some((name, _)) = outside {
                 return bad_log(host, format!("its file `{name}` is outside the directory the run was in"));
@@ -5699,7 +5981,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 if let Err(e) = std::fs::write(&path, text) {
-                    let _ = std::fs::remove_dir_all(&mirror);
+                    let _ = std::fs::remove_dir_all(&root);
                     return bad_log(host, format!("its file `{name}` cannot be written aside: {e}"));
                 }
             }
@@ -5717,6 +5999,9 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
                 if log.header.contracts != sisu_lower::ContractLevel::All.name() {
                     words.push(format!("--contracts={}", log.header.contracts));
                 }
+                // The options the run's program was built with (decision
+                // 1243).
+                words.extend(log.header.options.iter().cloned());
                 if log.header.file != "." {
                     words.push(log.header.file.clone());
                 }
@@ -5725,7 +6010,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
             }
             None => sisu_interp::run_main_report(&prog, &mut rep, &options),
         };
-        let _ = std::fs::remove_dir_all(&mirror);
+        let _ = std::fs::remove_dir_all(&root);
         let diverged = rep.divergence();
         drop(rep);
         if let Some(detail) = diverged {

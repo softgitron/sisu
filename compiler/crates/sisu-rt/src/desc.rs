@@ -210,6 +210,7 @@ pub(crate) fn set_up(
             | Kind::Slice(x)
             | Kind::Iter(x)
             | Kind::Option(x)
+            | Kind::Nullable(x)
             | Kind::Box(x)
             | Kind::Set(x)
             | Kind::Handle(x)

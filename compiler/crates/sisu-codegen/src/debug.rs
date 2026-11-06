@@ -621,7 +621,9 @@ impl TypeBuilder<'_, '_> {
                 e.set(constants::DW_AT_type, AttributeValue::UnitRef(to));
                 id
             }
-            "Option" | "Result" => {
+            // An option of a raw pointer is its nullable word (decision
+            // 1240), a word as the pointer is.
+            "Option" | "Result" if !crate::layout::nullable(t) => {
                 let names: &[&str] = if n == "Option" { &["Some", "None"] } else { &["Ok", "Err"] };
                 let payloads =
                     if n == "Option" { vec![Some(arg(0)), None] } else { vec![Some(arg(0)), Some(arg(1))] };

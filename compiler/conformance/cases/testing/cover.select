@@ -1,0 +1,8 @@
+test "grades" ... ok
+test "totals" ... ok
+2 passed, 0 failed, 0 blocked
+cover.sisu:14:9: no test reaches this branch
+cover.sisu:14:9: no test reaches this statement
+cover.sisu:23:5: no test reaches this statement
+cover.sisu:33:5: no test reaches this statement
+regions: 14, 10 reached by the tests and 4 not

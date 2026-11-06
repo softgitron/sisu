@@ -219,6 +219,9 @@ impl<'p> Types<'p> {
                     "Entry" => w + self.room(&arg(0))?,
                     "System" => abi::CAPABILITIES.len() as u32 * w,
                     c if abi::CAPABILITIES.iter().any(|(h, o)| *h == c || *o == c) => w,
+                    // An option of a raw pointer is one nullable word
+                    // (decision 1240).
+                    "Option" if nullable_ptr(args) => w,
                     "Option" => w + self.room(&arg(0))?,
                     "Result" => w + self.room(&arg(0))?.max(self.room(&arg(1))?),
                     _ => match self.decl(n) {
@@ -246,37 +249,6 @@ impl<'p> Types<'p> {
                 return Err(Error::unsupported(format!("values of the type `{}`", sir::write::ty(other))));
             }
         })
-    }
-
-    /// Whether a value of the type lies in raw memory as it lies in a value
-    /// (the runtime's `rawmem::layout`, decision 302): no option of a raw
-    /// pointer is among the parts it holds in place. A narrow number is its
-    /// width, and a struct its fields and a tuple its parts at C's offsets,
-    /// in a value as in raw memory (decisions 1020, 1021 and 1100). A
-    /// reference into raw memory is only made to such a value, since the
-    /// code reads a reference's value as a value is laid out.
-    pub(crate) fn same_in_memory(&self, t: &Type) -> bool {
-        self.same_in_memory_at(t, 0)
-    }
-
-    fn same_in_memory_at(&self, t: &Type, depth: u32) -> bool {
-        if depth > 64 {
-            return false;
-        }
-        match t {
-            Type::Tuple(items) => items.iter().all(|x| self.same_in_memory_at(x, depth + 1)),
-            Type::Named(n, args) => match n.as_str() {
-                "Option" => !matches!(args.first(), Some(Type::Named(p, _)) if p == "ptr" || p == "ptr_mut"),
-                _ => match self.decl(n) {
-                    // A builtin that SIR declares as a struct has no fields.
-                    Some(sir::TypeDecl::Struct { fields, .. }) => {
-                        fields.iter().all(|f| self.same_in_memory_at(&f.ty.subst(args), depth + 1))
-                    }
-                    _ => true,
-                },
-            },
-            _ => true,
-        }
     }
 
     /// The number of a concrete type, if a value of it was made (the code
@@ -434,6 +406,12 @@ impl<'p> Types<'p> {
                 let (k, ks) = self.part(&arg(0))?;
                 let v = self.id(&arg(1))?;
                 return simple(Kind::Entry(k, v), w + ks);
+            }
+            // The nullable word of an option of a raw pointer (decision
+            // 1240): the address, 0 for `None`.
+            "Option" if nullable_ptr(args) => {
+                let p = self.id(&arg(0))?;
+                return simple(Kind::Nullable(p), w);
             }
             "Option" => {
                 let (p, size) = self.part(&arg(0))?;
@@ -782,7 +760,9 @@ impl<'p> Types<'p> {
                 if i != 0 {
                     return Err(bad());
                 }
-                Ok((abi::WORD, pt))
+                // A nullable word's `Some` is the word itself (decision
+                // 1240).
+                Ok((if nullable(t) { 0 } else { abi::WORD }, pt))
             }
             (Type::Named(n, _), None) if n == "System" => {
                 let (cap, _) = abi::CAPABILITIES.get(i as usize).ok_or_else(bad)?;
@@ -852,4 +832,17 @@ pub(crate) fn narrow_width(n: &str) -> Option<u32> {
         "u32" | "i32" | "f32" => Some(4),
         _ => None,
     }
+}
+
+/// Whether the type is an option of a raw pointer, `ptr[T]?` or `(ptr mut
+/// T)?`, which is one nullable word, its address or 0 for `None`, as C
+/// holds an optional pointer (decision 1240).
+pub(crate) fn nullable(t: &Type) -> bool {
+    matches!(t, Type::Named(n, args) if n == "Option" && nullable_ptr(args))
+}
+
+/// Whether the arguments of an `Option` make it a nullable word: a raw
+/// pointer's.
+fn nullable_ptr(args: &[Type]) -> bool {
+    matches!(args.first(), Some(Type::Named(p, _)) if p == "ptr" || p == "ptr_mut")
 }

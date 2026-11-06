@@ -14,6 +14,7 @@
 //! during unwinding.
 
 use crate::fx::FxMap;
+use crate::layout::nullable;
 use crate::{Codegen, Error, Target};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -1249,7 +1250,8 @@ impl<'a, 'p> Cx<'a, 'p> {
                 Proj::Downcast(v) => {
                     if let Some(skip) = skip {
                         let off = if self.cg.types.is_error(&ty) { abi::ERROR_TAG } else { 0 };
-                        let tag = self.load(addr, off);
+                        let word = self.load(addr, off);
+                        let tag = self.tag_of(word, &ty);
                         let is = self.b.ins().icmp_imm(IntCC::Equal, tag, i64::from(*v));
                         let cont = self.b.create_block();
                         self.b.ins().brif(is, cont, &[], skip, &[]);
@@ -1517,7 +1519,8 @@ impl<'a, 'p> Cx<'a, 'p> {
                     ty = (**inner).clone();
                 }
                 let off = if self.cg.types.is_error(&ty) { abi::ERROR_TAG } else { 0 };
-                Ok(Val::Words(vec![self.load(addr, off)]))
+                let word = self.load(addr, off);
+                Ok(Val::Words(vec![self.tag_of(word, &ty)]))
             }
             Rvalue::Closure(name, tys, ops) => self.closure(name, tys, ops),
             Rvalue::CopyOf(p) => {
@@ -1807,6 +1810,11 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// type.
     fn eq_shape(&mut self, t: &Type) -> Result<Option<Vec<Same>>, Error> {
         let Type::Named(n, args) = t else { return Ok(None) };
+        // Two nullable words are equal when they are the same word
+        // (decision 1240).
+        if nullable(t) {
+            return Ok(Some(vec![Same::Tag, Same::Tag]));
+        }
         let variants: Vec<Vec<Type>> = if n == "Option" {
             vec![args.first().cloned().into_iter().collect(), Vec::new()]
         } else {
@@ -2197,7 +2205,9 @@ impl<'a, 'p> Cx<'a, 'p> {
                     let zero = self.iconst(0);
                     self.store_word(zero, out, abi::ERROR_TRACE);
                 }
-                let tag = self.iconst(i64::from(index));
+                // A nullable word's `None` is 0, and its `Some` the address
+                // written over it (decision 1240).
+                let tag = self.iconst(if nullable(&ety) { 0 } else { i64::from(index) });
                 self.store_word(tag, out, if error { abi::ERROR_TAG } else { 0 });
                 for (i, o) in ops.iter().enumerate() {
                     let (off, ft) = self.cg.types.field(&ety, Some(index), i as u32)?;
@@ -2641,29 +2651,6 @@ impl<'a, 'p> Cx<'a, 'p> {
         if name.starts_with("rt.") {
             return self.machine_intrinsic(dest, name, args);
         }
-        // A place of the program holds a value as it is laid out, and a
-        // reference into raw memory is read so: a pointer to a place, and a
-        // reference made from a pointer, are only made to a type that raw
-        // memory holds as a value is laid out (decision 302).
-        let pointee = match name {
-            "mem.ptr.as_ref" | "mem.ptr.as_mut" | "mem.slice.as_ptr" => self.raw_pointee(args.first())?,
-            "mem.ptr.of" | "mem.ptr.of_mut" => match args.first() {
-                Some(Operand::Copy(p) | Operand::Move(p)) => match self.place_type(p)? {
-                    Type::Ref(inner, _) => Some(*inner),
-                    t => Some(t),
-                },
-                _ => None,
-            },
-            _ => None,
-        };
-        if let Some(t) = pointee
-            && !self.cg.types.same_in_memory(&t)
-        {
-            return Err(Error::unsupported(format!(
-                "`{name}` of a `{}`, which raw memory holds otherwise than a value of it",
-                sir::write::ty(&t)
-            )));
-        }
         let Some(i) = Intrinsic::from_name(name) else {
             return Err(Error::unsupported(format!("the intrinsic `{name}`")));
         };
@@ -2684,9 +2671,17 @@ impl<'a, 'p> Cx<'a, 'p> {
         }
         // The commonest intrinsics run inline, the runtime called only
         // where it raises a panic or keeps state of its own (decision 253).
-        let fast = match self.frame_iterator(i, dest, &argv)? {
-            Fast::No => self.inline_intrinsic(i, dest, &argv)?,
-            framed => framed,
+        // An option of a raw pointer the runtime makes it writes as any
+        // option, a tag word and the address, which becomes the nullable
+        // word after (decision 1240); no inline form writes one.
+        let wide = i.gives_option() && nullable(&dest_ty);
+        let fast = if wide {
+            Fast::No
+        } else {
+            match self.frame_iterator(i, dest, &argv)? {
+                Fast::No => self.inline_intrinsic(i, dest, &argv)?,
+                framed => framed,
+            }
         };
         let done = match fast {
             Fast::Done => return Ok(()),
@@ -2711,7 +2706,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             self.store_word(*a, arr, (k * 8) as u32);
         }
         let rsize = self.size(&dest_ty)?;
-        let ret = self.slot(rsize);
+        let ret = self.slot(if wide { 2 * abi::WORD } else { rsize });
         let st = self.rt_status(sym::INTRINSIC, &[daddr, ret, arr])?;
         // A value moved into a parameter the intrinsic neither owns nor
         // lets its result hold was only read: it is dropped now, when
@@ -2738,7 +2733,12 @@ impl<'a, 'p> Cx<'a, 'p> {
         }
         self.check(st);
         let (addr, _) = self.place(dest, None)?;
-        self.copy_bytes(addr, ret, rsize);
+        if wide {
+            let word = self.nullable_of(ret);
+            self.store_word(word, addr, 0);
+        } else {
+            self.copy_bytes(addr, ret, rsize);
+        }
         if let Some(done) = done {
             self.b.ins().jump(done, &[]);
             self.b.switch_to_block(done);
@@ -2746,21 +2746,6 @@ impl<'a, 'p> Cx<'a, 'p> {
         Ok(())
     }
 
-    /// The type a raw pointer operand (or a slice operand, through
-    /// references) holds values of.
-    fn raw_pointee(&mut self, o: Option<&Operand>) -> Result<Option<Type>, Error> {
-        let Some(Operand::Copy(p) | Operand::Move(p)) = o else { return Ok(None) };
-        let mut t = self.place_type(p)?;
-        while let Type::Ref(inner, _) = t {
-            t = *inner;
-        }
-        Ok(match t {
-            Type::Named(n, args) if matches!(n.as_str(), "ptr" | "ptr_mut" | "Slice" | "list") => {
-                args.first().cloned()
-            }
-            _ => None,
-        })
-    }
 
     /// A call of a foreign function (`extern.LIBRARY.NAME`), as C calls it:
     /// each argument converted to its C type, the result back to its Sisu
@@ -2809,13 +2794,6 @@ impl<'a, 'p> Cx<'a, 'p> {
         let (Some(v), Some(ct)) = (result, ret) else { return Ok(()) };
         let (d, _) = self.place(dest, None)?;
         let word = match &dest_ty {
-            Type::Named(n, _) if n == "Option" => {
-                let none = self.b.ins().icmp_imm(IntCC::Equal, v, 0);
-                let tag = self.b.ins().uextend(types::I64, none);
-                self.store_word(tag, d, 0);
-                self.store_word(v, d, 8);
-                return Ok(());
-            }
             Type::Named(n, _) if n == "f32" => {
                 let bits = self.b.ins().bitcast(types::I32, MemFlags::new(), v);
                 self.b.ins().uextend(types::I64, bits)
@@ -2830,8 +2808,30 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.store_scalar(word, d, &dest_ty)
     }
 
+    /// The tag of a value of type `t` whose tag word is `word`: the word,
+    /// or for an option of a raw pointer 0 (`Some`) when the nullable word
+    /// is an address and 1 (`None`) when it is 0 (decision 1240).
+    fn tag_of(&mut self, word: Value, t: &Type) -> Value {
+        if !nullable(t) {
+            return word;
+        }
+        let none = self.b.ins().icmp_imm(IntCC::Equal, word, 0);
+        self.b.ins().uextend(types::I64, none)
+    }
+
+    /// The nullable word of an option of a raw pointer the runtime wrote at
+    /// `at` as any option, a tag word and the address (decision 1240).
+    fn nullable_of(&mut self, at: Value) -> Value {
+        let tag = self.load(at, 0);
+        let payload = self.load(at, 8);
+        let some = self.b.ins().icmp_imm(IntCC::Equal, tag, 0);
+        let zero = self.iconst(0);
+        self.b.ins().select(some, payload, zero)
+    }
+
     /// An argument of a foreign call as its C type: its value loaded from
-    /// `addr` and narrowed, an option of a raw pointer as a nullable one.
+    /// `addr` and narrowed; an option of a raw pointer is its nullable word
+    /// (decision 1240).
     fn c_argument(&mut self, addr: Value, t: &Type, symbol: &str) -> Result<(ir::Type, Value), Error> {
         let ct = c_type(t).ok_or_else(|| {
             Error::unsupported(format!(
@@ -2841,12 +2841,6 @@ impl<'a, 'p> Cx<'a, 'p> {
         })?;
         let word = self.load(addr, 0);
         let v = match t {
-            Type::Named(n, _) if n == "Option" => {
-                let payload = self.load(addr, 8);
-                let some = self.b.ins().icmp_imm(IntCC::Equal, word, 0);
-                let zero = self.iconst(0);
-                self.b.ins().select(some, payload, zero)
-            }
             Type::Float => self.b.ins().bitcast(types::F64, MemFlags::new(), word),
             Type::Named(n, _) if n == "f32" => {
                 let low = self.b.ins().ireduce(types::I32, word);
@@ -3209,7 +3203,9 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
             I::OptionIsSome | I::OptionIsNone if named(&bt, &["Option"]) => {
                 let tag = self.load(b, 0);
-                let cc = if i == I::OptionIsSome { IntCC::Equal } else { IntCC::NotEqual };
+                // A nullable word holds `Some` when it is not 0 (decision
+                // 1240), where a tag word holds it at 0.
+                let cc = if (i == I::OptionIsSome) != nullable(&bt) { IntCC::Equal } else { IntCC::NotEqual };
                 let is = self.b.ins().icmp_imm(cc, tag, 0);
                 let w = self.b.ins().uextend(types::I64, is);
                 let (d, _) = self.place(dest, None)?;

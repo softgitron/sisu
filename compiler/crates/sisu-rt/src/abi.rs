@@ -489,6 +489,10 @@ pub enum Kind {
     Iter(u32),
     /// `T?`: a tag word (0 `Some`, 1 `None`) and the payload.
     Option(u32),
+    /// `ptr[T]?` and `(ptr mut T)?`: one word, the address, 0 for `None`,
+    /// as C holds an optional pointer (decision 1240); the raw pointer's
+    /// type.
+    Nullable(u32),
     /// `Result[T, E]`: a tag word (0 `Ok`, 1 `Err`) and the payload.
     Result(u32, u32),
     /// A tuple: its elements in order.
@@ -732,6 +736,7 @@ const K_RW_LOCK: u8 = 44;
 const K_READ_GUARD: u8 = 45;
 const K_PTR: u8 = 46;
 const K_SLICE: u8 = 47;
+const K_NULLABLE: u8 = 48;
 
 struct Writer(Vec<u8>);
 
@@ -791,6 +796,7 @@ impl Kind {
             Kind::Slice(_) => K_SLICE,
             Kind::Iter(_) => K_ITER,
             Kind::Option(_) => K_OPTION,
+            Kind::Nullable(_) => K_NULLABLE,
             Kind::Result(..) => K_RESULT,
             Kind::Tuple(_) => K_TUPLE,
             Kind::Box(_) => K_BOX,
@@ -857,6 +863,7 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
             | Kind::Slice(t)
             | Kind::Iter(t)
             | Kind::Option(t)
+            | Kind::Nullable(t)
             | Kind::Box(t)
             | Kind::Set(t)
             | Kind::Handle(t)
@@ -984,6 +991,7 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_SLICE => Kind::Slice(r.u32()?),
             K_ITER => Kind::Iter(r.u32()?),
             K_OPTION => Kind::Option(r.u32()?),
+            K_NULLABLE => Kind::Nullable(r.u32()?),
             K_RESULT => Kind::Result(r.u32()?, r.u32()?),
             K_TUPLE => {
                 let k = r.u32()?;
@@ -1460,6 +1468,29 @@ impl Intrinsic {
         }
     }
 
+    /// Whether the call's result is an option the runtime makes, `T?` of an
+    /// item, a value or a payload of its arguments' types, or the block
+    /// `Global.acquire` gives: the runtime
+    /// writes it as any option, a tag word and the payload, which the
+    /// generated code turns into the nullable word where `T` is a raw
+    /// pointer (decision 1240). A result that is a `T` the runtime copies
+    /// is already laid out as its type.
+    pub fn gives_option(self) -> bool {
+        matches!(
+            self,
+            Intrinsic::ListPop
+                | Intrinsic::DictInsert
+                | Intrinsic::DictRemove
+                | Intrinsic::IterNext
+                | Intrinsic::ArenaTake
+                | Intrinsic::SenderTrySend
+                | Intrinsic::ReceiverTryRecv
+                | Intrinsic::ResultOk
+                | Intrinsic::ResultErr
+                | Intrinsic::MemGlobalAcquire
+        )
+    }
+
     /// Whether a call may make its task wait (or, for a scope, wait at the
     /// scope's end): the code generator records where the call is before
     /// it ([`sym::SITE`]), for the deadlock report.
@@ -1554,6 +1585,7 @@ mod tests {
             Kind::Cell(7),
             Kind::Arena(8),
             Kind::Ptr(9),
+            Kind::Nullable(30),
         ];
         let table: Vec<TypeEntry> =
             kinds.into_iter().enumerate().map(|(i, kind)| TypeEntry { size: 8 * i as u32, kind }).collect();

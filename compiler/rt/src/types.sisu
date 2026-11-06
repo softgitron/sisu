@@ -56,6 +56,9 @@ pub const RW_LOCK: int = 44
 pub const READ_GUARD: int = 45
 pub const PTR: int = 46
 pub const SLICE: int = 47
+## An option of a raw pointer, one nullable word: the address, 0 for `None`
+## (decision 1240); its `A` is the raw pointer's type.
+pub const NULLABLE: int = 48
 
 ## A type's flags: a drop of a value of it can do something; a copy is a
 ## copy of its bytes; an error value, whose first word is its own type's

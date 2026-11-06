@@ -448,7 +448,9 @@ and the time spent building and running them.
   test runs (`refused_program`, `refused_comptime`), a package that
   declares its unsafe code, whose lockfile keeps the level
   (`unsafe_level`), the mutants its tests leave alive under `sisu test
-  --mutate` (`mutants`, `# select --mutate`, decision 1201), and
+  --mutate` (`mutants`, `# select --mutate`, decision 1201), the regions
+  no test reaches under `sisu test --cover` (`cover`, `# select --cover`,
+  decision 1241), and
   `proposal_testing`, which starts with
   `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
@@ -549,7 +551,9 @@ and the time spent building and running them.
   native code does (decision 302): a vector on memory of `Global`, grown
   by copying its slots, its values moved out, referred to and dropped in
   place, and a bump `Region` (`vector`); pointers to the program's places
-  and into a C struct (`pointers`); plain data, its bit casts, bytes and
+  and into a C struct (`pointers`); a list of `@repr(c)` nodes linked by
+  options of raw pointers, each one nullable word that a pointer to it
+  reads (`option_pointer`, decision 1240); plain data, its bit casts, bytes and
   views, and `transmute` (`plain_casts`); foreign calls the interpreter
   emulates, `strlen`, `memcpy`, `malloc`, `free`, `getenv` and `write`
   (`foreign`); a `CString` whose pointer `strlen` and a `CStr` read while

@@ -49,6 +49,7 @@ from rt.types import INT
 from rt.types import ITER
 from rt.types import LIST
 from rt.types import MUTEX
+from rt.types import NULLABLE
 from rt.types import OPAQUE
 from rt.types import OPTION
 from rt.types import PARTS
@@ -254,6 +255,14 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
             if p.offset(h.offset(TAG).read()).cast[int]().read() == 0:
                 text.put_word(out, W_SOME, 5)
                 debug(ts, out, p.offset(8), h.offset(A).read())
+                text.put(out, 41)
+            else:
+                text.put_word(out, W_NONE, 4)
+        elif k == NULLABLE:
+            # The address, 0 for `None` (decision 1240).
+            if p.cast[int]().read() != 0:
+                text.put_word(out, W_SOME, 5)
+                debug(ts, out, p, h.offset(A).read())
                 text.put(out, 41)
             else:
                 text.put_word(out, W_NONE, 4)

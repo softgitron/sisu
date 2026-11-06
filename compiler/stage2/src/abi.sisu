@@ -298,6 +298,9 @@ pub enum Kind:
     Slice(int)
     Iter(int)
     Option(int)
+    ## `ptr[T]?` and `(ptr mut T)?`: one word, the address, 0 for `None`
+    ## (decision 1240), and the raw pointer's type.
+    Nullable(int)
     Result(int, int)
     Tuple(list[Slot])
     Box(int)
@@ -429,6 +432,8 @@ pub pure def encode(table: list[TypeEntry]) -> list[int]:
                 w.code(13, [x])
             case Option(x):
                 w.code(14, [x])
+            case Nullable(x):
+                w.code(48, [x])
             case Result(a, b):
                 w.code(15, [a, b])
             case Tuple(slots):
@@ -505,6 +510,25 @@ pub pure def encode(table: list[TypeEntry]) -> list[int]:
             case Ptr(x):
                 w.code(46, [x])
     return w.out
+
+## Whether the call's result is an option the runtime makes, `T?` of an
+## item, a value or a payload of its arguments' types, or the block
+## `Global.acquire` gives: the runtime writes it
+## as any option, a tag word and the payload, which the generated code turns
+## into the nullable word where `T` is a raw pointer (decision 1240).
+pub pure def gives_option(i: int) -> bool:
+    return (
+        i == I_LIST_POP
+            or i == I_DICT_INSERT
+            or i == I_DICT_REMOVE
+            or i == I_ITER_NEXT
+            or i == I_ARENA_TAKE
+            or i == I_SENDER_TRY_SEND
+            or i == I_RECEIVER_TRY_RECV
+            or i == I_RESULT_OK
+            or i == I_RESULT_ERR
+            or i == I_MEM_GLOBAL_ACQUIRE
+    )
 
 ## The intrinsics that may wait, whose call records its site first.
 pub pure def may_wait(i: int) -> bool:
@@ -619,6 +643,9 @@ pub const I_MEM_PTR_OFFSET: int = 285
 pub const I_MEM_PTR_CAST_MUT: int = 286
 pub const I_MEM_PTR_READ: int = 287
 pub const I_MEM_PTR_WRITE: int = 288
+## The block `Global.acquire` gives, an option of a raw pointer the runtime
+## makes (decision 1240).
+pub const I_MEM_GLOBAL_ACQUIRE: int = 298
 pub const I_STR_BYTE_LEN: int = 68
 pub const I_STR_BYTE_AT: int = 69
 pub const I_STR_BYTE_SLICE: int = 70
