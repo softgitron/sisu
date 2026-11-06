@@ -101,6 +101,162 @@ pub pure def printed(pages: list[Page]) -> String:
         out.push(p.text)
     return out
 
+## `sisu doc --digest` (10, "AI-assisted development"; N-50; RULES.md,
+## R207): the pages as one plain text that a model can hold in its
+## context, `title` its first line. Each module is a line `# module
+## PATH`, its `##!` summary and its re-exports, then each item as its
+## page's declaration, with the first paragraph of its doc comment, its
+## capabilities, its typed holes and its first example written before it
+## as `##` lines, as a doc comment is written. The declarations keep what
+## the pages add to them, the inferred error sets and the contracts; a
+## field's doc comment is left out, and a type's members are indented
+## under it.
+pub pure def digest(title: str, pages: list[Page]) -> String:
+    var out = String.new()
+    out.push("# {title}\n")
+    for p in pages:
+        digest_page(p.text, mut out)
+    return out
+
+## One page of the digest, appended to `out`.
+pure def digest_page(text: str, mut out: String):
+    var lines: list[str] = []
+    for l in text.lines():
+        lines.push(l)
+    var k = 0
+    var path = String.new()
+    if k < len(lines) and lines[k].starts_with("# "):
+        path = lines[k].strip_prefix("# ").to_string()
+        k += 1
+    out.push("\n# module {path}\n")
+    # The blocks before the first item: the module's doc, its modules and
+    # its re-exports.
+    var intro: list[String] = []
+    var reexported: list[String] = []
+    var block = String.new()
+    while k < len(lines)
+            and not lines[k].starts_with("<a id=")
+            and lines[k] != "## Implementations":
+        let l = lines[k]
+        k += 1
+        if l.starts_with("## "):
+            block = l.strip_prefix("## ").to_string()
+            continue
+        if block.is_empty():
+            intro.push(l.to_string())
+        elif block == "Re-exports" and l.starts_with("- "):
+            reexported.push(unlinked(l.strip_prefix("- ")))
+    if let Some(s) = summary(intro):
+        out.push("##! {s}\n")
+    if not reexported.is_empty():
+        out.push("##! Re-exports: {reexported.join(", ")}.\n")
+    while k < len(lines):
+        let l = lines[k]
+        if l == "## Implementations":
+            k += 1
+            var code: list[String] = []
+            k = digest_code(lines, k, mut code)
+            out.push("\n")
+            for c in code:
+                out.push("{c}\n")
+            continue
+        if not l.starts_with("<a id=") or k + 1 >= len(lines):
+            k += 1
+            continue
+        let member = lines[k + 1].starts_with("### ")
+        k += 2
+        var code: list[String] = []
+        k = digest_code(lines, k, mut code)
+        # The doc text: its paragraphs and its first example, up to the
+        # next item.
+        var paragraphs: list[String] = []
+        var paragraph: list[String] = []
+        var example: list[String] = []
+        var in_example = False
+        var examples = 0
+        while k < len(lines)
+                and not lines[k].starts_with("<a id=")
+                and lines[k] != "## Implementations":
+            let d = lines[k]
+            k += 1
+            if in_example:
+                if d.trim() == "```":
+                    in_example = False
+                elif examples == 1:
+                    example.push(d.to_string())
+                continue
+            if d.trim().starts_with("```"):
+                in_example = True
+                if d.trim() == "```sisu":
+                    examples += 1
+                if not paragraph.is_empty():
+                    paragraphs.push(paragraph.join(" "))
+                    paragraph = []
+                continue
+            if d.trim().is_empty():
+                if not paragraph.is_empty():
+                    paragraphs.push(paragraph.join(" "))
+                    paragraph = []
+                continue
+            paragraph.push(d.trim().to_string())
+        if not paragraph.is_empty():
+            paragraphs.push(paragraph.join(" "))
+        let indent = if member: STEP else: ""
+        var notes: list[String] = []
+        for (i, para) in enumerate(paragraphs):
+            if i == 0 or para.starts_with("Capabilities: ") or para.starts_with("Unfinished: "):
+                notes.push(para.copy())
+        out.push("\n")
+        for n in notes:
+            out.push("{indent}## {n}\n")
+        if not example.is_empty():
+            out.push("{indent}## ```\n")
+            for e in example:
+                let line = "{indent}## {e}"
+                out.push(line.trim_end())
+                out.push("\n")
+            out.push("{indent}## ```\n")
+        for c in code:
+            let line = "{indent}{c}"
+            out.push(line.trim_end())
+            out.push("\n")
+
+## `text` with each Markdown link `[TEXT](TARGET)` written as its `TEXT`.
+pure def unlinked(text: str) -> String:
+    var out = String.new()
+    var rest = text
+    while True:
+        let Some((before, after)) = rest.split_once("[") else:
+            out.push(rest)
+            return out
+        let Some((shown, tail)) = after.split_once("](") else:
+            out.push(rest)
+            return out
+        let Some((_, beyond)) = tail.split_once(")") else:
+            out.push(rest)
+            return out
+        out.push(before)
+        out.push(shown)
+        rest = beyond
+
+test "a digest's links are their texts":
+    assert unlinked("`Item`: [`shop.Item`](shop.md#Item), `Cents`: `money.Cents`")
+        == "`Item`: `shop.Item`, `Cents`: `money.Cents`"
+    assert unlinked("no link [here") == "no link [here"
+
+## The lines of the fenced code block at or after `lines[k]` but its doc
+## comments, pushed onto `code`; where the block ends.
+pure def digest_code(lines: list[str], k: int, mut code: list[String]) -> int:
+    var at = k
+    while at < len(lines) and not lines[at].starts_with("```"):
+        at += 1
+    at += 1
+    while at < len(lines) and lines[at] != "```":
+        if not lines[at].trim().starts_with("##"):
+            code.push(lines[at].to_string())
+        at += 1
+    return at + 1
+
 const STEP: str = "    "
 
 ## The capability types, as `sisu audit --caps` has them (decision 240):

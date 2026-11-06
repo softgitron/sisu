@@ -1,14 +1,15 @@
 ##! Names beyond ASCII (02, "Lexical structure"; D-048; RULES.md, R136): a
 ##! name is read in NFC, its letters' scripts tell a name that mixes them,
-##! and its skeleton, each letter as the ASCII letter it reads as, tells two
-##! names a reader may take for one. The tables are `unicode_tables`',
-##! generated from Unicode's data; a lookup is a binary search over a
-##! table's records.
+##! and its skeleton, each character as the characters it reads as (UTS
+##! #39's `confusables.txt`), tells two names a reader may take for one. The
+##! tables are `unicode_tables`', generated from Unicode's data; a lookup is
+##! a binary search over a table's records.
 
 from stage1.unicode_tables import (
     SCRIPTS,
     combining_classes,
     compositions,
+    confusable_pool,
     confusables,
     decompositions,
     scripts,
@@ -81,14 +82,30 @@ pure def latin() -> int?:
             return Some(i)
     return None
 
-## The ASCII letter or digit the code point `n` reads as, or `n` itself.
-pub pure def prototype(n: int) -> int:
-    if n < 0x80:
-        return n
+## Appends what the code point `n` reads as to `out`: the characters
+## `confusables.txt` maps it to (`а` is `a`, `m` is `rn`), or `n` itself
+## (RULES.md, R205).
+pub pure def prototype_into(n: int, mut out: list[int]):
     let table = confusables()
-    let at = range_record(table, 20, n) else:
-        return n
-    return hex_at(table, at + 14, 6) + (n - hex_at(table, at, 6))
+    let width = 14
+    var lo = 0
+    var hi = table.byte_len() // (width + 1) - 1
+    while lo <= hi:
+        let mid = (lo + hi) // 2
+        let at = mid * (width + 1)
+        let c = hex_at(table, at, 6)
+        if n < c:
+            hi = mid - 1
+        elif n > c:
+            lo = mid + 1
+        else:
+            let first = hex_at(table, at + 7, 4)
+            let count = hex_at(table, at + 12, 2)
+            let pool = confusable_pool()
+            for k in range(first, first + count):
+                out.push(hex_at(pool, (k // 24) * 145 + (k % 24) * 6, 6))
+            return
+    out.push(n)
 
 ## The canonical decomposition of `n` into one or two code points (the
 ## second 0 for one), and whether NFC composes it again.
@@ -237,13 +254,37 @@ pub pure def scripts_of(name: str) -> list[str]:
         out.push(SCRIPTS[s])
     return out
 
-## `name` with each letter written as the ASCII letter or digit it reads as:
-## two names with one skeleton are confusable.
+## `name`'s skeleton as UTS #39 makes it: its canonical decomposition with
+## each character written as what it reads as, decomposed again. Two names
+## with one skeleton are confusable (RULES.md, R136, R205).
 pub pure def skeleton(name: str) -> String:
+    var codes: list[int] = []
+    for c in name.chars():
+        codes.push(c.code())
+    var read: list[int] = []
+    for n in decomposed(codes):
+        prototype_into(n, mut read)
     var text = String.new()
-    for c in nfc(name).chars():
-        text.push_char(char.from_code(prototype(c.code())) ?? c)
+    for n in decomposed(read):
+        text.push_char(char.from_code(n) ?? '\u{FFFD}')
     return text
+
+## The code points `codes` in their canonical decomposition, the marks of
+## each run in their canonical order.
+pure def decomposed(codes: list[int]) -> list[int]:
+    var out: list[int] = []
+    for n in codes:
+        decompose_into(n, mut out)
+    var classes: list[int] = []
+    for n in out:
+        classes.push(combining_class(n))
+    for i in range(1, len(out)):
+        var j = i
+        while j > 0 and classes[j] != 0 and classes[j - 1] > classes[j]:
+            out.swap(j - 1, j)
+            classes.swap(j - 1, j)
+            j -= 1
+    return out
 
 test "a name is read in NFC":
     # `e` and a combining acute accent is `é`; the marks below and above
@@ -265,8 +306,12 @@ test "a name's scripts and skeleton":
     assert scripts_of("p\u{430}rt") == ["LATIN", "CYRILLIC"]
     assert scripts_of("l\u{F6}yly_2") == ["LATIN"]
     assert scripts_of("\u{3B1}\u{3B2}") == ["GREEK"]
+    assert scripts_of("\u{3B1}\u{2B0}") == ["GREEK", "LATIN"]
     assert skeleton("p\u{430}rt") == "part"
     assert skeleton("\u{FF41}b") == "ab"
-    assert skeleton("l\u{F6}yly") == "l\u{F6}yly"
+    # The skeleton is decomposed (UTS #39), and `m` reads as `rn`.
+    assert skeleton("l\u{F6}yly") == "lo\u{308}yly"
+    assert skeleton("modern") == skeleton("rn\u{43E}dern")
+    assert skeleton("\u{433}un") == "run"
     assert is_combining('\u{301}')
     assert not is_combining('e')

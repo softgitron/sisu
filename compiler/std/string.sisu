@@ -114,14 +114,13 @@ impl Normalize for str:
         return normalized(self, True, False)
 
 ## The graphemes of a text, what a reader takes for one character each (03:
-## "`s.graphemes()` ... graphemes one method away"; Unicode's UAX #29), by
-## the rules these tables carry: a base with the marks after it (and the
-## variation selectors, the emoji modifiers and the tag characters), `\r\n`,
-## a Hangul syllable written in jamo, two regional indicators (a flag), and
-## a sequence joined by U+200D, each one grapheme; a control character is
-## one of its own. The full rules would also keep a prepended character
-## with what follows it (`Prepend`), join an Indic conjunct across its
-## virama, and join after U+200D only between pictographs.
+## "`s.graphemes()` ... graphemes one method away"), by every rule of
+## Unicode's UAX #29 for extended grapheme clusters: `\r\n`, a control
+## character of its own, a syllable written in jamo, a base with what
+## extends it (its marks, the joiner U+200D, spacing marks) and a
+## prepended character with what follows it, an Indic conjunct across its
+## virama (GB9c), pictographs joined by U+200D (GB11), and regional
+## indicators two by two (a flag).
 ##
 ## ```
 ## var gs: list[str] = []
@@ -132,6 +131,10 @@ impl Normalize for str:
 ## for _ in "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}!".graphemes():
 ##     family += 1
 ## assert family == 2
+## var joined: list[str] = []
+## for g in "a\u{200d}b\u{915}\u{94d}\u{937}".graphemes():
+##     joined.push(g)
+## assert joined == ["a\u{200d}", "b", "\u{915}\u{94d}\u{937}"]
 ## ```
 pub trait Graphemes:
     ## Each grapheme, in order.
@@ -142,85 +145,119 @@ impl Graphemes for str:
         var out: list[str] = []
         var start = 0
         var at = 0
-        var previous: char? = None
-        var flags = 0
+        var previous = -1
+        # What the rules that look further back than one character need of
+        # the text before the boundary (UAX #29, GB9c, GB11, GB12 and GB13).
+        var state = BreakState(regional=0, pictograph=0, conjunct=0)
         for c in self.chars():
-            if let Some(p) = previous:
-                if breaks_between(p, c, flags):
-                    out.push(self.byte_slice(start, at))
-                    start = at
-                    flags = 0
-            if is_regional(c):
-                flags += 1
-            previous = Some(c)
+            let q = grapheme_property(c.code())
+            if previous >= 0 and breaks_between(previous, q, state):
+                out.push(self.byte_slice(start, at))
+                start = at
+            state = state.after(q)
+            previous = q
             at += c.len_utf8()
         if at > start:
             out.push(self.byte_slice(start, at))
         return iter_of(out)
 
-## Whether a grapheme ends between `p` and `c`, `flags` being the regional
-## indicators of the grapheme so far.
-pure def breaks_between(p: char, c: char, flags: int) -> bool:
-    let a = p.code()
-    let b = c.code()
-    if a == 13 and b == 10:
+## What the rules of UAX #29 that look back past one character know of the
+## text before a boundary: the regional indicators in a row before it (a
+## flag is two), whether a pictograph with what extends it (1), and then a
+## joiner (2), ends it (GB11), and whether a conjunct's consonant with its
+## extenders (1), and then a virama among them (2), ends it (GB9c).
+@derive(Copy)
+struct BreakState:
+    regional: int
+    pictograph: int
+    conjunct: int
+
+    ## The state after a character of the grapheme properties `q`.
+    pure def after(self, q: int) -> BreakState:
+        let gcb = q % 16
+        let regional = if gcb == GCB_REGIONAL: self.regional + 1 else: 0
+        var pictograph = 0
+        if q // 16 % 2 == 1:
+            pictograph = 1
+        elif self.pictograph == 1 and gcb == GCB_EXTEND:
+            pictograph = 1
+        elif self.pictograph == 1 and gcb == GCB_ZWJ:
+            pictograph = 2
+        let incb = q // 32
+        var conjunct = 0
+        if incb == INCB_CONSONANT:
+            conjunct = 1
+        elif incb == INCB_LINKER and self.conjunct >= 1:
+            conjunct = 2
+        elif incb == INCB_EXTEND and self.conjunct >= 1:
+            conjunct = self.conjunct
+        return BreakState(regional=regional, pictograph=pictograph, conjunct=conjunct)
+
+## Whether a grapheme ends between a character of the grapheme properties
+## `p` and one of `q`, the text before them being `state` (UAX #29's rules
+## GB3 to GB999, in their order).
+pure def breaks_between(p: int, q: int, state: BreakState) -> bool:
+    let a = p % 16
+    let b = q % 16
+    if a == GCB_CR and b == GCB_LF:
         return False
-    if is_control(a) or is_control(b):
+    if a == GCB_CR or a == GCB_LF or a == GCB_CONTROL:
         return True
-    # A syllable's jamo: a leading consonant before a consonant, a vowel or
-    # a syllable; a vowel or an open syllable before a vowel or a final; a
-    # final or a closed syllable before a final.
-    let x = jamo(a)
-    let y = jamo(b)
-    if x == JAMO_L and y != JAMO_NONE:
+    if b == GCB_CR or b == GCB_LF or b == GCB_CONTROL:
+        return True
+    if a == GCB_L and (b == GCB_L or b == GCB_V or b == GCB_LV or b == GCB_LVT):
         return False
-    if (x == JAMO_V or x == JAMO_LV) and (y == JAMO_V or y == JAMO_T):
+    if (a == GCB_LV or a == GCB_V) and (b == GCB_V or b == GCB_T):
         return False
-    if (x == JAMO_T or x == JAMO_LVT) and y == JAMO_T:
+    if (a == GCB_LVT or a == GCB_T) and b == GCB_T:
         return False
-    if b == 0x200D or a == 0x200D or extends(b):
+    if b == GCB_EXTEND or b == GCB_ZWJ or b == GCB_SPACING_MARK:
         return False
-    if is_regional(c) and is_regional(p) and flags % 2 == 1:
+    if a == GCB_PREPEND:
+        return False
+    if q // 32 == INCB_CONSONANT and state.conjunct == 2:
+        return False
+    if q // 16 % 2 == 1 and state.pictograph == 2:
+        return False
+    if a == GCB_REGIONAL and b == GCB_REGIONAL and state.regional % 2 == 1:
         return False
     return True
 
-pure def is_control(n: int) -> bool:
-    return n < 0x20 or (0x7F <= n and n <= 0x9F) or n == 0x2028 or n == 0x2029
-
-pure def is_regional(c: char) -> bool:
-    return 0x1F1E6 <= c.code() and c.code() <= 0x1F1FF
-
-## What a grapheme keeps after its base: a mark, a variation selector, an
-## emoji modifier, a tag character.
-pure def extends(n: int) -> bool:
-    if (0xFE00 <= n and n <= 0xFE0F) or (0xE0100 <= n and n <= 0xE01EF):
-        return True
-    if (0x1F3FB <= n and n <= 0x1F3FF) or (0xE0020 <= n and n <= 0xE007F):
-        return True
-    return record_range(marks_table(), 13, n).is_some()
-
-pure def jamo_l(n: int) -> bool:
-    return (0x1100 <= n and n <= 0x115F) or (0xA960 <= n and n <= 0xA97C)
-
-## What `n` is of Hangul: a leading, a vowel or a final jamo, an open or
-## a closed syllable, or none.
-pure def jamo(n: int) -> int:
-    if jamo_l(n):
-        return JAMO_L
-    if (0x1160 <= n and n <= 0x11A7) or (0xD7B0 <= n and n <= 0xD7C6):
-        return JAMO_V
-    if (0x11A8 <= n and n <= 0x11FF) or (0xD7CB <= n and n <= 0xD7FB):
-        return JAMO_T
+## The grapheme properties of the code point `n`, as `grapheme_table()`
+## writes them: its `Grapheme_Cluster_Break` value, 16 more for a
+## pictograph, and its `Indic_Conjunct_Break` value times 32.
+pure def grapheme_property(n: int) -> int:
+    if n < 0x7F:
+        if n == 13:
+            return GCB_CR
+        if n == 10:
+            return GCB_LF
+        return if n < 0x20: GCB_CONTROL else: 0
     if is_hangul_syllable(n):
-        return if (n - HANGUL_BASE) % HANGUL_FINALS == 0: JAMO_LV else: JAMO_LVT
-    return JAMO_NONE
+        return if (n - HANGUL_BASE) % HANGUL_FINALS == 0: GCB_LV else: GCB_LVT
+    let table = grapheme_table()
+    let Some(at) = record_range(table, 16, n) else:
+        return 0
+    return hex_at(table, at + 14, 2)
 
-const JAMO_NONE: int = 0
-const JAMO_L: int = 1
-const JAMO_V: int = 2
-const JAMO_T: int = 3
-const JAMO_LV: int = 4
-const JAMO_LVT: int = 5
+# The values of `Grapheme_Cluster_Break` and `Indic_Conjunct_Break` in
+# `grapheme_table()` (the generator's `GCB` and `INCB`).
+const GCB_CR: int = 1
+const GCB_LF: int = 2
+const GCB_CONTROL: int = 3
+const GCB_EXTEND: int = 4
+const GCB_ZWJ: int = 5
+const GCB_REGIONAL: int = 6
+const GCB_PREPEND: int = 7
+const GCB_SPACING_MARK: int = 8
+const GCB_L: int = 9
+const GCB_V: int = 10
+const GCB_T: int = 11
+const GCB_LV: int = 12
+const GCB_LVT: int = 13
+const INCB_CONSONANT: int = 1
+const INCB_EXTEND: int = 2
+const INCB_LINKER: int = 3
 
 const HANGUL_BASE: int = 0xAC00
 const HANGUL_L: int = 0x1100
@@ -402,7 +439,9 @@ pure def hex_at(text: str, at: int, width: int) -> int:
 # ---------------------------------------------------------------- Unicode's tables, generated
 
 # Written by `stage1/tools/unicode_tables.py` from Unicode 15.1.0 as Python's
-# `unicodedata` has it (RULES.md, R162): do not edit them by hand. Each is a
+# `unicodedata` has it (RULES.md, R162), the graphemes' from Unicode's own
+# `GraphemeBreakProperty.txt`, `emoji-data.txt` and
+# `DerivedCoreProperties.txt` (R205): do not edit them by hand. Each is a
 # text of fixed-width records in hexadecimal, sorted by their first field
 # and each followed by one space or line break, which `record_find`
 # searches.
@@ -1865,59 +1904,133 @@ pure def classes_table() -> str:
 01e4ef-01e4ef-e6 01e8d0-01e8d6-dc 01e944-01e949-e6 01e94a-01e94a-07
 """
 
-## `LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a
-## grapheme keeps after its base (310 records).
-pure def marks_table() -> str:
-    return """000300-00036f 000483-000489 000591-0005bd 0005bf-0005bf 0005c1-0005c2 0005c4-0005c5
-0005c7-0005c7 000610-00061a 00064b-00065f 000670-000670 0006d6-0006dc 0006df-0006e4
-0006e7-0006e8 0006ea-0006ed 000711-000711 000730-00074a 0007a6-0007b0 0007eb-0007f3
-0007fd-0007fd 000816-000819 00081b-000823 000825-000827 000829-00082d 000859-00085b
-000898-00089f 0008ca-0008e1 0008e3-000903 00093a-00093c 00093e-00094f 000951-000957
-000962-000963 000981-000983 0009bc-0009bc 0009be-0009c4 0009c7-0009c8 0009cb-0009cd
-0009d7-0009d7 0009e2-0009e3 0009fe-0009fe 000a01-000a03 000a3c-000a3c 000a3e-000a42
-000a47-000a48 000a4b-000a4d 000a51-000a51 000a70-000a71 000a75-000a75 000a81-000a83
-000abc-000abc 000abe-000ac5 000ac7-000ac9 000acb-000acd 000ae2-000ae3 000afa-000aff
-000b01-000b03 000b3c-000b3c 000b3e-000b44 000b47-000b48 000b4b-000b4d 000b55-000b57
-000b62-000b63 000b82-000b82 000bbe-000bc2 000bc6-000bc8 000bca-000bcd 000bd7-000bd7
-000c00-000c04 000c3c-000c3c 000c3e-000c44 000c46-000c48 000c4a-000c4d 000c55-000c56
-000c62-000c63 000c81-000c83 000cbc-000cbc 000cbe-000cc4 000cc6-000cc8 000cca-000ccd
-000cd5-000cd6 000ce2-000ce3 000cf3-000cf3 000d00-000d03 000d3b-000d3c 000d3e-000d44
-000d46-000d48 000d4a-000d4d 000d57-000d57 000d62-000d63 000d81-000d83 000dca-000dca
-000dcf-000dd4 000dd6-000dd6 000dd8-000ddf 000df2-000df3 000e31-000e31 000e34-000e3a
-000e47-000e4e 000eb1-000eb1 000eb4-000ebc 000ec8-000ece 000f18-000f19 000f35-000f35
-000f37-000f37 000f39-000f39 000f3e-000f3f 000f71-000f84 000f86-000f87 000f8d-000f97
-000f99-000fbc 000fc6-000fc6 00102b-00103e 001056-001059 00105e-001060 001062-001064
-001067-00106d 001071-001074 001082-00108d 00108f-00108f 00109a-00109d 00135d-00135f
-001712-001715 001732-001734 001752-001753 001772-001773 0017b4-0017d3 0017dd-0017dd
-00180b-00180d 00180f-00180f 001885-001886 0018a9-0018a9 001920-00192b 001930-00193b
-001a17-001a1b 001a55-001a5e 001a60-001a7c 001a7f-001a7f 001ab0-001ace 001b00-001b04
-001b34-001b44 001b6b-001b73 001b80-001b82 001ba1-001bad 001be6-001bf3 001c24-001c37
-001cd0-001cd2 001cd4-001ce8 001ced-001ced 001cf4-001cf4 001cf7-001cf9 001dc0-001dff
-0020d0-0020f0 002cef-002cf1 002d7f-002d7f 002de0-002dff 00302a-00302f 003099-00309a
-00a66f-00a672 00a674-00a67d 00a69e-00a69f 00a6f0-00a6f1 00a802-00a802 00a806-00a806
-00a80b-00a80b 00a823-00a827 00a82c-00a82c 00a880-00a881 00a8b4-00a8c5 00a8e0-00a8f1
-00a8ff-00a8ff 00a926-00a92d 00a947-00a953 00a980-00a983 00a9b3-00a9c0 00a9e5-00a9e5
-00aa29-00aa36 00aa43-00aa43 00aa4c-00aa4d 00aa7b-00aa7d 00aab0-00aab0 00aab2-00aab4
-00aab7-00aab8 00aabe-00aabf 00aac1-00aac1 00aaeb-00aaef 00aaf5-00aaf6 00abe3-00abea
-00abec-00abed 00fb1e-00fb1e 00fe00-00fe0f 00fe20-00fe2f 0101fd-0101fd 0102e0-0102e0
-010376-01037a 010a01-010a03 010a05-010a06 010a0c-010a0f 010a38-010a3a 010a3f-010a3f
-010ae5-010ae6 010d24-010d27 010eab-010eac 010efd-010eff 010f46-010f50 010f82-010f85
-011000-011002 011038-011046 011070-011070 011073-011074 01107f-011082 0110b0-0110ba
-0110c2-0110c2 011100-011102 011127-011134 011145-011146 011173-011173 011180-011182
-0111b3-0111c0 0111c9-0111cc 0111ce-0111cf 01122c-011237 01123e-01123e 011241-011241
-0112df-0112ea 011300-011303 01133b-01133c 01133e-011344 011347-011348 01134b-01134d
-011357-011357 011362-011363 011366-01136c 011370-011374 011435-011446 01145e-01145e
-0114b0-0114c3 0115af-0115b5 0115b8-0115c0 0115dc-0115dd 011630-011640 0116ab-0116b7
-01171d-01172b 01182c-01183a 011930-011935 011937-011938 01193b-01193e 011940-011940
-011942-011943 0119d1-0119d7 0119da-0119e0 0119e4-0119e4 011a01-011a0a 011a33-011a39
-011a3b-011a3e 011a47-011a47 011a51-011a5b 011a8a-011a99 011c2f-011c36 011c38-011c3f
-011c92-011ca7 011ca9-011cb6 011d31-011d36 011d3a-011d3a 011d3c-011d3d 011d3f-011d45
-011d47-011d47 011d8a-011d8e 011d90-011d91 011d93-011d97 011ef3-011ef6 011f00-011f01
-011f03-011f03 011f34-011f3a 011f3e-011f42 013440-013440 013447-013455 016af0-016af4
-016b30-016b36 016f4f-016f4f 016f51-016f87 016f8f-016f92 016fe4-016fe4 016ff0-016ff1
-01bc9d-01bc9e 01cf00-01cf2d 01cf30-01cf46 01d165-01d169 01d16d-01d172 01d17b-01d182
-01d185-01d18b 01d1aa-01d1ad 01d242-01d244 01da00-01da36 01da3b-01da6c 01da75-01da75
-01da84-01da84 01da9b-01da9f 01daa1-01daaf 01e000-01e006 01e008-01e018 01e01b-01e021
-01e023-01e024 01e026-01e02a 01e08f-01e08f 01e130-01e136 01e2ae-01e2ae 01e2ec-01e2ef
-01e4ec-01e4ef 01e8d0-01e8d6 01e944-01e94a 0e0100-0e01ef
+## `LLLLLL-HHHHHH-PP`: the grapheme properties of the code points from `L`
+## to `H` (UAX #29), `PP` their sum: the `Grapheme_Cluster_Break` value
+## (`GCB_*`), 0x10 for `Extended_Pictographic`, and `Indic_Conjunct_Break`
+## times 0x20 (`INCB_*`); a code point of none, and a Hangul syllable,
+## whose class is computed, has no record (733 records).
+pure def grapheme_table() -> str:
+    return """000000-000009-03 00000a-00000a-02 00000b-00000c-03 00000d-00000d-01 00000e-00001f-03 00007f-00009f-03
+0000a9-0000a9-10 0000ad-0000ad-03 0000ae-0000ae-10 000300-00034e-44 00034f-00034f-04 000350-00036f-44
+000483-000487-44 000488-000489-04 000591-0005bd-44 0005bf-0005bf-44 0005c1-0005c2-44 0005c4-0005c5-44
+0005c7-0005c7-44 000600-000605-07 000610-00061a-44 00061c-00061c-03 00064b-00065f-44 000670-000670-44
+0006d6-0006dc-44 0006dd-0006dd-07 0006df-0006e4-44 0006e7-0006e8-44 0006ea-0006ed-44 00070f-00070f-07
+000711-000711-44 000730-00074a-44 0007a6-0007b0-04 0007eb-0007f3-44 0007fd-0007fd-44 000816-000819-44
+00081b-000823-44 000825-000827-44 000829-00082d-44 000859-00085b-44 000890-000891-07 000898-00089f-44
+0008ca-0008e1-44 0008e2-0008e2-07 0008e3-0008ff-44 000900-000902-04 000903-000903-08 000915-000939-20
+00093a-00093a-04 00093b-00093b-08 00093c-00093c-44 00093e-000940-08 000941-000948-04 000949-00094c-08
+00094d-00094d-64 00094e-00094f-08 000951-000954-44 000955-000957-04 000958-00095f-20 000962-000963-04
+000978-00097f-20 000981-000981-04 000982-000983-08 000995-0009a8-20 0009aa-0009b0-20 0009b2-0009b2-20
+0009b6-0009b9-20 0009bc-0009bc-44 0009be-0009be-04 0009bf-0009c0-08 0009c1-0009c4-04 0009c7-0009c8-08
+0009cb-0009cc-08 0009cd-0009cd-64 0009d7-0009d7-04 0009dc-0009dd-20 0009df-0009df-20 0009e2-0009e3-04
+0009f0-0009f1-20 0009fe-0009fe-44 000a01-000a02-04 000a03-000a03-08 000a3c-000a3c-44 000a3e-000a40-08
+000a41-000a42-04 000a47-000a48-04 000a4b-000a4d-04 000a51-000a51-04 000a70-000a71-04 000a75-000a75-04
+000a81-000a82-04 000a83-000a83-08 000a95-000aa8-20 000aaa-000ab0-20 000ab2-000ab3-20 000ab5-000ab9-20
+000abc-000abc-44 000abe-000ac0-08 000ac1-000ac5-04 000ac7-000ac8-04 000ac9-000ac9-08 000acb-000acc-08
+000acd-000acd-64 000ae2-000ae3-04 000af9-000af9-20 000afa-000aff-04 000b01-000b01-04 000b02-000b03-08
+000b15-000b28-20 000b2a-000b30-20 000b32-000b33-20 000b35-000b39-20 000b3c-000b3c-44 000b3e-000b3f-04
+000b40-000b40-08 000b41-000b44-04 000b47-000b48-08 000b4b-000b4c-08 000b4d-000b4d-64 000b55-000b57-04
+000b5c-000b5d-20 000b5f-000b5f-20 000b62-000b63-04 000b71-000b71-20 000b82-000b82-04 000bbe-000bbe-04
+000bbf-000bbf-08 000bc0-000bc0-04 000bc1-000bc2-08 000bc6-000bc8-08 000bca-000bcc-08 000bcd-000bcd-04
+000bd7-000bd7-04 000c00-000c00-04 000c01-000c03-08 000c04-000c04-04 000c15-000c28-20 000c2a-000c39-20
+000c3c-000c3c-44 000c3e-000c40-04 000c41-000c44-08 000c46-000c48-04 000c4a-000c4c-04 000c4d-000c4d-64
+000c55-000c56-44 000c58-000c5a-20 000c62-000c63-04 000c81-000c81-04 000c82-000c83-08 000cbc-000cbc-44
+000cbe-000cbe-08 000cbf-000cbf-04 000cc0-000cc1-08 000cc2-000cc2-04 000cc3-000cc4-08 000cc6-000cc6-04
+000cc7-000cc8-08 000cca-000ccb-08 000ccc-000ccd-04 000cd5-000cd6-04 000ce2-000ce3-04 000cf3-000cf3-08
+000d00-000d01-04 000d02-000d03-08 000d15-000d3a-20 000d3b-000d3c-44 000d3e-000d3e-04 000d3f-000d40-08
+000d41-000d44-04 000d46-000d48-08 000d4a-000d4c-08 000d4d-000d4d-64 000d4e-000d4e-07 000d57-000d57-04
+000d62-000d63-04 000d81-000d81-04 000d82-000d83-08 000dca-000dca-04 000dcf-000dcf-04 000dd0-000dd1-08
+000dd2-000dd4-04 000dd6-000dd6-04 000dd8-000dde-08 000ddf-000ddf-04 000df2-000df3-08 000e31-000e31-04
+000e33-000e33-08 000e34-000e37-04 000e38-000e3a-44 000e47-000e47-04 000e48-000e4b-44 000e4c-000e4e-04
+000eb1-000eb1-04 000eb3-000eb3-08 000eb4-000eb7-04 000eb8-000eba-44 000ebb-000ebc-04 000ec8-000ecb-44
+000ecc-000ece-04 000f18-000f19-44 000f35-000f35-44 000f37-000f37-44 000f39-000f39-44 000f3e-000f3f-08
+000f71-000f72-44 000f73-000f73-04 000f74-000f74-44 000f75-000f79-04 000f7a-000f7d-44 000f7e-000f7e-04
+000f7f-000f7f-08 000f80-000f80-44 000f81-000f81-04 000f82-000f84-44 000f86-000f87-44 000f8d-000f97-04
+000f99-000fbc-04 000fc6-000fc6-44 00102d-001030-04 001031-001031-08 001032-001036-04 001037-001037-44
+001039-00103a-44 00103b-00103c-08 00103d-00103e-04 001056-001057-08 001058-001059-04 00105e-001060-04
+001071-001074-04 001082-001082-04 001084-001084-08 001085-001086-04 00108d-00108d-44 00109d-00109d-04
+001100-00115f-09 001160-0011a7-0a 0011a8-0011ff-0b 00135d-00135f-44 001712-001713-04 001714-001714-44
+001715-001715-08 001732-001733-04 001734-001734-08 001752-001753-04 001772-001773-04 0017b4-0017b5-04
+0017b6-0017b6-08 0017b7-0017bd-04 0017be-0017c5-08 0017c6-0017c6-04 0017c7-0017c8-08 0017c9-0017d1-04
+0017d2-0017d2-44 0017d3-0017d3-04 0017dd-0017dd-44 00180b-00180d-04 00180e-00180e-03 00180f-00180f-04
+001885-001886-04 0018a9-0018a9-44 001920-001922-04 001923-001926-08 001927-001928-04 001929-00192b-08
+001930-001931-08 001932-001932-04 001933-001938-08 001939-00193b-44 001a17-001a18-44 001a19-001a1a-08
+001a1b-001a1b-04 001a55-001a55-08 001a56-001a56-04 001a57-001a57-08 001a58-001a5e-04 001a60-001a60-44
+001a62-001a62-04 001a65-001a6c-04 001a6d-001a72-08 001a73-001a74-04 001a75-001a7c-44 001a7f-001a7f-44
+001ab0-001abd-44 001abe-001abe-04 001abf-001ace-44 001b00-001b03-04 001b04-001b04-08 001b34-001b34-44
+001b35-001b3a-04 001b3b-001b3b-08 001b3c-001b3c-04 001b3d-001b41-08 001b42-001b42-04 001b43-001b44-08
+001b6b-001b73-44 001b80-001b81-04 001b82-001b82-08 001ba1-001ba1-08 001ba2-001ba5-04 001ba6-001ba7-08
+001ba8-001ba9-04 001baa-001baa-08 001bab-001bab-44 001bac-001bad-04 001be6-001be6-44 001be7-001be7-08
+001be8-001be9-04 001bea-001bec-08 001bed-001bed-04 001bee-001bee-08 001bef-001bf1-04 001bf2-001bf3-08
+001c24-001c2b-08 001c2c-001c33-04 001c34-001c35-08 001c36-001c36-04 001c37-001c37-44 001cd0-001cd2-44
+001cd4-001ce0-44 001ce1-001ce1-08 001ce2-001ce8-44 001ced-001ced-44 001cf4-001cf4-44 001cf7-001cf7-08
+001cf8-001cf9-44 001dc0-001dff-44 00200b-00200b-03 00200c-00200c-04 00200d-00200d-45 00200e-00200f-03
+002028-00202e-03 00203c-00203c-10 002049-002049-10 002060-00206f-03 0020d0-0020dc-44 0020dd-0020e0-04
+0020e1-0020e1-44 0020e2-0020e4-04 0020e5-0020f0-44 002122-002122-10 002139-002139-10 002194-002199-10
+0021a9-0021aa-10 00231a-00231b-10 002328-002328-10 002388-002388-10 0023cf-0023cf-10 0023e9-0023f3-10
+0023f8-0023fa-10 0024c2-0024c2-10 0025aa-0025ab-10 0025b6-0025b6-10 0025c0-0025c0-10 0025fb-0025fe-10
+002600-002605-10 002607-002612-10 002614-002685-10 002690-002705-10 002708-002712-10 002714-002714-10
+002716-002716-10 00271d-00271d-10 002721-002721-10 002728-002728-10 002733-002734-10 002744-002744-10
+002747-002747-10 00274c-00274c-10 00274e-00274e-10 002753-002755-10 002757-002757-10 002763-002767-10
+002795-002797-10 0027a1-0027a1-10 0027b0-0027b0-10 0027bf-0027bf-10 002934-002935-10 002b05-002b07-10
+002b1b-002b1c-10 002b50-002b50-10 002b55-002b55-10 002cef-002cf1-44 002d7f-002d7f-44 002de0-002dff-44
+00302a-00302f-44 003030-003030-10 00303d-00303d-10 003099-00309a-44 003297-003297-10 003299-003299-10
+00a66f-00a66f-44 00a670-00a672-04 00a674-00a67d-44 00a69e-00a69f-44 00a6f0-00a6f1-44 00a802-00a802-04
+00a806-00a806-04 00a80b-00a80b-04 00a823-00a824-08 00a825-00a826-04 00a827-00a827-08 00a82c-00a82c-44
+00a880-00a881-08 00a8b4-00a8c3-08 00a8c4-00a8c5-04 00a8e0-00a8f1-44 00a8ff-00a8ff-04 00a926-00a92a-04
+00a92b-00a92d-44 00a947-00a951-04 00a952-00a953-08 00a960-00a97c-09 00a980-00a982-04 00a983-00a983-08
+00a9b3-00a9b3-44 00a9b4-00a9b5-08 00a9b6-00a9b9-04 00a9ba-00a9bb-08 00a9bc-00a9bd-04 00a9be-00a9c0-08
+00a9e5-00a9e5-04 00aa29-00aa2e-04 00aa2f-00aa30-08 00aa31-00aa32-04 00aa33-00aa34-08 00aa35-00aa36-04
+00aa43-00aa43-04 00aa4c-00aa4c-04 00aa4d-00aa4d-08 00aa7c-00aa7c-04 00aab0-00aab0-44 00aab2-00aab4-44
+00aab7-00aab8-44 00aabe-00aabf-44 00aac1-00aac1-44 00aaeb-00aaeb-08 00aaec-00aaed-04 00aaee-00aaef-08
+00aaf5-00aaf5-08 00aaf6-00aaf6-44 00abe3-00abe4-08 00abe5-00abe5-04 00abe6-00abe7-08 00abe8-00abe8-04
+00abe9-00abea-08 00abec-00abec-08 00abed-00abed-44 00d7b0-00d7c6-0a 00d7cb-00d7fb-0b 00fb1e-00fb1e-44
+00fe00-00fe0f-04 00fe20-00fe2f-44 00feff-00feff-03 00ff9e-00ff9f-04 00fff0-00fffb-03 0101fd-0101fd-44
+0102e0-0102e0-44 010376-01037a-44 010a01-010a03-04 010a05-010a06-04 010a0c-010a0c-04 010a0d-010a0d-44
+010a0e-010a0e-04 010a0f-010a0f-44 010a38-010a3a-44 010a3f-010a3f-44 010ae5-010ae6-44 010d24-010d27-44
+010eab-010eac-44 010efd-010eff-44 010f46-010f50-44 010f82-010f85-44 011000-011000-08 011001-011001-04
+011002-011002-08 011038-011046-04 011070-011070-44 011073-011074-04 01107f-01107f-44 011080-011081-04
+011082-011082-08 0110b0-0110b2-08 0110b3-0110b6-04 0110b7-0110b8-08 0110b9-0110b9-04 0110ba-0110ba-44
+0110bd-0110bd-07 0110c2-0110c2-04 0110cd-0110cd-07 011100-011102-44 011127-01112b-04 01112c-01112c-08
+01112d-011132-04 011133-011134-44 011145-011146-08 011173-011173-44 011180-011181-04 011182-011182-08
+0111b3-0111b5-08 0111b6-0111be-04 0111bf-0111c0-08 0111c2-0111c3-07 0111c9-0111c9-04 0111ca-0111ca-44
+0111cb-0111cc-04 0111ce-0111ce-08 0111cf-0111cf-04 01122c-01122e-08 01122f-011231-04 011232-011233-08
+011234-011234-04 011235-011235-08 011236-011236-44 011237-011237-04 01123e-01123e-04 011241-011241-04
+0112df-0112df-04 0112e0-0112e2-08 0112e3-0112e8-04 0112e9-0112ea-44 011300-011301-04 011302-011303-08
+01133b-01133c-44 01133e-01133e-04 01133f-01133f-08 011340-011340-04 011341-011344-08 011347-011348-08
+01134b-01134d-08 011357-011357-04 011362-011363-08 011366-01136c-44 011370-011374-44 011435-011437-08
+011438-01143f-04 011440-011441-08 011442-011444-04 011445-011445-08 011446-011446-44 01145e-01145e-44
+0114b0-0114b0-04 0114b1-0114b2-08 0114b3-0114b8-04 0114b9-0114b9-08 0114ba-0114ba-04 0114bb-0114bc-08
+0114bd-0114bd-04 0114be-0114be-08 0114bf-0114c0-04 0114c1-0114c1-08 0114c2-0114c2-04 0114c3-0114c3-44
+0115af-0115af-04 0115b0-0115b1-08 0115b2-0115b5-04 0115b8-0115bb-08 0115bc-0115bd-04 0115be-0115be-08
+0115bf-0115bf-04 0115c0-0115c0-44 0115dc-0115dd-04 011630-011632-08 011633-01163a-04 01163b-01163c-08
+01163d-01163d-04 01163e-01163e-08 01163f-011640-04 0116ab-0116ab-04 0116ac-0116ac-08 0116ad-0116ad-04
+0116ae-0116af-08 0116b0-0116b5-04 0116b6-0116b6-08 0116b7-0116b7-44 01171d-01171f-04 011722-011725-04
+011726-011726-08 011727-01172a-04 01172b-01172b-44 01182c-01182e-08 01182f-011837-04 011838-011838-08
+011839-011839-04 01183a-01183a-44 011930-011930-04 011931-011935-08 011937-011938-08 01193b-01193c-04
+01193d-01193d-08 01193e-01193e-44 01193f-01193f-07 011940-011940-08 011941-011941-07 011942-011942-08
+011943-011943-44 0119d1-0119d3-08 0119d4-0119d7-04 0119da-0119db-04 0119dc-0119df-08 0119e0-0119e0-04
+0119e4-0119e4-08 011a01-011a0a-04 011a33-011a33-04 011a34-011a34-44 011a35-011a38-04 011a39-011a39-08
+011a3a-011a3a-07 011a3b-011a3e-04 011a47-011a47-44 011a51-011a56-04 011a57-011a58-08 011a59-011a5b-04
+011a84-011a89-07 011a8a-011a96-04 011a97-011a97-08 011a98-011a98-04 011a99-011a99-44 011c2f-011c2f-08
+011c30-011c36-04 011c38-011c3d-04 011c3e-011c3e-08 011c3f-011c3f-04 011c92-011ca7-04 011ca9-011ca9-08
+011caa-011cb0-04 011cb1-011cb1-08 011cb2-011cb3-04 011cb4-011cb4-08 011cb5-011cb6-04 011d31-011d36-04
+011d3a-011d3a-04 011d3c-011d3d-04 011d3f-011d41-04 011d42-011d42-44 011d43-011d43-04 011d44-011d45-44
+011d46-011d46-07 011d47-011d47-04 011d8a-011d8e-08 011d90-011d91-04 011d93-011d94-08 011d95-011d95-04
+011d96-011d96-08 011d97-011d97-44 011ef3-011ef4-04 011ef5-011ef6-08 011f00-011f01-04 011f02-011f02-07
+011f03-011f03-08 011f34-011f35-08 011f36-011f3a-04 011f3e-011f3f-08 011f40-011f40-04 011f41-011f41-08
+011f42-011f42-44 013430-01343f-03 013440-013440-04 013447-013455-04 016af0-016af4-44 016b30-016b36-44
+016f4f-016f4f-04 016f51-016f87-08 016f8f-016f92-04 016fe4-016fe4-04 016ff0-016ff1-08 01bc9d-01bc9d-04
+01bc9e-01bc9e-44 01bca0-01bca3-03 01cf00-01cf2d-04 01cf30-01cf46-04 01d165-01d165-44 01d166-01d166-08
+01d167-01d169-44 01d16d-01d16d-08 01d16e-01d172-44 01d173-01d17a-03 01d17b-01d182-44 01d185-01d18b-44
+01d1aa-01d1ad-44 01d242-01d244-44 01da00-01da36-04 01da3b-01da6c-04 01da75-01da75-04 01da84-01da84-04
+01da9b-01da9f-04 01daa1-01daaf-04 01e000-01e006-44 01e008-01e018-44 01e01b-01e021-44 01e023-01e024-44
+01e026-01e02a-44 01e08f-01e08f-44 01e130-01e136-44 01e2ae-01e2ae-44 01e2ec-01e2ef-44 01e4ec-01e4ef-44
+01e8d0-01e8d6-44 01e944-01e94a-44 01f000-01f0ff-10 01f10d-01f10f-10 01f12f-01f12f-10 01f16c-01f171-10
+01f17e-01f17f-10 01f18e-01f18e-10 01f191-01f19a-10 01f1ad-01f1e5-10 01f1e6-01f1ff-06 01f201-01f20f-10
+01f21a-01f21a-10 01f22f-01f22f-10 01f232-01f23a-10 01f23c-01f23f-10 01f249-01f3fa-10 01f3fb-01f3ff-04
+01f400-01f53d-10 01f546-01f64f-10 01f680-01f6ff-10 01f774-01f77f-10 01f7d5-01f7ff-10 01f80c-01f80f-10
+01f848-01f84f-10 01f85a-01f85f-10 01f888-01f88f-10 01f8ae-01f8ff-10 01f90c-01f93a-10 01f93c-01f945-10
+01f947-01faff-10 01fc00-01fffd-10 0e0000-0e001f-03 0e0020-0e007f-04 0e0080-0e00ff-03 0e0100-0e01ef-04
+0e01f0-0e0fff-03
 """

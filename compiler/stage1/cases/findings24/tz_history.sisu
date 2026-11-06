@@ -1,0 +1,29 @@
+# `Zone.named` with each zone's history from the tz database (RULES.md,
+# R206): a date before a zone's rules came into force has the offset and
+# the abbreviation its clocks showed then, and a later one today's rules.
+from std.time import Zone
+
+def show(name: str, when: str):
+    let zone = Zone.named(name).expect("a zone")
+    let t = DateTime.parse(when).expect("a time")
+    print(
+        "{name} {when}: {zone.format(t)} {zone.abbreviation_at(t)} {zone.offset_at(t).as_seconds()}"
+    )
+
+def main():
+    show("Europe/Helsinki", "1900-01-01T12:00:00Z")
+    show("Europe/Helsinki", "1950-07-01T12:00:00Z")
+    show("Europe/Helsinki", "2026-07-01T12:00:00Z")
+    show("America/New_York", "1960-07-01T12:00:00Z")
+    show("America/New_York", "1974-01-15T12:00:00Z")
+    show("America/New_York", "2006-04-01T12:00:00Z")
+    show("America/New_York", "2026-04-01T12:00:00Z")
+    show("Europe/Moscow", "2012-01-15T12:00:00Z")
+    show("Europe/Moscow", "2026-01-15T12:00:00Z")
+    show("Europe/Istanbul", "2015-01-15T12:00:00Z")
+    show("Europe/Kyiv", "1985-07-01T12:00:00Z")
+    show("America/Sao_Paulo", "2015-01-15T12:00:00Z")
+    show("Asia/Kolkata", "1943-01-01T12:00:00Z")
+    show("Asia/Tokyo", "1949-07-01T12:00:00Z")
+    show("Australia/Perth", "2008-01-15T12:00:00Z")
+    show("UTC", "1900-01-01T00:00:00Z")

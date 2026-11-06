@@ -1,0 +1,43 @@
+##! `sisu doc --digest` (RULES.md, R207; 10, "AI-assisted development"):
+##! each item's declaration with its inferred error set and contracts, the
+##! first paragraph of its doc comment, its capabilities, its typed holes
+##! and its first example, as one plain text.
+
+## A sauna's stove.
+##
+## Its heat is in degrees.
+pub struct Stove:
+    ## The heat now.
+    pub heat: int
+    limit: int
+
+    ## The stove one step hotter, never past its limit.
+    ##
+    ## ```
+    ## let s = Stove(heat=60, limit=90)
+    ## assert s.hotter().heat == 65
+    ## ```
+    pub def hotter(self) -> Stove:
+        return Stove(heat=min(self.heat + 5, self.limit), limit=self.limit)
+
+error StoveError:
+    TooHot(heat: int)
+
+## Checks the heat.
+pub def measure(heat: int) -> int !:
+    requires heat >= 0
+    if heat > 120:
+        return Err(StoveError.TooHot(heat=heat))
+    return Ok(heat)
+
+## The log of the stove, written to `fs`.
+pub def save(fs: Fs, s: Stove) -> ! IoError:
+    fs.write_text(Path.new("stove.txt"), "{s.heat}")?
+    return Ok(())
+
+## The stove's next setting, not written yet.
+pub def plan(s: Stove) -> int:
+    return todo("plan")
+
+def main():
+    print(Stove(heat=60, limit=90).hotter().heat)

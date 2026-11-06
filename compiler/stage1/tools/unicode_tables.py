@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """Writes stage 1's `src/unicode_tables.sisu`: the tables that NFC names and
-D-048's lints read (RULES.md, R136), from Python's `unicodedata`; and the
-tables at the end of `std/string.sisu`, below its line `STD_MARK`, which
-its normalisation forms and graphemes read (RULES.md, R162).
+D-048's lints read (RULES.md, R136, R205), from Python's `unicodedata` and
+Unicode's own `Scripts.txt`, `confusables.txt` and
+`DerivedCoreProperties.txt`; and the tables at the end of
+`std/string.sisu`, below its line `STD_MARK`, which its normalisation forms
+and graphemes read (RULES.md, R162, R205), the graphemes' from
+`GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt` (`InCB`) and
+`emoji-data.txt` (`Extended_Pictographic`).
 
-    python3 tools/unicode_tables.py            # rewrites src/unicode_tables.sisu
-    python3 tools/unicode_tables.py --check    # exits 1 when the file is stale
+    python3 tools/unicode_tables.py            # rewrites both
+    python3 tools/unicode_tables.py --check    # exits 1 when either is stale
+
+Unicode's files are those of Unicode 15.1.0, the version of Python's
+`unicodedata`, fetched once from their pinned URLs (`FILES`, below) into
+`compiler/target/unicode/15.1.0/`, which the repository does not hold; each
+is checked to be the version's by its first line.
 
 Each table is a text of fixed-width records in hexadecimal, sorted by their
 first field, each followed by one space or line break, as `text.unicode`'s
@@ -23,65 +32,79 @@ are, so that a lookup is a binary search over the text itself:
 - `combining_classes()`: `LLLLLL-HHHHHH-CC`, the canonical combining class
   `CC` of the code points from `L` to `H`, for every class but 0;
 - `scripts()`: `LLLLLL-HHHHHH-SS`, the script `SCRIPTS[SS]` of the letters
-  from `L` to `H`, a letter's script being the first word of its name (the
-  words of `COMMON_WORDS` make it no script's, those of `WIDTH_WORDS` are
-  passed over, those of `ALIASES` name another script, and the scripts of
+  and marks from `L` to `H` beyond ASCII, as `Scripts.txt` gives it (its
+  `Common`, `Inherited` and `Unknown` are no script's; the scripts of
   `CJK_SCRIPTS` are one script, since a Japanese or a Korean name mixes
-  them);
-- `confusables()`: `LLLLLL-HHHHHH-PPPPPP`, the code points from `L` to `H`
-  that read as the ASCII letters or digits from `P` on: the letters whose
-  NFKC form is one ASCII letter or digit (the fullwidth forms, the
-  mathematical alphabets, the small capitals that have one), and the
-  Cyrillic and Greek letters whose glyphs are the Latin ones'
-  (`GLYPHS`, below).
+  them), a range running on over the code points no character is
+  assigned to;
+- `confusables()`: `SSSSSS-OOOO-LL`, the character `S` that can stand in a
+  name (`XID_Continue`) and reads as the `L` code points of
+  `confusable_pool()` from the `O`th, every such record of
+  `confusables.txt`, from which a skeleton is made as UTS #39 makes it.
 """
 
 import sys
 import unicodedata
+import urllib.request
 from pathlib import Path
 
 PER_LINE = 6
 
-# The words that begin the names of letters of no script of their own.
-COMMON_WORDS = {
-    "MATHEMATICAL", "MODIFIER", "SUPERSCRIPT", "SUBSCRIPT", "DOUBLE-STRUCK",
-    "SCRIPT", "BLACK-LETTER", "CIRCLED", "PARENTHESIZED", "SQUARED",
-    "NEGATIVE", "OUTLINED", "TAG", "MICRO", "CARON", "EULER", "PLANCK",
-    "ALEF", "BET", "GIMEL", "DALET", "INFORMATION", "VERTICAL", "VEDIC",
+VERSION = "15.1.0"
+UCD = "https://www.unicode.org/Public/15.1.0/ucd/"
+# Each file Unicode publishes, by its pinned URL: `confusables.txt` is the
+# security data's (UTS #39), published beside the character database.
+FILES = {
+    "GraphemeBreakProperty.txt": UCD + "auxiliary/GraphemeBreakProperty.txt",
+    "GraphemeBreakTest.txt": UCD + "auxiliary/GraphemeBreakTest.txt",
+    "DerivedCoreProperties.txt": UCD + "DerivedCoreProperties.txt",
+    "emoji-data.txt": UCD + "emoji/emoji-data.txt",
+    "Scripts.txt": UCD + "Scripts.txt",
+    "confusables.txt": "https://www.unicode.org/Public/security/15.1.0/confusables.txt",
 }
-# The words that begin the names of letters of a script they do not name.
-ALIASES = {
-    "FEMININE": "LATIN", "MASCULINE": "LATIN", "TURNED": "LATIN",
-    "ROMAN": "LATIN", "KELVIN": "LATIN", "ANGSTROM": "LATIN", "OHM": "GREEK",
-    "KATAKANA-HIRAGANA": "CJK", "MASU": "CJK",
-}
-# The words before a script's name that say only a width.
-WIDTH_WORDS = {"FULLWIDTH", "HALFWIDTH"}
-# The scripts a name of East Asia mixes, counted as one.
-CJK_SCRIPTS = {"CJK", "HIRAGANA", "KATAKANA", "HANGUL", "BOPOMOFO", "IDEOGRAPHIC"}
 
-# The Cyrillic and Greek letters that are written as Latin ones, and the
-# Latin letter each reads as (the usual pairs of Unicode's confusables).
-GLYPHS = {
-    # Cyrillic small letters
-    0x0430: "a", 0x0435: "e", 0x043E: "o", 0x0440: "p", 0x0441: "c",
-    0x0443: "y", 0x0445: "x", 0x0455: "s", 0x0456: "i", 0x0458: "j",
-    0x0501: "d", 0x051B: "q", 0x051D: "w", 0x04BB: "h", 0x0491: "r",
-    # Cyrillic capital letters
-    0x0410: "A", 0x0412: "B", 0x0415: "E", 0x041A: "K", 0x041C: "M",
-    0x041D: "H", 0x041E: "O", 0x0420: "P", 0x0421: "C", 0x0422: "T",
-    0x0425: "X", 0x0405: "S", 0x0406: "I", 0x0408: "J", 0x04AE: "Y",
-    0x051A: "Q", 0x051C: "W",
-    # Greek small letters
-    0x03BF: "o", 0x03B1: "a", 0x03BD: "v", 0x03C1: "p", 0x03B9: "i",
-    0x03BA: "k", 0x03C5: "u", 0x03C7: "x", 0x03B3: "y",
-    # Greek capital letters
-    0x0391: "A", 0x0392: "B", 0x0395: "E", 0x0396: "Z", 0x0397: "H",
-    0x0399: "I", 0x039A: "K", 0x039C: "M", 0x039D: "N", 0x039F: "O",
-    0x03A1: "P", 0x03A4: "T", 0x03A5: "Y", 0x03A7: "X",
-    # Latin letters that read as others
-    0x0131: "i", 0x0237: "j", 0x0251: "a", 0x0261: "g",
-}
+
+def data_dir():
+    return Path(__file__).resolve().parent.parent.parent / "target" / "unicode" / VERSION
+
+
+def data(name):
+    """The lines of Unicode's file `name`, fetched once into `data_dir()`."""
+    path = data_dir() / name
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with urllib.request.urlopen(FILES[name], timeout=60) as r:
+                body = r.read()
+        except OSError as e:
+            sys.exit("unicode_tables: cannot fetch {} ({}); put it in {}".format(FILES[name], e, path.parent))
+        path.write_bytes(body)
+    text = path.read_text(encoding="utf-8")
+    # The version in the file's header: `Scripts-15.1.0.txt`, `Version:
+    # 15.1.0`, or the emoji data's `Emoji Version 15.1`.
+    head = text.split("\n", 12)[:12]
+    if not any(VERSION in l or "Version " + VERSION[:-2] + " " in l for l in head):
+        sys.exit("unicode_tables: {} is not Unicode {}'s".format(path, VERSION))
+    return text.split("\n")
+
+
+def properties(name):
+    """`(low, high, value)` for each record of a property file: the code
+    points `low` to `high` and the value its fields after the first name."""
+    out = []
+    for line in data(name):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = [f.strip() for f in line.split(";")]
+        lo, _, hi = fields[0].partition("..")
+        out.append((int(lo, 16), int(hi or lo, 16), fields[1:]))
+    return out
+
+# The scripts a name of East Asia mixes, counted as one.
+CJK_SCRIPTS = {"Han", "Hiragana", "Katakana", "Hangul", "Bopomofo"}
+# `Scripts.txt`'s values that are no script's.
+NO_SCRIPT = {"Common", "Inherited", "Unknown"}
 
 
 def is_letter(c):
@@ -126,42 +149,40 @@ def tables():
             classes[-1][1] = c
         else:
             classes.append([c, c, k])
+    script = {}
+    for lo, hi, [value] in properties("Scripts.txt"):
+        if value in NO_SCRIPT:
+            continue
+        for c in range(max(lo, 0x80), hi + 1):
+            if is_letter_or_mark(c):
+                script[c] = "CJK" if value in CJK_SCRIPTS else value.upper().replace("_", " ")
     names, scripts = [], []
-    for c in range(0x80, 0x110000):
-        if not is_letter(c):
-            continue
-        words = unicodedata.name(chr(c), "").split()
-        while words and words[0] in WIDTH_WORDS:
-            words = words[1:]
-        if not words or words[0] in COMMON_WORDS:
-            continue
-        s = ALIASES.get(words[0], words[0])
-        if s in CJK_SCRIPTS:
-            s = "CJK"
+    for c in sorted(script):
+        s = script[c]
         if s not in names:
             names.append(s)
         k = names.index(s)
-        if scripts and scripts[-1][1] == c - 1 and scripts[-1][2] == k:
+        # A range runs on over code points no character is assigned to,
+        # which no name holds.
+        if scripts and scripts[-1][2] == k and all(
+            unicodedata.category(chr(x)) == "Cn" for x in range(scripts[-1][1] + 1, c)
+        ):
             scripts[-1][1] = c
         else:
             scripts.append([c, c, k])
-    confusable = {}
-    for c in range(0x80, 0x110000):
-        if not is_letter(c):
+    in_names = set()
+    for lo, hi, fields in properties("DerivedCoreProperties.txt"):
+        if fields[0] == "XID_Continue":
+            in_names.update(range(lo, hi + 1))
+    ranges, pool = [], []
+    for lo, hi, fields in properties("confusables.txt"):
+        if lo not in in_names:
             continue
-        k = unicodedata.normalize("NFKC", chr(c))
-        if len(k) == 1 and k.isascii() and k.isalnum():
-            confusable[c] = ord(k)
-    for c, p in GLYPHS.items():
-        confusable[c] = ord(p)
-    ranges = []
-    for c in sorted(confusable):
-        p = confusable[c]
-        if ranges and ranges[-1][1] == c - 1 and ranges[-1][2] + (c - ranges[-1][0]) == p:
-            ranges[-1][1] = c
-        else:
-            ranges.append([c, c, p])
-    return comps, decomps, classes, names, scripts, ranges
+        target = [int(x, 16) for x in fields[0].split()]
+        ranges.append((lo, len(pool), len(target)))
+        pool.extend(target)
+    ranges.sort()
+    return comps, decomps, classes, names, scripts, ranges, pool
 
 
 def block(records):
@@ -172,11 +193,13 @@ def block(records):
 
 
 def text():
-    comps, decomps, classes, names, scripts, ranges = tables()
+    comps, decomps, classes, names, scripts, ranges, pool = tables()
     out = []
     out.append("##! Unicode's tables for names (RULES.md, R136), generated by\n")
     out.append("##! `tools/unicode_tables.py` from Unicode {} as Python's `unicodedata`\n".format(unicodedata.unidata_version))
-    out.append("##! has it: do not edit it by hand, and `check.sh` fails when it is stale.\n")
+    out.append("##! has it, with the scripts of `Scripts.txt` and the confusables of\n")
+    out.append("##! `confusables.txt` (R205): do not edit it by hand, and `check.sh` fails\n")
+    out.append("##! when it is stale.\n")
     out.append("##! Each table is a text of fixed-width records in hexadecimal, sorted by\n")
     out.append("##! their first field, each followed by one space or line break, so that a\n")
     out.append("##! lookup is a binary search over the text itself (`stage1.text.names`).\n")
@@ -206,13 +229,23 @@ def text():
         "from `L` to `H`, for every class but 0 ({} records).".format(len(classes)),
     ], ["{:06x}-{:06x}-{:02x}".format(*r) for r in classes])
     fn("scripts", [
-        "`LLLLLL-HHHHHH-SS`: the script `SCRIPTS[SS]` of the letters beyond ASCII",
-        "from `L` to `H` ({} records); a letter of no script has none.".format(len(scripts)),
+        "`LLLLLL-HHHHHH-SS`: the script `SCRIPTS[SS]` of the letters and marks",
+        "beyond ASCII from `L` to `H`, as `Scripts.txt` gives it ({} records); a".format(len(scripts)),
+        "character of no script has none.",
     ], ["{:06x}-{:06x}-{:02x}".format(*r) for r in scripts])
     fn("confusables", [
-        "`LLLLLL-HHHHHH-PPPPPP`: the letters from `L` to `H` that read as the",
-        "ASCII letters or digits from `P` on ({} records).".format(len(ranges)),
-    ], ["{:06x}-{:06x}-{:06x}".format(*r) for r in ranges])
+        "`SSSSSS-OOOO-LL`: the character `S` of a name that reads as the `L` code",
+        "points of `confusable_pool()` from the `O`th, as `confusables.txt` gives",
+        "it ({} records).".format(len(ranges)),
+    ], ["{:06x}-{:04x}-{:02x}".format(*r) for r in ranges])
+    out.append("\n")
+    out.append("## The code points of `confusables()`, six hexadecimal digits each, {} to a\n".format(PER_LINE * 4))
+    out.append("## line ({} code points).\n".format(len(pool)))
+    out.append("pub pure def confusable_pool() -> str:\n")
+    lines = []
+    for i in range(0, len(pool), PER_LINE * 4):
+        lines.append("".join("{:06x}".format(x) for x in pool[i:i + PER_LINE * 4]))
+    out.append('    return """' + "\n".join(lines) + '\n"""\n')
     return "".join(out)
 
 
@@ -227,8 +260,47 @@ def is_hangul_syllable(c):
     return 0xAC00 <= c <= 0xD7A3
 
 
+# The values of `Grapheme_Cluster_Break` (`GraphemeBreakProperty.txt`) and
+# of `Indic_Conjunct_Break` (`DerivedCoreProperties.txt`), as the grapheme
+# table writes them; `std/string.sisu`'s constants `GCB_*` and `INCB_*`
+# are the same numbers.
+GCB = {
+    "CR": 1, "LF": 2, "Control": 3, "Extend": 4, "ZWJ": 5,
+    "Regional_Indicator": 6, "Prepend": 7, "SpacingMark": 8, "L": 9, "V": 10,
+    "T": 11, "LV": 12, "LVT": 13,
+}
+INCB = {"Consonant": 1, "Extend": 2, "Linker": 3}
+PICTOGRAPHIC = 0x10
+
+
+def grapheme_records():
+    """`[low, high, properties]` for every run of code points with the same
+    grapheme properties, but for the Hangul syllables (their `LV` and
+    `LVT` alternate, and `std.string` computes them)."""
+    props = {}
+    for lo, hi, fields in properties("GraphemeBreakProperty.txt"):
+        for c in range(lo, hi + 1):
+            if not is_hangul_syllable(c):
+                props[c] = props.get(c, 0) | GCB[fields[0]]
+    for lo, hi, fields in properties("emoji-data.txt"):
+        if fields[0] == "Extended_Pictographic":
+            for c in range(lo, hi + 1):
+                props[c] = props.get(c, 0) | PICTOGRAPHIC
+    for lo, hi, fields in properties("DerivedCoreProperties.txt"):
+        if fields[0] == "InCB":
+            for c in range(lo, hi + 1):
+                props[c] = props.get(c, 0) | INCB[fields[1]] * 0x20
+    out = []
+    for c in sorted(props):
+        if out and out[-1][1] == c - 1 and out[-1][2] == props[c]:
+            out[-1][1] = c
+        else:
+            out.append([c, c, props[c]])
+    return out
+
+
 def std_tables():
-    canonical, compat, pool, comps, classes, marks = [], [], [], [], [], []
+    canonical, compat, pool, comps, classes = [], [], [], [], []
     for c in range(0x110000):
         if is_hangul_syllable(c):
             continue
@@ -254,21 +326,17 @@ def std_tables():
             classes[-1][1] = c
         else:
             classes.append([c, c, k])
-    for c in range(0x110000):
-        if unicodedata.category(chr(c)) not in ("Mn", "Me", "Mc"):
-            continue
-        if marks and marks[-1][1] == c - 1:
-            marks[-1][1] = c
-        else:
-            marks.append([c, c])
-    return canonical, compat, pool, comps, classes, marks
+    graphemes = grapheme_records()
+    return canonical, compat, pool, comps, classes, graphemes
 
 
 def std_text():
-    canonical, compat, pool, comps, classes, marks = std_tables()
+    canonical, compat, pool, comps, classes, graphemes = std_tables()
     out = [STD_MARK, "\n"]
     out.append("# Written by `stage1/tools/unicode_tables.py` from Unicode {} as Python's\n".format(unicodedata.unidata_version))
-    out.append("# `unicodedata` has it (RULES.md, R162): do not edit them by hand. Each is a\n")
+    out.append("# `unicodedata` has it (RULES.md, R162), the graphemes' from Unicode's own\n")
+    out.append("# `GraphemeBreakProperty.txt`, `emoji-data.txt` and\n")
+    out.append("# `DerivedCoreProperties.txt` (R205): do not edit them by hand. Each is a\n")
     out.append("# text of fixed-width records in hexadecimal, sorted by their first field\n")
     out.append("# and each followed by one space or line break, which `record_find`\n")
     out.append("# searches.\n")
@@ -303,10 +371,13 @@ def std_text():
         "`LLLLLL-HHHHHH-CC`: the canonical combining class of the code points from",
         "`L` to `H`, for every class but 0 ({} records).".format(len(classes)),
     ], ["{:06x}-{:06x}-{:02x}".format(*r) for r in classes])
-    fn("marks_table", [
-        "`LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a",
-        "grapheme keeps after its base ({} records).".format(len(marks)),
-    ], ["{:06x}-{:06x}".format(*r) for r in marks])
+    fn("grapheme_table", [
+        "`LLLLLL-HHHHHH-PP`: the grapheme properties of the code points from `L`",
+        "to `H` (UAX #29), `PP` their sum: the `Grapheme_Cluster_Break` value",
+        "(`GCB_*`), 0x10 for `Extended_Pictographic`, and `Indic_Conjunct_Break`",
+        "times 0x20 (`INCB_*`); a code point of none, and a Hangul syllable,",
+        "whose class is computed, has no record ({} records).".format(len(graphemes)),
+    ], ["{:06x}-{:06x}-{:02x}".format(*r) for r in graphemes])
     return "".join(out)
 
 

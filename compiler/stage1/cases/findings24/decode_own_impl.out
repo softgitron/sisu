@@ -1,0 +1,3 @@
+Day(name="sauna", mood=Happy, later=[Sad, Happy], maybe=None)
+{"name":"sauna","mood":"happy","later":["sad","happy"],"maybe":null}
+Mismatch(path="$.mood", expected="a mood")

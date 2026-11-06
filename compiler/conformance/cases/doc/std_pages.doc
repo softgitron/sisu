@@ -573,19 +573,26 @@ normalisation forms need Unicode's tables, which are not here yet.
 
 - [`Builder`](#Builder): A text made from many pieces: each `push` keeps its piece, and `build` copies them all into one `String` once, so making a long text from short pieces copies each byte once.
 - [`Normalize`](#Normalize): Unicode's four normalisation forms of a text (11, "normalisation forms"; Unicode's UAX #15): `nfd` decomposes each character canonically and puts its marks in their canonical order, `nfc` composes the result again, and `nfkd` and `nfkc` do the same with the compatibility decompositions besides (`ﬁ` is `fi`, `²` is `2`). Two texts that read the same have the same `nfc`, and the same `nfkc` when they differ only in such forms.
-- [`Graphemes`](#Graphemes): The graphemes of a text, what a reader takes for one character each (03: "`s.graphemes()` ... graphemes one method away"; Unicode's UAX #29), by the rules these tables carry: a base with the marks after it (and the variation selectors, the emoji modifiers and the tag characters), `\r\n`, a Hangul syllable written in jamo, two regional indicators (a flag), and a sequence joined by U+200D, each one grapheme; a control character is one of its own. The full rules would also keep a prepended character with what follows it (`Prepend`), join an Indic conjunct across its virama, and join after U+200D only between pictographs.
-- [`breaks_between`](#breaks_between): Whether a grapheme ends between `p` and `c`, `flags` being the regional indicators of the grapheme so far.
-- [`is_control`](#is_control)
-- [`is_regional`](#is_regional)
-- [`extends`](#extends): What a grapheme keeps after its base: a mark, a variation selector, an emoji modifier, a tag character.
-- [`jamo_l`](#jamo_l)
-- [`jamo`](#jamo): What `n` is of Hangul: a leading, a vowel or a final jamo, an open or a closed syllable, or none.
-- [`JAMO_NONE`](#JAMO_NONE)
-- [`JAMO_L`](#JAMO_L)
-- [`JAMO_V`](#JAMO_V)
-- [`JAMO_T`](#JAMO_T)
-- [`JAMO_LV`](#JAMO_LV)
-- [`JAMO_LVT`](#JAMO_LVT)
+- [`Graphemes`](#Graphemes): The graphemes of a text, what a reader takes for one character each (03: "`s.graphemes()` ... graphemes one method away"), by every rule of Unicode's UAX #29 for extended grapheme clusters: `\r\n`, a control character of its own, a syllable written in jamo, a base with what extends it (its marks, the joiner U+200D, spacing marks) and a prepended character with what follows it, an Indic conjunct across its virama (GB9c), pictographs joined by U+200D (GB11), and regional indicators two by two (a flag).
+- [`BreakState`](#BreakState): What the rules of UAX #29 that look back past one character know of the text before a boundary: the regional indicators in a row before it (a flag is two), whether a pictograph with what extends it (1), and then a joiner (2), ends it (GB11), and whether a conjunct's consonant with its extenders (1), and then a virama among them (2), ends it (GB9c).
+- [`breaks_between`](#breaks_between): Whether a grapheme ends between a character of the grapheme properties `p` and one of `q`, the text before them being `state` (UAX #29's rules GB3 to GB999, in their order).
+- [`grapheme_property`](#grapheme_property): The grapheme properties of the code point `n`, as `grapheme_table()` writes them: its `Grapheme_Cluster_Break` value, 16 more for a pictograph, and its `Indic_Conjunct_Break` value times 32.
+- [`GCB_CR`](#GCB_CR)
+- [`GCB_LF`](#GCB_LF)
+- [`GCB_CONTROL`](#GCB_CONTROL)
+- [`GCB_EXTEND`](#GCB_EXTEND)
+- [`GCB_ZWJ`](#GCB_ZWJ)
+- [`GCB_REGIONAL`](#GCB_REGIONAL)
+- [`GCB_PREPEND`](#GCB_PREPEND)
+- [`GCB_SPACING_MARK`](#GCB_SPACING_MARK)
+- [`GCB_L`](#GCB_L)
+- [`GCB_V`](#GCB_V)
+- [`GCB_T`](#GCB_T)
+- [`GCB_LV`](#GCB_LV)
+- [`GCB_LVT`](#GCB_LVT)
+- [`INCB_CONSONANT`](#INCB_CONSONANT)
+- [`INCB_EXTEND`](#INCB_EXTEND)
+- [`INCB_LINKER`](#INCB_LINKER)
 - [`HANGUL_BASE`](#HANGUL_BASE)
 - [`HANGUL_L`](#HANGUL_L)
 - [`HANGUL_V`](#HANGUL_V)
@@ -609,7 +616,7 @@ normalisation forms need Unicode's tables, which are not here yet.
 - [`compatibility_table`](#compatibility_table): `CCCCCC-OOOO-LL`: the compatibility decomposition of `C`, the `L` code points of `compatibility_pool()` from the `O`th (3796 records).
 - [`compatibility_pool`](#compatibility_pool): The code points of the compatibility decompositions, six hexadecimal digits each, 24 to a line (5576 code points).
 - [`classes_table`](#classes_table): `LLLLLL-HHHHHH-CC`: the canonical combining class of the code points from `L` to `H`, for every class but 0 (388 records).
-- [`marks_table`](#marks_table): `LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a grapheme keeps after its base (310 records).
+- [`grapheme_table`](#grapheme_table): `LLLLLL-HHHHHH-PP`: the grapheme properties of the code points from `L` to `H` (UAX #29), `PP` their sum: the `Grapheme_Cluster_Break` value (`GCB_*`), 0x10 for `Extended_Pictographic`, and `Indic_Conjunct_Break` times 0x20 (`INCB_*`); a code point of none, and a Hangul syllable, whose class is computed, has no record (733 records).
 
 <a id="Builder"></a>
 ## `Builder`
@@ -781,14 +788,13 @@ pub trait Graphemes
 ```
 
 The graphemes of a text, what a reader takes for one character each (03:
-"`s.graphemes()` ... graphemes one method away"; Unicode's UAX #29), by
-the rules these tables carry: a base with the marks after it (and the
-variation selectors, the emoji modifiers and the tag characters), `\r\n`,
-a Hangul syllable written in jamo, two regional indicators (a flag), and
-a sequence joined by U+200D, each one grapheme; a control character is
-one of its own. The full rules would also keep a prepended character
-with what follows it (`Prepend`), join an Indic conjunct across its
-virama, and join after U+200D only between pictographs.
+"`s.graphemes()` ... graphemes one method away"), by every rule of
+Unicode's UAX #29 for extended grapheme clusters: `\r\n`, a control
+character of its own, a syllable written in jamo, a base with what
+extends it (its marks, the joiner U+200D, spacing marks) and a
+prepended character with what follows it, an Indic conjunct across its
+virama (GB9c), pictographs joined by U+200D (GB11), and regional
+indicators two by two (a flag).
 
 ```sisu
 var gs: list[str] = []
@@ -799,6 +805,10 @@ var family = 0
 for _ in "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}!".graphemes():
     family += 1
 assert family == 2
+var joined: list[str] = []
+for g in "a\u{200d}b\u{915}\u{94d}\u{937}".graphemes():
+    joined.push(g)
+assert joined == ["a\u{200d}", "b", "\u{915}\u{94d}\u{937}"]
 ```
 
 <a id="Graphemes.graphemes"></a>
@@ -810,97 +820,164 @@ pure def graphemes(self) -> Iter[str]
 
 Each grapheme, in order.
 
+<a id="BreakState"></a>
+## `BreakState`
+
+```sisu
+@derive(Copy)
+struct BreakState
+    regional: int
+    pictograph: int
+    conjunct: int
+```
+
+What the rules of UAX #29 that look back past one character know of the
+text before a boundary: the regional indicators in a row before it (a
+flag is two), whether a pictograph with what extends it (1), and then a
+joiner (2), ends it (GB11), and whether a conjunct's consonant with its
+extenders (1), and then a virama among them (2), ends it (GB9c).
+
+<a id="BreakState.after"></a>
+### `BreakState.after`
+
+```sisu
+pure def after(self, q: int) -> BreakState
+```
+
+The state after a character of the grapheme properties `q`.
+
 <a id="breaks_between"></a>
 ## `breaks_between`
 
 ```sisu
-pure def breaks_between(p: char, c: char, flags: int) -> bool
+pure def breaks_between(p: int, q: int, state: BreakState) -> bool
 ```
 
-Whether a grapheme ends between `p` and `c`, `flags` being the regional
-indicators of the grapheme so far.
+Whether a grapheme ends between a character of the grapheme properties
+`p` and one of `q`, the text before them being `state` (UAX #29's rules
+GB3 to GB999, in their order).
 
-<a id="is_control"></a>
-## `is_control`
+<a id="grapheme_property"></a>
+## `grapheme_property`
 
 ```sisu
-pure def is_control(n: int) -> bool
+pure def grapheme_property(n: int) -> int
 ```
 
-<a id="is_regional"></a>
-## `is_regional`
+The grapheme properties of the code point `n`, as `grapheme_table()`
+writes them: its `Grapheme_Cluster_Break` value, 16 more for a
+pictograph, and its `Indic_Conjunct_Break` value times 32.
+
+<a id="GCB_CR"></a>
+## `GCB_CR`
 
 ```sisu
-pure def is_regional(c: char) -> bool
+const GCB_CR: int
 ```
 
-<a id="extends"></a>
-## `extends`
+<a id="GCB_LF"></a>
+## `GCB_LF`
 
 ```sisu
-pure def extends(n: int) -> bool
+const GCB_LF: int
 ```
 
-What a grapheme keeps after its base: a mark, a variation selector, an
-emoji modifier, a tag character.
-
-<a id="jamo_l"></a>
-## `jamo_l`
+<a id="GCB_CONTROL"></a>
+## `GCB_CONTROL`
 
 ```sisu
-pure def jamo_l(n: int) -> bool
+const GCB_CONTROL: int
 ```
 
-<a id="jamo"></a>
-## `jamo`
+<a id="GCB_EXTEND"></a>
+## `GCB_EXTEND`
 
 ```sisu
-pure def jamo(n: int) -> int
+const GCB_EXTEND: int
 ```
 
-What `n` is of Hangul: a leading, a vowel or a final jamo, an open or
-a closed syllable, or none.
-
-<a id="JAMO_NONE"></a>
-## `JAMO_NONE`
+<a id="GCB_ZWJ"></a>
+## `GCB_ZWJ`
 
 ```sisu
-const JAMO_NONE: int
+const GCB_ZWJ: int
 ```
 
-<a id="JAMO_L"></a>
-## `JAMO_L`
+<a id="GCB_REGIONAL"></a>
+## `GCB_REGIONAL`
 
 ```sisu
-const JAMO_L: int
+const GCB_REGIONAL: int
 ```
 
-<a id="JAMO_V"></a>
-## `JAMO_V`
+<a id="GCB_PREPEND"></a>
+## `GCB_PREPEND`
 
 ```sisu
-const JAMO_V: int
+const GCB_PREPEND: int
 ```
 
-<a id="JAMO_T"></a>
-## `JAMO_T`
+<a id="GCB_SPACING_MARK"></a>
+## `GCB_SPACING_MARK`
 
 ```sisu
-const JAMO_T: int
+const GCB_SPACING_MARK: int
 ```
 
-<a id="JAMO_LV"></a>
-## `JAMO_LV`
+<a id="GCB_L"></a>
+## `GCB_L`
 
 ```sisu
-const JAMO_LV: int
+const GCB_L: int
 ```
 
-<a id="JAMO_LVT"></a>
-## `JAMO_LVT`
+<a id="GCB_V"></a>
+## `GCB_V`
 
 ```sisu
-const JAMO_LVT: int
+const GCB_V: int
+```
+
+<a id="GCB_T"></a>
+## `GCB_T`
+
+```sisu
+const GCB_T: int
+```
+
+<a id="GCB_LV"></a>
+## `GCB_LV`
+
+```sisu
+const GCB_LV: int
+```
+
+<a id="GCB_LVT"></a>
+## `GCB_LVT`
+
+```sisu
+const GCB_LVT: int
+```
+
+<a id="INCB_CONSONANT"></a>
+## `INCB_CONSONANT`
+
+```sisu
+const INCB_CONSONANT: int
+```
+
+<a id="INCB_EXTEND"></a>
+## `INCB_EXTEND`
+
+```sisu
+const INCB_EXTEND: int
+```
+
+<a id="INCB_LINKER"></a>
+## `INCB_LINKER`
+
+```sisu
+const INCB_LINKER: int
 ```
 
 <a id="HANGUL_BASE"></a>
@@ -1104,15 +1181,18 @@ pure def classes_table() -> str
 `LLLLLL-HHHHHH-CC`: the canonical combining class of the code points from
 `L` to `H`, for every class but 0 (388 records).
 
-<a id="marks_table"></a>
-## `marks_table`
+<a id="grapheme_table"></a>
+## `grapheme_table`
 
 ```sisu
-pure def marks_table() -> str
+pure def grapheme_table() -> str
 ```
 
-`LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a
-grapheme keeps after its base (310 records).
+`LLLLLL-HHHHHH-PP`: the grapheme properties of the code points from `L`
+to `H` (UAX #29), `PP` their sum: the `Grapheme_Cluster_Break` value
+(`GCB_*`), 0x10 for `Extended_Pictographic`, and `Indic_Conjunct_Break`
+times 0x20 (`INCB_*`); a code point of none, and a Hangul syllable,
+whose class is computed, has no record (733 records).
 
 ## Implementations
 
@@ -1145,7 +1225,10 @@ under the test clock.
 - [`Instant`](#Instant): A point on a clock's time line, to measure how long something took (11, `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time since, and the difference of two is a `Duration`; an instant is ordered but is not a civil time, and shows as its nanoseconds on its clock. Its readings are the clock's monotonic ones (`ClockOps.monotonic`, decision 643): on the host's clock the time since the run's first reading, which a change of the system's time does not move, and on the test clock its time, so that the test clock makes them deterministic; a recorded run replays them. Two instants of different clocks do not compare.
 - [`ZONES`](#ZONES): The zones whose rules `Zone.named` knows, each name with its rule as POSIX writes a `TZ` variable: the abbreviation and the offset west of UTC of its standard time, and of its daylight time with the rules of its start and its end (`M` month `.` week `.` weekday, `/` the local time), as the zones' rules stand since 2007 (decision 627).
 - [`Change`](#Change): A day a zone's rule changes its offset on: the `week`-th `weekday` (0 for Sunday) of `month`, week 5 being the last, at `seconds` of local time.
-- [`Zone`](#Zone): A time zone (11, `std.time`): the offset from UTC of its standard time and, when it has one, of its daylight time with the days that start and end it, each with the abbreviation it is shown with. `Zone.named` gives the zones of the table above by their names in the tz database; a time before the rules came into force is given today's rules (decision 627).
+- [`Zone`](#Zone): A time zone (11, `std.time`): the offset from UTC of its standard time and, when it has one, of its daylight time with the days that start and end it, each with the abbreviation it is shown with. `Zone.named` gives the zones of the table above by their names in the tz database, with each zone's history from the database (`zone_history`, below), so that a time before today's rules came into force has the offset the zone's clocks showed then (stage 1's RULES.md, R206).
+- [`Shift`](#Shift): A change of a zone's clocks in the tz database: from `at`, seconds since the epoch, they show `offset` seconds east of UTC, with the abbreviation, until the next.
+- [`FAR_PAST`](#FAR_PAST): Before every change the tz database records.
+- [`history`](#history): The history of the zone `name` from `zone_history()`: its time before its first change, at `FAR_PAST`, and each change; none for a zone without one.
 - [`change_seconds`](#change_seconds): The seconds since the epoch, as if UTC, of the local time a change gives in `year`.
 - [`offset_text`](#offset_text): An offset east of UTC as RFC 3339 writes it: `+05:30`, `-03:00`.
 - [`parse_rule`](#parse_rule): A rule as POSIX writes a `TZ` variable (the table's), or `None`.
@@ -1153,6 +1236,7 @@ under the test clock.
 - [`rule_seconds`](#rule_seconds): A signed `hh[:mm[:ss]]` from `at`, in seconds; and where it ends.
 - [`rule_change`](#rule_change): A change `Mm.w.d[/time]` from `at`, its time 02:00 when it gives none; and where it ends.
 - [`days_in_month`](#days_in_month): The days of `month` (1 for January to 12) in `year` of the proleptic Gregorian calendar: 29 for February of a leap year (one divisible by 4, and by 400 when by 100), 28 for another, 30 for April, June, September and November, and 31 for the rest. The prelude's own copy, which the standard library's code calls, is not a program's (stage 1's RULES.md, R183).
+- [`zone_history`](#zone_history): The history of each zone of `ZONES` that has one, a line each: `NAME|ABBR/OFFSET ...|AT/K ...`, its local time types, the first its time before its first change, and its changes, from `AT` (seconds since the epoch) to the `K`th type, up to the one from which its rule gives every later change (50 zones, 3545 changes).
 
 <a id="Ticker"></a>
 ## `Ticker`
@@ -1364,6 +1448,7 @@ pub struct Zone
     daylight: String
     daylight_offset: int
     rules: (Change, Change)?
+    past: list[Shift]
 
 ## A zone as the code that makes it writes it (decision 684):
 ## `Zone.named("Europe/Helsinki")`, `Zone.utc()` or `Zone.fixed(19800)`,
@@ -1374,8 +1459,10 @@ impl Debug for Zone
 A time zone (11, `std.time`): the offset from UTC of its standard time
 and, when it has one, of its daylight time with the days that start and
 end it, each with the abbreviation it is shown with. `Zone.named` gives
-the zones of the table above by their names in the tz database; a time
-before the rules came into force is given today's rules (decision 627).
+the zones of the table above by their names in the tz database, with
+each zone's history from the database (`zone_history`, below), so that
+a time before today's rules came into force has the offset the zone's
+clocks showed then (stage 1's RULES.md, R206).
 
 ```sisu
 let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
@@ -1385,6 +1472,8 @@ assert helsinki.offset_at(summer) == Duration.hours(3)
 assert helsinki.abbreviation_at(winter) == "EET"
 assert helsinki.format(summer) == "2026-07-01T15:00:00+03:00"
 assert helsinki.local(summer).hour() == 15
+let before = DateTime.parse("1950-07-01T12:00:00Z").expect("a time")
+assert helsinki.offset_at(before) == Duration.hours(2)
 assert Zone.named("Mars/Olympus").is_err()
 ```
 
@@ -1463,6 +1552,16 @@ pure def seconds_at(self, t: DateTime) -> int
 
 The offset at `t`, in seconds east of UTC.
 
+<a id="Zone.past_at"></a>
+### `Zone.past_at`
+
+```sisu
+pure def past_at(self, t: DateTime) -> int?
+```
+
+The index of the change of `past` in force at `t`, before the last
+change, from which the zone's rules hold; `None` from then on.
+
 <a id="Zone.daylight_at"></a>
 ### `Zone.daylight_at`
 
@@ -1474,6 +1573,41 @@ Whether daylight time is in force at `t`: from its start, a local
 standard time, to its end, a local daylight time, of the year `t`
 falls in locally; the end comes first in a year of the southern
 hemisphere.
+
+<a id="Shift"></a>
+## `Shift`
+
+```sisu
+@derive(Eq, Debug)
+struct Shift
+    at: int
+    offset: int
+    abbreviation: String
+```
+
+A change of a zone's clocks in the tz database: from `at`, seconds
+since the epoch, they show `offset` seconds east of UTC, with the
+abbreviation, until the next.
+
+<a id="FAR_PAST"></a>
+## `FAR_PAST`
+
+```sisu
+const FAR_PAST: int
+```
+
+Before every change the tz database records.
+
+<a id="history"></a>
+## `history`
+
+```sisu
+pure def history(name: str) -> list[Shift]
+```
+
+The history of the zone `name` from `zone_history()`: its time before
+its first change, at `FAR_PAST`, and each change; none for a zone
+without one.
 
 <a id="change_seconds"></a>
 ## `change_seconds`
@@ -1551,3 +1685,16 @@ assert days_in_month(2024, 2) == 29
 assert days_in_month(1900, 2) == 28
 assert days_in_month(2026, 11) == 30
 ```
+
+<a id="zone_history"></a>
+## `zone_history`
+
+```sisu
+pure def zone_history() -> str
+```
+
+The history of each zone of `ZONES` that has one, a line each:
+`NAME|ABBR/OFFSET ...|AT/K ...`, its local time types, the first its
+time before its first change, and its changes, from `AT` (seconds since
+the epoch) to the `K`th type, up to the one from which its rule gives
+every later change (50 zones, 3545 changes).

@@ -1,0 +1,1550 @@
+answer 0
+# digest: the API as `sisu doc --digest` writes it
+
+# module `digest`
+##! `sisu doc --digest` (RULES.md, R207; 10, "AI-assisted development"): each item's declaration with its inferred error set and contracts, the first paragraph of its doc comment, its capabilities, its typed holes and its first example, as one plain text.
+
+## A sauna's stove.
+pub struct Stove
+    pub heat: int
+    limit: int
+
+    ## The stove one step hotter, never past its limit.
+    ## ```
+    ## let s = Stove(heat=60, limit=90)
+    ## assert s.hotter().heat == 65
+    ## ```
+    pub def hotter(self) -> Stove
+
+error StoveError
+    TooHot(heat: int)
+
+## Checks the heat.
+pub def measure(heat: int) -> int ! StoveError  # inferred
+    requires heat >= 0
+
+## The log of the stove, written to `fs`.
+## Capabilities: `fs` (`Fs`).
+pub def save(fs: Fs, s: Stove) -> ! IoError
+
+## The stove's next setting, not written yet.
+## Unfinished: `todo("plan")`.
+pub def plan(s: Stove) -> int
+
+def main()
+answer 0
+# std: the API as `sisu doc --digest` writes it
+
+# module `std.time`
+##! `std.time` (11): `DateTime`, `Duration`, `Timer`, `TimeError` and the test clock `TestClock` are the prelude's, which this module also names; `Ticker` and `Timeline` (N-35, D-075) are written here, over a `Clock`, so the same code keeps real time in production and is deterministic under the test clock.
+##! Re-exports: `DateTime`: `std.core.DateTime`, `Duration`: `std.core.Duration`, `Timer`: `std.core.Timer`, `TimeError`: `std.core.TimeError`, `TestClock`: `std.core.TestClock`, `Clock`: `std.core.Clock`.
+
+## A periodic ticker that does not drift (N-35): its `n`-th tick is at `start + n * period` whatever each iteration took, so a slow iteration does not push the ticks after it back. A tick that passes while the loop is busy is skipped, not fired late, and counted in `missed`.
+## ```
+## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+## let start = clock.now()
+## var t = Ticker.every(clock, Duration.seconds(1))
+## t.wait().expect("not cancelled")
+## t.wait().expect("not cancelled")
+## assert clock.now() - start == Duration.seconds(2)
+## clock.advance(Duration.millis(3500))
+## t.wait().expect("not cancelled")
+## assert clock.now() - start == Duration.seconds(6)
+## assert t.missed == 3
+## ```
+pub struct Ticker
+    pub missed: int
+    # private fields
+
+    ## Ticks every `period`, the first a period from now.
+    ## Capabilities: `clock` (`Clock`).
+    pub def every(clock: Clock, period: Duration) -> Ticker
+        requires period > Duration.seconds(0)
+
+    ## Waits for the next tick still ahead, skipping those that passed.
+    ## Capabilities: `self` (`Clock`).
+    pub def wait(mut self) -> ! TaskError
+
+## Virtual time (Sonic Pi's model, N-35): `sleep(d)` moves the timeline's own time on by exactly `d` and then waits for the clock to reach it, so the time spent between sleeps does not accumulate as drift.
+## ```
+## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+## var tl = Timeline.start(clock)
+## let t0 = tl.now
+## tl.sleep(Duration.millis(250)).expect("not cancelled")
+## clock.advance(Duration.millis(100))
+## tl.sleep(Duration.millis(250)).expect("not cancelled")
+## assert tl.now - t0 == Duration.millis(500)
+## assert clock.now() - t0 == Duration.millis(500)
+## ```
+pub struct Timeline
+    pub now: DateTime
+    # private fields
+
+    ## A timeline whose time starts at the clock's.
+    ## Capabilities: `clock` (`Clock`).
+    pub def start(clock: Clock) -> Timeline
+
+    ## Moves the timeline on by `d`, and waits until the clock is there.
+    ## Capabilities: `self` (`Clock`).
+    pub def sleep(mut self, d: Duration) -> ! TaskError
+
+## A point on a clock's time line, to measure how long something took (11, `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time since, and the difference of two is a `Duration`; an instant is ordered but is not a civil time, and shows as its nanoseconds on its clock. Its readings are the clock's monotonic ones (`ClockOps.monotonic`, decision 643): on the host's clock the time since the run's first reading, which a change of the system's time does not move, and on the test clock its time, so that the test clock makes them deterministic; a recorded run replays them. Two instants of different clocks do not compare.
+## ```
+## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+## let start = Instant.now(clock)
+## clock.advance(Duration.millis(1500))
+## assert start.elapsed(clock) == Duration.millis(1500)
+## let later = Instant.now(clock)
+## assert later > start and later.since(start) == Duration.millis(1500)
+## assert start + Duration.seconds(2) > later
+## ```
+@derive(Copy, Eq, Ord, Hash, Debug)
+pub struct Instant
+    # private fields
+
+impl Add[Duration] for Instant
+impl Sub[Duration] for Instant
+impl Display for Instant
+
+    ## The clock's monotonic reading now.
+    ## Capabilities: `clock` (`Clock`).
+    pub def now(clock: Clock) -> Instant
+
+    ## The time from this instant to the clock's time now.
+    ## Capabilities: `clock` (`Clock`).
+    pub def elapsed(self, clock: Clock) -> Duration
+
+    ## The time from `earlier` to this instant, negative when `earlier` is the later one.
+    pub pure def since(self, earlier: Instant) -> Duration
+
+## A time zone (11, `std.time`): the offset from UTC of its standard time and, when it has one, of its daylight time with the days that start and end it, each with the abbreviation it is shown with. `Zone.named` gives the zones of the table above by their names in the tz database, with each zone's history from the database (`zone_history`, below), so that a time before today's rules came into force has the offset the zone's clocks showed then (stage 1's RULES.md, R206).
+## ```
+## let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+## let summer = DateTime.parse("2026-07-01T12:00:00Z").expect("a time")
+## let winter = DateTime.parse("2026-01-15T12:00:00Z").expect("a time")
+## assert helsinki.offset_at(summer) == Duration.hours(3)
+## assert helsinki.abbreviation_at(winter) == "EET"
+## assert helsinki.format(summer) == "2026-07-01T15:00:00+03:00"
+## assert helsinki.local(summer).hour() == 15
+## let before = DateTime.parse("1950-07-01T12:00:00Z").expect("a time")
+## assert helsinki.offset_at(before) == Duration.hours(2)
+## assert Zone.named("Mars/Olympus").is_err()
+## ```
+@derive(Eq)
+pub struct Zone
+    pub name: String
+    # private fields
+
+impl Debug for Zone
+
+    ## UTC itself.
+    pub pure def utc() -> Zone
+
+    ## A zone of one offset, `seconds` east of UTC, named `UTC+HH:MM`.
+    pub pure def fixed(seconds: int) -> Zone
+
+    ## The zone named `name` in the tz database, of the ones the table knows; `InvalidTime` for another name.
+    pub pure def named(name: str) -> Zone ! TimeError
+
+    ## The offset from UTC the zone's clocks show at `t`.
+    pub pure def offset_at(self, t: DateTime) -> Duration
+
+    ## The abbreviation the zone's time is shown with at `t`, as `EEST`.
+    pub pure def abbreviation_at(self, t: DateTime) -> String
+
+    ## The zone's wall-clock time at `t`, as a `DateTime` whose parts (`hour`, `day`, ...) are the local ones: `t` moved by its offset.
+    pub pure def local(self, t: DateTime) -> DateTime
+
+    ## `t` as RFC 3339 writes it in the zone, its local time and offset: `2026-07-01T15:00:00+03:00`.
+    pub pure def format(self, t: DateTime) -> String
+
+## The days of `month` (1 for January to 12) in `year` of the proleptic Gregorian calendar: 29 for February of a leap year (one divisible by 4, and by 400 when by 100), 28 for another, 30 for April, June, September and November, and 31 for the rest. The prelude's own copy, which the standard library's code calls, is not a program's (stage 1's RULES.md, R183).
+## ```
+## assert days_in_month(2024, 2) == 29
+## assert days_in_month(1900, 2) == 28
+## assert days_in_month(2026, 11) == 30
+## ```
+pub pure def days_in_month(year: int, month: int) -> int
+answer 0
+# shop: the API as `sisu doc --digest` writes it
+
+# module `shop`
+##! A shop: its items and their prices, and its orders.
+##! Re-exports: `Item`: `shop.items.Item`, `Priced`: `shop.items.Priced`, `LIMIT`: `shop.items.LIMIT`, `price_of`: `shop.items.price_of`, `Cost`: `shop.items.prices.Price`, `Cents`: `money.Cents`, `Duration`: `std.core.Duration`, `orders`: `shop.orders`.
+
+## The shop's name.
+const NAME: str
+
+# module `shop.items`
+##! Items, and what they cost.
+
+## The most items an order holds.
+const LIMIT: int
+
+## A thing for sale.
+pub view struct Item
+    pub name: str
+    # private fields
+
+impl Priced for Item
+
+    ## Its price, in cents.
+    pub def cost(self) -> int
+
+## What has a price.
+pub trait Priced
+
+    ## The price.
+    def price(self) -> int
+
+## The price of `item`.
+pub def price_of(item: Item) -> Price
+
+# module `shop.items.prices`
+##! Prices.
+
+## A price in cents.
+pub struct Price
+    pub cents: int
+
+# module `shop.orders`
+##! Orders of items.
+
+## Why an order fails.
+pub error OrderError
+    Late
+    Empty
+
+## An order's lines.
+pub struct Order
+    pub lines: list[int]
+
+## The total of an order, from errors of this module, of `money` and of the prelude.
+## Capabilities: `fs` (`Fs`).
+pub def total(order: Order, fs: Fs, path: Path) -> int ! {IoError, OrderError, money.MoneyError}  # inferred
+
+## Totals an order that is late, through `total`.
+## Capabilities: `fs` (`Fs`).
+pub def late(order: Order, fs: Fs) -> int ! {IoError, OrderError, money.MoneyError}  # inferred
+
+impl Display for Item
+answer 0
+# mutant 0: mutants.sisu:7:10: the boundary changed: `>` to `>=`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = ge copy _1, copy _2 @7:8-7:17
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:17
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:39
+  bb1:
+    _0 = not const false @12:30-12:39
+    return @12:5-12:39
+  bb2:
+    return @12:5-12:39
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+    let _9: int
+    let _10: int
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    _9 = copy _8.* @17:16-17:17
+    _10 = add copy _2, copy _9 @17:9-17:17
+    _2 = move _10 @17:9-17:17
+    goto bb2
+  bb4:
+    drop _3 @17:17-17:17
+    goto bb5
+  bb5:
+    dead _3 @17:17-17:17
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+# mutant 1: mutants.sisu:9:14: the operator flipped: `+` to `-`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = sub copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:39
+  bb1:
+    _0 = not const false @12:30-12:39
+    return @12:5-12:39
+  bb2:
+    return @12:5-12:39
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+    let _9: int
+    let _10: int
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    _9 = copy _8.* @17:16-17:17
+    _10 = add copy _2, copy _9 @17:9-17:17
+    _2 = move _10 @17:9-17:17
+    goto bb2
+  bb4:
+    drop _3 @17:17-17:17
+    goto bb5
+  bb5:
+    dead _3 @17:17-17:17
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+# mutant 2: mutants.sisu:12:20: the boundary changed: `>=` to `>`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = gt copy _1, const 60 @12:12-12:24
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:38
+  bb1:
+    _0 = not const false @12:29-12:38
+    return @12:5-12:38
+  bb2:
+    return @12:5-12:38
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+    let _9: int
+    let _10: int
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    _9 = copy _8.* @17:16-17:17
+    _10 = add copy _2, copy _9 @17:9-17:17
+    _2 = move _10 @17:9-17:17
+    goto bb2
+  bb4:
+    drop _3 @17:17-17:17
+    goto bb5
+  bb5:
+    dead _3 @17:17-17:17
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+# mutant 3: mutants.sisu:12:26: the operator flipped: `and` to `or`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb1, else: bb2] @12:12-12:38
+  bb1:
+    _0 = not const false @12:29-12:38
+    return @12:5-12:38
+  bb2:
+    return @12:5-12:38
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+    let _9: int
+    let _10: int
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    _9 = copy _8.* @17:16-17:17
+    _10 = add copy _2, copy _9 @17:9-17:17
+    _2 = move _10 @17:9-17:17
+    goto bb2
+  bb4:
+    drop _3 @17:17-17:17
+    goto bb5
+  bb5:
+    dead _3 @17:17-17:17
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+# mutant 4: mutants.sisu:12:30: the negation removed: `not False` to `False`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:35
+  bb1:
+    _0 = const false @12:30-12:35
+    return @12:5-12:35
+  bb2:
+    return @12:5-12:35
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+    let _9: int
+    let _10: int
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    _9 = copy _8.* @17:16-17:17
+    _10 = add copy _2, copy _9 @17:9-17:17
+    _2 = move _10 @17:9-17:17
+    goto bb2
+  bb4:
+    drop _3 @17:17-17:17
+    goto bb5
+  bb5:
+    dead _3 @17:17-17:17
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+# mutant 5: mutants.sisu:12:34: the operator flipped: `False` to `True`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:38
+  bb1:
+    _0 = not const true @12:30-12:38
+    return @12:5-12:38
+  bb2:
+    return @12:5-12:38
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+    let _9: int
+    let _10: int
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    _9 = copy _8.* @17:16-17:17
+    _10 = add copy _2, copy _9 @17:9-17:17
+    _2 = move _10 @17:9-17:17
+    goto bb2
+  bb4:
+    drop _3 @17:17-17:17
+    goto bb5
+  bb5:
+    dead _3 @17:17-17:17
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+# mutant 6: mutants.sisu:17:9: the statement removed: `sum += x`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:39
+  bb1:
+    _0 = not const false @12:30-12:39
+    return @12:5-12:39
+  bb2:
+    return @12:5-12:39
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    goto bb2
+  bb4:
+    drop _3 @17:13-17:13
+    goto bb5
+  bb5:
+    dead _3 @17:13-17:13
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}
+answer 0
+# mutant 6: mutants.sisu:17:9: the statement removed: `sum += x`
+sir 0
+source 0 "mutants.sisu"
+entry main
+test "clamps" test#0
+
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic assert.fail pure
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic iter.ref pure from 0
+intrinsic print
+
+fn clamp(2) source 0 @5:5-5:10 {
+    let _0: int
+    let _1: int "n" @5:11-5:17
+    let _2: int "high" @5:19-5:28
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: bool
+    let _8: ref String
+    let _9: bool
+  bb0:
+    _4 = call intrinsic fmt.new() @6:11-6:29
+    _5 = ref mut _4 @6:11-6:29
+    _6 = call intrinsic fmt.text(copy _5, const "clamping ") @6:11-6:29
+    _7 = lt copy _1, const 0 @6:22-6:27
+    _6 = call intrinsic fmt.display(copy _5, copy _7, const "") @6:22-6:27
+    goto bb1
+  bb1 (unwind bb2):
+    _8 = ref _4 @6:11-6:29
+    _3 = call intrinsic print(copy _8) @6:5-6:30
+    goto bb3
+  bb2 (cleanup):
+    drop _4
+    resume
+  bb3:
+    drop _4 @6:30-6:30
+    goto bb4
+  bb4:
+    dead _4 @6:30-6:30
+    _9 = gt copy _1, copy _2 @7:8-7:16
+    switch copy _9 [0: bb5, else: bb6] @7:8-7:16
+  bb5:
+    _0 = add copy _1, const 0 @9:12-9:17
+    return @9:5-9:17
+  bb6:
+    _0 = copy _2 @8:16-8:20
+    return @8:9-8:20
+}
+
+fn warm(1) source 0 @11:5-11:9 {
+    let _0: bool
+    let _1: int "degrees" @11:10-11:22
+  bb0:
+    _0 = ge copy _1, const 60 @12:12-12:25
+    switch copy _0 [0: bb2, else: bb1] @12:12-12:39
+  bb1:
+    _0 = not const false @12:30-12:39
+    return @12:5-12:39
+  bb2:
+    return @12:5-12:39
+}
+
+fn total(1) source 0 @14:5-14:10 {
+    let _0: int
+    let _1: ref list[int] "xs" @14:11-14:24
+    let _2: int "sum" @15:9-15:12
+    let _3: Iter[ref int]
+    let _4: ref list[int]
+    let _5: ref mut Iter[ref int]
+    let _6: Option[ref int]
+    let _7: int
+    let _8: ref int "x" @16:9-16:10
+  bb0:
+    _2 = const 0 @15:15-15:16
+    _4 = ref _1.* @16:14-16:16
+    _3 = call intrinsic iter.ref(copy _4) @16:5-16:16
+    goto bb2
+  bb1 (cleanup):
+    drop _3
+    resume
+  bb2 (unwind bb1):
+    _5 = ref mut _3 @16:5-16:16
+    _6 = call intrinsic Iter.next(copy _5) @16:5-16:16
+    _7 = discriminant _6 @16:5-16:16
+    switch copy _7 [0: bb3, else: bb4] @16:5-16:16
+  bb3 (unwind bb1):
+    _8 = copy _6.as(0).0 @16:9-16:10
+    goto bb2
+  bb4:
+    drop _3 @17:13-17:13
+    goto bb5
+  bb5:
+    dead _3 @17:13-17:13
+    _0 = copy _2 @18:12-18:15
+    return @18:5-18:15
+}
+
+fn test#0(0) test source 0 @20:6-20:14 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: list[int]
+    let _8: ref list[int]
+    let _9: bool
+    let _10: Never
+  bb0:
+    _1 = call fn clamp(const 5, const 3) @21:12-21:23
+    _2 = eq copy _1, const 3 @21:5-21:28
+    switch copy _2 [0: bb2, else: bb1] @21:5-21:28
+  bb1:
+    _4 = call fn warm(const 80) @22:12-22:20
+    switch copy _4 [0: bb4, else: bb3] @22:5-22:20
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "clamp(5, 3) == 3", const "", copy _1, const 3) @21:5-21:28
+    unreachable @21:5-21:28
+  bb3:
+    _7 = list(const 1, const 2) @23:18-23:24
+    goto bb5
+  bb4:
+    _5 = call intrinsic assert.fail(const "warm(80)", const "") @22:5-22:20
+    unreachable @22:5-22:20
+  bb5 (unwind bb6):
+    _8 = ref _7 @23:18-23:24
+    _6 = call fn total(copy _8) @23:12-23:25
+    _9 = eq copy _6, const 3 @23:5-23:30
+    switch copy _9 [0: bb7, else: bb8] @23:5-23:30
+  bb6 (cleanup):
+    drop _7
+    resume
+  bb7 (unwind bb6):
+    _10 = call intrinsic assert.fail_compare(const "total([1, 2]) == 3", const "", copy _6, const 3) @23:5-23:30
+    unreachable @23:5-23:30
+  bb8:
+    drop _7 @23:30-23:30
+    goto bb9
+  bb9:
+    dead _7 @23:30-23:30
+    _0 = const ()
+    return
+}
+
+fn main(0) source 0 @25:5-25:9 {
+    let _0: ()
+    let _1: ()
+    let _2: int
+  bb0:
+    _2 = call fn clamp(const 2, const 9) @26:11-26:22
+    _1 = call intrinsic print(copy _2) @26:5-26:23
+    _0 = const ()
+    return
+}

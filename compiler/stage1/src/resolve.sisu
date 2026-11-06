@@ -3288,11 +3288,8 @@ pure def screaming(name: str) -> bool:
 pure def confusable(name: str, ascii: bool, shape: str, other: str) -> bool:
     if other == name or other.is_empty():
         return False
-    let other_ascii = is_ascii(other)
-    if ascii and other_ascii:
+    if ascii and is_ascii(other):
         return False
-    if other_ascii:
-        return other == shape
     return skeleton(other) == shape
 
 ## A script's name as a message writes it: `LATIN` as `Latin`.

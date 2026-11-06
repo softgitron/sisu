@@ -1,0 +1,26 @@
+# The mutants of `sisu test --mutate` (RULES.md, R208; 17, "Coverage and
+# mutation"): `sir --tests --mutants` prints each mutant's SIR after a line
+# that says what it changes, where; the call of `print` is arid, and the
+# test is not mutated.
+def clamp(n: int, high: int) -> int:
+    print("clamping {n < 0}")
+    if n > high:
+        return high
+    return n + 0
+
+def warm(degrees: int) -> bool:
+    return degrees >= 60 and not False
+
+def total(xs: list[int]) -> int:
+    var sum = 0
+    for x in xs:
+        sum += x
+    return sum
+
+test "clamps":
+    assert clamp(5, 3) == 3
+    assert warm(80)
+    assert total([1, 2]) == 3
+
+def main():
+    print(clamp(2, 9))

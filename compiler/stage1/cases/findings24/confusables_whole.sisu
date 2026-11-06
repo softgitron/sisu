@@ -1,0 +1,15 @@
+# D-048's lints read Unicode's own `Scripts.txt` and `confusables.txt`
+# whole (RULES.md, R205): the Cyrillic `г` reads as `r`, and `m` as `rn`,
+# which the subset of R136 did not know, and the modifier letter `ʰ` is
+# Latin, where a letter's name gave it no script.
+def run() -> int:
+    return 1
+
+def modern() -> int:
+    return 2
+
+def main():
+    let гun = 3
+    let rnоdern = 4
+    let αʰ = 5
+    print(гun + rnоdern + αʰ + run() + modern())
