@@ -197,6 +197,8 @@ sisu run -- doc [--std] --digest [PATH] [--output DIR]  # the API as one plain t
 sisu run -- sir --tests (--mutants | --mutant=K) [PATH]  # each mutant of `sisu test --mutate` after a line `# mutant K: FILE:LINE:COL: WHAT` (R208)
 sisu run -- sir --tests --cover [PATH]      # the SIR, then a line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and branch, for `sisu test --cover` (R216)
 sisu run -- sir --tests --module-fixtures [PATH]  # each test's fixtures on its line, a module's fixture the test's `ref T` parameter (R219)
+sisu run -- sir --tests --std               # outside a package: the standard library's doc examples alone, as tests of an empty `examples.sisu` (R221)
+sisu run -- sir --tests --transcripts [PATH]  # the world of transcripts kept whatever is beside the program, for the driver (R223)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
@@ -3098,6 +3100,56 @@ finding, `sir --tests --cover` with its lines, and `sir --tests
 --module-fixtures` with its groups, each served. The new cases are in
 `cases/findings25/`.
 
+### The twenty-sixth round: a memo between a server's requests, the examples alone, `@no_alloc` at each instance, the transcripts' world, `test --std`'s speed, D-060's allocators planned
+
+This round took what decision 1200 asks of stage 1 (a save of `sisu run
+--watch` as fast as the Rust front end's kept queries), decision 1144's
+leftover, R215's open item, port-debt.md's transcripts, `test --std`'s
+3.1 s and the manual's allocators. RULES.md has the rules (R220 to R226,
+decisions 1220 to 1226) and their decision texts:
+
+- **A memo between a server's requests** (R220): the server's base parses
+  every std module a program may import once, for the resolver and the
+  name pass; each module's parse is the name pass's and the checker's,
+  and the server keeps it while its text is unchanged; the standard
+  library's bodies as a request typed, lowered and placed them are kept
+  for the next request, as a batch keeps them for its next program; and
+  `build` takes its SIR from the one check that made its report, without
+  copying the served base. A save of `live/swap` takes MEASURE_SWAP
+  served where it took MEASURE_SWAP_BEFORE; each answer is a fresh
+  request's bytes.
+- **The examples alone** (R221): `sir --tests --std` and `test --std`
+  naming no path outside a package lower and run the standard library's
+  doc examples as the tests of an empty `examples.sisu`.
+- **`@no_alloc` at each instance** (R222): a generic `@no_alloc`
+  function is checked as written for what allocates whatever its
+  arguments are, and at each instance the program makes for what depends
+  on them, `total[Big]` named with a note where the program makes it.
+- **The transcripts' world** (R223): `sir --tests --transcripts` keeps
+  `transcript_world` and `transcript_system` on the driver's word; the
+  round found the driver already runs every transcript from stage 1's
+  SIR but for its fallbacks, which the option lets it delete.
+- **`test --std`'s speed** (R224): the examples' modules are made once
+  for a check, where each round of resolution made them again.
+- **D-060's allocators** (R225), planned in five steps; the first,
+  the defaulted parameter on the prelude's collections, decided against
+  for the round, since it changes the prelude stage 0's agent shares.
+- **The merge's differences** (R226): none; the conformance suite's `testing/mutants` differs in nothing.
+
+Decided against: a memo of the resolver's, the checker's, lowering's and
+the ownership checker's results for the unchanged modules (R220), which
+need each body's dependencies on the other modules' declarations, which
+no phase records; and step 1 of the allocators for the round (R225).
+Open: the runner's halves of `--cover`, `--mutate` and a module's
+fixture (R216, R208, R219), stage 0's; compile-time types (R155); the
+allocators' steps (R225).
+
+Stage 1's version is 0.21.0. The driver may rely on `sir --tests --std`
+and `test --std` with no path outside a package, their first source
+`examples.sisu` (R221), and `sir --tests --transcripts` (R223), each
+served; the memo (R220) changes no answer. The new cases are in
+`cases/findings26/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3993,6 +4045,32 @@ each function's answer kept; `sir --tests --cover` of `cover.sisu` 0.26
 to 0.28 s against `sir --tests`'s 0.27 to 0.32 s, the table one parse of
 each module and a read of the SIR's text.
 
+The twenty-sixth round measured a served save and the standard library's
+examples. A save of `live/swap` (`build --for-run --emit-sir`, served)
+took 1.18 G instructions under callgrind: the copy and the drop of the
+served base 0.23 G, a second check, lowering and ownership check of the
+same program for its SIR 0.31 G, `std.time` parsed three times (once by
+the name pass, once in each check's import) 0.12 G, and the std bodies
+typed and lowered again 0.14 G. R220 takes all four: the save takes
+MEASURE_SWAP where it took MEASURE_SWAP_BEFORE (the mean of 20 after the
+first, at a load of about 8 to 10). A `query diagnostics` of a module of
+`compiler/rt`, 18 modules and 7,624 lines, takes MEASURE_RT where it took
+MEASURE_RT_BEFORE: the parse of its modules was 1 G of its 16 G
+instructions; the rest is the program's own type check (3.7 G), lowering
+and ownership check (11 G), done again at each request, which only a
+memo of each body's results, with the dependencies no phase records,
+would shorten. `sir --tests --std` of no program took 28.6 G
+instructions, the base made whole among them: its check 7.5 G, 4.2 G of
+it declaring the examples in each of two rounds of resolution, lowering
+8.9 G (the 815 std bodies the examples reach typed, 3.6 G, and lowered,
+3.6 G) and the ownership checker 5.5 G (its elaboration 2.2 G). R224
+makes the examples' modules once a check: 26.9 G, and natively 2.9 to
+3.3 s of user time where it took 3.4 to 3.6 s; what is left is the
+examples' own reach into the standard library, typed, lowered and
+checked once a process (a server's later request takes them from its
+`Kept`), and the parse of every documented module for the examples'
+places (1.8 G), which a base that kept its modules' syntax would give.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -4231,7 +4309,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     fixtures on the test lines (R219); decided against again: `sisu
     doc`'s values (R217); left: compile-time types (R155), `@no_alloc` at
     each instantiation of a generic function (R215), and the runner's
-    halves of `--cover`, `--mutate` and a module's fixture, stage 0's. The tenth round took a variant's
+    halves of `--cover`, `--mutate` and a module's fixture, stage 0's. The
+    twenty-sixth round took `@no_alloc` at each instance of a generic
+    function (R222) and planned D-060's allocators (R225); decided against
+    for the round: the allocators' first step, the defaulted parameter on
+    the prelude's collections (R225); left: compile-time types (R155), the
+    allocators' steps (R225), and the runner's halves of `--cover`,
+    `--mutate` and a module's fixture, stage 0's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

@@ -1,0 +1,1566 @@
+answer 0
+answer 0
+# executable memo
+sir 0
+source 0 "memo.sisu"
+source 1 "<std>/prelude.sisu"
+entry main
+
+struct Duration { nanos: int }
+
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic print
+
+fn wait_of(1) source 0 @8:5-8:12 {
+    let _0: Duration
+    let _1: int "steps" @8:13-8:23
+    let _2: int
+  bb0:
+    _2 = mul copy _1, const 16 @9:28-9:38
+    _0 = call fn Duration.millis(copy _2) @9:12-9:39
+    return @9:5-9:39
+}
+
+fn label(1) source 0 @11:5-11:10 {
+    let _0: String
+    let _1: int "n" @11:11-11:17
+    let _2: int "unused" @12:9-12:15
+    let _3: ref mut String
+    let _4: ()
+  bb0:
+    _2 = add copy _1, const 1 @12:18-12:23
+    _0 = call intrinsic fmt.new() @13:12-13:22
+    _3 = ref mut _0 @13:12-13:22
+    _4 = call intrinsic fmt.text(copy _3, const "step ") @13:12-13:22
+    _4 = call intrinsic fmt.display(copy _3, copy _1, const "") @13:19-13:20
+    return @13:5-13:22
+}
+
+fn main(0) source 0 @15:5-15:9 {
+    let _0: ()
+    let _1: ()
+    let _2: String
+    let _3: int
+    let _4: Duration
+    let _5: ref String
+  bb0:
+    _4 = call fn wait_of(const 2) @16:17-16:27
+    _3 = call fn Duration.as_millis(copy _4) @16:17-16:39
+    _2 = call fn label(copy _3) @16:11-16:40
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = ref _2 @16:11-16:40
+    _1 = call intrinsic print(copy _5) @16:5-16:41
+    goto bb3
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3:
+    drop _2 @16:41-16:41
+    goto bb4
+  bb4:
+    dead _2 @16:41-16:41
+    _0 = const ()
+    return
+}
+
+fn Duration.millis(1) pure source 1 @2674:14-2674:20 {
+    let _0: Duration
+    let _1: int "n" @2674:21-2674:27
+    let _2: int
+  bb0:
+    _2 = mul copy _1, const 1000000 @2675:31-2675:42
+    _0 = struct Duration(copy _2) @2675:16-2675:43
+    return @2675:9-2675:43
+}
+
+fn Duration.as_millis(1) pure source 1 @2685:14-2685:23 {
+    let _0: int
+    let _1: Duration "self" @2685:14-2685:23
+  bb0:
+    _0 = floordiv copy _1.0, const 1000000 @2686:16-2686:37
+    return @2686:9-2686:37
+}
+answer 0
+13:12-13:13	E0300	type.mismatch	error	expected `String`, found `int`
+answer 0
+answer 0
+# executable memo
+sir 0
+source 0 "memo.sisu"
+source 1 "<std>/prelude.sisu"
+entry main
+
+struct Duration { nanos: int }
+
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic print
+
+fn wait_of(1) source 0 @8:5-8:12 {
+    let _0: Duration
+    let _1: int "steps" @8:13-8:23
+    let _2: int
+  bb0:
+    _2 = mul copy _1, const 16 @9:28-9:38
+    _0 = call fn Duration.millis(copy _2) @9:12-9:39
+    return @9:5-9:39
+}
+
+fn label(1) source 0 @11:5-11:10 {
+    let _0: String
+    let _1: int "n" @11:11-11:17
+    let _2: int "unused" @12:9-12:15
+    let _3: ref mut String
+    let _4: ()
+  bb0:
+    _2 = add copy _1, const 1 @12:18-12:23
+    _0 = call intrinsic fmt.new() @13:12-13:22
+    _3 = ref mut _0 @13:12-13:22
+    _4 = call intrinsic fmt.text(copy _3, const "step ") @13:12-13:22
+    _4 = call intrinsic fmt.display(copy _3, copy _1, const "") @13:19-13:20
+    return @13:5-13:22
+}
+
+fn main(0) source 0 @15:5-15:9 {
+    let _0: ()
+    let _1: ()
+    let _2: String
+    let _3: int
+    let _4: Duration
+    let _5: ref String
+  bb0:
+    _4 = call fn wait_of(const 2) @16:17-16:27
+    _3 = call fn Duration.as_millis(copy _4) @16:17-16:39
+    _2 = call fn label(copy _3) @16:11-16:40
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = ref _2 @16:11-16:40
+    _1 = call intrinsic print(copy _5) @16:5-16:41
+    goto bb3
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3:
+    drop _2 @16:41-16:41
+    goto bb4
+  bb4:
+    dead _2 @16:41-16:41
+    _0 = const ()
+    return
+}
+
+fn Duration.millis(1) pure source 1 @2674:14-2674:20 {
+    let _0: Duration
+    let _1: int "n" @2674:21-2674:27
+    let _2: int
+  bb0:
+    _2 = mul copy _1, const 1000000 @2675:31-2675:42
+    _0 = struct Duration(copy _2) @2675:16-2675:43
+    return @2675:9-2675:43
+}
+
+fn Duration.as_millis(1) pure source 1 @2685:14-2685:23 {
+    let _0: int
+    let _1: Duration "self" @2685:14-2685:23
+  bb0:
+    _0 = floordiv copy _1.0, const 1000000 @2686:16-2686:37
+    return @2686:9-2686:37
+}
+answer 1
+error[E0282]: `total[Big]` is `@no_alloc`, but `Big.Weighed.weight` may allocate
+  --> no_alloc_instances.sisu:31:16
+   |
+31 |         sum += xs[i].weight()
+   |                ^^^^^^^^^^^^^^
+  = note: `Big.Weighed.weight` calls `list.push`, at no_alloc_instances.sisu:24:9
+  = note: in this instance, which the program makes at no_alloc_instances.sisu:43:11
+
+error[E0282]: `pair` is `@no_alloc`, but the list it makes may allocate
+  --> no_alloc_instances.sisu:36:16
+   |
+36 |     let both = [1, 2]
+   |                ^^^^^^
+
+error: Failed
+answer 0
+sir 0
+source 0 "world.sisu"
+source 1 "<std>/prelude.sisu"
+source 2 "<std>/cap.sisu"
+entry main
+test "greets" test#0
+
+struct u8 {  }
+
+struct bytes {  }
+
+struct TestClock {  }
+
+struct Cap[T] {  }
+
+struct Mutex[T] {  }
+
+struct TranscriptWorld { fs: Fs, clock: Clock, rand: Rand }
+
+struct cap.MemFile { data: bytes, modified: DateTime }
+
+struct cap.MemFs { files: Mutex[dict[String, cap.MemFile]], dirs: Mutex[set[String]] }
+
+struct cap.NoNet {  }
+
+struct cap.SeededRand { state: Mutex[int] }
+
+struct cap.FakeEnv { args: list[String], vars: dict[String, String] }
+
+struct cap.FakeStdin { state: Cap[Mutex[cap.FakeLines]] }
+
+struct cap.FakeLines { lines: list[String], next: int }
+
+struct cap.FakeProc { outputs: dict[String, String] }
+
+intrinsic Cap.new pure from 0 own 0
+intrinsic Clock.fake
+intrinsic DateTime.from_unix_nanos pure
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic Iter.of pure from 0 own 0 keeps 0
+intrinsic Mutex.new pure from 0 own 0
+intrinsic String.new pure
+intrinsic String.push pure
+intrinsic System.assemble own 0 1 2 3 4 5 6
+intrinsic TestClock.set
+intrinsic assert.fail_parts pure
+intrinsic cap.new pure own 0 keeps 0
+intrinsic clock.now
+intrinsic dict.insert pure from 1 2 inner 0 own 1 2 keeps 0 2
+intrinsic dict.items pure from 0
+intrinsic dict.new pure
+intrinsic fmt.debug pure
+intrinsic fmt.new pure
+intrinsic iter.ref pure from 0
+intrinsic list.push pure own 1 keeps 0 1
+intrinsic max pure inner 0 1
+intrinsic panic pure
+intrinsic print
+intrinsic range pure
+intrinsic set.new pure
+intrinsic str.byte_at pure
+intrinsic str.byte_len pure
+intrinsic str.byte_slice pure from 0
+intrinsic str.encode pure
+intrinsic str.to_string pure
+
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: ()
+  bb0:
+    _1 = call intrinsic print(const "hello") @5:5-5:19
+    _0 = const ()
+    return
+}
+
+fn test#0(0) test source 0 @7:6-7:14 {
+    let _0: ()
+    let _1: bool
+    let _2: int
+    let _3: String
+    let _4: ref mut String
+    let _5: int
+    let _6: ()
+    let _7: (int, String)
+    let _8: list[(int, String)]
+    let _9: Never
+  bb0:
+    _2 = add const 1, const 1 @8:12-8:17
+    _1 = eq copy _2, const 2 @8:12-8:22
+    switch copy _1 [0: bb2, else: bb1] @8:5-8:22
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _3 = call intrinsic fmt.new() @8:12-8:17
+    _4 = ref mut _3 @8:12-8:17
+    _5 = add const 1, const 1 @8:12-8:17
+    _6 = call intrinsic fmt.debug(copy _4, copy _5, const "") @8:12-8:17
+    goto bb3
+  bb3 (unwind bb4):
+    _7 = tuple(const 2, move _3) @8:5-8:22
+    _8 = list(move _7) @8:5-8:22
+    _9 = call intrinsic assert.fail_parts(const "1 + 1 == 2", const "", move _8) @8:5-8:22
+    unreachable @8:5-8:22
+  bb4 (cleanup):
+    resume
+}
+
+fn transcript_world(1) source 1 own 0 @4153:5-4153:21 {
+    let _0: TranscriptWorld
+    let _1: list[(str, str)] "files" @4153:22-4153:49
+    let _2: dict[str, str] "d" @4154:9-4154:10
+    let _3: Iter[ref (str, str)]
+    let _4: ref list[(str, str)]
+    let _5: ref mut Iter[ref (str, str)]
+    let _6: Option[ref (str, str)]
+    let _7: int
+    let _8: str "path" @4155:9-4155:13
+    let _9: str "text" @4155:15-4155:19
+    let _10: Option[str]
+    let _11: ref mut dict[str, str]
+    let _12: Fs
+    let _13: ref dict[str, str]
+    let _14: Clock
+    let _15: TestClock
+    let _16: DateTime
+    let _17: Rand
+  bb0 (unwind bb1):
+    _2 = call intrinsic dict.new[str, str]() @4154:29-4154:35
+    goto bb2
+  bb1 (cleanup):
+    drop _1
+    resume
+  bb2 (unwind bb3):
+    _4 = ref _1 @4155:23-4155:28
+    _3 = call intrinsic iter.ref(copy _4) @4155:5-4155:28
+    goto bb5
+  bb3 (cleanup):
+    drop _2
+    goto bb1
+  bb4 (cleanup):
+    drop _3
+    goto bb3
+  bb5 (unwind bb4):
+    _5 = ref mut _3 @4155:5-4155:28
+    _6 = call intrinsic Iter.next(copy _5) @4155:5-4155:28
+    _7 = discriminant _6 @4155:5-4155:28
+    switch copy _7 [0: bb6, else: bb7] @4155:5-4155:28
+  bb6 (unwind bb4):
+    _8 = copy _6.as(0).0.*.0 @4155:9-4155:13
+    _9 = copy _6.as(0).0.*.1 @4155:15-4155:19
+    _11 = ref mut _2 @4156:13-4156:14
+    _10 = call intrinsic dict.insert(copy _11, copy _8, copy _9) @4156:13-4156:33
+    goto bb5
+  bb7 (unwind bb3):
+    drop _3 @4156:33-4156:33
+    goto bb8
+  bb8 (unwind bb3):
+    dead _3 @4156:33-4156:33
+    _13 = ref _2 @4158:25-4158:26
+    _12 = call fn Fs.in_memory(copy _13) @4158:12-4158:27
+    goto bb9
+  bb9 (unwind bb10):
+    _16 = call fn DateTime.epoch() @4158:51-4158:67
+    _15 = call fn Clock.frozen_at(copy _16) @4158:35-4158:68
+    _14 = call intrinsic cap.new[TestClock, Clock](copy _15) @4158:35-4158:68
+    goto bb11
+  bb10 (cleanup):
+    drop _12
+    goto bb3
+  bb11 (unwind bb12):
+    _17 = call fn Rand.seeded(const 0) @4158:75-4158:89
+    goto bb13
+  bb12 (cleanup):
+    drop _14
+    goto bb10
+  bb13 (unwind bb3):
+    _0 = struct TranscriptWorld(move _12, move _14, move _17) @4157:12-4159:6
+    goto bb14
+  bb14 (unwind bb1):
+    drop _2 @4157:5-4159:6
+    goto bb15
+  bb15:
+    drop _1 @4157:5-4159:6
+    return @4157:5-4159:6
+}
+
+fn transcript_system(3) source 1 own 0 1 2 @4162:5-4162:22 {
+    let _0: System
+    let _1: TranscriptWorld "world" @4163:5-4163:31
+    let _2: list[str] "args" @4163:33-4163:52
+    let _3: list[str] "stdin" @4163:54-4163:74
+    let _4: Net
+    let _5: cap.NoNet
+    let _6: Env
+    let _7: ref list[str]
+    let _8: dict[str, str]
+    let _9: ref dict[str, str]
+    let _10: Proc
+    let _11: dict[str, str]
+    let _12: ref dict[str, str]
+    let _13: Stdin
+    let _14: ref list[str]
+  bb0 (unwind bb3):
+    _5 = struct cap.NoNet() @4167:13-4167:24
+    _4 = call intrinsic cap.new[cap.NoNet, Net](copy _5) @4167:13-4167:24
+    goto bb4
+  bb1 (cleanup):
+    drop _1
+    resume
+  bb2 (cleanup):
+    drop _2
+    goto bb1
+  bb3 (cleanup):
+    drop _3
+    goto bb2
+  bb4 (unwind bb5):
+    _7 = ref _2 @4170:22-4170:26
+    _8 = call fn Env.fake#vars() @4170:13-4170:27
+    goto bb6
+  bb5 (cleanup):
+    drop _4
+    goto bb3
+  bb6 (unwind bb7):
+    _9 = ref _8 @4170:13-4170:27
+    _6 = call fn Env.fake(copy _7, copy _9) @4170:13-4170:27
+    goto bb8
+  bb7 (cleanup):
+    drop _8
+    goto bb5
+  bb8 (unwind bb9):
+    _11 = call fn Proc.fake#outputs() @4171:14-4171:25
+    goto bb10
+  bb9 (cleanup):
+    drop _6
+    goto bb7
+  bb10 (unwind bb11):
+    _12 = ref _11 @4171:14-4171:25
+    _10 = call fn Proc.fake(copy _12) @4171:14-4171:25
+    goto bb12
+  bb11 (cleanup):
+    drop _11
+    goto bb9
+  bb12 (unwind bb13):
+    _14 = ref _3 @4172:26-4172:31
+    _13 = call fn Stdin.fake(copy _14) @4172:15-4172:32
+    goto bb14
+  bb13 (cleanup):
+    drop _10
+    goto bb11
+  bb14 (unwind bb16):
+    _0 = call intrinsic System.assemble(copy _1.0, move _4, copy _1.1, copy _1.2, move _6, move _10, move _13) @4165:12-4173:6
+    goto bb17
+  bb15 (cleanup):
+    drop _8
+    goto bb3
+  bb16 (cleanup):
+    drop _11
+    goto bb15
+  bb17 (unwind bb15):
+    drop _11 @4165:5-4173:6
+    goto bb18
+  bb18 (unwind bb3):
+    drop _8 @4165:5-4173:6
+    goto bb19
+  bb19 (unwind bb2):
+    drop _3 @4165:5-4173:6
+    goto bb20
+  bb20 (unwind bb1):
+    drop _2 @4165:5-4173:6
+    goto bb21
+  bb21:
+    drop _1 @4165:5-4173:6
+    return @4165:5-4173:6
+}
+
+fn cap.normal(1) pure source 2 @11:10-11:16 {
+    let _0: String
+    let _1: str "text" @11:17-11:26
+    let _2: String "out" @12:9-12:12
+    let _3: str
+    let _4: Iter[str]
+    let _5: ref mut Iter[str]
+    let _6: Option[str]
+    let _7: int
+    let _8: str "part" @13:9-13:13
+    let _9: bool
+    let _10: bool
+    let _11: bool
+    let _12: str
+    let _13: ()
+    let _14: ref mut String
+    let _15: ()
+    let _16: ref mut String
+    let _17: bool
+    let _18: str
+    let _19: bool "flag"
+  bb0:
+    _19 = const false
+    _3 = call fn String.new#text() @12:15-12:27
+    _2 = call intrinsic String.new(copy _3) @12:15-12:27
+    _19 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = call fn str.split(copy _1, const "/") @13:17-13:32
+    goto bb4
+  bb2 (cleanup):
+    drop _2 if _19
+    resume
+  bb3 (cleanup):
+    drop _4
+    goto bb2
+  bb4 (unwind bb3):
+    _5 = ref mut _4 @13:5-13:32
+    _6 = call intrinsic Iter.next(copy _5) @13:5-13:32
+    _7 = discriminant _6 @13:5-13:32
+    switch copy _7 [0: bb5, else: bb11] @13:5-13:32
+  bb5 (unwind bb3):
+    _8 = copy _6.as(0).0 @13:9-13:13
+    _9 = eq copy _8, const "" @14:12-14:22
+    switch copy _9 [0: bb7, else: bb8] @14:12-14:37
+  bb6 (unwind bb3):
+    _12 = strview _2 @16:16-16:19
+    _11 = call fn str.is_empty(copy _12) @16:16-16:30
+    _10 = not copy _11 @16:12-16:30
+    switch copy _10 [0: bb9, else: bb10] @16:12-16:30
+  bb7 (unwind bb3):
+    _9 = eq copy _8, const "." @14:26-14:37
+    switch copy _9 [0: bb6, else: bb4] @14:12-14:37
+  bb8 (unwind bb3):
+    switch copy _9 [0: bb6, else: bb4] @14:12-14:37
+  bb9 (unwind bb3):
+    _16 = ref mut _2 @18:9-18:12
+    _15 = call intrinsic String.push(copy _16, copy _8) @18:9-18:23
+    goto bb4
+  bb10 (unwind bb3):
+    _14 = ref mut _2 @17:13-17:16
+    _13 = call intrinsic String.push(copy _14, const "/") @17:13-17:26
+    goto bb9
+  bb11 (unwind bb2):
+    drop _4 @18:23-18:23
+    goto bb12
+  bb12 (unwind bb2):
+    dead _4 @18:23-18:23
+    _18 = strview _2 @19:8-19:11
+    _17 = call fn str.is_empty(copy _18) @19:8-19:22
+    switch copy _17 [0: bb13, else: bb14] @19:8-19:22
+  bb13 (unwind bb2):
+    _19 = const false
+    _0 = move _2 @21:12-21:15
+    goto bb16
+  bb14 (unwind bb2):
+    _0 = call intrinsic str.to_string(const ".") @20:16-20:31
+    goto bb15
+  bb15:
+    _19 = const false
+    drop _2 @20:9-20:31
+    return @20:9-20:31
+  bb16:
+    _19 = const false
+    return @21:5-21:15
+}
+
+fn str.is_empty(1) pure source 1 @1618:14-1618:22 {
+    let _0: bool
+    let _1: str "self" @1618:14-1618:22
+    let _2: int
+  bb0:
+    _2 = call intrinsic str.byte_len(copy _1) @1619:16-1619:31
+    _0 = eq copy _2, const 0 @1619:16-1619:36
+    return @1619:9-1619:36
+}
+
+fn str.byte_find(3) pure source 1 @1638:14-1638:23 {
+    let _0: Option[int]
+    let _1: str "self" @1638:14-1638:23
+    let _2: str "part" @1638:30-1638:39
+    let _3: int "start" @1638:41-1638:55
+    let _4: int "m" @1639:13-1639:14
+    let _5: int "last" @1640:13-1640:17
+    let _6: int
+    let _7: bool
+    let _8: bool
+    let _9: bool
+    let _10: u8 "b" @1644:17-1644:18
+    let _11: int "i" @1645:17-1645:18
+    let _12: bool
+    let _13: bool
+    let _14: u8
+    let _15: int
+    let _16: (int, int)
+    let _17: int "s1" @1654:14-1654:16
+    let _18: int "p1" @1654:18-1654:20
+    let _19: (int, int)
+    let _20: int "s2" @1655:14-1655:16
+    let _21: int "p2" @1655:18-1655:20
+    let _22: (int, int)
+    let _23: bool
+    let _24: int "cut" @1656:14-1656:17
+    let _25: int "period" @1656:19-1656:25
+    let _26: int "j" @1657:13-1657:14
+    let _27: bool
+    let _28: int
+    let _29: int "memory" @1661:17-1661:23
+    let _30: bool
+    let _31: int "i" @1663:21-1663:22
+    let _32: int
+    let _33: ref int
+    let _34: ref int
+    let _35: bool
+    let _36: u8
+    let _37: u8
+    let _38: int
+    let _39: int
+    let _40: bool
+    let _41: bool
+    let _42: u8
+    let _43: u8
+    let _44: int
+    let _45: int
+    let _46: bool
+    let _47: int
+    let _48: int
+    let _49: int
+    let _50: int
+    let _51: int
+    let _52: int "shift" @1678:13-1678:18
+    let _53: int
+    let _54: int
+    let _55: ref int
+    let _56: int
+    let _57: int
+    let _58: ref int
+    let _59: bool
+    let _60: int "i" @1680:17-1680:18
+    let _61: bool
+    let _62: u8
+    let _63: u8
+    let _64: int
+    let _65: int
+    let _66: bool
+    let _67: bool
+    let _68: u8
+    let _69: u8
+    let _70: int
+    let _71: int
+    let _72: bool
+    let _73: int
+    let _74: int
+    let _75: int
+  bb0:
+    _4 = call intrinsic str.byte_len(copy _2) @1639:17-1639:32
+    _6 = call intrinsic str.byte_len(copy _1) @1640:20-1640:35
+    _5 = sub copy _6, copy _4 @1640:20-1640:39
+    _7 = eq copy _4, const 0 @1641:12-1641:18
+    switch copy _7 [0: bb1, else: bb2] @1641:12-1641:18
+  bb1:
+    _9 = eq copy _4, const 1 @1643:12-1643:18
+    switch copy _9 [0: bb5, else: bb6] @1643:12-1643:18
+  bb2:
+    _8 = le copy _3, copy _5 @1642:23-1642:36
+    switch copy _8 [0: bb4, else: bb3] @1642:20-1642:60
+  bb3:
+    _0 = variant Option::Some(copy _3) @1642:38-1642:49
+    return @1642:13-1642:60
+  bb4:
+    _0 = variant Option::None() @1642:56-1642:60
+    return @1642:13-1642:60
+  bb5:
+    _16 = call fn str.maximal_suffix(copy _2, const false) @1654:24-1654:50
+    _17 = copy _16.0 @1654:14-1654:16
+    _18 = copy _16.1 @1654:18-1654:20
+    _19 = call fn str.maximal_suffix(copy _2, const true) @1655:24-1655:49
+    _20 = copy _19.0 @1655:14-1655:16
+    _21 = copy _19.1 @1655:18-1655:20
+    _23 = gt copy _17, copy _20 @1656:32-1656:39
+    switch copy _23 [0: bb13, else: bb12] @1656:29-1656:64
+  bb6:
+    _10 = call intrinsic str.byte_at(copy _2, const 0) @1644:21-1644:36
+    _11 = copy _3 @1645:21-1645:26
+    goto bb7
+  bb7:
+    _12 = le copy _11, copy _5 @1646:19-1646:28
+    switch copy _12 [0: bb8, else: bb9] @1646:19-1646:28
+  bb8:
+    _0 = variant Option::None() @1650:20-1650:24
+    return @1650:13-1650:24
+  bb9:
+    _14 = call intrinsic str.byte_at(copy _1, copy _11) @1647:20-1647:35
+    _13 = eq copy _14, copy _10 @1647:20-1647:40
+    switch copy _13 [0: bb10, else: bb11] @1647:20-1647:40
+  bb10:
+    _15 = add copy _11, const 1 @1649:17-1649:23
+    _11 = move _15 @1649:17-1649:23
+    goto bb7
+  bb11:
+    _0 = variant Option::Some(copy _11) @1648:28-1648:35
+    return @1648:21-1648:35
+  bb12:
+    _22 = tuple(copy _17, copy _18) @1656:41-1656:49
+    goto bb14
+  bb13:
+    _22 = tuple(copy _20, copy _21) @1656:56-1656:64
+    goto bb14
+  bb14:
+    _24 = copy _22.0 @1656:14-1656:17
+    _25 = copy _22.1 @1656:19-1656:25
+    _26 = copy _3 @1657:17-1657:22
+    _28 = add copy _24, const 1 @1658:39-1658:46
+    _27 = call fn str.same_bytes(copy _2, const 0, copy _25, copy _28) @1658:12-1658:47
+    switch copy _27 [0: bb15, else: bb16] @1658:12-1658:47
+  bb15:
+    _54 = add copy _24, const 1 @1678:25-1678:32
+    _55 = ref _54 @1678:25-1678:32
+    _57 = sub copy _4, copy _24 @1678:34-1678:41
+    _56 = sub copy _57, const 1 @1678:34-1678:45
+    _58 = ref _56 @1678:34-1678:45
+    _53 = call intrinsic max(copy _55, copy _58) @1678:21-1678:46
+    _52 = add copy _53, const 1 @1678:21-1678:50
+    dead _56 @1678:50-1678:50
+    dead _54 @1678:50-1678:50
+    goto bb34
+  bb16:
+    _29 = const -1 @1661:26-1661:28
+    goto bb17
+  bb17:
+    _30 = le copy _26, copy _5 @1662:19-1662:28
+    switch copy _30 [0: bb18, else: bb19] @1662:19-1662:28
+  bb18:
+    _0 = variant Option::None() @1677:20-1677:24
+    return @1677:13-1677:24
+  bb19:
+    _33 = ref _24 @1663:29-1663:32
+    _34 = ref _29 @1663:34-1663:40
+    _32 = call intrinsic max(copy _33, copy _34) @1663:25-1663:41
+    _31 = add copy _32, const 1 @1663:25-1663:45
+    goto bb20
+  bb20:
+    _35 = lt copy _31, copy _4 @1664:23-1664:28
+    switch copy _35 [0: bb23, else: bb22] @1664:23-1664:71
+  bb21:
+    _40 = ge copy _31, copy _4 @1666:20-1666:26
+    switch copy _40 [0: bb25, else: bb26] @1666:20-1666:26
+  bb22:
+    _36 = call intrinsic str.byte_at(copy _2, copy _31) @1664:33-1664:48
+    _38 = add copy _31, copy _26 @1664:65-1664:70
+    _37 = call intrinsic str.byte_at(copy _1, copy _38) @1664:52-1664:71
+    _35 = eq copy _36, copy _37 @1664:33-1664:71
+    switch copy _35 [0: bb21, else: bb24] @1664:23-1664:71
+  bb23:
+    switch copy _35 [0: bb21, else: bb24] @1664:23-1664:71
+  bb24:
+    _39 = add copy _31, const 1 @1665:21-1665:27
+    _31 = move _39 @1665:21-1665:27
+    goto bb20
+  bb25:
+    _50 = sub copy _31, copy _24 @1675:26-1675:33
+    _51 = add copy _26, copy _50 @1675:21-1675:33
+    _26 = move _51 @1675:21-1675:33
+    _29 = const -1 @1676:21-1676:32
+    goto bb17
+  bb26:
+    _31 = copy _24 @1667:21-1667:28
+    goto bb27
+  bb27:
+    _41 = gt copy _31, copy _29 @1668:27-1668:37
+    switch copy _41 [0: bb30, else: bb29] @1668:27-1668:80
+  bb28:
+    _46 = le copy _31, copy _29 @1670:24-1670:35
+    switch copy _46 [0: bb32, else: bb33] @1670:24-1670:35
+  bb29:
+    _42 = call intrinsic str.byte_at(copy _2, copy _31) @1668:42-1668:57
+    _44 = add copy _31, copy _26 @1668:74-1668:79
+    _43 = call intrinsic str.byte_at(copy _1, copy _44) @1668:61-1668:80
+    _41 = eq copy _42, copy _43 @1668:42-1668:80
+    switch copy _41 [0: bb28, else: bb31] @1668:27-1668:80
+  bb30:
+    switch copy _41 [0: bb28, else: bb31] @1668:27-1668:80
+  bb31:
+    _45 = sub copy _31, const 1 @1669:25-1669:31
+    _31 = move _45 @1669:25-1669:31
+    goto bb27
+  bb32:
+    _47 = add copy _26, copy _25 @1672:21-1672:32
+    _26 = move _47 @1672:21-1672:32
+    _49 = sub copy _4, copy _25 @1673:30-1673:40
+    _48 = sub copy _49, const 1 @1673:30-1673:44
+    _29 = copy _48 @1673:21-1673:44
+    goto bb17
+  bb33:
+    _0 = variant Option::Some(copy _26) @1671:32-1671:39
+    return @1671:25-1671:39
+  bb34:
+    _59 = le copy _26, copy _5 @1679:15-1679:24
+    switch copy _59 [0: bb35, else: bb36] @1679:15-1679:24
+  bb35:
+    _0 = variant Option::None() @1692:16-1692:20
+    return @1692:9-1692:20
+  bb36:
+    _60 = add copy _24, const 1 @1680:21-1680:28
+    goto bb37
+  bb37:
+    _61 = lt copy _60, copy _4 @1681:19-1681:24
+    switch copy _61 [0: bb40, else: bb39] @1681:19-1681:67
+  bb38:
+    _66 = ge copy _60, copy _4 @1683:16-1683:22
+    switch copy _66 [0: bb42, else: bb43] @1683:16-1683:22
+  bb39:
+    _62 = call intrinsic str.byte_at(copy _2, copy _60) @1681:29-1681:44
+    _64 = add copy _60, copy _26 @1681:61-1681:66
+    _63 = call intrinsic str.byte_at(copy _1, copy _64) @1681:48-1681:67
+    _61 = eq copy _62, copy _63 @1681:29-1681:67
+    switch copy _61 [0: bb38, else: bb41] @1681:19-1681:67
+  bb40:
+    switch copy _61 [0: bb38, else: bb41] @1681:19-1681:67
+  bb41:
+    _65 = add copy _60, const 1 @1682:17-1682:23
+    _60 = move _65 @1682:17-1682:23
+    goto bb37
+  bb42:
+    _74 = sub copy _60, copy _24 @1691:22-1691:29
+    _75 = add copy _26, copy _74 @1691:17-1691:29
+    _26 = move _75 @1691:17-1691:29
+    goto bb34
+  bb43:
+    _60 = copy _24 @1684:17-1684:24
+    goto bb44
+  bb44:
+    _67 = ge copy _60, const 0 @1685:23-1685:29
+    switch copy _67 [0: bb47, else: bb46] @1685:23-1685:72
+  bb45:
+    _72 = lt copy _60, const 0 @1687:20-1687:25
+    switch copy _72 [0: bb49, else: bb50] @1687:20-1687:25
+  bb46:
+    _68 = call intrinsic str.byte_at(copy _2, copy _60) @1685:34-1685:49
+    _70 = add copy _60, copy _26 @1685:66-1685:71
+    _69 = call intrinsic str.byte_at(copy _1, copy _70) @1685:53-1685:72
+    _67 = eq copy _68, copy _69 @1685:34-1685:72
+    switch copy _67 [0: bb45, else: bb48] @1685:23-1685:72
+  bb47:
+    switch copy _67 [0: bb45, else: bb48] @1685:23-1685:72
+  bb48:
+    _71 = sub copy _60, const 1 @1686:21-1686:27
+    _60 = move _71 @1686:21-1686:27
+    goto bb44
+  bb49:
+    _73 = add copy _26, copy _52 @1689:17-1689:27
+    _26 = move _73 @1689:17-1689:27
+    goto bb34
+  bb50:
+    _0 = variant Option::Some(copy _26) @1688:28-1688:35
+    return @1688:21-1688:35
+}
+
+fn str.split(2) pure source 1 from 0 @1745:14-1745:19 {
+    let _0: Iter[str]
+    let _1: str "self" @1745:14-1745:19
+    let _2: str "sep" @1745:26-1745:34
+    let _3: bool
+    let _4: Never
+    let _5: list[str] "pieces" @1748:13-1748:19
+    let _6: int "start" @1749:13-1749:18
+    let _7: Option[int]
+    let _8: int
+    let _9: int "at" @1752:27-1752:29
+    let _10: ()
+    let _11: ref mut list[str]
+    let _12: str
+    let _13: int
+    let _14: int
+    let _15: ()
+    let _16: ref mut list[str]
+    let _17: str
+    let _18: int
+    let _19: bool "flag"
+  bb0:
+    _19 = const false
+    _3 = call fn str.is_empty(copy _2) @1746:12-1746:26
+    switch copy _3 [0: bb1, else: bb2] @1746:12-1746:26
+  bb1:
+    _5 = list() @1748:33-1748:35
+    _19 = const true
+    goto bb3
+  bb2:
+    _4 = call intrinsic panic(const "str.split: the separator must not be empty") @1747:13-1747:64
+    unreachable @1747:13-1747:64
+  bb3 (unwind bb4):
+    _6 = const 0 @1749:21-1749:22
+    switch const true [0: bb5, else: bb6] @1750:15-1750:19
+  bb4 (cleanup):
+    drop _5 if _19
+    resume
+  bb5 (unwind bb4):
+    _0 = const ()
+    goto bb11
+  bb6 (unwind bb4):
+    _7 = call fn str.byte_find(copy _1, copy _2, copy _6) @1751:19-1751:45
+    _8 = discriminant _7 @1751:13-1757:43
+    switch copy _8 [0: bb7, 1: bb8, else: bb9] @1751:13-1757:43
+  bb7 (unwind bb4):
+    _9 = copy _7.as(0).0 @1752:27-1752:29
+    _11 = ref mut _5 @1753:21-1753:27
+    _12 = call intrinsic str.byte_slice(copy _1, copy _6, copy _9) @1753:33-1753:59
+    _10 = call intrinsic list.push(copy _11, copy _12) @1753:21-1753:60
+    _14 = call intrinsic str.byte_len(copy _2) @1754:34-1754:48
+    _13 = add copy _9, copy _14 @1754:29-1754:48
+    _6 = copy _13 @1754:21-1754:48
+    switch const true [0: bb5, else: bb6] @1750:15-1750:19
+  bb8 (unwind bb4):
+    _16 = ref mut _5 @1756:21-1756:27
+    _18 = call intrinsic str.byte_len(copy _1) @1756:56-1756:71
+    _17 = call intrinsic str.byte_slice(copy _1, copy _6, copy _18) @1756:33-1756:72
+    _15 = call intrinsic list.push(copy _16, copy _17) @1756:21-1756:73
+    _19 = const false
+    _0 = call intrinsic Iter.of(move _5) @1757:28-1757:43
+    goto bb10
+  bb9 (unwind bb4):
+    unreachable @1751:13-1757:43
+  bb10:
+    _19 = const false
+    return @1757:21-1757:43
+  bb11:
+    _19 = const false
+    drop _5 @1757:43-1757:43
+    return
+}
+
+fn str.maximal_suffix(2) pure source 1 @1893:14-1893:28 {
+    let _0: (int, int)
+    let _1: str "self" @1893:14-1893:28
+    let _2: bool "reversed" @1893:35-1893:49
+    let _3: int "m" @1894:13-1894:14
+    let _4: int "at" @1895:13-1895:15
+    let _5: int "j" @1896:13-1896:14
+    let _6: int "k" @1897:13-1897:14
+    let _7: int "p" @1898:13-1898:14
+    let _8: bool
+    let _9: int
+    let _10: u8 "a" @1900:17-1900:18
+    let _11: int
+    let _12: u8 "b" @1901:17-1901:18
+    let _13: int
+    let _14: bool
+    let _15: bool
+    let _16: int
+    let _17: int
+    let _18: bool
+    let _19: bool
+    let _20: int
+    let _21: int
+    let _22: int
+  bb0:
+    _3 = call intrinsic str.byte_len(copy _1) @1894:17-1894:32
+    _4 = const -1 @1895:18-1895:20
+    _5 = const 0 @1896:17-1896:18
+    _6 = const 1 @1897:17-1897:18
+    _7 = const 1 @1898:17-1898:18
+    goto bb1
+  bb1:
+    _9 = add copy _5, copy _6 @1899:15-1899:20
+    _8 = lt copy _9, copy _3 @1899:15-1899:24
+    switch copy _8 [0: bb2, else: bb3] @1899:15-1899:24
+  bb2:
+    _0 = tuple(copy _4, copy _7) @1917:16-1917:23
+    return @1917:9-1917:23
+  bb3:
+    _11 = add copy _5, copy _6 @1900:34-1900:39
+    _10 = call intrinsic str.byte_at(copy _1, copy _11) @1900:21-1900:40
+    _13 = add copy _4, copy _6 @1901:34-1901:40
+    _12 = call intrinsic str.byte_at(copy _1, copy _13) @1901:21-1901:41
+    _14 = eq copy _10, copy _12 @1902:16-1902:22
+    switch copy _14 [0: bb4, else: bb5] @1902:16-1902:22
+  bb4:
+    _19 = lt copy _10, copy _12 @1908:18-1908:25
+    _18 = ne copy _19, copy _2 @1908:18-1908:37
+    switch copy _18 [0: bb8, else: bb9] @1908:18-1908:37
+  bb5:
+    _15 = ne copy _6, copy _7 @1903:20-1903:26
+    switch copy _15 [0: bb6, else: bb7] @1903:20-1903:26
+  bb6:
+    _17 = add copy _5, copy _7 @1906:21-1906:27
+    _5 = move _17 @1906:21-1906:27
+    _6 = const 1 @1907:21-1907:26
+    goto bb1
+  bb7:
+    _16 = add copy _6, const 1 @1904:21-1904:27
+    _6 = move _16 @1904:21-1904:27
+    goto bb1
+  bb8:
+    _4 = copy _5 @1913:17-1913:23
+    _22 = add copy _4, const 1 @1914:21-1914:27
+    _5 = copy _22 @1914:17-1914:27
+    _6 = const 1 @1915:17-1915:22
+    _7 = const 1 @1916:17-1916:22
+    goto bb1
+  bb9:
+    _20 = add copy _5, copy _6 @1909:17-1909:23
+    _5 = move _20 @1909:17-1909:23
+    _6 = const 1 @1910:17-1910:22
+    _21 = sub copy _5, copy _4 @1911:21-1911:27
+    _7 = copy _21 @1911:17-1911:27
+    goto bb1
+}
+
+fn str.same_bytes(4) pure source 1 @1920:14-1920:24 {
+    let _0: bool
+    let _1: str "self" @1920:14-1920:24
+    let _2: int "a" @1920:31-1920:37
+    let _3: int "b" @1920:39-1920:45
+    let _4: int "count" @1920:47-1920:57
+    let _5: Iter[int]
+    let _6: int
+    let _7: ref mut Iter[int]
+    let _8: Option[int]
+    let _9: int
+    let _10: int "k" @1921:13-1921:14
+    let _11: bool
+    let _12: u8
+    let _13: int
+    let _14: u8
+    let _15: int
+  bb0:
+    _6 = call fn range#step() @1921:18-1921:30
+    _5 = call intrinsic range(const 0, copy _4, copy _6) @1921:18-1921:30
+    goto bb2
+  bb1 (cleanup):
+    drop _5
+    resume
+  bb2 (unwind bb1):
+    _7 = ref mut _5 @1921:9-1921:30
+    _8 = call intrinsic Iter.next(copy _7) @1921:9-1921:30
+    _9 = discriminant _8 @1921:9-1921:30
+    switch copy _9 [0: bb3, else: bb6] @1921:9-1921:30
+  bb3 (unwind bb1):
+    _10 = copy _8.as(0).0 @1921:13-1921:14
+    _13 = add copy _2, copy _10 @1922:29-1922:34
+    _12 = call intrinsic str.byte_at(copy _1, copy _13) @1922:16-1922:35
+    _15 = add copy _3, copy _10 @1922:52-1922:57
+    _14 = call intrinsic str.byte_at(copy _1, copy _15) @1922:39-1922:58
+    _11 = ne copy _12, copy _14 @1922:16-1922:58
+    switch copy _11 [0: bb2, else: bb4] @1922:16-1922:58
+  bb4 (unwind bb1):
+    _0 = const false @1923:24-1923:29
+    goto bb5
+  bb5:
+    drop _5 @1923:17-1923:29
+    return @1923:17-1923:29
+  bb6:
+    drop _5 @1923:29-1923:29
+    goto bb7
+  bb7:
+    dead _5 @1923:29-1923:29
+    _0 = const true @1924:16-1924:20
+    return @1924:9-1924:20
+}
+
+fn DateTime.epoch(0) pure source 1 @2845:14-2845:19 {
+    let _0: DateTime
+  bb0:
+    _0 = call intrinsic DateTime.from_unix_nanos(const 0) @2846:16-2846:43
+    return @2846:9-2846:43
+}
+
+fn Fs.in_memory(1) source 1 @3711:9-3711:18 {
+    let _0: Fs
+    let _1: ref dict[str, str] "files" @3711:19-3711:45
+  bb0:
+    _0 = call fn cap.MemFs.new(copy _1) @3712:16-3712:36
+    return @3712:9-3712:36
+}
+
+fn Clock.frozen_at(1) source 1 @3918:9-3918:18 {
+    let _0: TestClock
+    let _1: DateTime "t" @3918:19-3918:30
+    let _2: TestClock "c" @3919:13-3919:14
+    let _3: ()
+  bb0:
+    _2 = call intrinsic Clock.fake() @3919:17-3919:29
+    _3 = call intrinsic TestClock.set(copy _2, copy _1) @3920:9-3920:17
+    _0 = copy _2 @3921:16-3921:17
+    return @3921:9-3921:17
+}
+
+fn Rand.seeded(1) source 1 @3999:9-3999:15 {
+    let _0: Rand
+    let _1: int "seed" @3999:16-3999:25
+  bb0:
+    _0 = call fn cap.SeededRand.new(copy _1) @4000:16-4000:40
+    return @4000:9-4000:40
+}
+
+fn Env.fake(2) source 1 @4027:9-4027:13 {
+    let _0: Env
+    let _1: ref list[str] "args" @4027:14-4027:34
+    let _2: ref dict[str, str] "vars" @4027:36-4027:61
+  bb0:
+    _0 = call fn cap.FakeEnv.new(copy _1, copy _2) @4028:16-4028:43
+    return @4028:9-4028:43
+}
+
+fn Proc.fake(1) source 1 @4062:9-4062:13 {
+    let _0: Proc
+    let _1: ref dict[str, str] "outputs" @4062:14-4062:42
+  bb0:
+    _0 = call fn cap.FakeProc.new(copy _1) @4063:16-4063:41
+    return @4063:9-4063:41
+}
+
+fn Stdin.fake(1) source 1 @4087:9-4087:13 {
+    let _0: Stdin
+    let _1: ref list[str] "lines" @4087:14-4087:35
+  bb0:
+    _0 = call fn cap.FakeStdin.new(copy _1) @4088:16-4088:40
+    return @4088:9-4088:40
+}
+
+fn cap.MemFs.new(1) source 2 @232:9-232:12 {
+    let _0: Fs
+    let _1: ref dict[str, str] "files" @232:13-232:34
+    let _2: dict[String, cap.MemFile] "held" @233:13-233:17
+    let _3: DateTime "now" @234:13-234:16
+    let _4: TestClock
+    let _5: ref TestClock
+    let _6: Iter[(ref str, ref str)]
+    let _7: ref dict[str, str]
+    let _8: ref mut Iter[(ref str, ref str)]
+    let _9: Option[(ref str, ref str)]
+    let _10: int
+    let _11: ref str "name" @235:13-235:17
+    let _12: ref str "text" @235:19-235:23
+    let _13: Option[cap.MemFile]
+    let _14: ref mut dict[String, cap.MemFile]
+    let _15: String
+    let _16: str
+    let _17: cap.MemFile
+    let _18: bytes
+    let _19: cap.MemFs
+    let _20: Mutex[dict[String, cap.MemFile]]
+    let _21: Mutex[set[String]]
+    let _22: set[String]
+    let _23: bool "flag"
+  bb0:
+    _23 = const false
+    _2 = dict() @233:43-233:45
+    _23 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = call intrinsic Clock.fake() @234:19-234:31
+    _5 = ref _4 @234:19-234:31
+    _3 = call intrinsic clock.now(copy _5) @234:19-234:37
+    dead _4 @234:37-234:37
+    _7 = ref _1.* @235:27-235:32
+    _6 = call intrinsic dict.items(copy _7) @235:27-235:40
+    goto bb4
+  bb2 (cleanup):
+    drop _2 if _23
+    resume
+  bb3 (cleanup):
+    drop _6
+    goto bb2
+  bb4 (unwind bb3):
+    _8 = ref mut _6 @235:9-235:40
+    _9 = call intrinsic Iter.next(copy _8) @235:9-235:40
+    _10 = discriminant _9 @235:9-235:40
+    switch copy _10 [0: bb5, else: bb9] @235:9-235:40
+  bb5 (unwind bb3):
+    _11 = copy _9.as(0).0.0 @235:13-235:17
+    _12 = copy _9.as(0).0.1 @235:19-235:23
+    _14 = ref mut _2 @236:17-236:21
+    _16 = copy _11.* @236:36-236:40
+    _15 = call fn cap.normal(copy _16) @236:29-236:41
+    goto bb6
+  bb6 (unwind bb7):
+    _18 = call intrinsic str.encode(copy _12.*) @236:56-236:69
+    _17 = struct cap.MemFile(move _18, copy _3) @236:43-236:84
+    goto bb8
+  bb7 (cleanup):
+    drop _15
+    goto bb3
+  bb8 (unwind bb3):
+    _13 = call intrinsic dict.insert(copy _14, move _15, move _17) @236:17-236:85
+    drop _13 @236:85-236:85
+    goto bb4
+  bb9 (unwind bb2):
+    drop _6 @236:85-236:85
+    goto bb10
+  bb10 (unwind bb2):
+    dead _6 @236:85-236:85
+    _23 = const false
+    _20 = call intrinsic Mutex.new(move _2) @237:28-237:39
+    goto bb11
+  bb11 (unwind bb12):
+    _22 = call intrinsic set.new[String]() @237:52-237:57
+    _21 = call intrinsic Mutex.new(move _22) @237:46-237:58
+    goto bb13
+  bb12 (cleanup):
+    drop _20
+    goto bb2
+  bb13 (unwind bb2):
+    _19 = struct cap.MemFs(move _20, move _21) @237:16-237:59
+    _0 = call intrinsic cap.new[cap.MemFs, Fs](move _19) @237:16-237:59
+    goto bb14
+  bb14:
+    _23 = const false
+    return @237:9-237:59
+}
+
+fn cap.SeededRand.new(1) pure source 2 @838:14-838:17 {
+    let _0: Rand
+    let _1: int "seed" @838:18-838:27
+    let _2: cap.SeededRand
+    let _3: Mutex[int]
+  bb0:
+    _3 = call intrinsic Mutex.new(copy _1) @839:33-839:44
+    _2 = struct cap.SeededRand(move _3) @839:16-839:45
+    _0 = call intrinsic cap.new[cap.SeededRand, Rand](move _2) @839:16-839:45
+    return @839:9-839:45
+}
+
+fn cap.FakeEnv.new(2) pure source 2 @861:14-861:17 {
+    let _0: Env
+    let _1: ref list[str] "args" @861:18-861:33
+    let _2: ref dict[str, str] "vars" @861:35-861:55
+    let _3: list[String] "a" @862:13-862:14
+    let _4: Iter[ref str]
+    let _5: ref list[str]
+    let _6: ref mut Iter[ref str]
+    let _7: Option[ref str]
+    let _8: int
+    let _9: ref str "x" @863:13-863:14
+    let _10: ()
+    let _11: ref mut list[String]
+    let _12: String
+    let _13: dict[String, String] "v" @865:13-865:14
+    let _14: Iter[(ref str, ref str)]
+    let _15: ref dict[str, str]
+    let _16: ref mut Iter[(ref str, ref str)]
+    let _17: Option[(ref str, ref str)]
+    let _18: int
+    let _19: ref str "k" @866:13-866:14
+    let _20: ref str "x" @866:16-866:17
+    let _21: Option[String]
+    let _22: ref mut dict[String, String]
+    let _23: String
+    let _24: String
+    let _25: cap.FakeEnv
+    let _26: bool "flag"
+    let _27: bool "flag"
+  bb0:
+    _26 = const false
+    _27 = const false
+    _3 = list() @862:31-862:33
+    _26 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = ref _1.* @863:18-863:22
+    _4 = call intrinsic iter.ref(copy _5) @863:9-863:22
+    goto bb4
+  bb2 (cleanup):
+    drop _3 if _26
+    resume
+  bb3 (cleanup):
+    drop _4
+    goto bb2
+  bb4 (unwind bb3):
+    _6 = ref mut _4 @863:9-863:22
+    _7 = call intrinsic Iter.next(copy _6) @863:9-863:22
+    _8 = discriminant _7 @863:9-863:22
+    switch copy _8 [0: bb5, else: bb6] @863:9-863:22
+  bb5 (unwind bb3):
+    _9 = copy _7.as(0).0 @863:13-863:14
+    _11 = ref mut _3 @864:13-864:14
+    _12 = call intrinsic str.to_string(copy _9.*) @864:20-864:33
+    _10 = call intrinsic list.push(copy _11, move _12) @864:13-864:34
+    goto bb4
+  bb6 (unwind bb2):
+    drop _4 @864:34-864:34
+    goto bb7
+  bb7 (unwind bb2):
+    dead _4 @864:34-864:34
+    _13 = dict() @865:39-865:41
+    _27 = const true
+    goto bb8
+  bb8 (unwind bb9):
+    _15 = ref _2.* @866:21-866:25
+    _14 = call intrinsic dict.items(copy _15) @866:21-866:33
+    goto bb11
+  bb9 (cleanup):
+    drop _13 if _27
+    goto bb2
+  bb10 (cleanup):
+    drop _14
+    goto bb9
+  bb11 (unwind bb10):
+    _16 = ref mut _14 @866:9-866:33
+    _17 = call intrinsic Iter.next(copy _16) @866:9-866:33
+    _18 = discriminant _17 @866:9-866:33
+    switch copy _18 [0: bb12, else: bb16] @866:9-866:33
+  bb12 (unwind bb10):
+    _19 = copy _17.as(0).0.0 @866:13-866:14
+    _20 = copy _17.as(0).0.1 @866:16-866:17
+    _22 = ref mut _13 @867:17-867:18
+    _23 = call intrinsic str.to_string(copy _19.*) @867:26-867:39
+    goto bb13
+  bb13 (unwind bb14):
+    _24 = call intrinsic str.to_string(copy _20.*) @867:41-867:54
+    goto bb15
+  bb14 (cleanup):
+    drop _23
+    goto bb10
+  bb15 (unwind bb10):
+    _21 = call intrinsic dict.insert(copy _22, move _23, move _24) @867:17-867:55
+    drop _21 @867:55-867:55
+    goto bb11
+  bb16 (unwind bb9):
+    drop _14 @867:55-867:55
+    goto bb17
+  bb17 (unwind bb9):
+    dead _14 @867:55-867:55
+    _26 = const false
+    _27 = const false
+    _25 = struct cap.FakeEnv(move _3, move _13) @868:16-868:39
+    _0 = call intrinsic cap.new[cap.FakeEnv, Env](move _25) @868:16-868:39
+    goto bb18
+  bb18 (unwind bb2):
+    _27 = const false
+    goto bb19
+  bb19:
+    _26 = const false
+    return @868:9-868:39
+}
+
+fn cap.FakeStdin.new(1) source 2 @890:9-890:12 {
+    let _0: Stdin
+    let _1: ref list[str] "lines" @890:13-890:29
+    let _2: list[String] "ls" @891:13-891:15
+    let _3: Iter[ref str]
+    let _4: ref list[str]
+    let _5: ref mut Iter[ref str]
+    let _6: Option[ref str]
+    let _7: int
+    let _8: ref str "x" @892:13-892:14
+    let _9: ()
+    let _10: ref mut list[String]
+    let _11: String
+    let _12: cap.FakeStdin
+    let _13: Cap[Mutex[cap.FakeLines]]
+    let _14: Mutex[cap.FakeLines]
+    let _15: cap.FakeLines
+    let _16: bool "flag"
+  bb0:
+    _16 = const false
+    _2 = list() @891:32-891:34
+    _16 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = ref _1.* @892:18-892:23
+    _3 = call intrinsic iter.ref(copy _4) @892:9-892:23
+    goto bb4
+  bb2 (cleanup):
+    drop _2 if _16
+    resume
+  bb3 (cleanup):
+    drop _3
+    goto bb2
+  bb4 (unwind bb3):
+    _5 = ref mut _3 @892:9-892:23
+    _6 = call intrinsic Iter.next(copy _5) @892:9-892:23
+    _7 = discriminant _6 @892:9-892:23
+    switch copy _7 [0: bb5, else: bb6] @892:9-892:23
+  bb5 (unwind bb3):
+    _8 = copy _6.as(0).0 @892:13-892:14
+    _10 = ref mut _2 @893:13-893:15
+    _11 = call intrinsic str.to_string(copy _8.*) @893:21-893:34
+    _9 = call intrinsic list.push(copy _10, move _11) @893:13-893:35
+    goto bb4
+  bb6 (unwind bb2):
+    drop _3 @893:35-893:35
+    goto bb7
+  bb7 (unwind bb2):
+    dead _3 @893:35-893:35
+    _16 = const false
+    _15 = struct cap.FakeLines(move _2, const 0) @894:46-894:73
+    _14 = call intrinsic Mutex.new(move _15) @894:40-894:74
+    _13 = call intrinsic Cap.new(move _14) @894:32-894:75
+    _12 = struct cap.FakeStdin(move _13) @894:16-894:76
+    _0 = call intrinsic cap.new[cap.FakeStdin, Stdin](move _12) @894:16-894:76
+    goto bb8
+  bb8:
+    _16 = const false
+    return @894:9-894:76
+}
+
+fn cap.FakeProc.new(1) pure source 2 @910:14-910:17 {
+    let _0: Proc
+    let _1: ref dict[str, str] "outputs" @910:18-910:41
+    let _2: dict[String, String] "o" @911:13-911:14
+    let _3: Iter[(ref str, ref str)]
+    let _4: ref dict[str, str]
+    let _5: ref mut Iter[(ref str, ref str)]
+    let _6: Option[(ref str, ref str)]
+    let _7: int
+    let _8: ref str "k" @912:13-912:14
+    let _9: ref str "x" @912:16-912:17
+    let _10: Option[String]
+    let _11: ref mut dict[String, String]
+    let _12: String
+    let _13: String
+    let _14: cap.FakeProc
+    let _15: bool "flag"
+  bb0:
+    _15 = const false
+    _2 = dict() @911:39-911:41
+    _15 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = ref _1.* @912:21-912:28
+    _3 = call intrinsic dict.items(copy _4) @912:21-912:36
+    goto bb4
+  bb2 (cleanup):
+    drop _2 if _15
+    resume
+  bb3 (cleanup):
+    drop _3
+    goto bb2
+  bb4 (unwind bb3):
+    _5 = ref mut _3 @912:9-912:36
+    _6 = call intrinsic Iter.next(copy _5) @912:9-912:36
+    _7 = discriminant _6 @912:9-912:36
+    switch copy _7 [0: bb5, else: bb9] @912:9-912:36
+  bb5 (unwind bb3):
+    _8 = copy _6.as(0).0.0 @912:13-912:14
+    _9 = copy _6.as(0).0.1 @912:16-912:17
+    _11 = ref mut _2 @913:17-913:18
+    _12 = call intrinsic str.to_string(copy _8.*) @913:26-913:39
+    goto bb6
+  bb6 (unwind bb7):
+    _13 = call intrinsic str.to_string(copy _9.*) @913:41-913:54
+    goto bb8
+  bb7 (cleanup):
+    drop _12
+    goto bb3
+  bb8 (unwind bb3):
+    _10 = call intrinsic dict.insert(copy _11, move _12, move _13) @913:17-913:55
+    drop _10 @913:55-913:55
+    goto bb4
+  bb9 (unwind bb2):
+    drop _3 @913:55-913:55
+    goto bb10
+  bb10 (unwind bb2):
+    dead _3 @913:55-913:55
+    _15 = const false
+    _14 = struct cap.FakeProc(move _2) @914:16-914:35
+    _0 = call intrinsic cap.new[cap.FakeProc, Proc](move _14) @914:16-914:35
+    goto bb11
+  bb11:
+    _15 = const false
+    return @914:9-914:35
+}
+
+fn range#step(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 1 @1194:55-1194:56
+    return @1194:55-1194:56
+}
+
+fn String.new#text(0) value pure source 1 {
+    let _0: str
+  bb0:
+    _0 = const "" @1972:30-1972:32
+    return @1972:30-1972:32
+}
+
+fn Env.fake#vars(0) value pure source 1 {
+    let _0: dict[str, str]
+  bb0:
+    _0 = dict() @4027:59-4027:61
+    return @4027:59-4027:61
+}
+
+fn Proc.fake#outputs(0) value pure source 1 {
+    let _0: dict[str, str]
+  bb0:
+    _0 = dict() @4062:40-4062:42
+    return @4062:40-4062:42
+}
+
+fn TranscriptWorld#drop(1) glue source 0 own 0 {
+    let _0: ()
+    let _1: TranscriptWorld "self"
+  bb0:
+    goto bb7
+  bb1:
+    return
+  bb2 (cleanup):
+    resume
+  bb3 (cleanup):
+    drop _1.0
+    goto bb2
+  bb4 (cleanup):
+    drop _1.1
+    goto bb3
+  bb5:
+    drop _1.0
+    return
+  bb6 (unwind bb3):
+    drop _1.1
+    goto bb5
+  bb7 (unwind bb4):
+    drop _1.2
+    goto bb6
+}
+
+fn cap.FakeStdin#drop(1) glue source 0 own 0 {
+    let _0: ()
+    let _1: cap.FakeStdin "self"
+  bb0:
+    goto bb2
+  bb1:
+    return
+  bb2:
+    drop _1.0
+    return
+}
+answer 0
+sir 0
+source 0 "world.sisu"
+entry main
+test "greets" test#0
+
+intrinsic assert.fail_parts pure
+intrinsic fmt.debug pure
+intrinsic fmt.new pure
+intrinsic print
+
+fn main(0) source 0 @4:5-4:9 {
+    let _0: ()
+    let _1: ()
+  bb0:
+    _1 = call intrinsic print(const "hello") @5:5-5:19
+    _0 = const ()
+    return
+}
+
+fn test#0(0) test source 0 @7:6-7:14 {
+    let _0: ()
+    let _1: bool
+    let _2: int
+    let _3: String
+    let _4: ref mut String
+    let _5: int
+    let _6: ()
+    let _7: (int, String)
+    let _8: list[(int, String)]
+    let _9: Never
+  bb0:
+    _2 = add const 1, const 1 @8:12-8:17
+    _1 = eq copy _2, const 2 @8:12-8:22
+    switch copy _1 [0: bb2, else: bb1] @8:5-8:22
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _3 = call intrinsic fmt.new() @8:12-8:17
+    _4 = ref mut _3 @8:12-8:17
+    _5 = add const 1, const 1 @8:12-8:17
+    _6 = call intrinsic fmt.debug(copy _4, copy _5, const "") @8:12-8:17
+    goto bb3
+  bb3 (unwind bb4):
+    _7 = tuple(const 2, move _3) @8:5-8:22
+    _8 = list(move _7) @8:5-8:22
+    _9 = call intrinsic assert.fail_parts(const "1 + 1 == 2", const "", move _8) @8:5-8:22
+    unreachable @8:5-8:22
+  bb4 (cleanup):
+    resume
+}

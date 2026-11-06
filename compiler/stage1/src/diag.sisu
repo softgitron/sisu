@@ -604,6 +604,7 @@ pub enum Msg:
     TypeNoAlloc
     TypeNoAllocThrough
     TypeNoAllocUnknown
+    TypeNoAllocInstance
     TypeModuleFixtureSync
     ResolvePlainPadding
     ResolvePlainPaddingEnd
@@ -1219,6 +1220,7 @@ impl Msg:
             case TypeNoAlloc: "type.no-alloc"
             case TypeNoAllocThrough: "type.no-alloc-through"
             case TypeNoAllocUnknown: "type.no-alloc-unknown"
+            case TypeNoAllocInstance: "type.no-alloc-instance"
             case TypeModuleFixtureSync: "type.module-fixture-sync"
             case ResolvePlainPadding: "resolve.plain-padding"
             case ResolvePlainPaddingEnd: "resolve.plain-padding-end"

@@ -1,0 +1,16 @@
+# The memo between a server's requests (RULES.md, R220): `memo.requests`
+# asks for this program's diagnostics and its run's SIR, then for those of
+# `memo_changed.txt`, the same file with one line changed, as an editor's
+# unsaved text, then for this one's again: each answer is a fresh
+# request's, the parses the memo keeps notwithstanding.
+from std.time import Duration
+
+def wait_of(steps: int) -> Duration:
+    return Duration.millis(steps * 16)
+
+def label(n: int) -> String:
+    let unused = n + 1
+    return "step {n}"
+
+def main():
+    print(label(wait_of(2).as_millis()))

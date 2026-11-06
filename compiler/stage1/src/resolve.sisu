@@ -32,6 +32,7 @@
 
 from stage1.diag import Catalog, Diagnostic, Edit, Lines, Msg, Param, TextRange, sort_unique
 from stage1.naming import Style, problem
+from stage1.parser import Parse, parse
 from stage1.sir import Folded
 from stage1.syntax.ast import ItemKind, Module, TypeKind, build
 from stage1.syntax.kinds import SyntaxKind
@@ -147,12 +148,72 @@ impl ModuleNames:
 pub struct Environment:
     pub prelude: ModuleNames
     pub std: dict[String, ModuleNames]
+    ## The parses a server keeps between its requests (RULES.md, R220);
+    ## none for a command run alone or a batch, which parse each text.
+    pub parses: Shared[Cell[ParseMemo]]?
 
 impl Environment:
     ## The environment a program's modules are resolved in: the prelude's
     ## `pub` names (RULES.md, R175).
     pub pure def for_programs(self) -> Environment:
-        return Environment(prelude=self.prelude.visible(), std=self.std.copy())
+        return Environment(
+            prelude=self.prelude.visible(), std=self.std.copy(), parses=self.parses.copy()
+        )
+
+    ## The parse of a module's `text`, and its syntax: the memo's when the
+    ## environment keeps one that holds it (RULES.md, R220), else made, and
+    ## then kept there.
+    pub def parsed(self, text: str, catalog: Catalog) -> Shared[Parsed]:
+        let held = self.parses.copy() else:
+            return Shared(Parsed.of(text, catalog))
+        let cell = Shared.get(held)
+        var memo = cell.replace(ParseMemo.new())
+        var made: Shared[Parsed]? = None
+        if let Some(e) = memo.entries.get(text.to_string()):
+            made = Some(e.0.copy())
+        let found = made ?? Shared(Parsed.of(text, catalog))
+        _ = memo.entries.insert(text.to_string(), (found.copy(), memo.request))
+        cell.set(memo)
+        return found
+
+## A module's text parsed: its tree and syntax diagnostics, and the AST the
+## tree builds, which the name pass and the type checker of one request
+## share, and a server's later requests too (RULES.md, R220).
+pub struct Parsed:
+    ## The text parsed: a module whose text was changed since (a mutant's,
+    ## R208) is parsed again.
+    pub text: String
+    pub parse: Parse
+    pub syntax: Module
+
+impl Parsed:
+    pub pure def of(text: str, catalog: Catalog) -> Parsed:
+        let p = parse(text, catalog)
+        let syntax = build.module(p.tree)
+        return Parsed(text=text.to_string(), parse=p, syntax=syntax)
+
+## The parses a server keeps between requests (RULES.md, R220), by the
+## text parsed, each with the number of the last request that used it: a
+## parse the last request did not use is let go after it.
+pub struct ParseMemo:
+    entries: dict[String, (Shared[Parsed], int)]
+    request: int
+
+impl ParseMemo:
+    pub pure def new() -> ParseMemo:
+        return ParseMemo(entries={}, request=0)
+
+    ## After a request: what it did not use let go, and the next counted.
+    pub pure def next(own self) -> ParseMemo:
+        var kept: dict[String, (Shared[Parsed], int)] = {}
+        for (text, entry) in self.entries.items():
+            if entry.1 == self.request:
+                _ = kept.insert(text.copy(), entry.copy())
+        return ParseMemo(entries=kept, request=self.request + 1)
+
+    ## How many parses the memo holds.
+    pub pure def len(self) -> int:
+        return len(self.entries)
 
 ## The module of the standard library an import path names, as stage 0's
 ## `std_sources::module_for` maps them (`std.json`, and the short `json`).
@@ -473,6 +534,8 @@ pub struct NamedModule:
     ## target that the build leaves out (RULES.md, R106).
     pub absent: list[(String, String)]
     pub discarded: list[TextRange]
+    ## The module's parse, which the type checker takes (RULES.md, R220).
+    pub parsed: Shared[Parsed]?
 
 ## The name diagnostics of each module of a program of several modules (09),
 ## in the modules' order, as stage 0's resolver and type checker find them:

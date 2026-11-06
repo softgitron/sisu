@@ -292,6 +292,10 @@ pub struct Resolver:
     ## `sir --tests --std` (RULES.md, R185): the texts of the std modules,
     ## by name, whose doc examples are tests too; empty otherwise.
     pub std_doc_texts: dict[String, String]
+    ## The module each std module's doc examples make, by the module's name,
+    ## made once for every round of a check (RULES.md, R224); empty for a
+    ## resolver that makes each when it declares it.
+    pub std_docs: Shared[dict[String, StdDoc]]
     ## How many instances this resolution declared: the next one's number.
     pub instances_declared: int
     ## The modules that hold an instance, whose functions are never
@@ -387,6 +391,7 @@ impl Resolver:
         let parsed: dict[String, Module] = {}
         let sources: dict[String, String] = {}
         let safety_texts: dict[String, String] = {}
+        let no_docs: dict[String, StdDoc] = {}
         return Resolver(
             prog=Program.new(),
             types=Types.new(),
@@ -428,6 +433,7 @@ impl Resolver:
             instances_bounded=False,
             tests=True,
             std_doc_texts={},
+            std_docs=Shared(no_docs),
             instances_declared=0,
             instance_modules=set(),
             instance_sites={},
@@ -493,6 +499,34 @@ impl Resolver:
         r.mark_base()
         return (r, all)
 
+    ## Every std module a program may import parsed, for a base a server
+    ## keeps (RULES.md, R220): its syntax for the imports of each request's
+    ## resolution, which a base made from the cache otherwise parses at each
+    ## import, and its names for the name pass's environment, which the name
+    ## pass otherwise reads and parses at each import. A module the base
+    ## parsed already keeps its syntax.
+    pub pure def parse_importables(mut self, texts: dict[String, String]):
+        var parsed: dict[String, Module] = {}
+        var names: dict[String, ModuleNames] = {}
+        for name in importable():
+            let text = text_of(texts, name)
+            if text.is_empty():
+                continue
+            let p = parse(text, Catalog.parse(""))
+            _ = names.insert(name.to_string(), ModuleNames.of(text, p.tree))
+            if let Some(m) = self.std_parsed.get(name.to_string()):
+                _ = parsed.insert(name.to_string(), m.copy())
+            else:
+                _ = parsed.insert(name.to_string(), build.module(p.tree))
+        self.std_parsed = Shared(parsed)
+        let current = self.environment.copy()
+        if let Some(e) = current:
+            var env = e.copy()
+            for (name, these) in names.items():
+                if not env.std.contains(name.copy()):
+                    _ = env.std.insert(name.copy(), these.copy())
+            self.environment = Some(env)
+
     ## `base` made from what `base_with_all`'s copy made before, the derived
     ## impls of every std module by name (`main.base_of`'s cache): the
     ## modules a program may import are parsed when one imports them.
@@ -548,7 +582,7 @@ impl Resolver:
             let d = r.new_def(prelude, name, TextRange.empty(0), Vis.Pub, DefKind.Module(m))
             _ = r.prog.modules[prelude.index].items.insert(name.to_string(), d)
         _ = names.items.add("target".to_string())
-        r.environment = Some(Environment(prelude=names, std=ambient_names))
+        r.environment = Some(Environment(prelude=names, std=ambient_names, parses=None))
         # The build's target, which a native build names (RULES.md, R116).
         let target_text = if texts.contains("target"): text_of(texts, "target") else: target()
         let t = r.load_std("target", target_text, templates)
@@ -4139,6 +4173,18 @@ impl Resolver:
     pure def declare_std_doc_tests(mut self):
         let texts = self.std_doc_texts.copy()
         let p = self.prog.prelude
+        # The examples' modules made once for the check (RULES.md, R224).
+        if not self.std_docs.is_empty():
+            if let Some(doc) = self.std_docs.get("prelude"):
+                self.declare_std_doc(p, doc.copy(), "std.core")
+            for name in documented():
+                if not texts.contains(name.to_string()):
+                    continue
+                let m = self.std_module_named(name) else:
+                    continue
+                if let Some(doc) = self.std_docs.get(name.to_string()):
+                    self.declare_std_doc(m, doc.copy(), display_path(name))
+            return
         # The base keeps no syntax of its modules for a program (the type
         # checker never checks their bodies): the items' starts are read
         # from the text.
@@ -4170,6 +4216,21 @@ impl Resolver:
         if not self.std_derived.contains(name.to_string()):
             return None
         return Some(self.load_std_module(name, parsed.copy(), "", Templates.none()))
+
+    ## `declare_doc_tests_in` of a std module whose examples' module `doc`
+    ## holds, made before (RULES.md, R224).
+    pure def declare_std_doc(mut self, module: ModuleId, own doc: StdDoc, test_prefix: str):
+        let g_items = doc.syntax.items.copy()
+        let name = "<doc>/{self.prog.modules[module.index].name}.sisu"
+        let g = self.add_module(name, False, doc.syntax)
+        self.prog.modules[g.index].parent = Some(module)
+        self.prog.modules[g.index].package = self.prog.modules[module.index].package
+        self.prog.modules[g.index].file = self.prog.modules[module.index].file.copy()
+        for d in doc.diagnostics:
+            self.report_other(g, d.copy())
+        _ = self.module_texts.insert(g, doc.text.copy())
+        self.docs.push((g, doc.text.copy()))
+        self.declare_items(g, g_items, test_prefix)
 
     ## `declare_doc_tests` of a module whose text is `source`, whose items
     ## that can carry a doc comment start at `starts`.
@@ -5961,6 +6022,43 @@ impl Resolver:
 ## The attribute the compiler puts on the function that gives an
 ## associated constant's value (RULES.md, R37), which no program writes.
 pub const ASSOC_CONST_ATTR: str = "<const>"
+
+## The module a std module's doc examples make (`sir --tests --std`,
+## RULES.md, R185 and R224): its text, the diagnostics of its parse and its
+## syntax.
+pub struct StdDoc:
+    text: String
+    diagnostics: list[Diagnostic]
+    syntax: Module
+
+## The module of each std module's doc examples that has one, by the
+## module's name (the prelude's as `prelude`), from `texts`, the std
+## modules' sources: made once for a check, where each round of its
+## resolution made them again, the module's text parsed for its items'
+## starts and the examples' text for their module (RULES.md, R224).
+pub pure def std_docs_of(texts: dict[String, String], catalog: Catalog) -> dict[String, StdDoc]:
+    var out: dict[String, StdDoc] = {}
+    var names: list[str] = ["prelude"]
+    for name in documented():
+        names.push(name)
+    for name in names:
+        let text = texts.get(name.to_string()) else:
+            continue
+        if out.contains(name.to_string()):
+            continue
+        let syntax = build.module(parse(text, Catalog.parse("")).tree)
+        let examples = doc_examples(text, item_starts(syntax.ast, syntax.items))
+        if examples.is_empty():
+            continue
+        let generated = doc_test_module(text, examples)
+        let parsed = parse(generated, catalog)
+        let doc = StdDoc(
+            text=generated.copy(),
+            diagnostics=parsed.diagnostics.copy(),
+            syntax=build.module(parsed.tree),
+        )
+        _ = out.insert(name.to_string(), doc)
+    return out
 
 ## Where each item among `items` that can carry a doc comment starts, with
 ## the name its examples' tests are named after: a method as

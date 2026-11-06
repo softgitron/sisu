@@ -42,12 +42,12 @@ from stage1.diag import (
     sort_unique,
 )
 from stage1.parser import parse
-from stage1.resolve import Environment, ModuleNames
+from stage1.resolve import Environment, ModuleNames, ParseMemo, Parsed
 from stage1.syntax.ast import Ast, Block, ExprId, ExprKind, Mode, Module
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
 from stage1.typeck.check import Checker, Cx, Finished, PASSED, RetCtx
-from stage1.typeck.collect import Resolver, SourceModule, SourcePackage, StdMarks, preview_warning
+from stage1.typeck.collect import Resolver, SourceModule, SourcePackage, StdDoc, StdMarks, preview_warning, std_docs_of
 from stage1.typeck.contracts import contract_only, leading_contracts
 from stage1.typeck.generic_asserts import Assert, ConstCall, failures
 from stage1.typeck.instances import DeriveOrigin
@@ -149,7 +149,7 @@ impl Base:
     pub pure def environment(self) -> Environment:
         if let Some(e) = self.resolver.environment:
             return e.copy()
-        return Environment(prelude=ModuleNames.empty(), std={})
+        return Environment(prelude=ModuleNames.empty(), std={}, parses=None)
 
 ## What making a base computes once for the std modules a program may
 ## import, which a base made again from it does not (`main.base_of`'s
@@ -283,6 +283,20 @@ pub pure def with_lines(own base: Base) -> Base:
     out.lines = lines_of(out.texts)
     return out
 
+## The base a server keeps for its requests (RULES.md, R220): every std
+## module a program may import parsed once (`Resolver.parse_importables`),
+## and an environment that keeps the parses of the programs' modules
+## between requests (`resolve.ParseMemo`).
+pub pure def kept_for_requests(own base: Base) -> Base:
+    var out = base
+    out.resolver.parse_importables(out.texts)
+    let current = out.resolver.environment.copy()
+    if let Some(e) = current:
+        var env = e.copy()
+        env.parses = Some(Shared(Cell.new(ParseMemo.new())))
+        out.resolver.environment = Some(env)
+    return out
+
 ## Where the lines of each text start.
 pure def lines_of(texts: dict[String, String]) -> dict[String, Lines]:
     var out: dict[String, Lines] = {}
@@ -394,6 +408,9 @@ pub struct InputModule:
     pub file: String
     pub text: String
     pub package: int
+    ## The parse of `text` the name pass made, which the check takes rather
+    ## than parsing the text again (RULES.md, R220); none when it made none.
+    pub parsed: Shared[Parsed]?
 
 ## What checking one body left, but the table of types, which the next
 ## body's check continues.
@@ -509,7 +526,9 @@ pub pure def check_file(
     embedded: dict[String, Embedded],
     keep: bool,
 ) -> Checked:
-    let module = InputModule(path=[], file=String.new(), text=text.to_string(), package=0)
+    let module = InputModule(
+        path=[], file=String.new(), text=text.to_string(), package=0, parsed=None
+    )
     let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[])
     let features = [Features.none()]
     return check_program(
@@ -551,6 +570,17 @@ pub pure def resolve_file(base: Base, text: str, catalog: Catalog) -> Program:
 pure def source_of(own syntax: Module, text: str) -> SourceModule:
     return SourceModule(path=[], file=String.new(), syntax=syntax, text=text.to_string(), package=0)
 
+## A module's syntax diagnostics and syntax: the name pass's parse of it,
+## when it made one of the module's text as it is now (RULES.md, R220),
+## else its text parsed.
+pure def syntax_of_input(m: InputModule, catalog: Catalog) -> (list[Diagnostic], Module):
+    if let Some(made) = m.parsed:
+        let held = Shared.get(made)
+        if held.text == m.text:
+            return (held.parse.diagnostics.copy(), held.syntax.copy())
+    let p = parse(m.text, catalog)
+    return (p.diagnostics.copy(), build.module(p.tree))
+
 ## Checks a program of several modules and packages (09) against the
 ## resolved prelude, as `check_file` checks one file; with `multi`, every
 ## position is in the conformance form of a program of several files, its
@@ -577,9 +607,8 @@ pub pure def check_program(
     var syntaxes: list[list[Diagnostic]] = []
     var parsed: list[Module] = []
     for m in modules:
-        let p = parse(m.text, catalog)
-        syntaxes.push(p.diagnostics.copy())
-        let module = build.module(p.tree)
+        let (diagnostics, module) = syntax_of_input(m, catalog)
+        syntaxes.push(diagnostics)
         # Each module as this build compiles it (decision 243).
         var package_features: Features? = None
         if m.package < len(features):
@@ -605,12 +634,19 @@ pub pure def check_program(
     # for a promotion: the next one makes its table again, and the types
     # are carried into it.
     var named_in: Types? = None
+    # The std modules' doc examples, made once for every round (RULES.md,
+    # R224).
+    var std_docs: dict[String, StdDoc] = {}
+    if std_tests:
+        std_docs = std_docs_of(base.texts, catalog)
+    let docs = Shared(std_docs)
     while True:
         var r = base.resolver.copy()
         r.prog.embedded = embedded.copy()
         r.tests = tests
         if std_tests:
             r.std_doc_texts = base.texts.copy()
+            r.std_docs = docs.copy()
         for q in requests:
             if let Request.Promote(d) = q:
                 _ = r.promoted.add(d)

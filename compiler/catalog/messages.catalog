@@ -251,6 +251,9 @@ E0281 error   type.fixture-signature      `{name}` is a `@fixture`, which a test
 E0282 error   type.no-alloc               `{name}` is `@no_alloc`, but {what} may allocate
 -     note    type.no-alloc-through       `{callee}` {how}, at {at}
 -     note    type.no-alloc-unknown       which function it calls is known only when it runs, so it may be one that allocates
+# Stage 1's (RULES.md, R222): a generic `@no_alloc` function is checked at
+# each instance the program makes, where its type arguments are known.
+-     note    type.no-alloc-instance      in this instance, which the program makes at {at}
 # Stage 1's (RULES.md, R219; 17, "Fixtures"): a module's fixture is made once
 # and shared by the module's tests, which run at once.
 E0283 error   type.module-fixture-sync    `{name}` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `{ty}` is not

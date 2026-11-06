@@ -123,7 +123,7 @@ from stage1.manifest import read as manifest_read
 from stage1.mutants import Rng, joined, mutate, spread
 from stage1.package import FeatureRequest, Layout, Problem, Target
 from stage1.parser import parse, parse_lexed
-from stage1.resolve import Environment, ModuleNames, NamedModule, imported_std_modules
+from stage1.resolve import Environment, ModuleNames, NamedModule, ParseMemo, Parsed, imported_std_modules
 from stage1.syntax.ast import ExprKind, StrPart, build
 from stage1.syntax.ast import Mode
 from stage1.syntax.ast import visit
@@ -154,7 +154,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.20.0"
+const VERSION: str = "0.21.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -419,6 +419,7 @@ def run_command(
             "--cover",
             "--module-fixtures",
             "--std",
+            "--transcripts",
             "--defer-borrow",
             "--locked",
             "--no-default-features",
@@ -430,10 +431,31 @@ def run_command(
         # none; its lockfile written as stage 0 writes it (09).
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
-        if not names_path(words, flags):
+        # `sir --tests --std` naming no path outside a package: the standard
+        # library's doc examples alone, as tests of an empty program
+        # (RULES.md, R221), which `path` names by being empty.
+        let examples = words.contains("--tests") and words.contains("--std")
+        let examples_alone = examples
+            and not names_path(words, flags)
+            and package_above(sys).is_none()
+        if examples_alone:
+            path = String.new()
+        elif not names_path(words, flags):
             let found = nearest_package(sys, "sir", catalog, mut o) else:
                 return Err(Failed)
             path = found
+        if path.is_empty():
+            match served.base:
+                case Some(b):
+                    return sir_with(
+                        sys, home, path, words, level, request, b, catalog, served.kept, mut o
+                    )
+                case None:
+                    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+                    let alone = Cell.new(Kept.new())
+                    return sir_with(
+                        sys, home, path, words, level, request, base, catalog, alone, mut o
+                    )
         if let Some(e) = workspace_run_error(sys, path, catalog):
             o.emit("", e)
             return Err(Failed)
@@ -450,10 +472,13 @@ def run_command(
         # The served base, or one made for this command (RULES.md, R158).
         match served.base:
             case Some(b):
-                return sir_with(sys, home, path, words, level, request, b, catalog, mut o)
+                return sir_with(
+                    sys, home, path, words, level, request, b, catalog, served.kept, mut o
+                )
             case None:
                 let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-                return sir_with(sys, home, path, words, level, request, base, catalog, mut o)
+                let alone = Cell.new(Kept.new())
+                return sir_with(sys, home, path, words, level, request, base, catalog, alone, mut o)
     if command == "ownership" and len(rest) == 2:
         let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -575,10 +600,13 @@ def run_command(
         # The served base, or one made for this command (RULES.md, R158).
         match served.base:
             case Some(b):
-                return check_with(sys, home, path, ids, request, b, catalog, mut o, diary)
+                return check_with(
+                    sys, home, path, ids, request, b, catalog, mut o, diary, served.kept
+                )
             case None:
                 let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-                return check_with(sys, home, path, ids, request, base, catalog, mut o, diary)
+                let alone = Cell.new(Kept.new())
+                return check_with(sys, home, path, ids, request, base, catalog, mut o, diary, alone)
     if command == "lint":
         # `sisu lint` (10: "lints beyond the compiler's warnings, with
         # fix-its"; RULES.md, R11): the lints of a program the front end
@@ -953,9 +981,33 @@ def sir_with(
     request: FeatureRequest,
     base: typeck.Base,
     catalog: Catalog,
+    held: Cell[Kept],
     mut o: Out,
 ) -> ! {IoError, UsageError, CommandError}:
-    var kept = Kept.new()
+    # What earlier requests of a server made of the standard library's
+    # bodies (RULES.md, R220), given back when the command is done.
+    var kept = held.replace(Kept.new())
+    let done = sir_kept(sys, home, path, words, level, request, base, catalog, mut kept, mut o)
+    held.set(kept)
+    # The error as the command gave it, without a line of this function
+    # in the run time's trace, which the driver reads past.
+    if let Err(e) = done:
+        return Err(e.copy())
+    return Ok(())
+
+## `sir_with` with what it keeps of the standard library's bodies, `kept`.
+def sir_kept(
+    sys: System,
+    home: str,
+    path: str,
+    words: list[String],
+    level: int,
+    request: FeatureRequest,
+    base: typeck.Base,
+    catalog: Catalog,
+    mut kept: Kept,
+    mut o: Out,
+) -> ! {IoError, UsageError, CommandError}:
     var env = base.environment()
     var times = SirTimes(check=0, lower=0, ownership=0)
     # `--partial`: the SIR of what lowering reached, also of a program
@@ -973,7 +1025,7 @@ def sir_with(
             return Ok(())
         var built = input.copy()
         built.contracts = level
-        built.roots = transcript_roots(sys, built.disk, tests)
+        built.roots = world_roots(sys, built.disk, words, tests and not path.is_empty())
         built.std_tests = tests and words.contains("--std")
         let d = deferred_program(base, built, path, catalog, mut kept, words.contains("--modules"))
         let (sir, errs, status) = deferred_answer(d, catalog, words.contains("--format=ids"))
@@ -992,7 +1044,7 @@ def sir_with(
             return Ok(())
         var built = input.copy()
         built.contracts = level
-        built.roots = transcript_roots(sys, built.disk, True)
+        built.roots = world_roots(sys, built.disk, words, not path.is_empty())
         built.std_tests = words.contains("--std")
         # `--module-fixtures`: a module's fixture a `ref T` parameter of the
         # tests that name it, which the runner gives, and each test's
@@ -1127,8 +1179,31 @@ def check_with(
     catalog: Catalog,
     mut o: Out,
     diary: String?,
+    held: Cell[Kept],
 ) -> ! {IoError, UsageError, CommandError}:
-    var kept = Kept.new()
+    # What earlier requests made of the standard library's bodies (R220).
+    var kept = held.replace(Kept.new())
+    let done = check_kept(sys, home, path, ids, request, base, catalog, mut o, diary, mut kept)
+    held.set(kept)
+    # The error as the command gave it, without a line of this function
+    # in the run time's trace, which the driver reads past.
+    if let Err(e) = done:
+        return Err(e.copy())
+    return Ok(())
+
+## `check_with` with what it keeps of the standard library's bodies.
+def check_kept(
+    sys: System,
+    home: str,
+    path: str,
+    ids: bool,
+    request: FeatureRequest,
+    base: typeck.Base,
+    catalog: Catalog,
+    mut o: Out,
+    diary: String?,
+    mut kept: Kept,
+) -> ! {IoError, UsageError, CommandError}:
     var env = base.environment()
     let reports = reports_of(
         sys, home, path, path, True, request, base, mut env, catalog, mut kept
@@ -1357,7 +1432,7 @@ def file_input(
 ) -> Input ! IoError:
     let features = Features.for_runtime(target_runtime(sys))
     let built = name_diagnostics(sys, home, text, tests, features.copy(), mut env, catalog)?
-    let (syntax, found_names, cfg_diags) = built
+    let (syntax, found_names, cfg_diags, made) = built
     let names = beside_notes(sys, arg, found_names)
     var named = False
     var name_errors: list[(int, int)] = []
@@ -1367,7 +1442,9 @@ def file_input(
     for d in cfg_diags:
         if catalog.is_error(d.msg):
             named = True
-    let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.to_string(), package=0)
+    let module = typeck.InputModule(
+        path=[], file=arg.to_string(), text=text.to_string(), package=0, parsed=Some(made)
+    )
     let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[])
     return Ok(
         Input(
@@ -1426,7 +1503,11 @@ def held_layout_input(
         let text = named[i].text.copy()
         modules.push(
             typeck.InputModule(
-                path=m.path.copy(), file=m.name.copy(), text=text.copy(), package=m.package
+                path=m.path.copy(),
+                file=m.name.copy(),
+                text=text.copy(),
+                package=m.package,
+                parsed=named[i].parsed.copy(),
             )
         )
         # The files `embed` names, relative to the root of each module's
@@ -2424,6 +2505,9 @@ def app_input(
     mut env: Environment,
     catalog: Catalog,
 ) -> Input? ! IoError:
+    # No path: the standard library's doc examples alone (RULES.md, R221).
+    if arg.is_empty():
+        return Ok(Some(examples_input(sys, home, mut env, catalog)?))
     if let Some(layouts) = layouts_of(sys, arg, True, request):
         if len(layouts) == 1 and not layouts[0].modules.is_empty():
             return Ok(Some(layout_input(sys, home, layouts[0], tests, mut env, catalog)?))
@@ -2432,6 +2516,20 @@ def app_input(
     if let Some(x) = built.first():
         return Ok(Some(x.copy()))
     return Ok(None)
+
+## The program whose tests are the standard library's doc examples alone,
+## `sir --tests --std` and `test --std` naming no path outside a package
+## (RULES.md, R221): an empty root module, `examples.sisu`, which is not
+## read, with the examples' tests.
+def examples_input(
+    sys: System, home: str, mut env: Environment, catalog: Catalog
+) -> Input ! IoError:
+    var input = file_input(sys, home, EXAMPLES_FILE, "", True, mut env, catalog)?
+    input.std_tests = True
+    return Ok(input)
+
+## The name of the empty program `examples_input` makes.
+const EXAMPLES_FILE: str = "examples.sisu"
 
 ## Whether a build without its tests may compile the program otherwise than
 ## one with them (decision 243): a module of it has a `@cfg`, or an item
@@ -2510,6 +2608,15 @@ pure def lower_of(
     if input.runtime != "full":
         lowered.program.runtime = Some(input.runtime.copy())
     return Some(lowered)
+
+## The functions `sir --tests` keeps for the transcripts: with
+## `--transcripts` the world of transcripts whatever is beside the program,
+## so that the driver, which found its transcripts, runs them from this SIR
+## (RULES.md, R223); else those `transcript_roots` finds.
+def world_roots(sys: System, disk: str, words: list[String], tests: bool) -> list[String]:
+    if tests and words.contains("--transcripts"):
+        return ["transcript_world".to_string(), "transcript_system".to_string()]
+    return transcript_roots(sys, disk, tests)
 
 ## The world of transcripts (`transcript_world`, `transcript_system`),
 ## which `sir --tests` of a program keeps when it has transcripts: a
@@ -2774,15 +2881,23 @@ pure def report_with(
         return (report, text)
     let ready = evaluated else:
         return (report, text)
+    text = sir_text(ready, input, catalog, modules)
+    return (report, text)
+
+## The SIR of a program the ownership checker placed its drops in and whose
+## `comptime` values were computed (`report_program`'s), as `sir` prints
+## it: each typed hole printing its closure where a run reaches it
+## (RULES.md, R27), a session's inputs named as its own (R123), with each
+## test's module when `modules` is set (R142).
+pure def sir_text(
+    own ready: borrowck.Checked, input: Input, catalog: Catalog, modules: bool
+) -> String:
     var done = ready
-    # Each typed hole prints its closure where a run reaches it
-    # (RULES.md, R27), once the checker is done with the program.
     let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
     holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
     if not input.regions.is_empty():
         session.name_regions(mut done.program, input.regions)
-    text = write.write_as(done.program, modules)
-    return (report, text)
+    return write.write_as(done.program, modules)
 
 ## `report_of`'s report, and the program it checked, its `comptime` values
 ## evaluated, when it has no error and is within the slice (`eval`,
@@ -3320,8 +3435,42 @@ def build_command(
         stopped = "cli.errors-found"
     if not write_lockfile(sys, path, False, locked, accept, catalog, stopped, mut o)?:
         return Err(Failed)
-    var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
-    var kept = Kept.new()
+    # The served base, not a copy of it, with what earlier requests made of
+    # the standard library's bodies (RULES.md, R220).
+    match served.base:
+        case Some(b):
+            var kept = served.kept.replace(Kept.new())
+            let done = build_with(
+                sys, home, path, how, level, output, request, catalog, b, mut kept, mut o
+            )
+            served.kept.set(kept)
+            # The error as the command gave it, without a line of this function
+            # in the run time's trace, which the driver reads past.
+            if let Err(e) = done:
+                return Err(e.copy())
+            return Ok(())
+        case None:
+            let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+            var kept = Kept.new()
+            return build_with(
+                sys, home, path, how, level, output, request, catalog, base, mut kept, mut o
+            )
+
+## `build_command`'s builds, against the base `base`, keeping what they
+## make of the standard library's bodies in `kept`.
+def build_with(
+    sys: System,
+    home: str,
+    path: str,
+    how: BuildHow,
+    level: int?,
+    output: String?,
+    request: FeatureRequest,
+    catalog: Catalog,
+    base: typeck.Base,
+    mut kept: Kept,
+    mut o: Out,
+) -> ! {IoError, CommandError}:
     var env = base.environment()
     var programs: list[Input] = []
     var failed = False
@@ -3430,8 +3579,9 @@ def build_program(
         built.contracts = CONTRACTS_PRECONDITIONS
         if let Some(c) = input.release_contracts:
             built.contracts = contract_level(c) ?? CONTRACTS_PRECONDITIONS
-    # A program of one file is named as it was given.
-    let r = report_of(base, built, path, catalog, mut kept)
+    # A program of one file is named as it was given. The one check makes
+    # the report and the SIR (RULES.md, R220).
+    let (r, evaluated) = report_program(base, built, path, catalog, mut kept)
     let front = r.front(catalog, None)
     let errors = front.errors(catalog)
     var beyond = String.new()
@@ -3479,27 +3629,26 @@ def build_program(
     if not beyond.is_empty():
         o.emit("", beyond)
         return Ok(False)
-    var times = SirTimes(check=0, lower=0, ownership=0)
-    let done = sir_of(sys, base, built, catalog, mut times, False, mut kept)
-    if not done.beyond.is_empty():
-        var why = String.new()
-        for b in done.beyond:
-            why.push("beyond the slice: {b}\n")
-        o.emit("", why)
+    # The SIR of the check that made the report: a program it did not lower
+    # is beyond the slice.
+    let ready = evaluated else:
+        o.emit("", "beyond the slice: nothing to lower\n")
         return Ok(False)
+    let entry = ready.program.entry.is_some()
+    let sir = sir_text(ready, built, catalog, False)
     var exe = output_for(built.disk, built.package_name, built.build_root.copy(), release)
     if let Some(given) = output:
         exe = given.copy()
-    if how.emit_sir and done.entry:
+    if how.emit_sir and entry:
         # What the backend would be handed, after the line that names the
         # executable it would make (RULES.md, R170 and R195).
-        o.emit("{EMITTED_EXECUTABLE}{exe}\n{done.sir}", "")
+        o.emit("{EMITTED_EXECUTABLE}{exe}\n{sir}", "")
         return Ok(True)
     if how.emit_sir and how.for_run:
         # Nothing for a program without `main`, which the driver says it
         # cannot run (R170).
         return Ok(True)
-    if not native or not done.entry:
+    if not native or not entry:
         # The plain build: checked and lowered (a library has no `main` to
         # link).
         var line = String.new()
@@ -3524,7 +3673,7 @@ def build_program(
     # the SIR is written into it first.
     _ = sys.fs.create_dir(Path.new(parent(exe)))
     let sir_file = "{exe}.sir"
-    sys.fs.write_text(Path.new(sir_file), done.sir)?
+    sys.fs.write_text(Path.new(sir_file), sir)?
     let sisu = "{home}/target/release/sisu"
     var backend: list[str] = ["build", "--native", "--from-sir", sir_file, "--output", exe]
     if release:
@@ -3695,7 +3844,18 @@ def repl_serve(sys: System, given_home: str, catalog_file: str, given: Catalog) 
                 print_err(io_frame(e))
                 continue
         serve_one(at, home, catalog_path, args, words, misused, served, catalog)
+        forget_unused(served)
     return Ok(())
+
+## After a request: the parses of the modules it did not read let go
+## (RULES.md, R220), so that the memo holds the last request's program.
+def forget_unused(served: Served):
+    if let Some(b) = served.base:
+        if let Some(e) = b.resolver.environment:
+            if let Some(held) = e.parses:
+                let cell = Shared.get(held)
+                let memo = cell.replace(ParseMemo.new())
+                cell.set(memo.next())
 
 ## One request of `sir --repl-serve` answered (RULES.md, R112 and R158):
 ## `args` as given, `words` without the working directory's `--dir`, with
@@ -3812,7 +3972,11 @@ def remade(sys: System, home: str, catalog_path: str) -> (Catalog, Served) ! IoE
     let catalog = Catalog.parse(sys.fs.read_to_string(Path.new(catalog_path))?)
     let texts = std_texts(sys, home)?
     let base = typeck.with_lines(base_of(sys, home, texts, catalog))
-    return Ok((catalog, Served(base=Some(base), texts=texts)))
+    # The memo between requests (RULES.md, R220): every importable std
+    # module parsed once, and what each request makes of the standard
+    # library's bodies kept for the next.
+    let kept_base = typeck.kept_for_requests(base)
+    return Ok((catalog, Served(base=Some(kept_base), texts=texts, kept=Cell.new(Kept.new()))))
 
 ## What tells a server's executable (RULES.md, R158): the running
 ## executable's size and time, and those of the driver's build of stage 1,
@@ -3953,10 +4117,14 @@ impl Out:
 struct Served:
     base: typeck.Base?
     texts: dict[String, String]
+    ## What the requests served against `base` made of the standard
+    ## library's bodies (`Kept`), which the next request takes and gives
+    ## back (RULES.md, R220); a command run alone has its own.
+    kept: Cell[Kept]
 
 impl Served:
     pure def alone() -> Served:
-        return Served(base=None, texts={})
+        return Served(base=None, texts={}, kept=Cell.new(Kept.new()))
 
 ## What `parse --bindings INPUT` answers (RULES.md, R95).
 def bindings_answer(sys: System, path: str, catalog: Catalog) -> Answer ! IoError:
@@ -4050,10 +4218,17 @@ def query_command(
         return Ok(())
     match served.base:
         case Some(b):
-            o.emit(query_answer(sys, home, kind, file, text, offset, new, b, catalog)?, "")
+            let answer = query_answer(
+                sys, home, kind, file, text, offset, new, b, catalog, served.kept
+            )?
+            o.emit(answer, "")
         case None:
             let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-            o.emit(query_answer(sys, home, kind, file, text, offset, new, base, catalog)?, "")
+            let alone = Cell.new(Kept.new())
+            let answer = query_answer(
+                sys, home, kind, file, text, offset, new, base, catalog, alone
+            )?
+            o.emit(answer, "")
     return Ok(())
 
 ## `check --holes FILE` (10, "Holes"; D-061; RULES.md, R174): each typed
@@ -4102,7 +4277,7 @@ def holes_command(
                 files.push((first.disk.copy(), False))
         if files.is_empty():
             return check_with(
-                sys, home, given, False, build_request(sys), base, catalog, mut o, None
+                sys, home, given, False, build_request(sys), base, catalog, mut o, None, served.kept
             )
     var out = String.new()
     var objects: list[String] = []
@@ -4113,11 +4288,11 @@ def holes_command(
         let checked = check_input(base, input, catalog, True)
         let typed = checked.typed else:
             return check_with(
-                sys, home, given, False, build_request(sys), base, catalog, mut o, None
+                sys, home, given, False, build_request(sys), base, catalog, mut o, None, served.kept
             )
         if checked.has_error:
             return check_with(
-                sys, home, given, False, build_request(sys), base, catalog, mut o, None
+                sys, home, given, False, build_request(sys), base, catalog, mut o, None, served.kept
             )
         hole_lines(input, at, file, as_given, typed, json, catalog, mut out, mut objects)
     if json:
@@ -4487,12 +4662,16 @@ def query_answer(
     new: str,
     base: typeck.Base,
     catalog: Catalog,
+    held: Cell[Kept],
 ) -> String ! IoError:
     var env = base.environment()
     let (input, at, disks) = query_input(sys, home, file, text, mut env, catalog)?
     if kind == "diagnostics" or kind == "actions":
-        var kept = Kept.new()
+        # What earlier requests made of the standard library's bodies
+        # (RULES.md, R220).
+        var kept = held.replace(Kept.new())
         let r = report_of(base, input, file, catalog, mut kept)
+        held.set(kept)
         if kind == "actions":
             return Ok(query_actions(r, at, offset, catalog))
         return Ok(query_diagnostics(r, at, catalog))
@@ -5271,6 +5450,22 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
     var path = path_of(words, flags) else:
         emit("", "{usage()}\n")
         return Ok(2)
+    # `test --std` naming no path outside a package: the standard library's
+    # doc examples alone (RULES.md, R221).
+    if std_tests and not names_path(words, flags) and package_above(sys).is_none():
+        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+        var kept = Kept.new()
+        var env = base.environment()
+        var input = examples_input(sys, home, mut env, catalog)?
+        # Its SIR is written beside the compiler's build of stage 1, not in
+        # the working directory.
+        input.disk = "{home}/target/stage1/{EXAMPLES_FILE}"
+        let (status, held) = test_program(
+            sys, home, "--std", input, runner, base, catalog, mut kept
+        )?
+        if status == 0 and held:
+            return Ok(TESTS_BLOCKED)
+        return Ok(status)
     if not names_path(words, flags):
         var direct = Out.direct()
         let found = nearest_package(sys, "test", catalog, mut direct) else:
@@ -5640,6 +5835,18 @@ def workspace_run_error(sys: System, arg: str, catalog: Catalog) -> String?:
 ## which a command that names no path works on (stage 0's `locate` without
 ## an argument): `None`, after `cli.no-package`, when there is none.
 def nearest_package(sys: System, command: str, catalog: Catalog, mut o: Out) -> String?:
+    let found = package_above(sys) else:
+        let params = [
+            Param(name="dir".to_string(), value=absolute(sys, ".")),
+            Param(name="command".to_string(), value=command.to_string()),
+        ]
+        o.emit("", catalog.plain_error("cli.no-package", params))
+        return None
+    return Some(found)
+
+## The directory of the package of the working directory or of the nearest
+## directory above it, without a word when there is none.
+def package_above(sys: System) -> String?:
     let cwd = absolute(sys, ".")
     var dir = cwd.copy()
     while True:
@@ -5648,11 +5855,6 @@ def nearest_package(sys: System, command: str, catalog: Catalog, mut o: Out) -> 
         if dir == "/":
             break
         dir = package.parent(dir)
-    let params = [
-        Param(name="dir".to_string(), value=cwd),
-        Param(name="command".to_string(), value=command.to_string()),
-    ]
-    o.emit("", catalog.plain_error("cli.no-package", params))
     return None
 
 ## Whether the words after a command name a path, beside the options
@@ -5738,7 +5940,7 @@ def environment(sys: System, home: str) -> Environment ! IoError:
         _ = prelude.items.add(module.to_string())
         _ = std.insert(module.to_string(), names)
     _ = prelude.items.add("target".to_string())
-    return Ok(Environment(prelude=prelude, std=std))
+    return Ok(Environment(prelude=prelude, std=std, parses=None))
 
 ## The base of a command that checks a program, made with the cache
 ## beside the native stage-1 executable when it holds what the base made
@@ -6105,8 +6307,11 @@ def name_diagnostics(
     features: Features,
     mut env: Environment,
     catalog: Catalog,
-) -> (list[Diagnostic], list[Diagnostic], list[Diagnostic]) ! IoError:
-    let parsed = parse(text, catalog)
+) -> (list[Diagnostic], list[Diagnostic], list[Diagnostic], Shared[Parsed]) ! IoError:
+    # The parse the type checker takes too, and a server keeps (RULES.md,
+    # R220).
+    let made = env.parsed(text, catalog)
+    let parsed = ref Shared.get(made).parse
     let (tree, cfg_diags) = built_tree(text, parsed.tree, tests, features)
     for module in imported_std_modules(text, tree):
         if not env.std.contains(module.copy()):
@@ -6117,7 +6322,7 @@ def name_diagnostics(
     let found = with_absences(
         resolve.resolve(text, tree, parsed.diagnostics, env, catalog), absent, discarded
     )
-    return Ok((parsed.diagnostics.copy(), found, cfg_diags))
+    return Ok((parsed.diagnostics.copy(), found, cfg_diags, made.copy()))
 
 ## A module's syntax tree as a build with or without its tests compiles it
 ## (decision 243): without the items and methods its `@cfg`s or the build
@@ -6274,7 +6479,8 @@ def held_named_modules(
                 text = t.copy()
             case None:
                 text = sys.fs.read_to_string(Path.new(m.disk))?
-        let parsed = parse(text, catalog)
+        let made = env.parsed(text, catalog)
+        let parsed = ref Shared.get(made).parse
         var features = Features.for_runtime(layout.runtime)
         if m.package < len(layout.packages):
             let p = ref layout.packages[m.package]
@@ -6293,11 +6499,12 @@ def held_named_modules(
             NamedModule(
                 text=text.copy(),
                 tree=tree,
-                syntax=parsed.diagnostics,
+                syntax=parsed.diagnostics.copy(),
                 path=m.path.copy(),
                 package=m.package,
                 absent=absent,
                 discarded=discarded,
+                parsed=Some(made.copy()),
             )
         )
     return Ok((out, problems))
@@ -6337,7 +6544,7 @@ def names(
     sys: System, home: str, text: str, mut env: Environment, catalog: Catalog
 ) -> String ! IoError:
     let features = Features.for_runtime(target_runtime(sys))
-    let (_, diags, _) = name_diagnostics(sys, home, text, True, features, mut env, catalog)?
+    let (_, diags, _, _) = name_diagnostics(sys, home, text, True, features, mut env, catalog)?
     return Ok(render_ids(text, diags, catalog))
 
 ## The one path a command names after its name, but for the options

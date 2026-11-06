@@ -1,0 +1,8 @@
+# `sir --tests --transcripts` (RULES.md, R223): the world of transcripts
+# (`transcript_world`, `transcript_system`) kept whatever is beside the
+# program, for the driver, which found its transcripts itself.
+def main():
+    print("hello")
+
+test "greets":
+    assert 1 + 1 == 2

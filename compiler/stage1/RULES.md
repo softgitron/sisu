@@ -11296,3 +11296,408 @@ without it `asks.requests` asks for, and `fixture_sync.sisu` (its
       parameter K, for the runner to make once per module; a module's
       fixture returns a `Sync` value (`E0283`). Stage 1 decides it
       (RULES.md, R219).
+
+## R220. A memo between a server's requests: the importable std modules parsed once, each module's parse kept while it is unchanged, the standard library's bodies kept, and one check for a build (decision 1220)
+
+**The rule.** Nothing a command prints changes; a served request does
+less. Decision 1200's "What stage 1 must do": each save of `sisu run
+--watch` is a served `build --for-run --emit-sir` of the whole program,
+0.132 s where the Rust front end's kept queries took 0.072 s on
+`live/swap`, and the editor's `query diagnostics` pays the same for each
+change. The server of R158 now keeps, besides the base, what the last
+requests made:
+
+- **The std modules a program may import, parsed once.** A base made from
+  the cache parsed an imported std module at each import, in each round
+  of each check, and the name pass read and parsed it again for its
+  names: `live/swap`'s `from std.time import Ticker` parsed `std.time`
+  (71 KB) three times a save. The server's base (`typeck.
+  kept_for_requests`, `Resolver.parse_importables`) parses each
+  importable module once when it is made, for the resolver's imports and
+  for the name pass's environment, which then reads no std file.
+- **Each module's parse, while its text is unchanged.** The name pass's
+  parse of a module is the type checker's too (`resolve.Parsed`, its tree,
+  its syntax diagnostics and the AST, which `typeck.InputModule.parsed`
+  carries, with the text it parsed, so that a module whose text changed
+  since, a mutant's of R208, is parsed again), where the checker parsed
+  and built each module again; and the
+  server's environment keeps each parse by the text parsed
+  (`resolve.ParseMemo`, `Environment.parses`), so a request reads an
+  unchanged module's parse from the memo and parses only what changed.
+  After each request the parses it did not use are let go
+  (`forget_unused`): the memo holds the last request's program, for the
+  directory it names, and an editor's unsaved text (`--text`) is one more
+  text.
+- **The standard library's bodies, from one request to the next.** What
+  a batch keeps from one program to the next (`Kept`: the std bodies as
+  the type checker typed them, the functions lowering made of them and
+  their drops, R125's round and "Where the time goes"), the server keeps
+  from one request to the next (`Served.kept`), for `sir`, `check`,
+  `build` and `query diagnostics`; it is made again with the base. Each
+  is keyed as a batch keys it, by the body and what the program's build
+  agrees on (`lower.std_agreement`: the contracts checked, the prelude's
+  names the program hides, the instances it asks for), so a request with
+  other options lowers what it needs again.
+- **One check for a build.** `build` checked a program twice, once for
+  its report and once more for its SIR, the same program both times
+  (`report_of`, then `sir_of`); its SIR now comes from the check that
+  made the report (`report_program`, `sir_text`), as `sir --tests` takes
+  its SIR from its one check (R47). And a served `build` no longer copies
+  the base it is served (`build_with`).
+
+The answers are byte for byte a fresh request's: what the memo holds is
+what the same text makes, a parse a function of the text and the
+catalog, which a change of the catalog or of a std text makes again with
+the base (R158's key). `cases/findings26/asks.requests` asks for
+`memo.sisu`'s diagnostics and its run's SIR, then for its diagnostics
+with one line changed (`--text memo_changed.txt`), then for both again,
+and the answers are those of a server without the memo (the round's
+first build, before it, gave the same bytes); nine requests of
+`live/swap`, `rt`'s 18 modules and their changed text gave the same
+227,916 bytes from both.
+
+**Measured** (natively, the release profile, the mean of 20 requests
+after the first, on four cores at a load of about 8 to 10): a save of
+`live/swap`, the served `build --for-run --emit-sir`, takes
+MEASURE_SWAP where it took MEASURE_SWAP_BEFORE; under callgrind a save
+took 1.18 G instructions, 0.23 G of them the base's copy and drop, 0.31
+G the second check and lowering, 0.12 G the three parses of `std.time`
+and 0.09 G the std bodies typed again. A `query diagnostics` of a module
+of `compiler/rt` (18 modules, 7,624 lines), each request with the module
+changed by a line from the last (its text and `--text` in turn), takes
+MEASURE_RT where it took MEASURE_RT_BEFORE: its time is the program's
+own type check (3.7 G instructions), lowering and ownership check (11 G),
+which nothing kept between requests would shorten short of keeping each
+function's check while its module is unchanged (below).
+
+**Decided against**, for the round: a memo of what the resolver, the
+type checker, lowering and the ownership checker make of the unchanged
+modules. Each round of resolution resolves the whole program again from
+a copy of the base (`check_program`), the checker's table of types is one
+for the program, and a body's types, its SIR and its drops depend on the
+declarations of every module it reaches, so a module's results kept
+across a change need the dependencies of each body on the others'
+declarations, which no phase records; the parse is the part that depends
+on the module's text alone.
+
+**Why.** Item 1 of the round: decision 1200, "What stage 1 must do".
+
+**In stage 1.** `main` (`Served.kept`, `remade`, `forget_unused`,
+`sir_with` and `sir_kept`, `check_with` and `check_kept`, `build_command`
+and `build_with`, `build_program`'s one check, `sir_text`,
+`query_answer`'s `held`, `name_diagnostics` and `held_named_modules`
+through `Environment.parsed`), `resolve` (`Parsed`, `ParseMemo`,
+`Environment.parses`, `Environment.parsed`, `NamedModule.parsed`),
+`typeck` (`kept_for_requests`, `InputModule.parsed`, `syntax_of_input`)
+and `typeck.collect` (`Resolver.parse_importables`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings26/memo.sisu`, with `memo_changed.txt` and
+`asks.requests`.
+
+**Decision 1220**, for docs/architecture.md:
+
+1220. A served request reads the std modules a program may import from
+      the server's base, which parses each once, and each module's parse
+      from a memo of the server's while its text is unchanged; the
+      standard library's bodies as a request typed, lowered and placed
+      them are kept for the next, and `build` takes its SIR from the
+      check that made its report. A save of `live/swap` takes
+      MEASURE_SWAP served where it took MEASURE_SWAP_BEFORE, each answer
+      a fresh request's bytes. Stage 1 decides it (RULES.md, R220).
+
+## R221. `sir --tests --std` and `test --std` naming no path: the standard library's doc examples alone (decision 1221)
+
+**The rule.** Decision 1144: the driver writes an empty program aside to
+run the standard library's examples alone. `sir --tests --std` that
+names no path, run where no package is (in the working directory or
+above it), lowers the examples alone, as the tests of an empty program
+whose root module is `examples.sisu`, which is not read
+(`examples_input`); `test --std` naming none does the same and runs
+them. Inside a package each still reads the package (R185), and a path
+is read as before. The SIR is the one `sir --tests --std examples.sisu`
+prints of an empty file of that name: its first source line is `source 0
+"examples.sisu"`, where the driver's file aside gave the path of its
+directory. Its 197 tests are R185's; statuses and warnings are `sir
+--tests`'s. Served, the request runs in its `--dir`.
+
+What the driver may rely on from 0.21.0: `sir --tests --std` with no
+path outside a package, with `--contracts=LEVEL`, `--format=ids`,
+`--modules` and the other options of `sir --tests`, and `test --std`;
+the source line `source 0 "examples.sisu"`; served. Then the file aside
+of decision 1144 retires: the driver sends `sir --tests --std` from the
+working directory (or `--dir`) where it found no package.
+
+**Why.** Item 2 of the round: decision 1144's leftover.
+
+**In stage 1.** `main` (`run_command`'s `sir`, `package_above`,
+`nearest_package`, `app_input`, `examples_input`, `EXAMPLES_FILE`,
+`test_command`).
+
+**What it changes.** No output of the corpus. Checked by hand, outside a
+package: `sir --tests --std` gives the bytes of `sir --tests --std
+examples.sisu` of an empty file, and `test --std` passes its 197 tests.
+
+**Decision 1221**, for docs/architecture.md:
+
+1221. `sisu1 sir --tests --std` and `test --std` that name no path,
+      outside a package, lower and run the standard library's doc
+      examples alone, as the tests of an empty program `examples.sisu`
+      that is not read, so that the driver's empty program written aside
+      retires. `sisu1 --version` is 0.21.0. Stage 1 decides it
+      (RULES.md, R221).
+
+## R222. `@no_alloc` at each instance of a generic function (decision 1222)
+
+**The rule.** R215's open item: 04 checks `@no_alloc` "after
+monomorphisation", and the SIR keeps a generic function generic, so a
+`@no_alloc` generic function's call of a trait's method on its type
+parameter was `E0282` at the function, whatever impl its instances
+call. Now `borrowck.alloc` checks a generic `@no_alloc` function twice
+over:
+
+- **As written**, for what allocates whatever its type arguments are (a
+  list literal, a call of a function that pushes): `E0282` as before,
+  named by the function alone. What depends on a type parameter, a call
+  of a trait's method on it, a `.copy()` of its value, an intrinsic whose
+  result holds it, a call whose type arguments name it, waits for the
+  instances.
+- **At each instance the program makes** (`instances`): the calls with
+  type arguments that name no type parameter, in any function, and those
+  of each instance's body with its arguments put for its parameters, to
+  any depth (at most 4,096 functions and instances walked), as
+  monomorphisation would make them. Each statement the function as
+  written did not report is checked with the instance's arguments: a
+  trait's method on a type parameter is checked through the impl the
+  arguments name, a callee through its own instance. What allocates is
+  `E0282` at the statement, named by the instance, `total[Big]`, with
+  the note `type.no-alloc-instance`, where the program makes it:
+
+```text
+error[E0282]: `total[Big]` is `@no_alloc`, but `Big.Weighed.weight` may allocate
+  --> no_alloc_instances.sisu:31:16
+   |
+31 |         sum += xs[i].weight()
+   |                ^^^^^^^^^^^^^^
+  = note: `Big.Weighed.weight` calls `list.push`, at no_alloc_instances.sisu:24:9
+  = note: in this instance, which the program makes at no_alloc_instances.sisu:43:11
+```
+
+  An instance that allocates nothing has no error, so a generic function
+  whose every instance allocates nothing checks; one the program never
+  makes is checked as written only. A non-generic `@no_alloc` function
+  that calls a generic one checks the callee's instance, where it
+  checked the callee as written (with its trait calls on a type
+  parameter as calls on a type only the run knows). A `dyn` value and a
+  function value are still known only at run time (D-059).
+
+**Why.** Item 3 of the round: R215's open item.
+
+**In stage 1.** `borrowck.alloc` (`check_body`, `Instance`, `instances`,
+`MAX_INSTANCES`, `subst_all`, `has_param`, `has_param_in`;
+`allocates`, `called` and `allocation` take the instance's arguments),
+`diag` and the catalog (`type.no-alloc-instance`).
+
+**What it changes.** The cases `cases/findings26/no_alloc_instances.sisu`
+(its `.diag`, and its words in `asks.answers`: `total[Big]` at its
+instance, `pair`'s list literal at the function, `total[Small]` and
+`pair[Small]` checked) and `no_alloc_generic_fine.sisu` (its `.out`: a
+generic function whose one instance calls a method that allocates
+nothing). The Rust front end answers both with `W0030`, which the
+classes compare for the first, whose errors stage 1 reports in their
+place.
+
+- Differs: `compiler/stage1/cases/findings26/no_alloc_instances.sisu`: ids, human
+
+**Decision 1222**, for docs/architecture.md:
+
+1222. A generic `@no_alloc` function is checked as written for what
+      allocates whatever its type arguments are, and at each instance
+      the program makes for what depends on them, through the impls the
+      arguments name; an instance that allocates is `E0282` named by its
+      arguments, `total[Big]`, with a note where the program makes it.
+      Stage 1 decides it (RULES.md, R222).
+
+## R223. `sir --tests --transcripts`: the world of transcripts kept on the driver's word (decision 1223)
+
+**The rule.** port-debt.md lists a program's transcripts among the Rust
+front end's roles left. Since R120 (0.11.0) `sir --tests` keeps
+`transcript_world` and `transcript_system` for a program with a
+`.transcript` file in `tests/` beside its root module, and since decision
+722 the driver runs the transcripts from that SIR, so the round looked
+for what the driver still takes from the Rust front end, by running
+`sisu test` of programs with transcripts that only stage 1 accepts (a
+`dict[String, V]` looked up by a `str`, R113): a file, a package, with
+`--native` and with `--defer-borrow`, each ran its transcripts from stage
+1's SIR. What is left is the driver's: `transcript_sir`, the Rust front
+end's build, which it takes when the SIR it has lacks the two functions
+or the stage 1 it finds is older than 0.11.0 (`keeps_transcripts`), and
+for `--front-end=rust`. A program without `main` is the driver's
+`D0128` either way, and a program that does not check never reaches its
+transcripts, since `sir --tests` refuses it (R46).
+
+So that the driver need not agree with stage 1 on where transcripts are,
+nor fall back when they disagree, `sir --tests --transcripts` keeps the
+world of transcripts whatever is beside the program (`world_roots`),
+after the tests, as R120 roots it; without the option stage 1 looks for
+them as before. With `--defer-borrow` it does the same. A program
+without `main` keeps them too, and the driver says it cannot run them.
+
+**What stage 0 must do.** From `sisu1 0.21.0`, ask for `sir --tests
+--transcripts` when `transcript::find` finds a transcript, run the
+transcripts from that SIR, and delete `transcript_sir`, the
+`keeps_transcripts` probe and `SISU_STAGE1_TRANSCRIPTS`; `--front-end=rust`
+keeps its own build until the Rust front end goes. With that and R221,
+what port-debt.md lists of `sisu test` on the Rust front end is `test
+--std --defer-borrow`, which `sir --tests --std --defer-borrow` already
+lowers (R189, R185), and building stage 1.
+
+What the driver may rely on from 0.21.0: `sir --tests --transcripts` with
+every option of `sir --tests`, the SIR holding `transcript_world` and
+`transcript_system`; served.
+
+**Why.** Item 4 of the round: port-debt.md, "The Rust front end's roles
+still to replace".
+
+**In stage 1.** `main` (`world_roots`, `sir_kept`'s flags).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings26/world.sisu`, which has no transcript, asked by
+`asks.requests` with the option (its SIR keeps the world) and without it
+(none).
+
+**Decision 1223**, for docs/architecture.md:
+
+1223. `sisu1 sir --tests --transcripts` keeps the world of transcripts
+      whatever is beside the program, so that the driver, which finds the
+      transcripts, runs them from stage 1's SIR without its own build of
+      the program. Stage 1 decides it (RULES.md, R223).
+
+## R224. `test --std`'s speed: the examples' modules made once for a check (decision 1224)
+
+**The rule.** Nothing a command prints changes. Decision 1144 measured
+`test --std` at 3.1 s on stage 1 against 0.7 s on the Rust front end.
+Profiled (callgrind, `sir --tests --std` of no program, 28.6 G
+instructions, the base made whole among them): the program's check
+7.5 G, lowering 8.9 G (the 815 std bodies the examples reach typed, 3.6
+G, and lowered, 3.6 G), the ownership checker 5.5 G. Of the check, 4.2 G
+was declaring the examples (`declare_std_doc_tests`) in each of its two
+rounds of resolution: each round parsed the prelude and every
+documented module again for its items' starts, made the examples' text
+and parsed it. Now `check_program` makes each module's examples' module
+once (`typeck.collect.std_docs_of`, `StdDoc`) and each round declares
+them (`declare_std_doc`): MEASURE_STD.
+
+What is left is the examples' own: the std bodies they reach, typed,
+lowered and checked for ownership (18 G), which a server's second
+request takes from `Kept` (R220), where a process makes them again; and
+the std modules loaded for them, which the examples import.
+
+**Why.** Item 5 of the round.
+
+**In stage 1.** `typeck.collect` (`StdDoc`, `std_docs_of`,
+`Resolver.std_docs`, `declare_std_doc`), `typeck` (`check_program`).
+
+**What it changes.** No output of the corpus; `sir --tests --std` gives
+the same bytes before and after.
+
+**Decision 1224**, for docs/architecture.md:
+
+1224. `sir --tests --std` makes the module of each std module's doc
+      examples once for a check, where each round of its resolution made
+      them again. Stage 1 decides it (RULES.md, R224).
+
+## R225. D-060's allocators, planned; the first step decided against for the round (decision 1225)
+
+**The rule.** Nothing changes; this round records the plan. 04,
+"Allocators", 11 and D-060: collections take their allocator as a type
+parameter with a default, `list[T, A: Allocator = Global]`, which
+ordinary code never writes; `list.with_allocator(a)` builds one on
+another allocator; a collection on a borrowed `Region` is a view; and
+`try_push` and friends return `! OutOfMemory`. The manual found
+`list[T, A]` with `Global` in the prelude missing (`E0208`, `E0201`),
+`list.with_allocator` `E0351` and `try_push` `E0304`. Stage 1's own
+`std.mem` has the `Allocator` trait, `Global`, `Region` and
+`RawBuf[T, A: Allocator = Global]` (R9), and the checker takes a
+defaulted type parameter on a program's own type.
+
+The plan, in its order of rounds:
+
+1. **The parameter, the front end's alone.** `Allocator` and `Global`
+   reach the prelude (the trait stays `unsafe` to implement), and
+   `list`, `dict`, `set` and `String` take a last type parameter `A:
+   Allocator = Global`. Every type the checker makes of them without it
+   is at `Global`, and the type table interns `list[T, Global]` as
+   `list[T]`, so that a program that names none, and one that names
+   `Global`, has the SIR it has now, byte for byte, and the SIR names
+   only another allocator. The checker's sites that make a collection's
+   type by its one argument (19 in the type checker, lowering and the
+   ownership checker) keep making it so.
+2. **The runtime's allocation through a value.** The runtime in Sisu
+   (D-086, R9) allocates a collection's buffer through `RawBuf[T, A]`,
+   whose `A` is the allocator value the collection holds; `Global`'s is
+   the C allocator, a `Region`'s its bump. Natively a collection on
+   `Global` keeps today's layout (its allocator is zero-sized); one on
+   another holds the value beside its buffer. The interpreter's checked
+   model allocates a `Region`'s blocks from the region's own range.
+3. **The library's forms.** `list.with_allocator(a)` (and `dict`'s and
+   `set`'s), whose result is `list[T, A]`, and `list[T, ref Region]` a
+   view by the existing rule (R21's: a collection that holds a
+   reference); `try_push`, `try_insert` and `try_reserve` with `!
+   OutOfMemory` when the allocator gives no block.
+4. **What `@no_alloc` then checks.** R215 counts a collection's growth as
+   an allocation whatever its allocator; with the parameter, growth of a
+   `list[T, ref Region]` allocates from the region and not the heap, so
+   it passes `@no_alloc` as 04's region pattern means it to (a region
+   made before the function, reset after), and `try_push` on it is the
+   allocation-free form of a hot path.
+5. **The `freestanding` profile** (12), which has no global allocator:
+   `Global` refused there (`E1023` today refuses the profile itself).
+
+**Decided against**, for the round: step 1. It is the front end's alone,
+but not small: the prelude's four builtin collections change their
+arity, and with them every impl of the prelude and of the std modules
+over `list[T]`, `dict[K, V]` and `set[T]` (`impl[T] list[T]`, the
+derive templates, the `Lookup` impls of R113), which must take or
+default the new parameter; `std/prelude.sisu` is shared with stage 0's
+agent, who edits it this round, and the Rust front end, which reads the
+same prelude for the `doc` classes, would see the changed impls. Step 1
+wants a round of its own that changes the prelude with the checker, so
+that the shared text changes once. Step 2 needs the runtime of D-086
+past R9's first slice; steps 3 and 4 follow them.
+
+**Why.** Item 6 of the round: the manual's findings under "Ownership"
+and "Types and traits".
+
+**What it changes.** Nothing.
+
+**Decision 1225**, for docs/architecture.md:
+
+1225. D-060's allocators come in five steps: the defaulted parameter on
+      `list`, `dict`, `set` and `String`, interned away at `Global` so
+      that today's SIR stays; allocation through the collection's
+      allocator value in the runtime in Sisu; `with_allocator` and
+      `try_push`; `@no_alloc` counting a region's growth as none; and
+      `freestanding`'s explicit allocator. The first waits for a round
+      that changes the shared prelude with the checker. Stage 1 decides
+      it (RULES.md, R225).
+
+## R226. The merge's differences: none (decision 1226)
+
+**The rule.** Nothing a command prints changes. Stage 0's twenty-third
+round added the conformance case `testing/mutants` (decision 1201),
+R208's program, which differs from stage 0's front end in no class:
+its AST, names, types, SIR, diagnostics and pages are the Rust front
+end's, and what it does is its `.out`, interpreted and natively. The
+round's run of `check.sh --native --names --types --sir` reported no
+difference that no rule lists but the round's own.
+
+**Why.** Item 7 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 1226**, for docs/architecture.md:
+
+1226. Stage 1's twenty-sixth round brought no difference from the merge:
+      the conformance suite's `testing/mutants` differs from stage 0's
+      front end in nothing. Stage 1 decides it (RULES.md, R226).
