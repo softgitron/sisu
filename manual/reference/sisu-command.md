@@ -2861,6 +2861,7 @@ a command line can produce, by what they report:
 | D0170 to D0174, D0180 to D0187 | The lines of `sisu check --holes` ([sisu check --holes](#sisu-check---holes)). |
 | D0175 to D0179, [D0190](diagnostics.md#d0190) | The lines of `sisu fix` ([sisu fix](#sisu-fix)). |
 | [D0153](diagnostics.md#d0153) to D0160 | `sisu test --mutate` and `--since` ([sisu test](#sisu-test)). |
+| [D0161](diagnostics.md#d0161) to D0163 | `sisu test --cover` ([sisu test](#sisu-test)). |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |
