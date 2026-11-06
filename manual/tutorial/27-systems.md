@@ -579,8 +579,9 @@ a `strlen` of text without its NUL stops the program.
   pointer or a `@repr(c)` type (E0991, `unsafe.export-not-c`). C calls
   it with its own convention, `int32_t sauna_heat(int32_t minutes)`
   for a function of an `i32`, and passes a `@repr(c)` struct by a
-  pointer to it, whose fields a native build lays out at C's offsets,
-  as `@repr(c)` asks. A panic cannot unwind into C, so one that
+  pointer to it, whose fields a native build lays out at C's offsets;
+  an optional pointer, `ptr[T]?`, is C's one word, 0 for `None`. A
+  panic cannot unwind into C, so one that
   leaves the function prints its report and ends the program with status 134, as
   [R14](../reference/attributes.md#exported-functions) shows.
 - Importing a C header, `import c "zlib.h"`, which would write the
@@ -851,7 +852,10 @@ compiler yet. Allocators for the
 collections, `list.with_allocator(Region.bump(n))` for memory released
 all at once and `try_push` for allocation that can fail, are designed in
 [04](../../proposal/04-memory-and-ownership.md#allocators) (E0351 and
-E0304 today); `Region` exists, under `RawBuf`. `@no_block` and
+E0304 today), planned in five steps, the first a defaulted
+allocator parameter on `list`, `dict`, `set` and `String`
+([R7](../reference/ownership.md#allocators)); `Region` exists, under
+`RawBuf`. `@no_block` and
 `@stack` compile with the warning W0030 (`resolve.unchecked-attribute`),
 since nothing checks them yet. The
 manifest's runtime profile is read, but `single` gets the runtime that
@@ -864,10 +868,7 @@ leaves out the code that nothing reaches, but links the C library
 dynamically and keeps its debug information: a ten-line program is
 6.25 MB, 1.74 MB stripped, nearly all of it the runtime, as `sisu build
 --native --explain-size` shows part by part
-([R22](../reference/targets.md#binary-size-and-startup)). The build
-itself is quick: the server of stage 1 answers it, and a package's
-native build takes about 0.14 seconds where starting stage 1 for it
-took 0.33 ([R16](../reference/sisu-command.md#the-server-of-stage-1)). A native debug build
+([R22](../reference/targets.md#binary-size-and-startup)). A native debug build
 checks raw memory as the interpreter does, the memory C gives out
 included, except where the interpreter alone knows enough: which
 borrow a pointer came from, which it checks only by address. The
@@ -1156,8 +1157,9 @@ what the test printed:
 ```
 
 `@no_alloc` states that the functions allocate nothing, and the
-compiler checks it through every call: making a list, joining text or
-calling a function that does is E0282 (`type.no-alloc`).
+compiler checks it through every call, a generic function at each type
+it is used with: making a list, joining text or calling a function
+that does is E0282 (`type.no-alloc`).
 
 <details>
 <summary>What Sisu says about a <code>mix</code> that makes a list</summary>

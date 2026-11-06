@@ -1,0 +1,13 @@
+# A test before opening time reaches the branch that was not run.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    if hour < 16:
+        return False
+    return hour < 22
+
+test "open in the evening":
+    assert open_at(18)
+
+test "closed in the morning":
+    assert not open_at(10)

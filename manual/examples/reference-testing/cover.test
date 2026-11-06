@@ -1,0 +1,3 @@
+test "a bill without a discount" ... ok
+test "an empty bill" ... ok
+2 passed, 0 failed, 0 blocked

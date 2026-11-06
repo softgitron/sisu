@@ -6,8 +6,9 @@ each case of a list, read what a failing assertion shows, and give each
 test the fixtures, fakes and clock it needs. Then you test properties rather
 than examples, check a fast function against a clear one, fake your
 own traits, and keep whole outputs as snapshots and transcripts. Last,
-you replay a failure from its token, time code with benchmarks and
-test your tests with mutants. You need about two hours.
+you replay a failure from its token, time code with benchmarks, find
+the code no test runs and test your tests with mutants. You need about
+two hours.
 
 ## Suites, tags and choosing tests
 
@@ -114,12 +115,11 @@ test, in the next section, is how a value reaches a name.
 
 </details>
 
-In a package, `sisu test` runs the tests of every module. The
-directory `tests/` beside the manifest holds tests from outside: each
-file `tests/NAME.sisu` is a program of its own that imports the
-package by its name, as a user of the library would, and so sees only
-its `pub` items. Here the library `stove` keeps its helper `step`
-private and tests it beside the code:
+In a package, `sisu test` runs every module's tests, and each file
+`tests/NAME.sisu` beside the manifest is a program of its own that
+imports the package as a user would, so it sees only the `pub` items.
+Here the library `stove` tests its private helper `step` beside the
+code:
 
 <!-- file: examples/19-testing/stove.pkg/src/lib.sisu -->
 ```sisu
@@ -160,11 +160,10 @@ test "two throws" ... ok
 2 passed, 0 failed, 0 blocked
 ```
 
-- The package's own tests run first, then each file of `tests/` in the
-  order of its name, each with its own list and counts under a line
-  that names it: the package by its name, a file by its path.
-- An import of a private item, `from stove import step`, is E0255 in
-  a file of `tests/`, as in any user of the library.
+The package's tests run first, then each file of `tests/`, each list
+under a line that names it. An import of a private item there, `from
+stove import step`, is E0255
+([R15](../reference/testing.md#black-box-tests)).
 
 ## A test for each case
 
@@ -221,7 +220,7 @@ alone. *Neljä* is Finnish for "four", and `word` does not know it.
 ## What a failing assertion shows
 
 When an `assert` fails, `sisu test` shows the values that made it
-fail, so that you rarely need to add a `print` to find out:
+fail:
 
 <!-- file: examples/19-testing/asserts.sisu -->
 ```sisu
@@ -286,8 +285,8 @@ replay: sisu test --replay 1-e4f3e873c7a7fcfa-0.0.1-t2-s0-r0 asserts.sisu
   and `temps` is the list.
 - `assert condition, "message"` adds a message, with interpolation, on
   the line `message:`. Write one that says what the condition means.
-- `replay:` is a command that runs the failing test again; the section
-  "Replaying a failure" is about it.
+- `replay:` runs the failing test again
+  ([Replaying a failure](#replaying-a-failure)).
 
 `expect condition` checks as `assert` does, but a failure does not stop
 the test: it is recorded, the test goes on, and at its end the test
@@ -332,8 +331,8 @@ replay: sisu test --replay 1-8d28ef2a938b01d6-0.0.1-t0-s0-r0 expects.sisu
 0 passed, 1 failed, 0 blocked
 ```
 
-Both failures are reported, with the sides a failed `assert` shows;
-the checks that hold say nothing. An `expect` takes a message too. Use `expect` for checks that do not
+Both failures are reported, with the sides a failed `assert` shows. An
+`expect` takes a message too. Use `expect` for checks that do not
 depend on each other, and `assert` where a failure makes the lines
 after it meaningless.
 
@@ -387,12 +386,10 @@ test "a test's own file system starts empty" ... ok
 
 - `cafe()` is the fixture: each test that calls it gets a new file
   system holding the menu, so what one test writes no other test sees.
-- A test can name capabilities as its parameters, one of each, and
-  receives a fresh fake of each: `(fs: Fs)` gets an empty in-memory file
-  system. The same goes for `net: Net`, an in-process network of its
-  own, `clock: Clock` or `clock: TestClock`, the test clock, `rand:
-  Rand`, a generator seeded by the test, and `env: Env`, `proc: Proc`
-  and `stdin: Stdin`, which hold nothing.
+- A test can name capabilities as its parameters and receives a fresh
+  fake of each: `(fs: Fs)` gets an empty in-memory file system,
+  `clock: TestClock` the test clock and `rand: Rand` a seeded generator
+  ([R10](../reference/capabilities.md#fakes)).
 - `System.fake(seed)` makes a whole set of fakes in the shape of a
   `System`, for code that takes one.
 
@@ -419,11 +416,10 @@ error[D0006]: the program was not run: errors found (1)
 
 </details>
 
-Each test runs in an interpreter of its own, and the tests run side
-by side, on up to 8 threads (`--jobs N`), their output written in the
-order of the file. A test that declares `sys: System` receives the real
-one instead: it runs alone, after the others, and cannot be repeated
-exactly.
+Each test runs in an interpreter of its own, side by side with the
+others ([R15](../reference/testing.md#isolation-and-the-test-clock)).
+A test that declares `sys: System` receives the real one: it runs
+alone, after the others, and cannot be repeated exactly.
 
 ## Fixtures that tests ask for
 
@@ -495,8 +491,7 @@ replay: sisu test --replay 1-f14e765a85b22b4f-0.0.1-t1-s0-r0 menu.sisu
 ```
 
 The fixture is set up before the test and put away after the failed
-`assert`. A `@fixture` that takes a parameter is E0281
-(`type.fixture-signature`).
+`assert`.
 
 </details>
 
@@ -610,12 +605,10 @@ test "one pot after the other" ... ok
 2 passed, 0 failed, 0 blocked
 ```
 
-In the first test two tasks sleep at once, four minutes and three, and
-the clock moves four minutes in all: when both wait, it jumps to three
-minutes, the tea task finishes, and when the coffee task is the only
-one left waiting, it jumps to four. The second test brews one pot after
-the other, and the clock moves seven minutes. Neither test takes any
-real time.
+In the first test two tasks sleep at once, four minutes and three: when
+both wait, the clock jumps to three minutes, the tea task finishes, and
+then it jumps to four, four minutes in all. The second test brews one
+pot after the other, seven minutes. Neither takes any real time.
 
 ## Properties instead of examples
 
@@ -687,10 +680,7 @@ replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sort
 `arbitrary` makes cases of the program's own types too: the compiler
 writes the generator from the type's fields and variants, and draws a
 `T: Arbitrary` of generic code through the bound
-([G11](../guides/property-test.md)). Saving each failing case to try it
-first on the next run, as Python's Hypothesis does, is designed in
-[17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
-and not in the compiler.
+([G11](../guides/property-test.md)).
 
 > **From Python.** `check` and `arbitrary` are Hypothesis's `@given` and
 > its strategies, built in: there is nothing to install, and a type
@@ -745,9 +735,9 @@ test "every number is kept" ... ok
 2 passed, 0 failed, 0 blocked
 ```
 
-D0033 (`cli.token-other-code`) names the content hash the token was made for and the file's
-own, so a replay can never run a different program by mistake, nor one of another toolchain. A test that
-takes the real `System` gets it even under `--sim`, and has no token.
+D0033 (`cli.token-other-code`) names the content hash the token was
+made for and the file's own, so a replay never runs a different program
+by mistake.
 
 ## Every small case
 
@@ -795,8 +785,8 @@ test "two toggles at the end change nothing" ... ok
 ```
 
 Each of the 121 cases is a list of up to four presses: one empty list,
-3 lists of one press, 9 of two, 27 of three and 81 of four. The test counts them to show it. The compiler writes the
-generator of `Press` from its variants, as it does for any enum.
+3 lists of one press, 9 of two, 27 of three and 81 of four. The test
+counts them to show it.
 
 ## A clear function as the specification
 
@@ -864,10 +854,7 @@ test "word_count refines word_count_ref" ... ok
 2 passed, 0 failed, 0 blocked
 ```
 
-The two functions now agree on every case tried. A case that takes the
-reference too long is left out rather than failed, since a clear
-function is often slow. For functions that return an `f64`,
-`@refines(reference, tolerance=Ulps(2))` lets the results differ in the last two places.
+The two functions now agree on every case tried.
 
 </details>
 
@@ -927,11 +914,9 @@ test "a refused reminder is counted" ... ok
 - A method called with nothing queued panics, which fails the test with
   the method's name.
 
-A fake can be made for a trait whose methods all take `self` or `mut
-self`, have no type parameters of their own, and have no borrow or
-`Self` in their signatures; other traits get E0614
-(`comptime.no-fake`). The same machinery gives `cap.Wrap` of chapter
-18 for your traits: an interceptor around a real implementation.
+A trait whose methods cannot all be faked is E0614 (`comptime.no-fake`,
+[R15](../reference/testing.md#fakes-of-your-own-traits)), and the same
+machinery gives `cap.Wrap` of chapter 18 for your traits.
 
 > **From Python.** There is no `unittest.mock`. A mock replaces what a
 > function reached for by itself; a Sisu function is handed what it
@@ -1103,11 +1088,10 @@ transcript "tests/sauna.transcript" ... ok
   starts with `>` would be a line of its standard input.
 - A run that fails ends with ` (exit N)` on its last line, as the
   third run does.
-- The program runs on a fake `System`: an in-memory file system that
-  starts with the files of `tests/sauna/`, here a `bookings.txt` that
-  books 17:00 for Roni; a clock frozen at the start of 1970; a seeded
-  `Rand`; and no network. The fakes last from one `$` line to the next,
-  so the second run's booking is there for the last.
+- The program runs on a fake `System`, whose file system starts with
+  the files of `tests/sauna/`, here a `bookings.txt` that books 17:00
+  for Roni. The fakes last from one `$` line to the next, so the second
+  run's booking is there for the last.
 
 **Try it.** Change the message of a booking to `"{name} has the sauna
 at {h}:00"`, run the tests, and accept the change with `--update`.
@@ -1153,9 +1137,8 @@ transcript "tests/sauna.transcript" ... ok
 1 passed, 0 failed, 0 blocked
 ```
 
-The diff shows the line the program now prints in place of the one in
-the transcript. `--update` shows the same diff, writes the transcript
-anew, and runs it.
+The diff shows the new line against the transcript's, and `--update`
+writes the transcript anew and runs it.
 
 </details>
 
@@ -1197,12 +1180,13 @@ test "the vowels of a short word" ... ok
 - `black_box(x)` uses a value in a way that the compiler cannot see
   through, so that the work that made it is not optimised away.
 - `sisu test` checks a benchmark and does not run it. `sisu bench
-  bench.sisu` runs each one once to warm up, times ten samples of its
-  loop, and prints the median time of one turn with a 95% interval.
-  Two benchmarks differ when their intervals do not overlap. The
-  compiler times its interpreter, so compare benchmarks with each
-  other, not with compiled code. *Lentokonesuihkuturbiinimoottoriapumekaanikko* is a Finnish
-  word for an assistant mechanic of jet engines.
+  bench.sisu` times ten samples of its loop and prints the median time
+  of one turn with a 95% interval; two benchmarks differ when their
+  intervals do not overlap. It times the interpreter, so compare
+  benchmarks with each other, not with compiled code
+  ([G27](../guides/bench.md)).
+  *Lentokonesuihkuturbiinimoottoriapumekaanikko* is a Finnish word for
+  an assistant mechanic of jet engines.
 
 ## What sisu test remembers
 
@@ -1284,8 +1268,41 @@ is a suggestion, not a failure.
 **Try it.** Make the second test check `ready(60)`, and run `sisu test
 --mutate` again: the mutant is killed.
 
-A JSON report, coverage (`--cover`) and fuzzing (`--fuzz`) are
-designed in [17](../../proposal/17-testing.md).
+`sisu test --cover` shows the code that no test runs: after the report
+it names each region, a statement or a branch, that no test reached,
+then counts them:
+
+<!-- file: examples/19-testing/steam.sisu -->
+```sisu
+# `sisu test --cover` names the code that no test runs.
+
+## What to tell a bather at a sauna of `celsius` degrees.
+def advice(celsius: int) -> str:
+    if celsius < 60:
+        return "wait"
+    elif celsius < 90:
+        return "go in"
+    else:
+        return "throw no more water"
+
+test "a cold sauna":
+    assert advice(40) == "wait"
+
+test "a warm sauna":
+    assert advice(75) == "go in"
+```
+
+<!-- output: examples/19-testing/steam.console -->
+```console
+```
+
+No test is at 90 degrees or more, so the `else` and its `return` never
+run. Like a survivor, an unreached region is a map of what is
+untested, not a failure. `--cover` counts in the interpreter, so it
+does not combine with `--native` (D0163). `--mutate` counts the same
+way, and runs against each mutant only the tests that reach its line.
+A JSON report and fuzzing (`--fuzz`) are designed in
+[17](../../proposal/17-testing.md).
 
 ## Exercise 19.1: predict the test clock
 
@@ -1910,8 +1927,8 @@ When every test passes, compare your answer with
   `sisu test --update` accepts a change after showing its diff.
 - Every failure has a replay token for `sisu test --replay`; `bench`
   and `sisu bench` time code; passing tests are cached.
-- `sisu test --mutate` shows the small changes to the code that no test
-  notices.
+- `sisu test --cover` names the code that no test runs, and `--mutate`
+  the small changes to the code that no test notices.
 
 Chapter 20 is about concurrency: tasks and scopes, what a task may
 share, channels and `select`, cancellation and deadlines, and testing

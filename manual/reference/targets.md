@@ -317,15 +317,19 @@ and the value as the tuple of the two lays them out: an entry of a
 `dict[i32, i32]` takes 16 bytes and one of a `dict[int, int]` 24, so natively a
 million entries of the first peak at about 35 MB where the second take
 43 MB (decision 1100 of the [architecture
-notes](../../compiler/docs/architecture.md)). A panic that leaves an exported
+notes](../../compiler/docs/architecture.md)). An option of a raw pointer,
+`ptr[T]?`, is one nullable word, the address or 0 for `None`, as C holds
+an optional pointer, in a value as in raw memory: a million
+`ptr[int]?` in a list take 8 bytes each and peak at about 11.9 MB
+where they took 18.8 MB with a tag word beside the address (decision
+1240). A panic that leaves an exported
 function ends the program with status 134, since C cannot unwind
 ([R14](attributes.md#exported-functions)).
 
 **Stage 0 differs.** A `@repr(c)` struct passed by value is D0103 in a
-native build ([R17](diagnostics.md#d0103)), and so is a pointer to an
-option of a raw pointer, which a native build gives a tag word where C
-has one nullable word; a tuple lays its parts out at C's offsets, as a
-struct does ([R14](attributes.md#exported-functions)).
+native build ([R17](diagnostics.md#d0103)); a tuple lays its parts out
+at C's offsets, as a struct does, and an option of a raw pointer is
+C's nullable word ([R14](attributes.md#exported-functions)).
 
 **Status.** Decided (D-039, Q-31), with the difference noted.
 

@@ -251,16 +251,20 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
-  against it. Meanwhile what stage 1 does not do yet runs on the Rust
-  front end, which knows none of the rules added since it was frozen:
-  `sisu test --std --defer-borrow` and building stage 1 itself. The
-  language server's worksheets and `sisu test --defer-borrow` and
-  `--std` left that list in stage 0's twenty-second round, and `sisu
-  run --watch`, whose saves stage 1 builds again, in its twenty-third.
-  A program's
-  transcripts left that list when stage 1's `sir --tests` came to keep
-  the world they run in; until then a transcript of a program that used
-  a newer rule failed with the Rust front end's errors (D0128).
+  against it. Of the driver's work, the Rust front end, which knows
+  none of the rules added since it was frozen, still does one thing by
+  default: building stage 1 itself, which a seed executable would
+  retire. The language server's worksheets and `sisu test
+  --defer-borrow` and `--std` left that list in stage 0's twenty-second
+  round, `sisu run --watch` in its twenty-third, and `sisu test --std
+  --defer-borrow` and the last fallback for a program's transcripts in
+  its twenty-fourth; until stage 1's `sir --tests` kept the world they
+  run in, a transcript of a program that used a newer rule failed with
+  the Rust front end's errors (D0128). Stage 1 checks a whole program
+  again for each save of `sisu run --watch`, where the Rust front end
+  redid only what changed; since its server keeps each module's parse
+  and the standard library's bodies between requests, a save takes
+  about 0.025 seconds where the Rust front end's took 0.07.
 - **The interpreter is slow.** It is fine for development, tests and an
   oracle, and not for users, which is why the native backend was built
   beside stage 1 rather than after it.

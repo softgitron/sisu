@@ -316,12 +316,14 @@ stage 1, and from the Rust front end only where stage 1 is not built
 --defer-borrow`, `explain-borrow`, every form of `audit`, and `run
 --watch` with a run recorded under it and its `sisu replay`, each the
 default as the sections of each say, with the Rust front end's answer
-under `--front-end=rust`. What the Rust front end still does by default
-is `sisu test --std --defer-borrow` and building stage 1 itself, the
-first time and after a source of stage 1 changed. A program's
-transcripts run on the front end its tests run on, stage 1 unless you
-choose the Rust one (with a stage 1 older than 0.11.0, on the Rust
-front end, D0128). `sisu
+under `--front-end=rust`; `sisu test --std --defer-borrow` is stage 1's
+too, since stage 0's twenty-fourth round. What the Rust front end still
+does by default is one thing: building stage 1 itself, the first time
+and after a source of stage 1 changed. A program's transcripts run on
+the front end its tests run on, stage 1 unless you choose the Rust one:
+from `sisu1 0.21.0` from its `sir --tests --transcripts`, whose SIR
+holds the transcripts' world, and with a stage 1 older than 0.11.0 on
+the Rust front end (D0128). `sisu
 test` and `sisu bench` run stage 1 once for each program, and print its
 warnings once, before the report.
 
@@ -337,7 +339,7 @@ A value other than `stage1` or `rust` is D0115. When stage 1 is missing
 (D0116), fails to build (D0117) or stops as a compiler may not (D0118),
 the message names `--front-end=rust` as the way on. Stage 1's own
 executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
-0.20.0` after stage 1's twenty-fifth round), which the driver asks
+0.21.0` after stage 1's twenty-sixth round), which the driver asks
 to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
@@ -378,9 +380,14 @@ served where it takes 0.326 as a process, a plain `sisu build` 0.065
 where it takes 0.275, and a package's `sisu run --native` 0.167 where
 it takes 0.333. Whatever goes wrong with the server, the command runs stage 1
 as a process of its own, and `SISU_STAGE1_SERVE=0` makes it do so every
-time. What a command prints is the same either way.
+time. What a command prints is the same either way. From `sisu1
+0.21.0` the server also keeps a memo between requests: the standard
+modules a program may import parsed once, each module's parse while
+its text is unchanged, and the standard library's bodies as the last
+request checked them, so a later request of the same program does only
+what changed, and every answer is the bytes a fresh request gives.
 
-**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980, 1061 and 1140 of
+**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980, 1061, 1140 and 1220 of
 the [architecture notes](../../compiler/docs/architecture.md)).
 
 ## Running programs
@@ -473,13 +480,18 @@ SIR is: the server of stage 1 answers the same request for each save
 ([The server of stage 1](#the-server-of-stage-1)), and a save that does
 not check prints stage 1's diagnostics, without the line D0006 that
 ends a run. A run recorded under `--watch` logs the program's files as
-it began, and its replay has stage 1 build each save from them in a
-directory of its own. Stage 1 checks the whole program again at each
-save, where the Rust front end's queries redo only what changed, so a
-save takes longer: 0.132 seconds where the Rust front end took 0.072
-for the conformance suite's `live/swap`, and 0.073 where it took 0.042
-for its `live/tasks`, with a release build of `sisu`. `--front-end=rust` keeps the
-Rust front end's queries.
+it began, the files outside its directory among them, such as a
+workspace's manifest and lockfile, and the options it was built with,
+`--locked`, `--features`, `--no-default-features` and
+`--accept-unsafe`; its replay has stage 1 build each save from them,
+with those options, in a directory of its own, so a recorded run of a
+workspace's member replays too. From `sisu1 0.21.0` the server keeps
+each module's parse and the standard library's checked bodies from one
+save to the next ([The server of stage 1](#the-server-of-stage-1)),
+so a save of the conformance suite's `live/swap` takes 0.022 to 0.029
+seconds where it took 0.104 to 0.107, and the Rust front end's queries,
+which redo only what changed, took 0.072, with a release build of
+`sisu`. `--front-end=rust` keeps the Rust front end's queries.
 
 **Status.** In stage 0. Hot replacement is decided (D-053); its epochs
 lean (D-068).
@@ -574,12 +586,13 @@ form of `--format=ids`, with status 3 when it deferred an error, and
 the driver reads the account's findings from them. An error that is
 not the ownership checker's is not deferred, so the run reports it as
 a plain run does. From `sisu1 0.20.0` stage 1 writes such an error in
-the human form, as a plain build does, where the driver now builds the
-program a second time without the option to get its words, and follows
-each deferred finding with a line naming its function in the SIR; the
-driver reads neither until stage 0's next round, so nothing a run
-prints changes. `--front-end=rust` lowers the program with the Rust
-front end instead.
+the human form, as a plain build does, and the driver prints those
+words with D0006, where it built the program a second time without the
+option to get them; and stage 1 follows each deferred finding with a
+line naming its function, which the driver reads, so a finding in a
+closure and one in the function that makes it are told apart. What a
+run prints is the same as before for the programs on this page.
+`--front-end=rust` lowers the program with the Rust front end instead.
 
 **Status.** In stage 0, a tool of the experiment (18, Phase 3).
 
@@ -1178,16 +1191,19 @@ includes the program's tests and benchmarks, and `--contracts` sets the
 contracts the SIR checks. Stage 1's own `sir` takes options more,
 most of which `sisu test` and `sisu run` send it, and which `sisu sir`
 does not take (D0009): from `sisu1 0.17.0`, `--std` beside `--tests` lowers the
-standard library's doc examples as tests, and `--defer-borrow` prints
+standard library's doc examples as tests, from `sisu1 0.21.0` alone
+when it names no path outside a package, and `--defer-borrow` prints
 the SIR of a program whose only errors are the ownership checker's
 ([--defer-borrow](#running-a-rejected-program---defer-borrow)); from
 `sisu1 0.19.0`, `--mutants` beside `--tests` prints each mutant of the
 program, which `sisu test --mutate` runs the tests against
 ([sisu test](#sisu-test)); from `sisu1 0.20.0`, `--cover` beside
-`--tests` prints after the SIR a table of the program's regions, the
-front end's half of a `--cover` that `sisu test` does not have yet,
-and `--module-fixtures` names each test's fixtures on its line and
-lends a module's fixture to its tests, which `sisu test` asks for.
+`--tests` prints after the SIR a table of the program's regions, which
+`sisu test --cover` counts, and `--module-fixtures` names each test's
+fixtures on its line and lends a module's fixture to its tests; from
+`sisu1 0.21.0`, `--transcripts` keeps the world of a program's
+transcripts in its SIR whatever is beside the program. `sisu test`
+asks for each of them.
 The [SIR example](#running-serialised-sir---sir---from-sir-and---from-lir)
 shows the SIR of `hello.sisu`.
 
@@ -1430,9 +1446,12 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   program's tests, before them; outside a package and without a file,
   it runs them alone, with no test cache, which has no file to sit
   beside. Stage 1 lowers them as tests from `sisu1 0.17.0`, 197 of
-  them, each once; alone they take about 3 seconds. Under
-  `--front-end=rust` the Rust front end lowers them, and lists
-  `std.net`'s two twice.
+  them, each once, and from `sisu1 0.21.0` alone, with no program
+  written aside for them; alone they take about 3 seconds, where they
+  took about 3.5 before stage 1 made each module's examples once for a
+  check. With `--defer-borrow` they run from stage 1 too, every one
+  passing under the monitor. Under `--front-end=rust` the Rust front
+  end lowers them, and lists `std.net`'s two twice.
 - `--native` compiles the tests into one executable and runs each in a
   process of its own, and `--release` compiles them with the release
   profile ([R15](testing.md#native-tests)), with the schedulers,
@@ -1442,8 +1461,16 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 - `--defer-borrow` runs the tests of a program that the ownership
   checker rejected, as [`sisu run
   --defer-borrow`](#running-a-rejected-program---defer-borrow) does.
-- `--mutate` runs the tests, then runs the selected tests against each
-  mutant of the program, a copy with one small change, and prints each
+- `--cover` runs the tests in the interpreter, counting the statements
+  each runs, and prints after the report each region of the program
+  that no test reached (D0161), then the counts (D0162); the status is
+  the tests' own ([R15](testing.md#coverage)). It does not combine with
+  `--native`, `--release`, `--defer-borrow`, `--mutate`, `--replay` or
+  `--from-sir` (D0163), and the files of `tests/` beside a package are
+  not counted.
+- `--mutate` runs the tests, then runs against each mutant of the
+  program, a copy with one small change, the selected tests that reach
+  its line, and prints each
   mutant that every test passed by its place (D0153), then the counts
   (D0154); `--since REV` keeps the mutants on the lines changed since
   the git revision `REV` (D0156, and D0158 when git cannot say). The
@@ -1579,12 +1606,12 @@ error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 
 **Stage 0 differs.** [17](../../proposal/17-testing.md) has `sisu test`
 write a JSON event stream, with TAP and JUnit XML as `--format` options;
-stage 0 prints the human form only, and has neither `--fuzz` nor
-`--cover` ([Commands that are designed](#commands-that-are-designed)).
-`--mutate` runs every selected test against each mutant, where 17 runs
-the tests that cover the mutant's line, which waits for `--cover`; its
-mutants are stage 1's, from `sisu1 0.19.0` ([sisu sir](#sisu-sir)), and
-with an older stage 1 or the Rust front end it is D0009.
+stage 0 prints the human form only, and has no `--fuzz`
+([Commands that are designed](#commands-that-are-designed)).
+`--cover` counts in the interpreter, where 17 instruments any build.
+The mutants of `--mutate` are stage 1's, from `sisu1 0.19.0`, and
+`--cover`'s regions from `sisu1 0.20.0` ([sisu sir](#sisu-sir)); with
+an older stage 1 or the Rust front end each is D0009.
 
 **Status.** In stage 0. `--sim`, `--faults` and replay tokens are
 prototypes of the experiment (Q-49, D-070).
@@ -2335,8 +2362,8 @@ and the editor's `sisu.explainBorrow` asks the same question of it (its
 end's checker, line for line in the same words. From `sisu1 0.20.0`,
 `query explain FILE LINE --ranges` also gives where each borrow starts
 and where it is last used as ranges with their ends, which the editor
-asks for from stage 0's next round; until then it marks each place by
-its first character.
+asks for, so it marks each loan from its start to the end of its last
+use; with an older stage 1 it marks each place by its first character.
 
 **Status.** In stage 0 (18, Phase 3), and in the language server as
 `sisu.explainBorrow`.
@@ -2783,9 +2810,8 @@ and shows the survivors for a person to choose.
 - `sisu run --profile` samples the run with the platform's profiler.
   Designed ([10](../../proposal/10-tooling.md), "Debugging and
   profiling").
-- `sisu test --fuzz` and `--cover` run coverage-guided fuzzing and
-  report uncovered regions; `--format` writes TAP or JUnit XML.
-  Designed ([17](../../proposal/17-testing.md)).
+- `sisu test --fuzz` runs coverage-guided fuzzing, and `--format`
+  writes TAP or JUnit XML. Designed ([17](../../proposal/17-testing.md)).
 - `sisu build --target TARGET` cross-compiles, and `--explain-size`
   reports what monomorphisation cost, the copies of each package, beside
   the parts of the executable that stage 0's `--explain-size` gives

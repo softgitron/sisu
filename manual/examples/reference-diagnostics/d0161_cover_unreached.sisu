@@ -1,0 +1,10 @@
+# A branch that no test runs, which `sisu test --cover` names.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    if hour < 16:
+        return False
+    return hour < 22
+
+test "open in the evening":
+    assert open_at(18)

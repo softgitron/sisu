@@ -1,0 +1,21 @@
+# `sisu test --cover` lists the regions that no test reaches.
+
+## The total of `prices` in cents, with `percent` off each price.
+def total(prices: list[int], percent: int) -> int:
+    var sum = 0
+    for p in prices:
+        if percent > 0:
+            sum += p * (100 - percent) // 100
+        else:
+            sum += p
+    return sum
+
+## The total in euros, as a receipt shows it.
+def shown(cents: int) -> String:
+    return "{cents // 100}.{cents % 100:02} €"
+
+test "a bill without a discount":
+    assert total([280, 350], 0) == 630
+
+test "an empty bill":
+    assert total([], 10) == 0

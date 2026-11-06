@@ -1,0 +1,2 @@
+$ sisu test --cover cover.sisu
+$ sisu test --cover --mutate cover.sisu

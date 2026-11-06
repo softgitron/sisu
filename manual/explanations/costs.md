@@ -158,8 +158,9 @@ audio callback that must finish in 2.7 milliseconds or an interrupt
 handler that must never allocate. Clang 20 checks the first two on
 function types, and Ada's `pragma Restrictions` is the older precedent.
 Stage 0 checks the first through the call graph, the standard library
-included, once for each generic function rather than for each type it
-is compiled for (E0282), and accepts the other two without a check
+included, and a generic function at each type the program uses it
+with, so a sum over readings that allocate is E0282 for that type alone
+and passes for the others; it accepts the other two without a check
 ([R14](../reference/attributes.md#resource-limits)).
 
 ## Generics compiled per type, and their price

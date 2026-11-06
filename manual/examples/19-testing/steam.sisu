@@ -1,0 +1,16 @@
+# `sisu test --cover` names the code that no test runs.
+
+## What to tell a bather at a sauna of `celsius` degrees.
+def advice(celsius: int) -> str:
+    if celsius < 60:
+        return "wait"
+    elif celsius < 90:
+        return "go in"
+    else:
+        return "throw no more water"
+
+test "a cold sauna":
+    assert advice(40) == "wait"
+
+test "a warm sauna":
+    assert advice(75) == "go in"

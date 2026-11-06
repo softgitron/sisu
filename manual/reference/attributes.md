@@ -1106,9 +1106,10 @@ $ sisu run --native export_tuple.sisu
 10
 ```
 
-A pointer to an option of a raw pointer is still D0103 natively, since
-the native backend gives such an option a tag word where C has one
-nullable word; the interpreter runs it:
+An option of a raw pointer, `ptr[T]?` or `(ptr mut T)?`, is one
+nullable word natively too, the address or 0 for `None`, as C holds an
+optional pointer, so a pointer to one, or to a struct that holds one,
+compiles and reads as C would:
 
 <!-- file: examples/reference-attributes/export_option.files/export_option.sisu -->
 ```sisu
@@ -1131,9 +1132,9 @@ $ sisu run --native export_option.sisu
 error[D0103]: the native backend does not compile `mem.ptr.of` of a `Option[ptr[u8]]`, which raw memory holds otherwise than a value of it yet (in `main`); `sisu run` without `--native` runs the program
 ```
 
-A foreign call's own parameter or result of type `ptr[T]?` is one
-nullable word already, so hand C an optional pointer that way (decision
-1101 of the [architecture notes](../../compiler/docs/architecture.md)).
+A foreign call's parameter or result of type `ptr[T]?` passes the same
+word, so C's optional pointer and Sisu's are one value (decision 1240
+of the [architecture notes](../../compiler/docs/architecture.md)).
 
 **Status.** In stage 0 ([12](../../proposal/12-interop-and-targets.md),
 [22](../../proposal/22-unsafe.md); D-080), with the difference noted.
@@ -1254,11 +1255,56 @@ error[E0282]: `report` is `@no_alloc`, but `fmt.new` may allocate
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
-The check differs from 04's in three ways: it runs once on a generic
-function, not at each instantiation, so a call of a trait's method on a
-type parameter is the error at the function; a closure that captures by
-value is taken to allocate, since whether its captures fit in its
-value is the backend's to know; and no collection is free of
+A generic function is checked as 04 checks it, at each instance the
+program makes: what allocates whatever the type arguments are is the
+error at the function, and a call of a trait's method on a type
+parameter is checked through the impl of each instance's type. An
+instance that allocates is the error named by its type arguments, with
+the note `type.no-alloc-instance` saying where the program makes it,
+and an instance that allocates nothing checks:
+
+<!-- file: examples/reference-attributes/no_alloc_generic.sisu -->
+```sisu
+# `@no_alloc` on a generic function is checked at each instance.
+trait Reading:
+    def celsius(self) -> int
+
+struct Plain:
+    value: int
+
+impl Reading for Plain:
+    def celsius(self) -> int:
+        return self.value
+
+struct Logged:
+    value: int
+
+impl Reading for Logged:
+    def celsius(self) -> int:
+        print("read {self.value} degrees")
+        return self.value
+
+## The highest of `readings`.
+@no_alloc
+def highest[T: Reading](readings: list[T]) -> int:
+    var top = 0
+    for i in range(len(readings)):
+        top = max(top, readings[i].celsius())
+    return top
+
+def main():
+    print(highest([Plain(value=80), Plain(value=95)]))
+    print(highest([Logged(value=80)]))
+```
+
+<!-- output: examples/reference-attributes/no_alloc_generic.console -->
+```console
+```
+
+`highest[Plain]` checks; `highest[Logged]` prints, which formats a
+string. The check still differs from 04's in two ways: a closure that
+captures by value is taken to allocate, since whether its captures fit
+in its value is the backend's to know; and no collection is free of
 allocation by its allocator, since the allocators are missing
 ([R7](ownership.md#allocators)). `@no_block` and `@stack` are accepted
 and checked by nothing, and stage 0 says so at each with W0030

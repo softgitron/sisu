@@ -1,0 +1,30 @@
+# `@no_alloc` on a generic function is checked at each instance.
+trait Reading:
+    def celsius(self) -> int
+
+struct Plain:
+    value: int
+
+impl Reading for Plain:
+    def celsius(self) -> int:
+        return self.value
+
+struct Logged:
+    value: int
+
+impl Reading for Logged:
+    def celsius(self) -> int:
+        print("read {self.value} degrees")
+        return self.value
+
+## The highest of `readings`.
+@no_alloc
+def highest[T: Reading](readings: list[T]) -> int:
+    var top = 0
+    for i in range(len(readings)):
+        top = max(top, readings[i].celsius())
+    return top
+
+def main():
+    print(highest([Plain(value=80), Plain(value=95)]))
+    print(highest([Logged(value=80)]))

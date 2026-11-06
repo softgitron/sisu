@@ -5,7 +5,8 @@ forms of `test`, black-box tests, its outcomes, the capabilities a test
 receives and how tests are kept apart, what a test prints, native tests,
 assertions, property tests and their generators, `@refines`, fakes of a
 program's own traits, doc examples, transcripts, snapshots, replay
-tokens, simulation, benchmarks, and what `sisu test` remembers. The
+tokens, simulation, benchmarks, what `sisu test` remembers, mutation
+testing and coverage. The
 command and its options are [R16](sisu-command.md#sisu-test).
 
 **See also:** the tutorial's [chapter 1](../tutorial/01-hello.md)
@@ -609,7 +610,9 @@ the fixture before the first of them, lends the value to each as a
 beside the other tests, which run in parallel, and drops the value
 after the last, failed or not: its `Drop` runs once, and what the
 fixture and the drop print is the output of the first test and of the
-last ([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
+last. A value whose type has no `Drop` of its own is dropped as its
+type drops it, a list's elements one by one, first to last, each with
+what it owns ([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
 shows a run). A replay token runs its test alone, with the fixture
 called before it. A fixture that panics fails the test that needed it.
 Since the tests share the value, what the fixture returns must be
@@ -776,6 +779,10 @@ test "word_count refines word_count_ref" ... ok
 A failure of the test that `@refines` adds is reported at the
 `@refines` line, in the file of the function it checks
 ([chapter 19](../tutorial/19-testing.md#a-clear-function-as-the-specification)).
+A case on which the reference takes too long is left out rather than
+failed, since a clear function is often slow, and for functions that
+return an `f64`, `@refines(reference, tolerance=Ulps(2))` lets the
+results differ in the last two places.
 
 **Status.** In stage 0 (leaning, D-070).
 
@@ -783,8 +790,10 @@ A failure of the test that `@refines` adds is reported at the
 
 `cap.Fake[Trait].new()` is a fake of one of the program's own traits:
 for each method `m`, `on_m(result)` queues the result its next call
-gives, and `calls()` lists the calls it received, as text. A trait whose
-methods cannot all be forwarded is E0614. The fakes of the standard
+gives, and `calls()` lists the calls it received, as text. A fake can
+be made of a trait whose methods all take `self` or `mut self`, have no
+type parameters of their own, and have no borrow or `Self` in their
+signatures; any other trait is E0614. The fakes of the standard
 capabilities are [R10](capabilities.md#fakes).
 
 <!-- file: examples/reference-testing/own_fake.sisu -->
@@ -1024,11 +1033,13 @@ takes the real `System` is never cached
 a run of each).
 
 **Stage 0 differs.** 17's machine-readable output (JSON, TAP, JUnit XML)
-and the report of coverage are designed
-([R16](sisu-command.md#options-of-the-existing-commands)).
+is designed ([R16](sisu-command.md#options-of-the-existing-commands));
+decision 1247 of the [architecture
+notes](../../compiler/docs/architecture.md) writes down its smallest
+form, a line of JSON for each test's start and end with its result and
+its replay token.
 
-**Status.** In stage 0, except the machine-readable output and the
-report of coverage.
+**Status.** In stage 0, except the machine-readable output.
 
 ## Mutation testing
 
@@ -1096,19 +1107,72 @@ The mutants are stage 1's, from `sisu1 0.19.0` (its `sir --tests
 --mutants`), and the runner's from stage 0's twenty-third round; with
 an older stage 1 or the Rust front end, `--mutate` is D0009.
 
-**Stage 0 differs.** 17 runs against each mutant the tests that cover
-its line; stage 0 runs every selected test against each, since the
-runner does not know yet which tests reach a line. Stage 1 gives the
-front end's half of `--cover` from `sisu1 0.20.0`: its `sir --tests
---cover` prints after the SIR a table of the program's regions, each
-statement and each branch (the body of an `if`'s branch, a loop, an
-arm, a `defer`, a `with` or an `unsafe:`) by its span, with the SIR
-statement that starts it, so that the runner can count the statements
-each test runs and report the regions no test reached. That runner,
-and so `sisu test --cover`, is still to come.
+As 17 has it, the runner counts the statements each test runs in the
+program's own run of its tests, and runs against each mutant only the
+tests that reached its line: a program of twenty functions, each with
+its test, runs 40 tests against its 40 mutants where it would run 800.
+A mutant that no test reaches survives without a run.
+
+**Status.** In stage 0 (17, "Coverage and mutation").
+
+## Coverage
+
+`sisu test --cover` runs the tests, then prints each region of the
+program that no test reached by its place and its kind, a statement or
+a branch (D0161, [R17](diagnostics.md#d0161)), and the regions counted,
+reached and not (D0162):
+
+<!-- file: examples/reference-testing/cover.sisu -->
+```sisu
+# `sisu test --cover` lists the regions that no test reaches.
+
+## The total of `prices` in cents, with `percent` off each price.
+def total(prices: list[int], percent: int) -> int:
+    var sum = 0
+    for p in prices:
+        if percent > 0:
+            sum += p * (100 - percent) // 100
+        else:
+            sum += p
+    return sum
+
+## The total in euros, as a receipt shows it.
+def shown(cents: int) -> String:
+    return "{cents // 100}.{cents % 100:02} €"
+
+test "a bill without a discount":
+    assert total([280, 350], 0) == 630
+
+test "an empty bill":
+    assert total([], 10) == 0
+```
+
+<!-- output: examples/reference-testing/cover.console -->
+```console
+```
+
+No test gives a discount on a price, so the branch at line 8 and its
+statement are not reached, and no test calls `shown`. A region is a
+statement or the body of a branch: an `if`'s, an `elif`'s or an
+`else`'s, a loop's, an arm's, a `defer`'s, a `with`'s or an
+`unsafe:`'s. The report is a map, not a gate: the status is the tests'
+own, and the test cache is not read, so every test runs.
+
+- The regions are stage 1's, from `sisu1 0.20.0` (its `sir --tests
+  --cover`, which prints a table of them after the SIR), and the
+  counting the interpreter's; with an older stage 1 or the Rust front
+  end, `--cover` is D0009.
+- The counting is the interpreter's alone, so `--cover` does not
+  combine with `--native`, `--release`, `--defer-borrow`, `--mutate`,
+  `--replay` or `--from-sir` (D0163).
+
+**Stage 0 differs.** 17 takes the regions from the compiler's own
+instrumentation, in any build; stage 0 counts them in the interpreter
+only, and for the program's own tests, not for the files of `tests/`
+beside a package ([Black-box tests](#black-box-tests)).
 
 **Status.** In stage 0 (17, "Coverage and mutation"), with the
-differences noted.
+difference noted.
 
 ## Diagnostics of this page
 
@@ -1123,6 +1187,7 @@ differences noted.
 | E0614 | `comptime.no-fake` | [Fakes of your own traits](#fakes-of-your-own-traits) |
 | [D0135](diagnostics.md#d0135) | `cli.test-output` | [What a test prints](#what-a-test-prints) |
 | [D0134](diagnostics.md#d0134) | `native.test-unsupported` | [Native tests](#native-tests) |
+| [D0161](diagnostics.md#d0161), D0162, D0163 | `cli.cover-unreached`, `cli.cover-summary`, `cli.cover-alone` | [Coverage](#coverage) |
 | D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |

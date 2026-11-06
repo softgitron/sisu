@@ -198,5 +198,5 @@ the Rust front end with `--front-end=rust`; so does `sisu test
 --defer-borrow`, which runs a rejected program's tests under the
 monitor. From its twenty-fifth round stage 1 also says in which
 function each deferred error stands, and gives a borrow's start and
-last use as ranges for the editor; the driver uses both from stage 0's
-next round, so nothing this guide shows changes.
+last use as ranges, which the driver and the editor use since stage
+0's twenty-fourth round; nothing this guide shows changes.

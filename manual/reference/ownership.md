@@ -776,7 +776,16 @@ and its kind return `! OutOfMemory` for code that must handle it.
 **Status.** Designed (D-060, leaning; Q-4); stage 0 has the global
 allocator only, and neither `with_allocator` nor `try_push`; `Region`
 exists in `std.mem`, under `RawBuf`
-([chapter 27](../tutorial/27-systems.md#what-is-still-to-come)).
+([chapter 27](../tutorial/27-systems.md#what-is-still-to-come)). Stage
+1's [rules](../../compiler/stage1/RULES.md), in R225, plan the
+allocators in five steps: the defaulted parameter
+on `list`, `dict`, `set` and `String`, kept out of the SIR while it is
+`Global`; the runtime allocating through the collection's allocator
+value; `with_allocator` and `try_push`; `@no_alloc` passing a
+collection's growth in a borrowed region; and the `freestanding`
+profile's explicit allocator. The first waits for a round of its own,
+since it changes the arity of the prelude's collections and every impl
+over them.
 
 ## Unsafe code and raw pointers
 

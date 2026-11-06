@@ -9,7 +9,9 @@ The tokens that the rules are made of, and the layout that makes
 **See also:** the proposal's [02, "Grammar
 notes"](../../proposal/02-syntax.md#grammar-notes); the compiler's
 [architecture notes](../../compiler/docs/architecture.md), "Parsing and
-the syntax tree", whose notation this page uses, and the parser of
+the syntax tree", whose notation this page uses and which carry the
+text `sisu grammar` prints, held the same by a test (decision 1246),
+and the parser of
 stage 1 in [compiler/stage1/src/parser/](../../compiler/stage1/src/parser/),
 which is the grammar's source; [R3](declarations.md) for declarations,
 [R4](expressions.md) for expressions, [R5](statements.md) for
@@ -27,7 +29,7 @@ Stage 1's parser keeps a grammar of its own in the `##!` comments of
 its modules, each production beside the function that reads it, which
 [`sisu grammar`](sisu-command.md#sisu-grammar) prints in one text.
 This page agrees with that text, rule for rule, as `sisu grammar`
-prints it from `sisu1 0.20.0`, and names some rules apart that the text
+prints it from `sisu1 0.20.0` to `sisu1 0.21.0`, and names some rules apart that the text
 writes inline (`cases`, `borrowed`, `bounds`, `module_path`); it was
 checked against the text by hand, since a page's rules are notation
 that no command runs.

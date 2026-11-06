@@ -4073,10 +4073,16 @@ A function marked `@no_alloc` makes, grows, copies or boxes a value
 that owns memory, or calls a function that may
 ([R14](attributes.md#resource-limits)). The check follows each call
 into its body, the standard library's included, and the note
-`type.no-alloc-through` names where the callee allocates. A call
-through a function value, or of a trait's method on a type that only
-the run knows, is the error too, with the note `type.no-alloc-unknown`.
-A path that only panics is exempt:
+`type.no-alloc-through` names where the callee allocates. A generic
+function is checked as written and again at each instance the program
+makes: a trait's method on a type parameter is checked through the
+impl of the instance's type, and an instance that allocates is the
+error named by its type arguments, `highest[Logged]`, with the note
+`type.no-alloc-instance` saying where the program makes it
+([R14](attributes.md#resource-limits) shows one). A call through a
+function value, or of a trait's method on a type that only the run
+knows, such as a `dyn` value's, is the error too, with the note
+`type.no-alloc-unknown`. A path that only panics is exempt:
 
 <!-- file: examples/reference-diagnostics/e0282_no_alloc.sisu -->
 ```sisu
@@ -12665,17 +12671,14 @@ The program is valid, and the interpreter runs it, but the native
 backend has no lowering yet for a part of it, which the message names,
 with the function it is in: a `@repr(c)` struct passed by value to an
 exported function, "a `Reading` by value (a parameter of the exported
-function `sauna_load`)", or a raw pointer to an option of a raw
-pointer, "`mem.ptr.of` of a `Option[ptr[u8]]`". A native build lays a
-declared struct's fields and a tuple's parts out at C's offsets and a
-number at its width, but gives an option of a raw pointer a tag word of
-its own where C has one nullable word, so a pointer to such an option
-would not see what C sees (D-086).
+function `sauna_load`)", which has no C classification yet (D-086). A
+native build lays a declared struct's fields and a tuple's parts out at
+C's offsets, a number at its width and an option of a raw pointer as
+C's one nullable word, so a pointer to any of them sees what C sees.
 
 Run the program without `--native`, or change it to what the backend
-compiles: pass a struct to an exported function by a pointer, and hand
-C an optional pointer through a foreign call's own `ptr[T]?` parameter,
-as [R14](attributes.md#exported-functions) shows.
+compiles: pass a struct to an exported function by a pointer, as
+[R14](attributes.md#exported-functions) shows.
 
 Example: [R14](attributes.md#exported-functions).
 
@@ -13103,6 +13106,65 @@ test "closed in the morning" ... ok
 3 passed, 0 failed, 0 blocked
 mutants: 3 run against the tests, 3 killed and 0 survived
 ```
+
+Shown in [chapter 19](../tutorial/19-testing.md#testing-the-tests).
+
+### D0161
+
+`cli.cover-unreached`: {at}: no test reaches this {kind}.
+
+`sisu test --cover` ran the tests and counted the statements each ran,
+and no test ran the region at `{at}`, a statement or the body of a
+branch ([R15](testing.md#coverage)). Each such region is printed after
+the report, then the count (D0162). It is a map, not an error: the
+status is the tests' own. Here no test asks before opening time:
+
+<!-- file: examples/reference-diagnostics/d0161_cover_unreached.sisu -->
+```sisu
+# A branch that no test runs, which `sisu test --cover` names.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    if hour < 16:
+        return False
+    return hour < 22
+
+test "open in the evening":
+    assert open_at(18)
+```
+
+<!-- output: examples/reference-diagnostics/d0161_cover_unreached.console -->
+```console
+```
+
+The branch and the statement in it start at the same place, so both
+are named there. Add a test that reaches the region, or remove the
+code if nothing should:
+
+<!-- file: examples/reference-diagnostics/d0161_cover_unreached_fixed.sisu -->
+```sisu
+# A test before opening time reaches the branch that was not run.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    if hour < 16:
+        return False
+    return hour < 22
+
+test "open in the evening":
+    assert open_at(18)
+
+test "closed in the morning":
+    assert not open_at(10)
+```
+
+<!-- output: examples/reference-diagnostics/d0161_cover_unreached_fixed.console -->
+```console
+```
+
+`--cover` counts in the interpreter, so it does not combine with
+`--native`, `--release`, `--defer-borrow`, `--mutate`, `--replay` or
+`--from-sir` (D0163).
 
 Shown in [chapter 19](../tutorial/19-testing.md#testing-the-tests).
 
@@ -13918,6 +13980,9 @@ it. `sisu explain CODE` prints the same line.
 | D0158 | `cli.mutate-no-region` | the lines changed since `{since}` could not be read from git: {reason} |
 | D0159 | `cli.mutate-alone` | `--mutate` runs the tests against each mutant of the program; it does not combine with `{option}` |
 | D0160 | `cli.since-without-mutate` | `--since REV` names the changed region of `--mutate`; it goes with `--mutate` |
+| [D0161](#d0161) | `cli.cover-unreached` | {at}: no test reaches this {kind} |
+| D0162 | `cli.cover-summary` | regions: {count}, {reached} reached by the tests and {unreached} not |
+| D0163 | `cli.cover-alone` | `--cover` counts the regions the tests reach in the interpreter; it does not combine with `{option}` |
 | D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
 | D0171 | `cli.hole-scope` | in scope: {bindings} |
 | D0172 | `cli.hole-scope-none` | nothing is in scope |

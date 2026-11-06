@@ -156,13 +156,18 @@ turn 2: the sauna is hot, epoch 1
 ```
 
 A run that went wrong after a change can thus be replayed with its
-change, on another machine and without the editor.
+change, on another machine and without the editor. The log keeps the
+options the run was built with, such as `--features`, and the files it
+read from outside its directory, such as a workspace's manifest, so a
+recorded run of a workspace's member replays as it ran.
 
 **Status.** In stage 0, in the interpreter (D-053, D-068): `--watch`
 does not combine with `--native` (D0109), and an executable built by
 `sisu build --native` runs the code it was built with. Each save is
 built by stage 1, from `sisu1 0.17.0`, the front end that built the
-run, and its replay too, from the files the log holds; a save takes
-about 0.07 to 0.13 seconds with a release build of `sisu`, where the
-Rust front end, which redoes only what changed, took 0.03 to 0.07
-([R16](../reference/sisu-command.md#watching-for-saves---watch)).
+run, and its replay too, from the files the log holds. Its server keeps
+each unchanged module's parse and the standard library's checked
+bodies from one save to the next, so a save of the conformance
+suite's `live/swap` takes about 0.02 to 0.03 seconds with a release
+build of `sisu`, where it took 0.10 and the Rust front end, which
+redoes only what changed, takes 0.07 ([R16](../reference/sisu-command.md#watching-for-saves---watch)).

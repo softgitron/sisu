@@ -75,7 +75,10 @@ Each of these, and the document's symbols and selection ranges, comes
 from stage 1, the front end that `sisu check` runs, through the same
 server of it that every command asks
 ([R16](../reference/sisu-command.md#the-server-of-stage-1)), so a hover
-answers in about 9 ms. A field's references and its rename include the
+answers in about 9 ms. The server keeps each unchanged module's parse
+between requests, so the diagnostics of a program of 18 modules after a
+one-line change take about 1.35 seconds, most of it checking the
+program's own types and ownership again. A field's references and its rename include the
 keyword of each construction, the `turn` of `Sauna(turn=1)`, and the
 field's name in each struct pattern, the `turn` of `case
 Sauna(turn=t)`. A file with a syntax error still gets what its
@@ -112,10 +115,9 @@ borrows live on line 6 of borrow.sisu, in `main`:
 ```
 
 Stage 1 answers the command, from its twenty-second round, and the
-server asks it the same question for the editor. The editor marks each
-borrow's start and last use by their first characters; stage 1 gives
-them as whole ranges from its twenty-fifth round, which the server
-asks for from stage 0's next round. Bind the command to a key,
+server asks it the same question for the editor, which marks each
+borrow from its start to the end of its last use, as stage 1 gives
+them from its twenty-fifth round. Bind the command to a key,
 and use it when a borrow error is hard to read; [Find and fix a borrow error](borrow-errors.md) shows the rest.
 
 ## 4. See a script's values beside its lines
