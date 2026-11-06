@@ -1082,6 +1082,18 @@ impl Interp:
                 let done = self.edit(p, InPlace.ListPop)? else:
                     return Err(Stop.Beyond("a pop from a value that is not a list"))
                 return Ok(done)
+            case "list.remove":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a removal from a value that is not a list"))
+                let Value.List(xs) = self.read(p)? else:
+                    return Err(Stop.Beyond("a removal from a value that is not a list"))
+                let i = int_arg(self, args, 1)?
+                if i < 0 or i >= len(xs):
+                    let ps = [param("len", "{len(xs)}"), param("index", "{i}")]
+                    return Err(self.panicked("panic.index-out-of-bounds", ps))
+                let done = self.edit(p, InPlace.ListRemove(i))? else:
+                    return Err(Stop.Beyond("a removal from a value that is not a list"))
+                return Ok(done)
             case "list.is_empty":
                 let Value.List(xs) = self.target(arg(args, 0)?)? else:
                     return Err(Stop.Beyond("a list method on a value that is not a list"))
@@ -1238,6 +1250,83 @@ impl Interp:
                 return Ok(Value.Float(n.to_f64()))
             case "sum":
                 return self.sum(prog, tys, arg(args, 0)?)
+            # The prelude's functions a constant reaches for (RULES.md,
+            # R173), as stage 0's interpreter computes them.
+            case "min" | "max":
+                let x = self.target(arg(args, 0)?)?
+                let y = self.target(arg(args, 1)?)?
+                let o = compare(x, y)? else:
+                    return Err(self.panicked("panic.unordered", []))
+                let pick_y = if name == "min": o > 0 else: o < 0
+                if pick_y:
+                    return Ok(y)
+                return Ok(x)
+            case "abs":
+                let x = self.target(arg(args, 0)?)?
+                if let Value.Int(i) = x:
+                    if i == INT_MIN:
+                        return Err(self.panicked("panic.overflow", [param("expr", "abs({i})")]))
+                    if i < 0:
+                        return Ok(Value.Int(0 - i))
+                    return Ok(Value.Int(i))
+                return match x:
+                    case Value.Float(f): Ok(Value.Float(f.abs()))
+                    case Value.F32(f): Ok(Value.F32(f.abs()))
+                    case _: Err(Stop.Beyond("`abs` of a value that is not a number"))
+            case "any" | "all":
+                let want = name == "any"
+                for x in self.items_of(arg(args, 0)?)?:
+                    let Value.Bool(b) = self.target(x)? else:
+                        return Err(Stop.Beyond("`{name}` of values that are not `bool`"))
+                    if b == want:
+                        return Ok(Value.Bool(want))
+                return Ok(Value.Bool(not want))
+            # A derived `Ord` (`structural.cmp`), as `max_of` and `min_of`
+            # call it, of the values `compare` orders.
+            case "structural.cmp":
+                let x = self.target(arg(args, 0)?)?
+                let y = self.target(arg(args, 1)?)?
+                let o = compare(x, y)? else:
+                    return Err(self.panicked("panic.unordered", []))
+                return Ok(Value.Adt(ty="Ordering".to_string(), variant=o + 1, fields=[]))
+            case "iterable_list":
+                return Ok(Value.List(self.items_of(arg(args, 0)?)?))
+            case "sorted":
+                var items = self.items_of(arg(args, 0)?)?
+                # An insertion sort keeps equal items in their order, as
+                # stage 0's merge sort does.
+                for i in range(1, len(items)):
+                    var j = i
+                    while j > 0:
+                        let o = compare(items[j - 1].copy(), items[j].copy())? else:
+                            return Err(self.panicked("panic.unordered", []))
+                        if o <= 0:
+                            break
+                        let t = items[j - 1].copy()
+                        items[j - 1] = items[j].copy()
+                        items[j] = t
+                        j -= 1
+                return Ok(Value.List(items))
+            # An iterator of items made up front holds the next one last.
+            case "reversed":
+                return Ok(Value.Items(self.items_of(arg(args, 0)?)?))
+            case "enumerate":
+                var pairs: list[Value] = []
+                let xs = self.items_of(arg(args, 0)?)?
+                for i in range(len(xs)):
+                    pairs.push(Value.Tuple([Value.Int(i), xs[i].copy()]))
+                pairs.reverse()
+                return Ok(Value.Items(pairs))
+            case "zip" | "zip_shortest":
+                let xs = self.items_of(arg(args, 0)?)?
+                let ys = self.items_of(arg(args, 1)?)?
+                if name == "zip" and len(xs) != len(ys):
+                    return Err(self.panicked("panic.zip-lengths", []))
+                var pairs: list[Value] = []
+                for i in range(min(len(xs), len(ys))):
+                    pairs.push(Value.Tuple([xs[i].copy(), ys[i].copy()]))
+                pairs.reverse()
+                return Ok(Value.Items(pairs))
             case "String.new":
                 if args.is_empty():
                     return Ok(Value.String(String.new()))
@@ -1283,6 +1372,29 @@ impl Interp:
                 case _:
                     pass
         return Err(Stop.Beyond("the intrinsic `{name}`"))
+
+    ## The items of an iterable, in order, as values: a list's or a set's, a
+    ## range's numbers, an iterator's items from the next one on (RULES.md,
+    ## R173).
+    pure def items_of(self, v: Value) -> list[Value] ! Stop:
+        var out: list[Value] = []
+        match self.target(v)?:
+            case Value.List(xs) | Value.Set(xs):
+                for x in xs:
+                    out.push(self.target(x)?)
+            case Value.Items(xs):
+                var i = len(xs) - 1
+                while i >= 0:
+                    out.push(self.target(xs[i].copy())?)
+                    i -= 1
+            case Value.Range(cur, stop, step):
+                var at = cur
+                while (step > 0 and at < stop) or (step < 0 and at > stop):
+                    out.push(Value.Int(at))
+                    at += step
+            case _:
+                return Err(Stop.Beyond("the items of a value that is not a list or a range"))
+        return Ok(out)
 
     ## `sum` of an iterable (stage 0's): an `f64`'s pairwise, as the run
     ## time sums (D-074), an `f32`'s in `f32`, an `int`'s with its overflow.
@@ -1725,6 +1837,8 @@ pure def value_at(v: Value, path: list[Step], i: int) -> ref Value? from v:
 enum InPlace:
     ListPush(Value)
     ListPop
+    ## The item at an index, which is in range (RULES.md, R173).
+    ListRemove(int)
     TextPush(String)
     ## The next of an iterator's items made up front (`Value.Items`).
     PopItem
@@ -1745,6 +1859,10 @@ pure def edit_at(mut v: Value, path: list[Step], i: int, own e: InPlace) -> Valu
                     if let Some(x) = xs.pop():
                         return Some(some(x))
                     return Some(none())
+            case InPlace.ListRemove(k):
+                if let Value.List(xs) = ref mut v:
+                    if k < len(xs):
+                        return Some(xs.remove(k))
             case InPlace.TextPush(t):
                 if let Value.String(s) = ref mut v:
                     s.push(t)

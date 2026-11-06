@@ -1,0 +1,8 @@
+# The prelude's helpers are its own (RULES.md, R175; 09, "Modules"): a
+# program sees only the names 09's list and 11 give, which the prelude
+# marks `pub`; one that names a helper is told so, with the std module
+# that has it as the fix where one does.
+def main():
+    print(days_in_month(2024, 2))
+    let s: DrawState = todo()
+    print(len(iterable_list([1, 2])))

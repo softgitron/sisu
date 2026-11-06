@@ -14,11 +14,11 @@
 import stage1.typeck
 from stage1.diag import Catalog, Lines, TextRange
 from stage1.parser import parse
-from stage1.syntax.ast import Mode
-from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.ast import Mode, Vis
+from stage1.syntax.kinds import SyntaxKind, keyword_kind
 from stage1.syntax.tree import Element, Tree
 from stage1.typeck.program import DefKind, ModuleId, Program
-from stage1.typeck.thir import Callee, TBody, TExprKind
+from stage1.typeck.thir import ArgMode, Callee, TBody, TExprKind
 from stage1.typeck.ty import DefId, Ty, TyData, Types
 
 ## The keywords a statement or a declaration starts with, which a
@@ -332,9 +332,9 @@ pure def doc_of(typed: typeck.Typed, files: Files, d: DefId) -> String:
 ## as one line `RANGE\tSIGNATURE\tNOTES\tDOC`; nothing where the position
 ## names nothing.
 pub pure def hover(
-    typed: typeck.Typed, files: Files, m: ModuleId, text: str, offset: int
+    typed: typeck.Typed, files: Files, m: ModuleId, text: str, offset: int, catalog: Catalog
 ) -> String:
-    let target = target_at(typed, m, offset) else:
+    let target = target_of(typed, files, m, offset, catalog) else:
         return String.new()
     let prog = ref typed.prog
     let types = ref typed.types
@@ -391,6 +391,9 @@ pub pure def declared(typed: typeck.Typed, target: Target) -> (ModuleId, TextRan
     let prog = ref typed.prog
     match target:
         case Target.Def(d):
+            # A module is declared by its file (RULES.md, R169).
+            if let DefKind.Module(mid) = prog.defs[d.index].kind():
+                return Some((mid, TextRange.new(0, 0)))
             return Some((prog.defs[d.index].module, prog.defs[d.index].span))
         case Target.Field(d, k):
             let s = prog.struct_info(d) else:
@@ -408,8 +411,10 @@ pure def name_in(r: TextRange, name: str) -> TextRange:
 
 ## `query definition`: the file and range of the declaration the position
 ## names, `PATH\tRANGE`; nothing where it names none or none with a file.
-pub pure def definition(typed: typeck.Typed, files: Files, m: ModuleId, offset: int) -> String:
-    let target = target_at(typed, m, offset) else:
+pub pure def definition(
+    typed: typeck.Typed, files: Files, m: ModuleId, offset: int, catalog: Catalog
+) -> String:
+    let target = target_of(typed, files, m, offset, catalog) else:
         return String.new()
     let (at, r) = declared(typed, target) else:
         return String.new()
@@ -446,7 +451,7 @@ pub pure def references(
     offset: int,
     catalog: Catalog,
 ) -> String:
-    let target = target_at(typed, m, offset) else:
+    let target = target_of(typed, files, m, offset, catalog) else:
         return String.new()
     let name = target_name(typed, target) else:
         return String.new()
@@ -483,6 +488,14 @@ pub pure def references(
                 if not within(extent(typed.bodies[bi]), t.start):
                     continue
             var means = False
+            # A name of an import line means what the line imports
+            # (RULES.md, R169).
+            if in_import(tree, k):
+                if let Target.Def(d) = target:
+                    means = import_meaning(typed.prog, tree, text, k) == Some(d)
+                if means:
+                    out.push("{field(path)}\t{range_of(text, lines, t.start, t.end)}\tuse\n")
+                continue
             if let Some(found) = target_at(typed, module, t.start):
                 means = found == target
             # A type's name written in a type means the type.
@@ -776,9 +789,18 @@ pub pure def scope(typed: typeck.Typed, m: ModuleId, offset: int) -> String:
                 let detail = "{kw} {l.name}: {shown(prog, types, l.ty, names)}"
                 _ = found.insert(l.name.copy(), item("variable", l.name, detail, ""))
                 order.push(l.name.copy())
+    # The prelude's names a program sees: those it marks `pub`, when it
+    # marks any (RULES.md, R175).
+    var marks_pub = False
+    for d in prog.modules[prog.prelude.index].order:
+        if prog.defs[d.index].vis == Vis.Pub:
+            marks_pub = True
+            break
     for module in [m, prog.prelude]:
         for (n, d) in prog.modules[module.index].items.items():
             if found.contains(n.copy()):
+                continue
+            if module == prog.prelude and marks_pub and prog.defs[d.index].vis != Vis.Pub:
                 continue
             if let Some(line) = def_item(prog, types, n, d):
                 _ = found.insert(n.copy(), line)
@@ -826,6 +848,462 @@ pub pure def word_start(text: str, offset: int) -> int:
         start -= 1
     return start
 
+# ---------------------------------------------------------------- import lines
+
+## What position `offset` of module `m` names: a name of an import line
+## what the line imports (RULES.md, R169), else what `target_at` finds.
+pub pure def target_of(
+    typed: typeck.Typed, files: Files, m: ModuleId, offset: int, catalog: Catalog
+) -> Target?:
+    if let Some((_, text)) = files.get(m):
+        let tree = parse(text, catalog).tree
+        for k in range(len(tree.tokens)):
+            let t = tree.tokens[k]
+            if t.kind != SyntaxKind.Ident or t.start > offset or offset > t.end:
+                continue
+            if in_import(tree, k):
+                if let Some(d) = import_meaning(typed.prog, tree, text, k):
+                    return Some(Target.Def(d))
+                return None
+    return target_at(typed, m, offset)
+
+## Whether token `k` is written in an import line.
+pure def in_import(tree: Tree, k: int) -> bool:
+    if k >= len(tree.token_parents):
+        return False
+    var at = tree.token_parents[k]
+    while let Some(n) = at:
+        let kind = tree.nodes[n].kind
+        if kind == SyntaxKind.FromImport or kind == SyntaxKind.ImportItem:
+            return True
+        at = tree.nodes[n].parent
+    return False
+
+## The names of a module path node, up to and including token `upto` when
+## it is one of them.
+pure def path_names(tree: Tree, text: str, n: int, upto: int?) -> list[String]:
+    var names: list[String] = []
+    for c in tree.nodes[n].children:
+        if let Element.Leaf(t) = c:
+            if tree.tokens[t].kind == SyntaxKind.Ident:
+                names.push(text.byte_slice(tree.tokens[t].start, tree.tokens[t].end).to_string())
+                if Some(t) == upto:
+                    break
+    return names
+
+## The module an import names by `names` (`garden.beds`, `std.json`).
+pure def module_by_path(prog: Program, names: list[String]) -> ModuleId?:
+    for k in range(len(prog.modules)):
+        if not prog.modules[k].path.is_empty() and prog.modules[k].path == names:
+            return Some(ModuleId(index=k))
+    if len(names) >= 2 and names[0] == "std":
+        var rest: list[String] = []
+        for i in range(1, len(names)):
+            rest.push(names[i].copy())
+        let name = rest.join(".")
+        for k in range(len(prog.modules)):
+            if prog.modules[k].is_std and prog.modules[k].name == name:
+                return Some(ModuleId(index=k))
+    return None
+
+## The definition that is module `mid`.
+pure def module_def(prog: Program, mid: ModuleId) -> DefId?:
+    for i in range(len(prog.defs)):
+        if let DefKind.Module(found) = prog.defs[i].kind():
+            if found == mid:
+                return Some(DefId(index=i))
+    return None
+
+## What the name at token `k` of an import line means: a module of its
+## path, or the definition a `from` line imports by that name (not the
+## alias after `as`, which declares a name of its own).
+pure def import_meaning(prog: Program, tree: Tree, text: str, k: int) -> DefId?:
+    if k >= len(tree.token_parents):
+        return None
+    let p = tree.token_parents[k] else:
+        return None
+    let kind = tree.nodes[p].kind
+    if kind == SyntaxKind.ModulePath:
+        let found = module_by_path(prog, path_names(tree, text, p, Some(k))) else:
+            return None
+        return module_def(prog, found)
+    if kind != SyntaxKind.ImportName:
+        return None
+    var first: int? = None
+    for c in tree.nodes[p].children:
+        if let Element.Leaf(t) = c:
+            if tree.tokens[t].kind == SyntaxKind.Ident and first.is_none():
+                first = Some(t)
+    if first != Some(k):
+        return None
+    let line = tree.nodes[p].parent else:
+        return None
+    var source: int? = None
+    for c in tree.nodes[line].children:
+        if let Element.Node(n) = c:
+            if tree.nodes[n].kind == SyntaxKind.ModulePath:
+                source = Some(n)
+    let path = source else:
+        return None
+    let found = module_by_path(prog, path_names(tree, text, path, None)) else:
+        return None
+    let name = text.byte_slice(tree.tokens[k].start, tree.tokens[k].end).to_string()
+    if let Some(d) = prog.modules[found.index].items.get(name):
+        return Some(d)
+    return None
+
+# ---------------------------------------------------------------- rename
+
+## Whether `name` may name a declaration: a name the lexer reads as one,
+## not a keyword.
+pub pure def is_name(name: str) -> bool:
+    var first = True
+    for c in name.chars():
+        if not (c.is_alphabetic() or c == '_' or (not first and c.is_digit())):
+            return False
+        first = False
+    if first or KEYWORDS.contains(name):
+        return False
+    return keyword_kind(name).is_none()
+
+## `query rename`: the edits that rename what the position names to `new`,
+## one per line of `references` (its declaration and every use),
+## `PATH\tRANGE\tNEW`; or one line `refused\tREASON`: `not-a-name` for a
+## `new` that is not a name, `not-renamable` where the position names
+## nothing the program declares (a local, a definition of the program's
+## own packages, a field of one).
+pub pure def rename(
+    typed: typeck.Typed,
+    files: Files,
+    programs: list[ModuleId],
+    m: ModuleId,
+    offset: int,
+    catalog: Catalog,
+    new: str,
+) -> String:
+    if not is_name(new):
+        return "refused\tnot-a-name\n"
+    let target = target_of(typed, files, m, offset, catalog) else:
+        return "refused\tnot-renamable\n"
+    let (at, _) = declared(typed, target) else:
+        return "refused\tnot-renamable\n"
+    # A module is named by its file, which a rename does not move.
+    if let Target.Def(d) = target:
+        if let DefKind.Module(_) = typed.prog.defs[d.index].kind():
+            return "refused\tnot-renamable\n"
+    if not programs.contains(at) or files.get(at).is_none():
+        return "refused\tnot-renamable\n"
+    var out = String.new()
+    for line in references(typed, files, programs, m, offset, catalog).lines():
+        var parts: list[String] = []
+        for part in line.split("\t"):
+            parts.push(part.to_string())
+        if len(parts) == 3:
+            out.push("{parts[0]}\t{parts[1]}\t{field(new)}\n")
+    if out.is_empty():
+        return "refused\tnot-renamable\n"
+    return out
+
+# ---------------------------------------------------------------- inlay hints
+
+## `query inlay`: the hints of module `m`, whose text is `text`, by
+## position: `POSITION\tKIND\tLABEL`, the kind `type` (`: T` after the
+## name of a local whose declaration does not write its type, a `let`'s, a
+## pattern's, a closure's parameter), `errors` (the error set a `T !`
+## function infers, `{A, B}`, after its return type) or `mode` (`mut` or
+## `own` before an argument passed to such a parameter without the word).
+pub pure def inlay(typed: typeck.Typed, m: ModuleId, text: str) -> String:
+    let prog = ref typed.prog
+    let types = ref typed.types
+    let lines = Lines.of(text)
+    var hints: list[(int, String)] = []
+    for bi in range(len(typed.bodies)):
+        if body_module(typed, bi) != m:
+            continue
+        let body = ref typed.bodies[bi]
+        let names = generic_names(prog, body.def_)
+        for li in range(len(body.locals)):
+            let l = ref body.locals[li]
+            if body.params.contains(li) or not named(l.name) or l.name.starts_with("_"):
+                continue
+            if l.span.end > text.byte_len() or text.byte_slice(l.span.start, l.span.end) != l.name:
+                continue
+            if types.contains_error(l.ty):
+                continue
+            let after = text.byte_slice(l.span.end, text.byte_len()).trim_start()
+            if after.starts_with(":"):
+                continue
+            let at = l.span.end
+            let label = ": {shown(prog, types, l.ty, names)}"
+            hints.push((at, "{position(text, lines, at)}\ttype\t{field(label)}\n"))
+        for e in body.exprs:
+            match e.kind:
+                case TExprKind.Call(Callee.Fn(d, _), args):
+                    let f = prog.fn_info(d) else:
+                        continue
+                    var skip = 0
+                    if f.self_mode.is_some():
+                        skip = 1
+                    for j in range(len(f.params)):
+                        if j + skip >= len(args):
+                            break
+                        let a = ref args[j + skip]
+                        let arg = ref body.exprs[a.expr.index]
+                        var word = ""
+                        if f.params[j].mode == Mode.Mut and a.mode == ArgMode.BorrowMut:
+                            word = "mut"
+                        elif f.params[j].mode == Mode.Own and not types.contains_error(arg.ty):
+                            word = "own"
+                        if word.is_empty() or arg.span.start > text.byte_len():
+                            continue
+                        let at = arg.span.start
+                        if text.byte_slice(0, at).trim_end().ends_with(word):
+                            continue
+                        hints.push((at, "{position(text, lines, at)}\tmode\t{word}\n"))
+                case _:
+                    pass
+    for i in range(len(prog.defs)):
+        let def_ = ref prog.defs[i]
+        if def_.module != m:
+            continue
+        let f = prog.fn_info(DefId(index=i)) else:
+            continue
+        if not f.err_inferred:
+            continue
+        let ret = f.ret_span else:
+            continue
+        var set: list[String] = []
+        if let Some(members) = typed.inferred.get(DefId(index=i)):
+            for e in members:
+                set.push(prog.defs[e.index].name.copy())
+        let label = "{{{set.join(", ")}}}"
+        hints.push((ret.end, "{position(text, lines, ret.end)}\terrors\t{field(label)}\n"))
+    hints.sort_by((a, b) -> a.0.cmp(b.0))
+    var out = String.new()
+    for (_, line) in hints:
+        out.push(line)
+    return out
+
+## `LINE:COL` of byte `at` of `text`.
+pub pure def position(text: str, lines: Lines, at: int) -> String:
+    let (line, col) = lines.line_col(text, at)
+    return "{line}:{col}"
+
+# ---------------------------------------------------------------- selection ranges
+
+## `query selection`: the ranges of the syntax around `offset` of `text`,
+## from its syntax tree alone, innermost first, each `RANGE` once, a
+## node's range without the blanks and line breaks it ends with (stage
+## 0's `selection_ranges`).
+pub pure def selection(text: str, offset: int, catalog: Catalog) -> String:
+    let tree = parse(text, catalog).tree
+    let lines = Lines.of(text)
+    var path: list[int] = []
+    var node: int? = Some(tree.root)
+    while let Some(n) = node:
+        path.push(n)
+        node = None
+        for c in tree.nodes[n].children:
+            if let Element.Node(k) = c:
+                if tree.nodes[k].start <= offset and offset < tree.nodes[k].end:
+                    node = Some(k)
+                    break
+    var out = String.new()
+    var last: (int, int)? = None
+    var i = len(path) - 1
+    while i >= 0:
+        let n = ref tree.nodes[path[i]]
+        let raw = text.byte_slice(n.start, n.end)
+        let end = n.start + raw.trim_end().byte_len()
+        if last != Some((n.start, end)):
+            out.push("{range_of(text, lines, n.start, end)}\n")
+            last = Some((n.start, end))
+        i -= 1
+    return out
+
+# ---------------------------------------------------------------- formatting
+
+## The lines of `text`, each with its line break.
+pure def split_lines(text: str) -> list[String]:
+    var out: list[String] = []
+    var start = 0
+    for i in range(text.byte_len()):
+        if text.byte_at(i).to_int() == 10:
+            out.push(text.byte_slice(start, i + 1).to_string())
+            start = i + 1
+    if start < text.byte_len():
+        out.push(text.byte_slice(start, text.byte_len()).to_string())
+    return out
+
+## The runs of lines that differ between `old` and `new`, as `(old start,
+## old end, new start, new end)`, from the longest common subsequence of
+## the lines between those both start and end with (stage 0's
+## `changed_runs`).
+pub pure def changed_runs(old: list[String], new: list[String]) -> list[(int, int, int, int)]:
+    var prefix = 0
+    while prefix < len(old) and prefix < len(new) and old[prefix] == new[prefix]:
+        prefix += 1
+    var suffix = 0
+    while suffix < len(old) - prefix
+            and suffix < len(new) - prefix
+            and old[len(old) - 1 - suffix] == new[len(new) - 1 - suffix]:
+        suffix += 1
+    let na = len(old) - prefix - suffix
+    let nb = len(new) - prefix - suffix
+    var lcs: list[list[int]] = []
+    for _ in range(na + 1):
+        var row: list[int] = []
+        for _ in range(nb + 1):
+            row.push(0)
+        lcs.push(row)
+    var i = na - 1
+    while i >= 0:
+        var j = nb - 1
+        while j >= 0:
+            if old[prefix + i] == new[prefix + j]:
+                lcs[i][j] = lcs[i + 1][j + 1] + 1
+            else:
+                lcs[i][j] = max(lcs[i + 1][j], lcs[i][j + 1])
+            j -= 1
+        i -= 1
+    var runs: list[(int, int, int, int)] = []
+    var a = 0
+    var b = 0
+    var open: (int, int)? = None
+    while a < na or b < nb:
+        if a < na and b < nb and old[prefix + a] == new[prefix + b]:
+            if let Some((s, t)) = open:
+                runs.push((prefix + s, prefix + a, prefix + t, prefix + b))
+                open = None
+            a += 1
+            b += 1
+            continue
+        if open.is_none():
+            open = Some((a, b))
+        if a < na and (b == nb or lcs[a + 1][b] >= lcs[a][b + 1]):
+            a += 1
+        else:
+            b += 1
+    if let Some((s, t)) = open:
+        runs.push((prefix + s, prefix + a, prefix + t, prefix + b))
+    return runs
+
+## `query format`'s edits of `text` formatted as `formatted`: one line per
+## run of changed lines, `RANGE\tTEXT`, the run's lines in `text` (an empty
+## range where lines are only inserted) and the lines that replace them.
+pub pure def format_edits(text: str, formatted: str) -> String:
+    let old = split_lines(text)
+    let new = split_lines(formatted)
+    var starts: list[int] = []
+    var at = 0
+    for l in old:
+        starts.push(at)
+        at += l.byte_len()
+    starts.push(text.byte_len())
+    let lines = Lines.of(text)
+    var out = String.new()
+    for (a0, a1, b0, b1) in changed_runs(old, new):
+        var written = String.new()
+        for k in range(b0, b1):
+            written.push(new[k])
+        out.push("{range_of(text, lines, starts[a0], starts[a1])}\t{field(written)}\n")
+    return out
+
+# ---------------------------------------------------------------- typed holes
+
+## A typed hole (10, "Holes"; D-061; RULES.md, R174): its module and
+## range, its name (empty for `todo()`), the type its place needs, the
+## function it is written in, the bindings in scope before it with their
+## types (`n: int`), and the names of those whose type is the hole's.
+pub struct Hole:
+    pub module: ModuleId
+    pub start: int
+    pub end: int
+    pub name: String
+    pub ty: String
+    pub function: String
+    pub scope: list[String]
+    pub fits: list[String]
+
+## The typed holes of the bodies of `modules`, by module and position.
+pub pure def holes(typed: typeck.Typed, modules: list[ModuleId]) -> list[Hole]:
+    let prog = ref typed.prog
+    let types = ref typed.types
+    var out: list[Hole] = []
+    for bi in range(len(typed.bodies)):
+        let m = body_module(typed, bi)
+        if not modules.contains(m):
+            continue
+        let body = ref typed.bodies[bi]
+        let names = generic_names(prog, body.def_)
+        for e in body.exprs:
+            match e.kind:
+                case TExprKind.Call(Callee.Fn(d, _), args):
+                    let f = prog.fn_info(d) else:
+                        continue
+                    if f.intrinsic != Some("todo".to_string()):
+                        continue
+                    var name = String.new()
+                    if let Some(first) = args.first():
+                        if let TExprKind.Str(t) = body.exprs[first.expr.index].kind:
+                            name = t.copy()
+                    let ty = shown(prog, types, e.ty, names)
+                    var scope: list[String] = []
+                    var fits: list[String] = []
+                    var seen: list[String] = []
+                    for l in body.locals:
+                        if l.span.end > e.span.start or not named(l.name) or seen.contains(l.name):
+                            continue
+                        seen.push(l.name.copy())
+                        scope.push("{l.name}: {shown(prog, types, l.ty, names)}")
+                        let bare = shown(prog, types, types.strip_ref(l.ty), names)
+                        if bare == ty:
+                            fits.push(l.name.copy())
+                    out.push(
+                        Hole(
+                            module=m,
+                            start=e.span.start,
+                            end=e.span.end,
+                            name=name,
+                            ty=ty,
+                            function=function_name(prog, types, body.def_),
+                            scope=scope,
+                            fits=fits,
+                        )
+                    )
+                case _:
+                    pass
+    out.sort_by((a, b) -> hole_order(a, b))
+    return out
+
+pure def hole_order(a: Hole, b: Hole) -> Ordering:
+    if a.module != b.module:
+        return a.module.index.cmp(b.module.index)
+    return a.start.cmp(b.start)
+
+## The name of a function as a hole's report writes it: `Point.moved` of a
+## method.
+pure def function_name(prog: Program, types: Types, d: DefId) -> String:
+    let def_ = ref prog.defs[d.index]
+    if let Some(f) = prog.fn_info(d):
+        if let Some(o) = f.owner:
+            return "{shown(prog, types, o, generic_names(prog, d))}.{def_.name}"
+    return def_.name.copy()
+
+## `query holes`: the typed holes of module `m`, whose text is `text`,
+## one line each, `RANGE\tNAME\tTYPE\tFUNCTION\tSCOPE\tFITS`, SCOPE the
+## bindings in scope with their types and FITS the names of those that fit,
+## each separated by `, `.
+pub pure def holes_answer(typed: typeck.Typed, m: ModuleId, text: str) -> String:
+    let lines = Lines.of(text)
+    var out = String.new()
+    for h in holes(typed, [m]):
+        let at = range_of(text, lines, h.start, h.end)
+        let scope = field(h.scope.join(", "))
+        let fits = field(h.fits.join(", "))
+        out.push("{at}\t{field(h.name)}\t{field(h.ty)}\t{field(h.function)}\t{scope}\t{fits}\n")
+    return out
+
 test "a field holds no tab and no line break":
     assert field("a\tb\nc\\d") == "a\\tb\\nc\\\\d"
     assert field("plain") == "plain"
@@ -839,3 +1317,17 @@ test "the name being written":
     assert word_start("let x = foo", 11) == 8
     assert word_start("p.na", 4) == 2
     assert with_prefix("a\tname\tx\t\nb\tother\ty\t\n", "na") == "a\tname\tx\t\n"
+
+test "the runs of changed lines":
+    let old = ["a\n".to_string(), "b\n".to_string(), "c\n".to_string()]
+    let new = ["a\n".to_string(), "B\n".to_string(), "c\n".to_string(), "d\n".to_string()]
+    assert changed_runs(old, new) == [(1, 2, 1, 2), (3, 3, 3, 4)]
+    assert format_edits("x=1\n", "x = 1\n") == "1:1-2:1\tx = 1\\n\n"
+
+test "a new name":
+    assert is_name("total")
+    assert is_name("_x2")
+    assert not is_name("2x")
+    assert not is_name("def")
+    assert not is_name("a-b")
+    assert not is_name("")
