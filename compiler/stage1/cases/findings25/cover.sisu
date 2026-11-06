@@ -1,0 +1,25 @@
+# The regions of `sisu test --cover` (RULES.md, R216): each statement of
+# the program's own functions and each branch, with the first statement of
+# SIR inside it, which the runner marks reached when a test runs it.
+def grade(score: int) -> str:
+    if score >= 90:
+        return "high"
+    elif score >= 50:
+        return "middle"
+    else:
+        return "low"
+
+def total(xs: list[int]) -> int:
+    var sum = 0
+    for x in xs:
+        sum += x
+    return sum
+
+test "a high grade":
+    assert grade(95) == "high"
+
+test "a total":
+    assert total([1, 2]) == 3
+
+def main():
+    print(grade(10))

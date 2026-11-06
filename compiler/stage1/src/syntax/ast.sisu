@@ -341,6 +341,20 @@ pub struct TestDef:
     pub cases: (PatternId, ExprId)?
     pub params: list[Param]
     pub body: Block?
+    ## The fixtures it names, which `sir --tests --module-fixtures` writes on
+    ## its `test` line (RULES.md, R219); none as written.
+    pub fixtures: list[TestFixture]
+
+## A fixture a test names (17, "Fixtures"; RULES.md, R219): its name, which
+## is its function's and the parameter's, whether its scope is the
+## module's, and then the place among the test's parameters where it
+## stays, a `ref T` the runner gives (`-1` for a test's own, a `let` of
+## its body).
+@derive(Debug, Eq)
+pub struct TestFixture:
+    pub name: String
+    pub module_scope: bool
+    pub param: int
 
 @derive(Debug)
 pub struct SuiteDef:

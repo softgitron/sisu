@@ -10814,3 +10814,485 @@ not list.
 1166. Stage 1's twenty-fourth round brought no difference from the
       merge: every difference `check.sh` reports is a rule's. Stage 1
       decides it (RULES.md, R210).
+
+## R211. The driver's three asks of `--defer-borrow` and `query explain`: the human form for `build`, each loan's ranges, each finding's function (decision 1180)
+
+**The rule.** Decisions 1104 and 1106 say what the driver works around
+in R187's and R189's answers, and stage 1 now gives each:
+
+- **`build --for-run --emit-sir --defer-borrow`** writes the errors that
+  stop it, those that are not the ownership rules', in the human form, as
+  R189 gives it for `build` (which takes no `--format`), and as `build
+  --for-run --emit-sir` without the option writes them: the diagnostics
+  as `check` prints them, then `D0006`, with status 1. It wrote them in
+  the conformance form, which the driver met by building again without
+  the option to get the words. `sir --defer-borrow` keeps writing them in
+  the form `--format` asks for. The deferred diagnostics stay in the
+  conformance form, which the counterexample mode reads.
+- **`query explain FILE LINE --ranges`** ends each loan's line with two
+  fields more, where the loan starts and where it is last used as ranges
+  with their ends, `LINE:COL-LINE:COL`, as `query.range_of` writes a
+  range: `main	shared	s	21:21	l	22:21	21:21-21:22	22:21-22:22`.
+  Without the option the line is R187's six fields, which the driver of
+  0.17.0 to 0.19.0 reads as exactly six; the option is what keeps it
+  reading them.
+- **Each deferred finding names its function.** In the answer of `sir
+  --defer-borrow` and `build --for-run --emit-sir --defer-borrow`, each
+  finding of the ownership checker is followed by a line `  function
+  NAME`, the SIR function whose statement it is at (`main`,
+  `Synth.next_sample`, `main#closure0`), before its labels and fixes:
+
+```text
+7:5-7:15 E0405 borrow.mut-while-borrowed name="xs" line="6" end="8"
+  function grow
+  label 6:17-6:26 borrow.borrowed-by borrower="first"
+```
+
+  A diagnostic of the front end, about a declaration, has no such line.
+  The line starts with spaces, as a label does, so a reader of 0.19.0's
+  answer that passes labels by passes it by too.
+
+What the driver may rely on from 0.20.0: the human form of `build
+--for-run --emit-sir --defer-borrow`'s stopping errors, the same bytes
+and status as the build without the option; `query explain FILE LINE
+--ranges` and its eight fields; and the line `  function NAME` after each
+deferred finding of both commands, the SIR function's name as the SIR
+writes it; each served.
+
+**Why.** Item 1 of the round: decisions 1104 and 1106, "What stage 1
+must do".
+
+**In stage 1.** `main` (`build_command`'s deferred answer,
+`ExplainedLoan`'s `start_range` and `end_range`, `loc_range`,
+`query_explain`'s `ranges`, `query_command`, `Deferred.functions`,
+`deferred_answer`), `borrowck` (`finding_functions`) and `diag`
+(`render_ids_in_functions`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings25/defer_functions.sisu`, two findings in two functions, is
+asked by `cases/findings25/asks.requests` with both commands, with
+`findings22/defer_other.sisu`'s type error and with `query explain`'s
+ranges, its old form and a misspelt option.
+`cases/findings22/roles.answers` is blessed again: its two deferred
+answers have the line `  function main`.
+
+**Decision 1180**, for docs/architecture.md:
+
+1180. `build --for-run --emit-sir --defer-borrow` writes the errors that
+      stop it in the human form, `query explain FILE LINE --ranges` gives
+      each loan's start and last use as ranges with their ends, and each
+      finding `--defer-borrow` defers is followed by a line `  function
+      NAME` naming its SIR function. Stage 1 decides it (RULES.md, R211).
+
+## R212. `E0702`'s words: a test's parameter may name a fixture (decision 1181)
+
+**The rule.** The manual's finding (chapter 19, R15, R17): `E0702`, for a
+parameter the runner cannot give a test, said that a test takes nothing,
+the real `System` or the fakes of capabilities, and named no `@fixture`,
+which a test may take since R200. Its message now lists the four forms:
+
+```text
+error[E0702]: a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`), or the values of its module's `@fixture` functions, each named after its fixture (`test "name"(schema: Schema):`)
+```
+
+And a parameter that names a `@fixture` that takes something, which is
+`E0281` at the fixture, is no longer `E0702` at the test as well: the one
+mistake has one error, the fixture's.
+
+**Why.** Item 2 of the round, the manual's finding.
+
+**In stage 1.** The catalog (`E0702`'s text, beside a comment naming the
+rule), `typeck` (the test's signature passes by a fixture `E0281`
+refuses) and `typeck.collect` (`Program.refused_fixtures`).
+
+**What it changes.** The case `cases/findings25/test_params.sisu` (its
+`.diag`, and its words in `asks.answers`): a fixture's value, a fixture
+that takes something and a number. `cases/findings23/fixture_errors.diag`
+is blessed again without its `E0702`. The Rust front end reads the same
+catalog, so its words of `E0702` change too, and it answers a fixture's
+parameter with `E0702` as before, and writes the case's pages, where
+stage 1 refuses them for its `E0281`.
+
+- Differs: `compiler/stage1/cases/findings25/test_params.sisu`: ids, human, doc, doc-output
+
+**Decision 1181**, for docs/architecture.md:
+
+1181. `E0702` names a module's `@fixture` among what a test's parameter
+      may be, and a parameter that names a fixture `E0281` refuses is
+      that error alone. Stage 1 decides it (RULES.md, R212).
+
+## R213. A contract's generated test calls the prelude's `check` by a name the program cannot shadow (decision 1182)
+
+**The rule.** Found by the twenty-fourth round: the test `contract of
+NAME` that the compiler writes for a function with a contract (07,
+"Contracts as properties"; stage 1's `typeck.arbitrary`) calls the
+prelude's `check` on the function's cases, and the module it writes is
+looked up through the module it serves, so a program's own function
+named `check` shadowed the prelude's there, and the test failed with
+`E0305` in `<arbitrary>/main.sisu`. The written module now calls
+`__prelude_check(...)`, and `within_ulps` of a `@refines` test
+`__prelude_within_ulps(...)`, names bound in the written module itself
+to the prelude's functions, which its own items come before the served
+module's in every lookup; they are not copied into the served module,
+so the program sees neither. The program's `check` is then the function
+under test, as its contract test calls it.
+
+**Why.** Item 3 of the round.
+
+**In stage 1.** `typeck.arbitrary` (`PRELUDE_CHECK`,
+`PRELUDE_WITHIN_ULPS`, `declare_arbitrary`'s written module).
+
+**What it changes.** The case `cases/findings25/check_shadowed.sisu`
+(its `.out` and `.tests`): a `check` with `requires` and `ensures`,
+whose contract test passes. The Rust front end reports the `E0305`.
+
+- Differs: `compiler/stage1/cases/findings25/check_shadowed.sisu`: ids, human, doc, doc-output
+
+**Decision 1182**, for docs/architecture.md:
+
+1182. The tests the compiler writes for contracts and `@refines` call the
+      prelude's `check` and `within_ulps` by names bound in the module
+      it writes, which a program's own function of the name does not
+      shadow. Stage 1 decides it (RULES.md, R213).
+
+## R214. The printed grammar against the parser: the five places, and a case of their forms (decision 1183)
+
+**The rule.** The manual's narrowed finding (R20): `sisu1 grammar`
+printed less than the parser reads in five places, which the manual's R20
+page names. The `##!` comments of `parser.items` and `parser.types`, and
+so the printed text, now say what the parser's functions read there, each
+read from its function:
+
+- **an attribute's dotted name**: `attribute := '@' name ('.' name)*
+  ('(' args? ')')? NEWLINE` (`attribute`), the parentheses empty or not;
+- **an error set's generic parameters**: `error_def := 'error' name
+  generic_params? ':' ...`, as an enum's (`enum_like`);
+- **the members of an enum or an error set**: `variant_member :=
+  attribute* (variant | '..' NEWLINE | 'pass' NEWLINE | item_body)`
+  (`variant_member`), beside a struct's `struct_member`, which holds any
+  declaration, `pass` and the `invariant` contract, and the `member` of
+  an impl, a trait and an `extern` block, any declaration, `pass` and a
+  trait's constant (`impl_member`), where the text had methods alone;
+- **the forms of a type**: `path_type` with `Self` and `type`,
+  `fn_type`, `tuple_type` with its labelled parts (`type_element`),
+  `'(' type ')'`, `dyn` of any primary type, `ptr mut T` and `impl Trait
+  for T` (`primary_type`, `paren_types`);
+- **a trait's constant**: `trait_const := 'const' name (':' type)? ('='
+  expr)? NEWLINE`, with or without its value, and a `const_def` whose
+  type `E0219` asks for.
+
+The text also names what it lacked beside them: `item_body`, `import c
+"header"` with `with`, a parenthesised `from` import, and `self: T`.
+
+How the two are kept together: each production names the parser's
+function that reads it, and is changed with it. The cases
+`cases/findings25/grammar_forms.sisu` and `grammar_attribute.sisu` write
+each form of the five places once and run, so that `check.sh` parses
+them in every class against stage 0's parser too, and
+`cases/findings23/served.answers` holds the printed text, so that a
+change of a comment is a difference `check.sh` shows until it is blessed.
+A case that parses every example of the manual's R20 page is the
+manual's to run, since the page's blocks are grammar, not Sisu.
+
+**Why.** Item 4 of the round, the manual's finding.
+
+**In stage 1.** The `##!` comments of `parser.items` and `parser.types`.
+
+**What it changes.** No output of the corpus.
+`cases/findings23/served.answers` is blessed again with the new text.
+Where the new cases differ from the Rust front end it is under earlier
+rules: `grammar_forms.sisu`'s trait constant, which R37 gives a trait,
+is in its AST and its page, and `grammar_attribute.sisu`'s `@lint.allow`
+is R30's `W0022`.
+
+- Differs: `compiler/stage1/cases/findings25/grammar_forms.sisu`: ast, doc, doc-output
+- Differs: `compiler/stage1/cases/findings25/grammar_attribute.sisu`: names, ids, human
+
+**Decision 1183**, for docs/architecture.md:
+
+1183. `sisu1 grammar` prints what the parser reads of an attribute's
+      dotted name, an error set's generic parameters, the members of an
+      enum, an error set, an impl, a trait and an `extern` block, every
+      form of a type and a trait's constant, each production read from
+      its function, with a case that writes each form. Stage 1 decides it
+      (RULES.md, R214).
+
+## R215. `@no_alloc` checked, through the program's call graph (decision 1184)
+
+**The rule.** The manual's finding (chapter 27): a program says that a
+function allocates nothing with `@no_alloc`, which nothing checked
+(`W0030`). 04, "Resource attributes", gives the rule: "no heap
+allocation, which means no construction or growth of `list`, `dict`,
+`String`, `Box` or `Shared` and no allocating callee", checked "over the
+call graph", with "panic paths exempt", and D-059: "a `dyn` call or a
+call through a non-generic closure parameter is an error because it must
+be assumed to allocate". Stage 1 checks it on the program's SIR, after
+the ownership checker, as a pass of its own (`borrowck.alloc`): in a
+function marked `@no_alloc`, each statement that allocates, or that calls
+a function that may, is `E0282`, `type.no-alloc`, at the statement:
+
+```text
+error[E0282]: `render` is `@no_alloc`, but `Synth.next_sample` may allocate
+  --> no_alloc.sisu:19:18
+   |
+19 |         out[i] = synth.next_sample()
+   |                  ^^^^^^^^^^^^^^^^^^^
+  = note: `Synth.next_sample` calls `list.push`, at no_alloc.sisu:13:9
+```
+
+What allocates: a `list`, `set` or `dict` made (a literal, a
+comprehension), a `dyn` value boxed, text joined by `+`, a `.copy()` of a
+value that owns memory (a collection, a text, a `Shared`, a number of any
+size, or a struct, enum or tuple that holds one), a closure that holds
+what it captures by value or that a task runs, an intrinsic that grows a
+collection, a text or the heap (`list.push`, `list.insert`,
+`list.extend`, `dict.insert`, `dict.entry`, `set.add`, `String.push`,
+`String.push_char`, `Shared.new`, `bytes.concat`), and an intrinsic that
+returns a new value that owns memory (`str.to_string`, `fmt.new`, which
+an interpolation calls); one that moves a value out of a collection or
+hands back one it holds (`list.pop`, `dict.get`, `Shared.get`) does not.
+A call of a function of the program or of the standard library is
+checked through its body, to any depth, the callee's first allocation
+the note's (`` `F` HOW, at FILE:LINE:COL ``); a trait's method is
+checked through the impl the call's types name. A call through a
+function value, and one of a trait's method on a type only the run knows
+(a type parameter, a `dyn` value, a capability's handle), is the error
+too, with the note `type.no-alloc-unknown`. The blocks from which every
+path ends in a panic (an `assert`'s message, an index's), and the
+cleanup that drops on the way out, are exempt. A recursive call is
+taken to allocate nothing more than the rest of its body.
+
+`@no_alloc` no longer has `W0030`; `@no_block` and `@stack` keep it.
+
+What the typed program cannot tell, and the rule leaves: 04 checks
+"after monomorphisation", with errors at each instantiation, where SIR
+keeps a generic function generic, so a `@no_alloc` generic function's
+call of a trait's method on its type parameter is the error at the
+function rather than at an instantiation that might allocate nothing;
+the `list[T, A]` allocators of D-060 do not exist (the manual's other
+finding), so no collection is allocation-free by its allocator; and
+whether a closure's environment fits in its value is the backend's
+(`env_words`), so a closure that captures by value is taken to allocate.
+
+**Why.** Item 5 of the round, the manual's finding.
+
+**In stage 1.** The new module `borrowck.alloc` (`check`, `allocates`,
+`allocation`, `grows`, `moves_out`, `owns_memory`, `captures_by_value`,
+`panic_blocks`), `borrowck` (`check_with` runs it),
+`typeck.collect` (`Program.no_alloc`), `lower` (`sir.Program.no_alloc`,
+not written), `resolve` (`unchecked_promise` without `no_alloc`), `diag`
+and the catalog (`E0282` and its two notes). `stage2`'s reader fills the
+new fields of `sir.Program` with nothing.
+
+**What it changes.** The cases `cases/findings25/no_alloc.sisu` (its
+`.diag`, and its words in `asks.answers`: a callee's `list.push`, a list
+literal, an interpolation and a function value) and `no_alloc_kept.sisu`
+(its `.out`: a function that reads, writes in place, calls a helper and
+asserts with a formatted message, which checks). The manual's
+`solutions/27-systems/mixer.sisu` checks. `cases/findings13/
+unchecked_attributes.diag` is blessed again without the `W0030` of
+`@no_alloc`, which the Rust front end still reports.
+
+- Differs: `compiler/stage1/cases/findings13/unchecked_attributes.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings25/no_alloc.sisu`: ids, human
+
+**Decision 1184**, for docs/architecture.md:
+
+1184. `@no_alloc` is checked on the program's SIR through its call graph,
+      the standard library's functions included: a statement that makes,
+      grows, copies or boxes what owns memory, or calls a function that
+      may, or calls through a function value or a type only the run
+      knows, is `E0282` at the statement; the paths that only panic are
+      exempt, and the attribute no longer has `W0030`. Stage 1 decides it
+      (RULES.md, R215).
+
+## R216. `sir --tests --cover`: the program's regions, the front end's half of `sisu test --cover` (decision 1185)
+
+**The rule.** 17, "Coverage and mutation": "`sisu test --cover` reports
+uncovered regions from the compiler's own instrumentation". This is the
+front end's half. `sir --tests --cover [PATH]` prints the SIR `sir
+--tests` prints, then a line `# regions` and a line for each region of
+the root package's modules, in the order of the modules and of their
+places:
+
+```text
+# regions
+# region cover.sisu:5:5-10:21 statement grade bb0:0
+# region cover.sisu:6:9-6:22 branch grade bb2:0
+# region cover.sisu:6:9-6:22 statement grade bb2:0
+```
+
+A region is a statement of the program's own functions and methods, or
+a branch, the body of an `if`'s branch or its `else`, of a loop, of an
+arm of a `match` that stands as a statement, of a `defer`, a `with` or an
+`unsafe:`, as `FILE:LINE:COL-LINE:COL` from its first character to its
+last (a branch from its first statement), then `statement` or `branch`,
+and the statement of SIR that starts it: its function, its block and its
+place in the block, `bbB:S`, the block's statements counted from 0 and
+its terminator after them. The SIR statement is the first one inside the
+region, by its position, or before it in the same block. A region
+lowering wrote no statement of is `none`. Tests, benchmarks, fixtures,
+compile-time and `@cfg` code are left out, as they are from the mutants
+(R208). The lines are comments of the SIR, which its reader passes by.
+A program with an error has `sir --tests`'s refusal (R46).
+
+**What stage 0 must do.** The runner's half: `sisu test --cover` asks
+stage 1 for `sir --tests --cover`, runs the tests from the SIR with each
+statement counted (the counting `test --defer-borrow`'s run does,
+decision 1143), marks a region reached when its statement ran in any
+test, and reports the regions no test reached, by their `FILE:LINE:COL`,
+as a map and never a gate (17), with `none` regions left out.
+
+What the driver may rely on from 0.20.0: `sir --tests --cover`, the line
+`# regions` after the SIR and the lines `# region SPAN KIND FUNCTION
+bbB:S` or `# region SPAN KIND none`, served.
+
+**Why.** Item 6 of the round.
+
+**In stage 1.** The new module `coverage` (`Region`, `regions`,
+`SirPlace`, `sir_places`, `table`), `main` (`sir`'s `--cover`,
+`cover_table`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings25/cover.sisu`, an `if` with an `elif` and an `else` and a
+`for`, is asked by `asks.requests`.
+
+**Decision 1185**, for docs/architecture.md:
+
+1185. `sisu1 sir --tests --cover` prints after the SIR a table of the
+      program's regions, each statement's and branch's span and the SIR
+      statement that starts it, so that the runner can report the regions
+      no test reached. Stage 1 decides it (RULES.md, R216).
+
+## R217. `sisu doc`'s examples with their values: decided against again (decision 1186)
+
+**The rule.** Nothing changes: a doc example is shown as written.
+
+**Decided against**, for this round, with what it needs: 10 has `sisu
+doc` render each example's expression statements with their values. The
+evaluator now runs a worksheet whole (R196, `interp.run_sheet`), but an
+example is not a worksheet: it is the body of a test of its module
+(R185), which imports the module's items, often by the package's path,
+and a value needs that test's program built and instrumented as `sir
+--worksheet` instruments a script (`__ws_show` after each expression
+statement), then run, for each example of each page. The examples of the
+standard library print and take capabilities (`Fs.in_memory()`,
+`System.fake()`), where the evaluator stops at the world, so most of
+them would show no value; and the pages of every program with an
+example, and 197 examples of the standard library's pages, would differ
+from stage 0's `sisu doc` for the doc classes to list. The round left it
+for the round that gives the evaluator the fakes `sisu ws` runs against,
+and builds an example's program as the worksheet builder builds a
+script's.
+
+**Why.** Item 7 of the round, R139's decided-against item.
+
+**What it changes.** Nothing.
+
+**Decision 1186**, for docs/architecture.md:
+
+1186. `sisu doc`'s rendering of an example's values waits for an
+      example to be built and instrumented as a worksheet is and for the
+      evaluator to run against the fakes of capabilities, since most
+      examples print or take one. Stage 1 decides it (RULES.md, R217).
+
+## R218. The merge's differences: the conformance suite's `unsafe/tuple_pointer` (decision 1187)
+
+**The rule.** Nothing a command prints changes. Stage 0's twenty-first
+round added two conformance cases (decision 1100), and its twenty-second
+none:
+
+- `unsafe/tuple_pointer.sisu` imports `std.mem` and writes `unsafe` code,
+  stage 1's (R4, R5), which the Rust front end answers with `E0220` and
+  `E0900`, so its AST, names, SIR, diagnostics and pages differ as those
+  of `unsafe/narrow_pointer` do (R184).
+- `std/narrow_tuples.sisu` does not differ.
+
+What each does is what its `.out` says, from stage 1's SIR
+(`behaviour`), interpreted and natively.
+
+**Why.** Item 8 of the round: the coordinator's run of `check.sh` on the
+main tree found `unsafe/tuple_pointer` unlisted in seven classes.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/unsafe/tuple_pointer.sisu`: ast, names, sir, ids, human, doc, doc-output
+
+**Decision 1187**, for docs/architecture.md:
+
+1187. The conformance suite's `unsafe/tuple_pointer` differs from stage
+      0's front end under R4 and R5, as `unsafe/narrow_pointer` does, and
+      `std/narrow_tuples` does not differ. Stage 1 decides it (RULES.md,
+      R218).
+
+## R219. Fixtures on the `test` lines of the SIR, and a module's fixture a `ref T` parameter the runner gives (decision 1188)
+
+**The rule.** Decision 1147 and R209: the runner would keep one value
+for a module's tests if the SIR named each test's fixtures and the test
+took the value as a parameter. `sir --tests --module-fixtures [PATH]`
+lowers so:
+
+- Each test's line names its fixtures after its function (and after `in
+  "MODULE"` with `--modules`), before its `tags`, in the order of its
+  parameters: ` fixture NAME FUNCTION test` for a fixture of the test,
+  which its body makes and drops as R200 lowers it, and ` fixture NAME
+  FUNCTION module K` for one with `scope="module"`, which the test's
+  function takes as its parameter `K` (counted from 0 among the
+  parameters it keeps, the capabilities among them), of type `ref T`.
+  NAME is the parameter's and the fixture's name, FUNCTION the SIR
+  function that makes the value.
+
+```text
+test "within the limits" test#0 fixture limits limits module 0
+test "a start within them" test#1 fixture start start test fixture limits limits module 0
+```
+
+- A module's fixture is read only by its tests, which share it while
+  they run at once, so what it returns must be `Sync` (06): `E0283`,
+  `type.module-fixture-sync`, at the attribute, with or without the
+  option, since `scope="module"` says the value is shared.
+
+Without the option the lowering is R200's, a `let` in each test's body,
+and the lines are as before, so the runner of 0.19.0, which gives a
+test its capabilities alone, runs the same tests. The option is the
+runner's to pass once it makes the value (decision 1147): it calls
+FUNCTION once before the first test it runs that names the fixture,
+keeps the value, passes a reference to it as parameter K of each such
+test, runs those tests in one interpreter, in turn, and drops the value
+after the last, failed or not; a test's own fixtures need nothing.
+
+What the driver may rely on from 0.20.0: `sir --tests --module-fixtures`,
+with `--modules`, `--format=ids` and the build's options, the groups `
+fixture NAME FUNCTION test` and ` fixture NAME FUNCTION module K` on the
+test's line before `tags`, the parameter K of type `ref T`, and `E0283`;
+served.
+
+**Why.** Item 9 of the round: decision 1147, R209.
+
+**In stage 1.** `typeck.fixtures` (`lower`'s `shared`, `fixture_names`
+with the scope, `scoped_to_module`, `lower_test`), `syntax.ast`
+(`TestDef.fixtures`, `TestFixture`), `typeck` (`check_program`'s
+`module_fixtures`; the test's signature passes by the parameters the
+runner gives; `E0283`), `typeck.collect` (`Program.test_fixtures` and
+`module_fixtures`, a test's `ref T`), `lower` (`sir.Program.
+test_fixtures`, `FixtureUse`), `sir.write` (the groups), `main` (`sir`'s
+`--module-fixtures`, `Input.module_fixtures`), and the catalog
+(`E0283`).
+
+**What it changes.** The case `cases/findings25/module_fixtures.sisu`
+(its `.out` and `.tests`, run without the option), whose SIR with and
+without it `asks.requests` asks for, and `fixture_sync.sisu` (its
+`.diag`, and its words in `asks.answers`). The Rust front end has no
+`@fixture`, and answers both cases' fixtures with `E0702`.
+
+- Differs: `compiler/stage1/cases/findings25/module_fixtures.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings25/fixture_sync.sisu`: ids, human, doc, doc-output
+
+**Decision 1188**, for docs/architecture.md:
+
+1188. `sisu1 sir --tests --module-fixtures` names each test's fixtures on
+      its line, `fixture NAME FUNCTION test` or `fixture NAME FUNCTION
+      module K`, and lowers a module's fixture as the test's `ref T`
+      parameter K, for the runner to make once per module; a module's
+      fixture returns a `Sync` value (`E0283`). Stage 1 decides it
+      (RULES.md, R219).

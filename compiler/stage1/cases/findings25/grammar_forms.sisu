@@ -1,0 +1,48 @@
+# The forms the printed grammar named less of than the parser reads
+# (RULES.md, R214; the manual's R20): each is written here once, so that
+# `check.sh` parses what the productions show, against stage 0's parser
+# too. An error set's generic parameters (`error_def`), an enum's members
+# beside its variants (`variant_member`), the forms of a type (`tuple_type`
+# with labelled parts, `fn_type`, `impl`, `ptr mut` in `primary_type`), and
+# a trait's constant with a value (`trait_const`). An attribute's dotted
+# name (`attribute`) is in `grammar_attribute.sisu`, since no attribute
+# with one means anything yet.
+# Declared, not made: the native backend makes no value of a generic
+# error set yet.
+error Failed[T]:
+    Missing(what: T)
+    Broken
+
+enum Mood:
+    Calm
+    Busy(level: int)
+
+    def describe(self) -> str:
+        return match self:
+            case Calm: "calm"
+            case Busy(_): "busy"
+
+trait Sized2:
+    const SIDES: int = 2
+
+    def sides(self) -> int:
+        return 2
+
+struct Pair:
+    a: int
+
+impl Sized2 for Pair:
+    pass
+
+def split(n: int) -> (low: int, high: int):
+    return (n // 2, n - n // 2)
+
+def twice(f: (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def main():
+    let parts = split(7)
+    print("{parts.low} {parts.high}")
+    print(twice((x) -> x + 1, 1))
+    print(Mood.Busy(level=2).describe())
+    print(Pair(a=1).sides())

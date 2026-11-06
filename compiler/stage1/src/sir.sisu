@@ -229,6 +229,14 @@ pub struct Program:
     ## Each test's `@tag`s, in the order written, by the test's place in
     ## `tests` (a test past its end has none; decision 285).
     pub test_tags: list[list[String]]
+    ## Each test's fixtures, by the test's place in `tests` (a test past its
+    ## end names none), written on its line by `sir --tests
+    ## --module-fixtures` (RULES.md, R219).
+    pub test_fixtures: list[list[FixtureUse]]
+    ## The functions marked `@no_alloc` (RULES.md, R215), each with its name
+    ## as the program writes it, which the ownership checker's pass checks
+    ## for allocation through the call graph. Not written.
+    pub no_alloc: list[(String, String)]
     ## Benchmark name and the function that runs it (decision 285).
     pub benches: list[(String, String)]
     ## The trait methods called through `call trait`, with their facts.
@@ -240,6 +248,17 @@ pub struct Program:
     ## purity check does not report those calls. Not written: SIR as the
     ## text form has it is unchanged by `unsafe` (22).
     pub asserted: list[(int, Loc)]
+
+## A fixture a test names (17, "Fixtures"; RULES.md, R219): its name, the
+## function that makes it, whether its scope is the module's, and for a
+## module's the index of the test's parameter that receives it as a
+## `ref T` (`-1` for a test's own, which its body makes).
+@derive(Eq)
+pub struct FixtureUse:
+    pub name: String
+    pub function: String
+    pub module_scope: bool
+    pub param: int
 
 impl Program:
     ## Whether a statement at `loc` of the source `source` is inside one of

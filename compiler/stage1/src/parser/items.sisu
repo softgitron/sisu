@@ -2,34 +2,43 @@
 ##!
 ##! ```text
 ##! file      := item* EOF
-##! item      := attribute* visibility? (fn_def | struct_def | enum_def | error_def
-##!              | impl_def | trait_def | import | from_import | test_def | suite_def
-##!              | bench_def | const_def | type_alias | extern_block)
-##! attribute := '@' name ('(' args ')')? NEWLINE
+##! item      := attribute* visibility? item_body
+##! item_body := fn_def | struct_def | enum_def | error_def | impl_def | trait_def
+##!              | import | from_import | test_def | suite_def | bench_def
+##!              | const_def | type_alias | extern_block
+##! attribute := '@' name ('.' name)* ('(' args? ')')? NEWLINE
 ##! fn_def    := ('pure' | 'comptime')? 'unsafe'? 'def' name generic_params? params
 ##!              ('->' type ('from' name (',' name)*)?)? where_clause? (':' block | NEWLINE)
-##! struct_def:= 'view'? 'struct' name generic_params? ':' INDENT (field | fn_def | 'pass')+ DEDENT
-##! field     := visibility? name ':' type ('=' expr)? NEWLINE
-##! enum_def  := 'enum' name generic_params? ':' INDENT (variant | fn_def)+ DEDENT
-##! error_def := 'error' name ':' INDENT (variant | '..' NEWLINE)+ DEDENT
-##! variant   := name ('(' (name ':')? type (',' (name ':')? type)* ')')? NEWLINE
-##! impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
+##! struct_def:= 'view'? 'struct' name generic_params? ':' INDENT struct_member+ DEDENT
+##! struct_member := attribute* visibility? (field | item_body | 'pass' NEWLINE)
+##!              | contract                      -- `invariant e`
+##! field     := name ':' type ('=' expr)? NEWLINE
+##! enum_def  := 'enum' name generic_params? ':' INDENT variant_member+ DEDENT
+##! error_def := 'error' name generic_params? ':' INDENT variant_member+ DEDENT
+##! variant_member := attribute* (variant | '..' NEWLINE | 'pass' NEWLINE | item_body)
+##! variant   := name ('(' variant_field (',' variant_field)* ')')? NEWLINE
+##! variant_field := (name ':')? type
+##! impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT member+ DEDENT
 ##! trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
-##!              INDENT (fn_def | type_alias | trait_const)+ DEDENT
-##! trait_const := 'const' name ':' type ('=' expr)? NEWLINE
-##! import    := 'import' path ('as' name)? NEWLINE
-##! from_import := 'from' path 'import' name ('as' name)? (',' name ('as' name)?)* NEWLINE
+##!              INDENT member+ DEDENT
+##! extern_block := 'extern' string? ':' INDENT member+ DEDENT
+##! member    := attribute* visibility? ('pass' NEWLINE | item_body | trait_const)
+##! trait_const := 'const' name (':' type)? ('=' expr)? NEWLINE   -- in a trait's body
+##! import    := 'import' (path | 'c' string) ('as' name)?
+##!              ('with' name '=' expr (',' name '=' expr)*)? NEWLINE
+##! from_import := 'from' path 'import' (import_names | '(' import_names ')') NEWLINE
+##! import_names := name ('as' name)? (',' name ('as' name)?)*
 ##! test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
 ##! bench_def := 'bench' string ('for' patterns 'in' expr)? params? ':' block
 ##! suite_def := 'suite' string ':' INDENT item+ DEDENT
-##! const_def := 'const' name ':' type '=' expr NEWLINE
+##! const_def := 'const' name (':' type)? '=' expr NEWLINE   -- without its type, E0219
 ##! type_alias:= 'type' name generic_params? ('=' type ('where' expr)?)? NEWLINE
-##! extern_block := 'extern' string? ':' INDENT fn_def+ DEDENT
 ##! visibility := 'pub' ('(' 'package' ')')?
 ##! generic_params := '[' generic_param (',' generic_param)* ']'
 ##! generic_param := 'const'? name (':' type ('+' type)*)? ('=' type)?
 ##! params    := '(' (param (',' param)*)? ')'
-##! param     := ('mut' | 'own')? ('self' | '*' | '/' | '*' name ':' type | name ':' type ('=' expr)?)
+##! param     := ('mut' | 'own')? ('self' (':' type)? | '*' | '/' | '*' name ':' type
+##!              | name ':' type ('=' expr)?)
 ##! where_clause := 'where' type ':' type ('+' type)* (',' type ':' type ('+' type)*)*
 ##! ```
 

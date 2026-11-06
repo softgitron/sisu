@@ -12515,3 +12515,57 @@ R219)
       provenance (decision 1108) are not this round's, for the reason
       1206 gives; the formatting family stays the first, with 903's
       measurement. This changes no rule of the language.
+
+**Stage 1's twenty-fifth round** (stage 1's RULES.md, R211 to R219; the driver's three asks of `--defer-borrow` and `query explain`, `E0702`'s words, a contract's test calling the prelude's `check` by an unshadowable name, the printed grammar against the parser, `@no_alloc` checked through the call graph, `sir --tests --cover`, `sisu doc`'s example values decided against again, the merge's differences, fixtures on the `test` lines with `--module-fixtures`; `sisu1 --version` 0.20.0)
+
+1180. `build --for-run --emit-sir --defer-borrow` writes the errors that
+      stop it in the human form, `query explain FILE LINE --ranges` gives
+      each loan's start and last use as ranges with their ends, and each
+      finding `--defer-borrow` defers is followed by a line `  function
+      NAME` naming its SIR function. Stage 1 decides it (RULES.md, R211).
+
+1181. `E0702` names a module's `@fixture` among what a test's parameter
+      may be, and a parameter that names a fixture `E0281` refuses is
+      that error alone. Stage 1 decides it (RULES.md, R212).
+
+1182. The tests the compiler writes for contracts and `@refines` call the
+      prelude's `check` and `within_ulps` by names bound in the module
+      it writes, which a program's own function of the name does not
+      shadow. Stage 1 decides it (RULES.md, R213).
+
+1183. `sisu1 grammar` prints what the parser reads of an attribute's
+      dotted name, an error set's generic parameters, the members of an
+      enum, an error set, an impl, a trait and an `extern` block, every
+      form of a type and a trait's constant, each production read from
+      its function, with a case that writes each form. Stage 1 decides it
+      (RULES.md, R214).
+
+1184. `@no_alloc` is checked on the program's SIR through its call graph,
+      the standard library's functions included: a statement that makes,
+      grows, copies or boxes what owns memory, or calls a function that
+      may, or calls through a function value or a type only the run
+      knows, is `E0282` at the statement; the paths that only panic are
+      exempt, and the attribute no longer has `W0030`. Stage 1 decides it
+      (RULES.md, R215).
+
+1185. `sisu1 sir --tests --cover` prints after the SIR a table of the
+      program's regions, each statement's and branch's span and the SIR
+      statement that starts it, so that the runner can report the regions
+      no test reached. Stage 1 decides it (RULES.md, R216).
+
+1186. `sisu doc`'s rendering of an example's values waits for an
+      example to be built and instrumented as a worksheet is and for the
+      evaluator to run against the fakes of capabilities, since most
+      examples print or take one. Stage 1 decides it (RULES.md, R217).
+
+1187. The conformance suite's `unsafe/tuple_pointer` differs from stage
+      0's front end under R4 and R5, as `unsafe/narrow_pointer` does, and
+      `std/narrow_tuples` does not differ. Stage 1 decides it (RULES.md,
+      R218).
+
+1188. `sisu1 sir --tests --module-fixtures` names each test's fixtures on
+      its line, `fixture NAME FUNCTION test` or `fixture NAME FUNCTION
+      module K`, and lowers a module's fixture as the test's `ref T`
+      parameter K, for the runner to make once per module; a module's
+      fixture returns a `Sync` value (`E0283`). Stage 1 decides it
+      (RULES.md, R219).

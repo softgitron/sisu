@@ -645,6 +645,11 @@ pub pure def read(text: str) -> Program ! ReadError:
         functions=[],
         tests=[],
         test_tags=[],
+        # What `sir --tests --module-fixtures` writes on a test's line and
+        # the `@no_alloc` functions (stage 1's R215 and R219), which the
+        # backend does not need.
+        test_fixtures=[],
+        no_alloc=[],
         benches=[],
         trait_methods=[],
         impls=[],

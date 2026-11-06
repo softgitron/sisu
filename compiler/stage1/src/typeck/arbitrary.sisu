@@ -712,7 +712,7 @@ impl Resolver:
             body.push("        _ = {call}\n        return True\n")
             tests.push("\ntest \"contract of {shown}\":\n")
             tests.push(
-                "    check(Gen.of(__contract_cases_{n}, quiet=True, steps=100000)) do args:\n{body}"
+                "    {PRELUDE_CHECK}(Gen.of(__contract_cases_{n}, quiet=True, steps=100000)) do args:\n{body}"
             )
         k = self.declare_refinements(module, items, mut w, mut tests, k)
         w.out.push(tests)
@@ -741,6 +741,12 @@ impl Resolver:
         for (name, d) in names:
             if not self.prog.modules[module.index].items.contains(name.copy()):
                 _ = self.prog.modules[module.index].items.insert(name.copy(), d)
+        # The prelude's `check` and `within_ulps` by names of the module the
+        # compiler wrote, which a program's own `check` does not shadow
+        # (RULES.md, R213); they stay out of the module the tests serve.
+        for (alias, real) in [(PRELUDE_CHECK, "check"), (PRELUDE_WITHIN_ULPS, "within_ulps")]:
+            if let Some(d) = self.prog.lookup_in(self.prog.prelude, real):
+                _ = self.prog.modules[generated.index].items.insert(alias.to_string(), d)
 
     ## The types `module`'s items implement `Arbitrary` for by hand or
     ## derive it for (RULES.md, R52), recorded before any module's
@@ -1200,12 +1206,12 @@ impl Resolver:
                 let rhs = "{rname}({args.join(", ")})"
                 var holds = "{lhs} == {rhs}"
                 if let Some(u) = ulps:
-                    holds = "within_ulps({lhs}, {rhs}, {u})"
+                    holds = "{PRELUDE_WITHIN_ULPS}({lhs}, {rhs}, {u})"
                 tests.push("\ntest \"{f.name.text} refines {rname}\":\n")
                 let test_name = "{f.name.text} refines {rname}"
                 _ = self.prog.refines_at.insert(test_name, (module, a.range))
                 tests.push(
-                    "    check(Gen.of(__refines_cases_{n}, quiet=True, steps=100000)) do args:\n"
+                    "    {PRELUDE_CHECK}(Gen.of(__refines_cases_{n}, quiet=True, steps=100000)) do args:\n"
                 )
                 tests.push("        return {holds}\n")
         return k
@@ -1643,3 +1649,9 @@ pure def is_bare_name(key: str) -> bool:
         if not (is_alphanumeric(c) or c == '_'):
             return False
     return True
+
+## The names by which the tests the compiler writes call the prelude's
+## `check` and `within_ulps`, bound in the module it writes, so that a
+## program's own function of the name does not shadow them (RULES.md, R213).
+pub const PRELUDE_CHECK: str = "__prelude_check"
+pub const PRELUDE_WITHIN_ULPS: str = "__prelude_within_ulps"

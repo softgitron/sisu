@@ -1,0 +1,35 @@
+# `@no_alloc` checked (RULES.md, R215; 04, "Resource attributes"): a
+# function that says it allocates nothing makes no list, text or other
+# value that owns memory, grows none, and calls no function that does,
+# through the call graph; a call of a function value may be one that
+# allocates. Each is `E0282` at the statement, a callee's with a note that
+# says where it allocates.
+struct Synth:
+    voices: list[f64]
+    level: f64
+
+impl Synth:
+    def next_sample(mut self) -> f64:
+        self.voices.push(self.level)
+        return self.level
+
+@no_alloc
+def render(mut out: list[f64], mut synth: Synth):
+    for i in range(len(out)):
+        out[i] = synth.next_sample()
+
+@no_alloc
+def label(n: int) -> String:
+    let parts = [n, n + 1]
+    return "{parts[0]}"
+
+@no_alloc
+def apply(f: (int) -> int) -> int:
+    return f(1)
+
+def main():
+    var out = [0.0, 0.0]
+    var s = Synth(voices=[], level=0.5)
+    render(mut out, mut s)
+    print(label(2))
+    print(apply((x) -> x + 1))

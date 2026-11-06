@@ -1,0 +1,26 @@
+# Each test's fixtures on its line, and a module's fixture a `ref T`
+# parameter the runner gives (RULES.md, R219): `sir --tests
+# --module-fixtures` writes `fixture NAME FUNCTION module K` for one the
+# runner makes once for the module's tests and gives as the test's
+# parameter K, and `fixture NAME FUNCTION test` for one the test's body
+# makes, as R200 lowers it. Without the option the lowering is R200's.
+struct Limits:
+    low: int
+    high: int
+
+@fixture(scope="module")
+def limits() -> Limits:
+    return Limits(low=1, high=9)
+
+@fixture
+def start() -> int:
+    return 3
+
+test "within the limits"(limits: Limits):
+    assert limits.low <= 5 <= limits.high
+
+test "a start within them"(start: int, limits: Limits):
+    assert limits.low <= start <= limits.high
+
+def main():
+    print(limits().high)

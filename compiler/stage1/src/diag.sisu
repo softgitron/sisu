@@ -601,6 +601,10 @@ pub enum Msg:
     TypeDeprecatedPlain
     TypeFixInlineBody
     TypeFixtureSignature
+    TypeNoAlloc
+    TypeNoAllocThrough
+    TypeNoAllocUnknown
+    TypeModuleFixtureSync
     ResolvePlainPadding
     ResolvePlainPaddingEnd
     ResolvePlainPaddingFill
@@ -1212,6 +1216,10 @@ impl Msg:
             case TypeDeprecatedPlain: "type.deprecated-plain"
             case TypeFixInlineBody: "type.fix-inline-body"
             case TypeFixtureSignature: "type.fixture-signature"
+            case TypeNoAlloc: "type.no-alloc"
+            case TypeNoAllocThrough: "type.no-alloc-through"
+            case TypeNoAllocUnknown: "type.no-alloc-unknown"
+            case TypeModuleFixtureSync: "type.module-fixture-sync"
             case ResolvePlainPadding: "resolve.plain-padding"
             case ResolvePlainPaddingEnd: "resolve.plain-padding-end"
             case ResolvePlainPaddingFill: "resolve.plain-padding-fill"
@@ -1871,11 +1879,25 @@ pub pure def render_human_files(
 pub pure def render_ids_files(
     files: list[(String, String)], diags: list[Filed], named: bool, catalog: Catalog
 ) -> String:
+    return render_ids_in_functions(files, diags, named, catalog, [])
+
+## The conformance form of `diags`, each followed by a line `  function
+## NAME` where `functions` names the SIR function it was found in (the
+## same length as `diags`, empty for none), as `--defer-borrow` writes the
+## ownership checker's findings (RULES.md, R211).
+pub pure def render_ids_in_functions(
+    files: list[(String, String)],
+    diags: list[Filed],
+    named: bool,
+    catalog: Catalog,
+    functions: list[String],
+) -> String:
     var lines: list[Lines] = []
     for (_, t) in files:
         lines.push(Lines.of(t))
     var out = String.new()
-    for x in diags:
+    for k in range(len(diags)):
+        let x = ref diags[k]
         let d = ref x.diag
         out.push(
             "{span_in(files, lines, x.file, d.start, d.end, named)} {catalog.code(d.msg)} {d.msg.id()}"
@@ -1883,6 +1905,8 @@ pub pure def render_ids_files(
         for p in d.params:
             out.push(" {p.name}={quote(p.value)}")
         out.push("\n")
+        if k < len(functions) and not functions[k].is_empty():
+            out.push("  function {functions[k]}\n")
         for k in range(len(d.labels)):
             let l = ref d.labels[k]
             out.push(

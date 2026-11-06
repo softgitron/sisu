@@ -1,0 +1,17 @@
+# A module's fixture is shared by the module's tests, which run at once
+# (RULES.md, R219; 17, "Fixtures"; 06): what it returns is `Sync`, which a
+# `Cell` is not (`E0283`); a test's own fixture may be anything.
+@fixture(scope="module")
+def counter() -> Cell[int]:
+    return Cell.new(0)
+
+@fixture
+def own_counter() -> Cell[int]:
+    return Cell.new(0)
+
+test "counts"(own_counter: Cell[int]):
+    own_counter.set(1)
+    assert own_counter.get() == 1
+
+def main():
+    pass

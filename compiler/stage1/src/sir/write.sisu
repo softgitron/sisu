@@ -58,6 +58,14 @@ pub pure def write_as(p: Program, modules: bool) -> String:
         out.push("test {quote(name)} {f}")
         if modules:
             out.push(module_word(p, files, f))
+        # The test's fixtures, `fixture NAME FUNCTION test` or `fixture NAME
+        # FUNCTION module K` with K its parameter (RULES.md, R219).
+        if k < len(p.test_fixtures):
+            for x in p.test_fixtures[k]:
+                if x.module_scope:
+                    out.push(" fixture {x.name} {x.function} module {x.param}")
+                else:
+                    out.push(" fixture {x.name} {x.function} test")
         # The test's `@tag`s, when it has any (decision 285).
         if k < len(p.test_tags) and not p.test_tags[k].is_empty():
             out.push(" tags")

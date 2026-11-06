@@ -1,0 +1,23 @@
+# What a test's parameter may be (RULES.md, R212): `E0702` names a
+# fixture beside the real `System` and the fakes of capabilities, and a
+# parameter that names a `@fixture` which takes something is `E0281`
+# alone, at the fixture.
+@fixture
+def sized(n: int) -> list[int]:
+    return [i for i in range(n)]
+
+@fixture
+def three() -> list[int]:
+    return [1, 2, 3]
+
+test "a fixture's value"(three: list[int]):
+    assert len(three) == 3
+
+test "a fixture that takes something"(sized: list[int]):
+    assert len(sized) == 0
+
+test "a number"(n: int):
+    assert n == n
+
+def main():
+    pass

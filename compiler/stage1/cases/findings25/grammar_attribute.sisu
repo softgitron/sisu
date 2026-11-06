@@ -1,0 +1,6 @@
+# An attribute's dotted name (RULES.md, R214; the manual's R20): the
+# parser reads `@NAME.NAME` as `attribute` gives it, and an attribute Sisu
+# does not read is the warning it is for any other name.
+@lint.allow
+def main():
+    print("read")

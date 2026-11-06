@@ -187,6 +187,7 @@ sisu run -- fix FILE [--dry-run] [--all]    # each diagnostic's preferred fix ap
 sisu run -- eval FILE [--to json|toml|yaml] # a configuration module's constants, evaluated at compile time and written as JSON, TOML or YAML (R165)
 sisu run -- check --diary PATH [PATH]       # `check`, its records also appended to the diary PATH (R186)
 sisu run -- explain-borrow FILE:LINE        # every borrow live on the line, in the driver's words (R187)
+sisu run -- query explain FILE LINE [--ranges]  # its loans as an answer, with `--ranges` each loan's start and last use as ranges (R187, R211)
 sisu run -- audit (--ownership FILE... | --caps [FILE...])  # the escape hatches of each file, a program's capabilities (R188)
 sisu run -- sir --defer-borrow [--tests] [PATH]  # the SIR of a program whose only errors are the ownership rules' (R189)
 sisu run -- build --emit-sir [--release] [--contracts=LEVEL] [--output OUT] [PATH]  # each program's SIR the native build hands its backend, after `# executable PATH` (R195)
@@ -194,6 +195,8 @@ sisu run -- query values FILE               # a worksheet's values and output by
 sisu run -- grammar                         # the parser's grammar, from its `##!` comments (R202)
 sisu run -- doc [--std] --digest [PATH] [--output DIR]  # the API as one plain text, each item's declaration and its doc's first paragraph (R207)
 sisu run -- sir --tests (--mutants | --mutant=K) [PATH]  # each mutant of `sisu test --mutate` after a line `# mutant K: FILE:LINE:COL: WHAT` (R208)
+sisu run -- sir --tests --cover [PATH]      # the SIR, then a line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and branch, for `sisu test --cover` (R216)
+sisu run -- sir --tests --module-fixtures [PATH]  # each test's fixtures on its line, a module's fixture the test's `ref T` parameter (R219)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
@@ -347,13 +350,14 @@ thirteen on a quiet machine, and the formatter's classes add about five
 
 ## Results
 
-The twenty-fourth round's run (`SISU_FRONT_END=rust SISU_LOWER=rust`, at
-a load of about 4 on four cores, 12 minutes) ended `total: 15947 files
-checked, 14079 identical, 1868 differing (1868 listed in RULES.md or
-DISCREPANCIES.md, 0 not)`, with `served` 11 request files and `fix` 4
-files as expected, `expected` 193 files, `behaviour` 371 programs (370 as
-expected, 351 natively too, 1 refused as listed) and `fixed-sir`
-identical. The run below is an earlier
+The twenty-fifth round's run (`SISU_FRONT_END=rust SISU_LOWER=rust`, at
+a load of about 4 on four cores, 13 minutes) ended `total: 16111 files
+checked, 14214 identical, 1897 differing (1897 listed in RULES.md or
+DISCREPANCIES.md, 0 not)`, with `served` 12 request files and `fix` 4
+files as expected, `expected` 198 files, `behaviour` 378 programs (377 as
+expected, 358 natively too, 1 refused as listed) and `fixed-sir`
+identical. The twenty-fourth round's ended `total: 15947 files checked,
+14079 identical, 1868 differing (1868 listed ..., 0 not)`. The run below is an earlier
 round's, kept for its breakdown of the classes.
 
 `./check.sh --native --names --types --sir` (`--native` implies `--self` and
@@ -3040,6 +3044,60 @@ Stage 1's version is 0.19.0. The driver may rely on `doc --digest` and
 --mutants` and `--mutant=K` with their lines, each served. The new cases
 are in `cases/findings24/`.
 
+### The twenty-fifth round: the driver's three asks, `E0702`'s words, `check` shadowed, the grammar against the parser, `@no_alloc`, `--cover`'s regions, fixtures on the test lines
+
+This round took what decisions 1104, 1106 and 1147 ask of stage 1, the
+manual's findings of `E0702`, R20's grammar and `@no_alloc`, the
+twenty-fourth round's `check` shadowed in a contract's test, and 17's
+`--cover`. RULES.md has the rules (R211 to R219, decisions 1180 to 1188)
+and their decision texts:
+
+- **The driver's three asks** (R211): `build --for-run --emit-sir
+  --defer-borrow` writes the errors that stop it in the human form;
+  `query explain FILE LINE --ranges` ends each loan's line with its start
+  and last use as ranges, `21:21-21:22`; and each deferred finding is
+  followed by a line `  function NAME`, its SIR function.
+- **`E0702`'s words** (R212) name a module's `@fixture` among what a
+  test's parameter may be, and a fixture `E0281` refuses is that error
+  alone.
+- **`check` shadowed** (R213): the tests the compiler writes call the
+  prelude's `check` and `within_ulps` by names bound in the module it
+  writes, `__prelude_check`.
+- **The grammar** (R214): the `##!` comments say what the parser reads
+  of an attribute's dotted name, an error set's generic parameters, the
+  members of an enum, an error set, an impl, a trait and an `extern`
+  block, every form of a type and a trait's constant; two cases write
+  each form.
+- **`@no_alloc`** (R215) is checked on the program's SIR through its call
+  graph, the standard library's functions included: `E0282` at a
+  statement that makes, grows, copies or boxes what owns memory, or calls
+  a function that may, or through a function value; the paths that only
+  panic are exempt.
+- **`--cover`** (R216): `sir --tests --cover` prints after the SIR a
+  line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and
+  branch of the program's own code; the runner's half is stage 0's.
+- **The merge's differences** (R218): `unsafe/tuple_pointer`, under R4
+  and R5.
+- **Fixtures on the test lines** (R219): `sir --tests
+  --module-fixtures` writes ` fixture NAME FUNCTION test` and ` fixture
+  NAME FUNCTION module K` on a test's line and lowers a module's fixture
+  as the test's `ref T` parameter K; such a fixture returns a `Sync`
+  value (`E0283`).
+
+Decided against: `sisu doc`'s examples with their values (R217), which
+need an example built and instrumented as a worksheet is and an
+evaluator that runs against the fakes. Open: the runner's halves of
+`--cover`, of `--mutate` and of a module's fixture (R216, R208, R219),
+stage 0's; `@no_alloc` at each instantiation of a generic function
+(R215); compile-time types (R155).
+
+Stage 1's version is 0.20.0. The driver may rely on the human form of
+`build --for-run --emit-sir --defer-borrow`'s stopping errors, `query
+explain --ranges`, the line `  function NAME` after each deferred
+finding, `sir --tests --cover` with its lines, and `sir --tests
+--module-fixtures` with its groups, each served. The new cases are in
+`cases/findings25/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3926,6 +3984,15 @@ program of all 1,187 lines of `GraphemeBreakTest.txt`, built natively,
 runs in 0.017 s, and `Zone.named` reads its zone's line of the history
 once per call.
 
+The twenty-fifth round's additions cost nothing a check notices,
+natively as processes at a load of about 1 (three runs each): `check` of
+`cases/findings25/no_alloc_kept.sisu` 0.26 to 0.28 s after the first
+run, as the same program without its `@no_alloc` (0.27 to 0.29 s), the
+pass walking the calls of one function into the standard library once,
+each function's answer kept; `sir --tests --cover` of `cover.sisu` 0.26
+to 0.28 s against `sir --tests`'s 0.27 to 0.32 s, the table one parse of
+each module and a read of the SIR's text.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3966,8 +4033,9 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
 
 1. **`sisu doc`'s parts that need evaluation**: 10's rendering of an
    example with its values (decision 258 leaves it out, port-debt.md),
-   which stage 0 does not have either; `--digest` is R207's, and `--open`
-   the driver's (R207).
+   which stage 0 does not have either, and which R217 leaves for an
+   evaluator that runs against the fakes; `--digest` is R207's, and
+   `--open` the driver's (R207).
 2. **Running SIR**: the rest of the interpreter (tasks, capabilities, the
    host), of which `interp` has what compile-time code needs, where stage
    1 becomes the oracle; the backend and the runtime stay stage 0's, as
@@ -4157,7 +4225,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     against: `std.x.tzdata` and the whole database (R206), `--open`
     (R207), and a module's fixture kept in the SIR (R209); left:
     compile-time types (R155), and the runner's halves of `--mutate` and
-    of `scope="module"`, stage 0's. The tenth round took a variant's
+    of `scope="module"`, stage 0's. The twenty-fifth round took `E0702`'s
+    words (R212), the prelude's `check` in a contract's test (R213), the
+    printed grammar against the parser (R214), `@no_alloc` (R215) and the
+    fixtures on the test lines (R219); decided against again: `sisu
+    doc`'s values (R217); left: compile-time types (R155), `@no_alloc` at
+    each instantiation of a generic function (R215), and the runner's
+    halves of `--cover`, `--mutate` and a module's fixture, stage 0's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

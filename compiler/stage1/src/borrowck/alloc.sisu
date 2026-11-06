@@ -1,0 +1,360 @@
+##! `@no_alloc` on SIR (04, "Resource attributes"; D-059; RULES.md, R215): a
+##! function that says it allocates nothing makes no `list`, `set`, `dict`,
+##! `String` or other value that owns memory, grows none, boxes no `dyn`
+##! value and makes no closure that holds what it captures, and no function
+##! it calls does, through the call graph of the program's SIR, the
+##! standard library's functions included. An intrinsic allocates where it
+##! grows a collection or a text (`list.push`, `dict.insert`,
+##! `String.push`, `Shared.new`) or returns a new value that owns memory
+##! (`str.to_string`); one that moves a value out of a collection
+##! (`list.pop`) does not. A call whose function only the run knows, of a
+##! function value or through a type parameter, `dyn` or a capability, may
+##! be one that allocates, and is an error too (D-059: "it must be assumed
+##! to allocate"). The paths that only end in a panic, and the cleanup
+##! that drops on the way out, are exempt (04: "Panic paths are exempt").
+
+from stage1.borrowck.finding import Finding, text
+from stage1.borrowck.types import Types
+from stage1.diag import Msg
+from stage1.sir import (
+    Aggregate,
+    BinOp,
+    Callee,
+    ClosureRole,
+    FnKind,
+    Function,
+    Loc,
+    Program,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+    TypeDecl,
+)
+
+## Where a function allocates: the function the allocation is in, what
+## does it (`calls `list.push``), and where.
+struct Site:
+    function: String
+    how: String
+    source: int
+    loc: Loc?
+
+## What a statement does that allocates, if anything: the words of the
+## error for a statement of the `@no_alloc` function itself (`the list it
+## makes`, `` `list.push` ``), the words of the note for one of a function
+## it calls (`makes a list`), and whether what it calls is known only at
+## run time.
+struct Allocation:
+    what: String
+    how: String
+    unknown: bool
+
+## The `E0282` errors of the program's `@no_alloc` functions, one at each
+## statement that allocates or calls a function that may.
+pub pure def check(p: Program, types: Types) -> list[Finding]:
+    var out: list[Finding] = []
+    var memo: dict[String, Site?] = {}
+    for (name, shown) in p.no_alloc:
+        let fi = types.function(name) else:
+            continue
+        let f = ref p.functions[fi]
+        let panics = panic_blocks(f)
+        for b in range(len(f.blocks)):
+            let block = ref f.blocks[b]
+            if block.cleanup or panics.contains(b):
+                continue
+            for si in range(len(block.stmts)):
+                let s = ref block.stmts[si]
+                if let Some(a) = allocation(p, types, f, s):
+                    var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
+                        "what", a.what
+                    ).at(b, si)
+                    if a.unknown:
+                        found = found.note(Msg.TypeNoAllocUnknown, [])
+                    out.push(found)
+                    continue
+                let callee = called(p, types, f, s) else:
+                    continue
+                if callee == f.name:
+                    continue
+                var seen: list[String] = [f.name.copy()]
+                let site = allocates(p, types, callee, mut memo, mut seen) else:
+                    continue
+                var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
+                    "what", "`{shown_fn(callee)}`"
+                ).at(b, si)
+                let at = place_of(p, site.source, site.loc)
+                let params = [
+                    text("callee", shown_fn(site.function)),
+                    text("how", site.how),
+                    text("at", at),
+                ]
+                found = found.note(Msg.TypeNoAllocThrough, params)
+                out.push(found)
+    return out
+
+## Where the function `name` or one it calls allocates first, by the order
+## of their blocks and statements; `None` when none does. A function on
+## the path being searched (`seen`) is taken to allocate nothing more than
+## the path finds, so recursion ends.
+pure def allocates(
+    p: Program, types: Types, name: str, mut memo: dict[String, Site?], mut seen: list[String]
+) -> Site?:
+    if let Some(known) = memo.get(name.to_string()):
+        return known.copy()
+    if seen.contains(name.to_string()):
+        return None
+    let fi = types.function(name) else:
+        return None
+    seen.push(name.to_string())
+    let f = ref p.functions[fi]
+    let panics = panic_blocks(f)
+    var found: Site? = None
+    for b in range(len(f.blocks)):
+        if found.is_some():
+            break
+        let block = ref f.blocks[b]
+        if block.cleanup or panics.contains(b):
+            continue
+        for s in block.stmts:
+            if let Some(a) = allocation(p, types, f, s):
+                found = Some(Site(function=f.name.copy(), how=a.how, source=f.source, loc=s.loc))
+                break
+            let callee = called(p, types, f, s) else:
+                continue
+            if let Some(site) = allocates(p, types, callee, mut memo, mut seen):
+                found = Some(site)
+                break
+    _ = seen.pop()
+    _ = memo.insert(name.to_string(), found.copy())
+    return found
+
+## The function a statement calls whose body the check walks: a function
+## of the program, or a trait's method whose impl the types name.
+pure def called(p: Program, types: Types, f: Function, s: Statement) -> String?:
+    let StatementKind.Call(_, callee, _) = s.kind.copy() else:
+        return None
+    match callee:
+        case Callee.Fn(n, _):
+            return Some(n.copy())
+        case Callee.Trait(n, tys):
+            if let Some((target, _)) = types.trait_target(p, n, tys):
+                return Some(target)
+            return None
+        case _:
+            return None
+
+## What a statement does that allocates, if anything.
+pure def allocation(p: Program, types: Types, f: Function, s: Statement) -> Allocation?:
+    match s.kind:
+        case StatementKind.Assign(_, value):
+            match value:
+                case Rvalue.Aggregate(kind, _):
+                    match kind:
+                        case Aggregate.List:
+                            return Some(made("the list it makes", "makes a list"))
+                        case Aggregate.Set:
+                            return Some(made("the set it makes", "makes a set"))
+                        case Aggregate.Dict:
+                            return Some(made("the dict it makes", "makes a dict"))
+                        case Aggregate.Dyn(_):
+                            return Some(made("the `dyn` value it boxes", "boxes a `dyn` value"))
+                        case _:
+                            return None
+                case Rvalue.Binary(op, _, _):
+                    if op == BinOp.Concat:
+                        return Some(made("the text `+` joins", "joins two texts"))
+                    return None
+                case Rvalue.CopyOf(place):
+                    let t = types.place_ty(f, place) else:
+                        return Some(made("the copy `.copy()` makes", "copies a value"))
+                    if owns_memory(types, t, 0):
+                        return Some(
+                            made("the copy `.copy()` makes", "copies a value that owns memory")
+                        )
+                    return None
+                case Rvalue.Closure(name, _, _):
+                    if captures_by_value(p, types, name):
+                        return Some(
+                            made(
+                                "the closure it makes, which holds what it captures,",
+                                "makes a closure that holds what it captures",
+                            )
+                        )
+                    return None
+                case _:
+                    return None
+        case StatementKind.Call(dest, callee, _):
+            match callee:
+                case Callee.Intrinsic(n, _):
+                    if grows(n):
+                        return Some(made("`{n}`", "calls `{n}`"))
+                    if moves_out(n):
+                        return None
+                    if not dest.proj.is_empty():
+                        return None
+                    let t = types.place_ty(f, dest) else:
+                        return None
+                    if owns_memory(types, t, 0):
+                        return Some(made("`{n}`", "calls `{n}`"))
+                    return None
+                case Callee.Value(_):
+                    return Some(
+                        Allocation(
+                            what="the function value it calls".to_string(),
+                            how="calls a function value".to_string(),
+                            unknown=True,
+                        )
+                    )
+                case Callee.Trait(n, tys):
+                    if types.trait_target(p, n, tys).is_some():
+                        return None
+                    return Some(
+                        Allocation(
+                            what="`{n}`".to_string(),
+                            how="calls `{n}` on a type only the run knows".to_string(),
+                            unknown=True,
+                        )
+                    )
+                case Callee.Fn(_, _):
+                    return None
+        case _:
+            return None
+
+pure def made(what: str, how: str) -> Allocation:
+    return Allocation(what=what.to_string(), how=how.to_string(), unknown=False)
+
+## The intrinsics that grow a collection, a text or the heap in place.
+pure def grows(n: str) -> bool:
+    return match n:
+        case "list.push" | "list.insert" | "list.extend" | "dict.insert" | "dict.entry": True
+        case "set.add" | "String.push" | "String.push_char" | "Shared.new" | "bytes.concat": True
+        case _: False
+
+## The intrinsics that move a value out of a collection or hand back one it
+## holds, which allocate nothing whatever the value's type.
+pure def moves_out(n: str) -> bool:
+    return match n:
+        case "list.pop" | "list.remove" | "list.get" | "list.first" | "list.last": True
+        case "dict.remove" | "dict.get" | "set.remove" | "Cell.get" | "Cell.replace": True
+        case "Shared.get" | "bytes.get": True
+        case _: False
+
+## The types whose values own memory of the heap: the collections, texts and
+## shared cells, a `dyn` value, and a struct, enum or tuple that holds one.
+pure def owns_memory(types: Types, t: Type, depth: int) -> bool:
+    if depth > 16:
+        return True
+    match t:
+        case Type.Dyn(_, _):
+            return True
+        case Type.Tuple(es):
+            for e in es:
+                if owns_memory(types, e, depth + 1):
+                    return True
+            return False
+        case Type.Named(n, args):
+            if heap_builtin(n):
+                return True
+            for a in args:
+                if owns_memory(types, a, depth + 1):
+                    return True
+            let decl = types.decl(n) else:
+                return False
+            match decl:
+                case TypeDecl.Struct(_, _, fields, _, _, _):
+                    for x in fields:
+                        if owns_memory(types, x.ty, depth + 1):
+                            return True
+                case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                    for v in variants:
+                        for (_, ft) in v.fields:
+                            if owns_memory(types, ft, depth + 1):
+                                return True
+            return False
+        case _:
+            return False
+
+## The builtin types that own memory of the heap.
+pure def heap_builtin(n: str) -> bool:
+    return match n:
+        case "list" | "dict" | "set" | "String" | "bytes" | "Shared" | "Weak" | "Box": True
+        case "BigInt" | "BigRatio" | "Decimal" | "Path": True
+        case _: False
+
+## Whether the closure function `name` takes what it captures by value,
+## not as references, so that its environment may not fit in the value.
+pure def captures_by_value(p: Program, types: Types, name: str) -> bool:
+    let fi = types.function(name) else:
+        return False
+    let c = ref p.functions[fi]
+    if c.kind == FnKind.Closure(ClosureRole.Task):
+        return True
+    if len(c.locals) < 2:
+        return False
+    match c.locals[1].ty:
+        case Type.Tuple(es):
+            for e in es:
+                if let Type.Ref(_, _) = e:
+                    continue
+                return True
+            return False
+        case Type.Unit:
+            return False
+        case Type.Ref(_, _):
+            return False
+        case _:
+            return True
+
+## The blocks from which every path ends in a panic (a block that ends
+## `unreachable`, after the call that panics), which `@no_alloc` exempts.
+pure def panic_blocks(f: Function) -> list[int]:
+    var out: list[int] = []
+    for b in range(len(f.blocks)):
+        if let Terminator.Unreachable = f.blocks[b].term:
+            out.push(b)
+    var changed = True
+    while changed:
+        changed = False
+        for b in range(len(f.blocks)):
+            if out.contains(b):
+                continue
+            var targets: list[int] = []
+            match f.blocks[b].term:
+                case Terminator.Goto(t):
+                    targets.push(t.index)
+                case Terminator.Switch(_, cases, default):
+                    for (_, t) in cases:
+                        targets.push(t.index)
+                    targets.push(default.index)
+                case _:
+                    pass
+            if targets.is_empty():
+                continue
+            var all = True
+            for t in targets:
+                if not out.contains(t):
+                    all = False
+            if all:
+                out.push(b)
+                changed = True
+    return out
+
+## `FILE:LINE:COL` of a statement, with the file as the SIR names it.
+pure def place_of(p: Program, source: int, loc: Loc?) -> String:
+    var file = "?".to_string()
+    if source >= 0 and source < len(p.sources):
+        file = p.sources[source].copy()
+    let at = loc else:
+        return file
+    return "{file}:{at.line}:{at.col}"
+
+## A function of SIR as a message names it: its name without what follows
+## a `#` (an instance's arguments, a closure's number), `Synth.next_sample`.
+pure def shown_fn(name: str) -> String:
+    for i in range(1, name.byte_len()):
+        if name.byte_at(i) == 35:
+            return name.byte_slice(0, i).to_string()
+    return name.to_string()

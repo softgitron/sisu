@@ -29,6 +29,7 @@
 ##!    makes a `Shared` is tagged task-local or may-cross, which the SIR
 ##!    writes as `Shared.new` or `Shared.new_atomic`.
 
+import stage1.borrowck.alloc
 import stage1.borrowck.consume
 import stage1.borrowck.elaborate
 import stage1.borrowck.loans
@@ -151,6 +152,8 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
         functions=functions,
         tests=p.tests.copy(),
         test_tags=p.test_tags.copy(),
+        test_fixtures=p.test_fixtures.copy(),
+        no_alloc=p.no_alloc.copy(),
         benches=p.benches.copy(),
         trait_methods=p.trait_methods.copy(),
         impls=p.impls.copy(),
@@ -170,6 +173,9 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
             for x in found:
                 findings.push(x.copy())
     for x in purity.check(program, types):
+        findings.push(x.copy())
+    # `@no_alloc` through the call graph (RULES.md, R215).
+    for x in alloc.check(program, types):
         findings.push(x.copy())
     dedup(mut findings)
     _ = shared.tag_sites(mut program)
@@ -225,6 +231,23 @@ pub pure def diagnostics_by_file(
     for k in range(count):
         sort_unique(mut out[k], catalog)
     return Some(out)
+
+## Where each finding is, as its diagnostic places it, and the SIR
+## function it was found in: the file's index among the program's, the
+## diagnostic's start and end, its message's identifier and the function,
+## so that `--defer-borrow` names the function of each (RULES.md, R211).
+pub pure def finding_functions(
+    findings: list[Finding], files: list[(int, String)?]
+) -> list[(int, int, int, String, String)]:
+    var out: list[(int, int, int, String, String)] = []
+    for f in findings:
+        if f.source >= len(files):
+            continue
+        let (at, text) = files[f.source].copy() else:
+            continue
+        let d = to_diagnostic(f, text, Lines.of(text))
+        out.push((at, d.start, d.end, d.msg.id().to_string(), f.function.copy()))
+    return out
 
 ## The findings as diagnostics of the program's file (SIR source 0), in
 ## the order `sisu check` prints them; `None` when one is in another file.

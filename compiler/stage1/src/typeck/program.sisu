@@ -11,7 +11,7 @@
 
 from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.resolve import closest
-from stage1.syntax.ast import Block, ExprId, Mode, Vis
+from stage1.syntax.ast import Block, ExprId, Mode, TestFixture, Vis
 from stage1.typeck.fix_inline import InlineForm
 from stage1.typeck.folding import Term
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
@@ -622,6 +622,19 @@ pub struct Program:
     pub with_tests: bool
     ## Each test's `@tag("...")`s, in the order written (decision 285).
     pub test_tags: dict[DefId, list[String]]
+    ## Each test's fixtures, for `sir --tests --module-fixtures` (RULES.md,
+    ## R219), in the order of its parameters.
+    pub test_fixtures: dict[DefId, list[TestFixture]]
+    ## The fixtures with `scope="module"` (RULES.md, R219), with their
+    ## attribute's name, whose value the tests of a module share.
+    pub module_fixtures: list[(DefId, TextRange)]
+    ## The functions marked `@fixture` that `E0281` refuses, which a test
+    ## that names one is not told again with `E0702` (RULES.md, R212).
+    pub refused_fixtures: list[DefId]
+    ## The functions marked `@no_alloc` (04, "Resource attributes"; RULES.md,
+    ## R215), with the attribute's name, which lowering names for the
+    ## ownership checker's pass over the call graph.
+    pub no_alloc: list[(DefId, TextRange)]
     ## Benchmarks in declaration order.
     pub benches: list[DefId]
     ## Every trait impl, in declaration order.
@@ -703,6 +716,10 @@ impl Program:
             const_args={},
             with_tests=False,
             test_tags={},
+            test_fixtures={},
+            module_fixtures=[],
+            refused_fixtures=[],
+            no_alloc=[],
             benches=[],
             impls=[],
             impls_of={},

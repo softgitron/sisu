@@ -19,6 +19,7 @@
 ##! statements) puts the module beyond the slice the checker covers.
 
 import stage1.typeck.consts
+import stage1.typeck.fixtures
 import stage1.typeck.folding
 from stage1.diag import Catalog, Diagnostic, Edit, Label, Msg, TextRange, quote
 from stage1.diag import Param as MsgParam
@@ -1623,6 +1624,8 @@ impl Resolver:
                         )
                         self.prog.tests.push(def_)
                         self.test_tags(def_, item.attrs, module)
+                        if not t.fixtures.is_empty():
+                            _ = self.prog.test_fixtures.insert(def_, t.fixtures.copy())
                         self.pending.push(
                             Pending.Test(def_=def_, module=module, ast=case_def.copy())
                         )
@@ -2598,9 +2601,13 @@ impl Resolver:
     pure def resolve_test(mut self, def_: DefId, module: ModuleId, t: TestDef):
         let name = self.prog.defs[def_.index].name.copy()
         var info = self.placeholder_fn(FnKind.Test(name.copy()))
+        # A module's fixture the runner gives is a `ref T` (RULES.md, R219).
+        var shared = False
+        for x in t.fixtures:
+            shared = shared or x.module_scope
         for p in t.params:
             if let ParamKind.Named(n, ty, _) = p.kind:
-                let resolved = self.resolve_ty(ty, TyCtx.plain(module, [], False))
+                let resolved = self.resolve_ty(ty, TyCtx.plain(module, [], shared))
                 info.params.push(
                     ParamInfo(
                         name=n.text.copy(),
@@ -2811,11 +2818,21 @@ impl Resolver:
         # A fixture takes nothing, and is a free function (17; RULES.md,
         # R200): a test names it as a parameter and receives what it returns.
         if has_attr(f.attrs, "fixture") and (not f.params.is_empty() or owner.is_some()):
+            self.prog.refused_fixtures.push(def_)
             for a in f.attrs:
                 if a.name == "fixture" and not self.is_std(module):
                     let at = a.range.start + 1
                     let d = Diagnostic.new(Msg.TypeFixtureSignature, at, at + a.name.byte_len())
                     self.warn_in(module, d.with("name", f.name.text))
+        elif has_attr(f.attrs, "fixture") and not self.is_std(module):
+            # A module's fixture, whose value its tests share (RULES.md,
+            # R219): what it returns is checked to be `Sync` once the types
+            # are known.
+            for a in f.attrs:
+                if a.name == "fixture" and fixtures.scoped_to_module(self.ast(module), a.args):
+                    let at = a.range.start + 1
+                    let named = TextRange.new(at, at + a.name.byte_len())
+                    self.prog.module_fixtures.push((def_, named))
         # A preview warns where it is used, as a deprecated function does
         # (RULES.md, R115).
         if has_attr(f.attrs, "preview"):
@@ -2825,6 +2842,12 @@ impl Resolver:
         # R120).
         if let Some(symbol) = self.builtin_attr(module, f.attrs, "export"):
             _ = self.prog.exports.insert(def_, symbol)
+        # A function that allocates nothing, checked over the program's SIR
+        # by the ownership checker's pass (04; RULES.md, R215).
+        for a in f.attrs:
+            if a.name == "no_alloc" and not self.is_std(module):
+                let at = a.range.start + 1
+                self.prog.no_alloc.push((def_, TextRange.new(at, at + a.name.byte_len())))
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):
@@ -4406,6 +4429,7 @@ impl Resolver:
             cases=None,
             params=t.params.copy(),
             body=body,
+            fixtures=t.fixtures.copy(),
         )
 
     # ---------------------------------------------------------------- associated constants

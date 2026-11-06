@@ -1,0 +1,4 @@
+19:18-19:37 E0282 type.no-alloc name="render" what="`Synth.next_sample`"
+23:17-23:27 E0282 type.no-alloc name="label" what="the list it makes"
+24:12-24:24 E0282 type.no-alloc name="label" what="`fmt.new`"
+28:12-28:16 E0282 type.no-alloc name="apply" what="the function value it calls"

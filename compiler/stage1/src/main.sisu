@@ -74,6 +74,7 @@ import stage1.borrowck
 import stage1.borrowck.holes
 import stage1.cfg
 import stage1.config
+import stage1.coverage
 import stage1.diary
 import stage1.diff
 import stage1.doc
@@ -110,6 +111,7 @@ from stage1.diag import (
     render_ids,
     render_ids_files,
     render_ids_in,
+    render_ids_in_functions,
     sort_filed,
     sort_unique,
 )
@@ -152,7 +154,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.19.0"
+const VERSION: str = "0.20.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -414,6 +416,8 @@ def run_command(
             "--tests",
             "--modules",
             "--mutants",
+            "--cover",
+            "--module-fixtures",
             "--std",
             "--defer-borrow",
             "--locked",
@@ -990,6 +994,10 @@ def sir_with(
         built.contracts = level
         built.roots = transcript_roots(sys, built.disk, True)
         built.std_tests = words.contains("--std")
+        # `--module-fixtures`: a module's fixture a `ref T` parameter of the
+        # tests that name it, which the runner gives, and each test's
+        # fixtures on its line (RULES.md, R219).
+        built.module_fixtures = words.contains("--module-fixtures")
         # `--modules`: each test's and benchmark's module beside it
         # (RULES.md, R142), which the driver reads to run one module's.
         let modules = words.contains("--modules")
@@ -1008,6 +1016,13 @@ def sir_with(
                 only = w.byte_slice(9, w.byte_len()).parse_int()
         if words.contains("--mutants") or only.is_some():
             o.emit(mutant_sirs(base, built, path, only, catalog, mut kept, modules), warned)
+            return Ok(())
+        # `--cover`: the table of the program's regions after its SIR, for
+        # `sisu test --cover` (RULES.md, R216).
+        if words.contains("--cover") and not sir.is_empty():
+            var shown = sir.copy()
+            shown.push(cover_table(built, path, sir, catalog))
+            o.emit(shown, warned)
             return Ok(())
         o.emit(sir, warned)
         return Ok(())
@@ -1031,6 +1046,31 @@ def sir_with(
         errs.push("beyond the slice: {b}\n")
     o.emit(done.sir, errs)
     return Ok(())
+
+## The regions of `sisu test --cover` of the root package's modules
+## (RULES.md, R216): after a line `# regions`, a line `# region
+## FILE:LINE:COL-LINE:COL KIND FUNCTION bbB:S` for each, its module's
+## file as `--mutants` names it, against the statements of the SIR `sir`.
+pure def cover_table(input: Input, path: str, sir: str, catalog: Catalog) -> String:
+    let (sources, places) = coverage.sir_places(sir)
+    var out = "# regions\n".to_string()
+    for m in range(len(input.modules)):
+        let module = ref input.modules[m]
+        if module.package != 0:
+            continue
+        let text = module.text.copy()
+        let parsed = build.module(parse(text, catalog).tree)
+        var shown = module.file.copy()
+        if input.package_name.is_empty():
+            shown = path.to_string()
+        var source = -1
+        for k in range(len(sources)):
+            let s = ref sources[k]
+            if s == shown or s.ends_with("/{shown}") or shown.ends_with("/{s}"):
+                source = k
+                break
+        out.push(coverage.table(text, parsed, shown, source, places))
+    return out
 
 ## The mutants of the program `input` (RULES.md, R208), or with `only`
 ## the `only`th: for each, in the order of the root package's modules and
@@ -1283,6 +1323,10 @@ struct Input:
     ## `sir --tests --std`: the standard library's doc examples are tests
     ## too (RULES.md, R185).
     std_tests: bool
+    ## `sir --tests --module-fixtures`: a module's fixture is a `ref T`
+    ## parameter of the tests that name it, and each test's fixtures are on
+    ## its line (RULES.md, R219).
+    module_fixtures: bool
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
@@ -1351,6 +1395,7 @@ def file_input(
             runtime="full".to_string(),
             roots=[],
             std_tests=False,
+            module_fixtures=False,
             regions=[],
         )
     )
@@ -1519,6 +1564,7 @@ def held_layout_input(
             runtime=runtime,
             roots=[],
             std_tests=False,
+            module_fixtures=False,
             regions=[],
         )
     )
@@ -1903,6 +1949,8 @@ pure def explained(
                     start=loc_text(l.start),
                     end=loc_text(l.until),
                     holders=l.holders.copy(),
+                    start_range=loc_range(l.start),
+                    end_range=loc_range(l.until),
                 )
             )
         out.push((fl.function.copy(), each))
@@ -1915,12 +1963,24 @@ struct ExplainedLoan:
     start: String
     end: String
     holders: list[String]
+    ## Where it starts and where it is last used as ranges with their ends,
+    ## `LINE:COL-LINE:COL`, which `query explain --ranges` gives (RULES.md,
+    ## R211).
+    start_range: String
+    end_range: String
 
 ## A position as `LINE:COL`, or empty for none.
 pure def loc_text(l: sir.Loc?) -> String:
     let at = l else:
         return String.new()
     return "{at.line}:{at.col}"
+
+## A position's range as `LINE:COL-LINE:COL`, as `query.range_of` writes
+## one, or empty for none.
+pure def loc_range(l: sir.Loc?) -> String:
+    let at = l else:
+        return String.new()
+    return "{at.line}:{at.col}-{at.end_line}:{at.end_col}"
 
 ## `explain-borrow FILE:LINE` (10, "Language server": the "explain this
 ## borrow" command; RULES.md, R187): every borrow live on the line, with
@@ -2005,9 +2065,18 @@ def explain_command(
 ## an answer, one line per loan, `FUNCTION\tKIND\tPLACE\tSTART\tHOLDERS\tEND`,
 ## KIND `shared` or `mut`, START and END `LINE:COL`, HOLDERS the names
 ## that hold it separated by `, ` (empty for a temporary); nothing for a
-## program with an error of the front end, or a line with no loan.
+## program with an error of the front end, or a line with no loan. With
+## `ranges` (`--ranges`, RULES.md, R211) each line ends with two fields
+## more, START's and END's ranges with their ends, `LINE:COL-LINE:COL`.
 pure def query_explain(
-    base: typeck.Base, input: Input, at: int, file: str, text: str, line: int, catalog: Catalog
+    base: typeck.Base,
+    input: Input,
+    at: int,
+    file: str,
+    text: str,
+    line: int,
+    ranges: bool,
+    catalog: Catalog,
 ) -> String:
     let (_, program, source) = owned_program(base, input, at, file, catalog)
     let p = program else:
@@ -2018,7 +2087,7 @@ pure def query_explain(
             var kind = "shared"
             if l.mutable:
                 kind = "mut"
-            let fields = [
+            var fields = [
                 query.field(function),
                 kind.to_string(),
                 query.field(l.place),
@@ -2026,6 +2095,9 @@ pure def query_explain(
                 query.field(l.holders.join(", ")),
                 l.end.copy(),
             ]
+            if ranges:
+                fields.push(l.start_range.copy())
+                fields.push(l.end_range.copy())
             out.push("{fields.join("\t")}\n")
     return out
 
@@ -2199,6 +2271,7 @@ pure def check_input(
         input.tests,
         input.features,
         input.std_tests,
+        input.module_fixtures,
     )
 
 ## The type diagnostics of a program, with the ownership checker's `type.`
@@ -2801,6 +2874,9 @@ struct Deferred:
     deferred: bool
     ## Whether the SIR has an entry, a `main` to run.
     entry: bool
+    ## Where each finding of the ownership checker is and the SIR function
+    ## it was found in (`borrowck.finding_functions`; RULES.md, R211).
+    functions: list[(int, int, int, String, String)]
 
 ## The purity rules and a `let` assigned twice, which the monitor does not
 ## observe, so that `--defer-borrow` does not defer them.
@@ -2825,6 +2901,7 @@ pure def deferred_program(
         stopped="cli.errors-found".to_string(),
         deferred=False,
         entry=False,
+        functions=[],
     )
     # The front end's errors but the ownership rules' stop it.
     var stopping: list[Filed] = []
@@ -2854,6 +2931,7 @@ pure def deferred_program(
         return out
     var done = borrowck.check_with(lowered.program, True, mut kept.placed)
     let by_source = files_by_source(lowered, program)
+    out.functions = borrowck.finding_functions(done.findings, by_source)
     var owned: list[Filed] = []
     match borrowck.diagnostics_by_file(done.findings, by_source, len(program), catalog):
         case Some(per_file):
@@ -2922,7 +3000,22 @@ pure def deferred_answer(d: Deferred, catalog: Catalog, ids: bool) -> (String, S
     var status = 0
     if d.deferred:
         status = 3
-    return (d.sir.copy(), d.report.ids(catalog), status)
+    # Each finding of the ownership checker with the SIR function it was
+    # found in, on a line of its own after it (RULES.md, R211).
+    var functions: list[String] = []
+    for x in d.report.diags:
+        var named = String.new()
+        for (file, start, end, id, function) in d.functions:
+            if file == x.file
+                    and start == x.diag.start
+                    and end == x.diag.end
+                    and id == x.diag.msg.id():
+                named = function.copy()
+                break
+        functions.push(named)
+    let r = ref d.report
+    let errs = render_ids_in_functions(r.files, r.diags, r.multi, catalog, functions)
+    return (d.sir.copy(), errs, status)
 
 ## A `const` item of the program's own modules (RULES.md, R178): its
 ## module's index among the input's, its function's name in SIR, its name
@@ -3252,7 +3345,10 @@ def build_command(
             var built = input.copy()
             built.contracts = level ?? CONTRACTS_ALL
             let d = deferred_program(base, built, path, catalog, mut kept, False)
-            let (sir, errs, status) = deferred_answer(d, catalog, True)
+            # The errors that stop it in the human form, which `build` writes
+            # (RULES.md, R189 and R211); the deferred ones in the
+            # conformance form, which the counterexample mode reads.
+            let (sir, errs, status) = deferred_answer(d, catalog, False)
             var exe = output_for(
                 built.disk, built.package_name, built.build_root.copy(), how.release
             )
@@ -3904,8 +4000,10 @@ def query_command(
         or kind == "selection"
         or kind == "actions"
     let renames = kind == "rename" and len(words) == 5
-    # `query explain FILE LINE` (RULES.md, R187): a line, not a position.
-    let explains = kind == "explain" and len(words) == 3
+    # `query explain FILE LINE [--ranges]` (RULES.md, R187, R211): a line,
+    # not a position, and with `--ranges` each loan's ranges.
+    let ranges = kind == "explain" and len(words) == 4 and words[3] == "--ranges"
+    let explains = kind == "explain" and (len(words) == 3 or ranges)
     if not (whole and len(words) == 2)
             and not (at and len(words) == 4)
             and not renames
@@ -3927,7 +4025,7 @@ def query_command(
         var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
         var env = base.environment()
         let (input, module, _) = query_input(sys, home, file, text, mut env, catalog)?
-        o.emit(query_explain(base, input, module, file, text, line, catalog), "")
+        o.emit(query_explain(base, input, module, file, text, line, ranges, catalog), "")
         return Ok(())
     var offset = 0
     if at or renames:
