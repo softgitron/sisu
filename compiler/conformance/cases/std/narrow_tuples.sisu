@@ -1,0 +1,76 @@
+# Tuples of narrow parts at C's offsets (decision 1100): a `(u8, u8)` is two
+# bytes, a `(u8, u16, i32)` eight, in lists, options, structs, closures'
+# environments and other tuples; `zip` and `enumerate` give their pairs so,
+# and a dict's entries hold a key and a value as the tuple of the two lays
+# them out, its items those tuples.
+struct Span:
+    ends: (u8, u8)
+    weight: i16
+
+def bytes_of(xs: list[int]) -> list[u8]:
+    var out: list[u8] = []
+    for x in xs:
+        out.push(x.to_u8() ?? 0)
+    return out
+
+def main():
+    let a = bytes_of([1, 2, 3, 250])
+    let b = bytes_of([9, 8, 7])
+    var pairs: list[(u8, u8)] = []
+    for (x, y) in zip_shortest(a, b):
+        pairs.push((x, y))
+    print(pairs)
+    pairs.push((0, 255))
+    print(pairs.pop())
+    print(sorted(pairs))
+    for (i, x) in enumerate(a):
+        if i % 2 == 1:
+            print("{i} {x}")
+    let wide: list[(u8, u16, i32)] = [(1, 2, -3), (255, 65535, 2147483647)]
+    print(wide)
+    print("{wide[1].2} {wide[0] == (1, 2, -3)}")
+    let maybe: (u8, i8)? = Some((200, -100))
+    print(maybe)
+    let nested = ((1.to_u8() ?? 0, 2.to_u8() ?? 0), 3.to_u8() ?? 0, (4.to_i16() ?? 0, 5))
+    print(nested)
+    let s = Span(ends=(3, 9), weight=-2)
+    print("{s.ends.1 - s.ends.0} {s.weight}")
+    let shift = 7.to_u8() ?? 0
+    let f = (p: (u8, u8)) -> (p.0 + shift, p.1 + shift)
+    print(f((1, 2)))
+
+    var small: dict[u8, u8] = {1: 10, 2: 20}
+    small[3] = 30
+    small[1] = 11
+    print(small)
+    print("{small.get(2)} {small.remove(2)} {small.get(2)} {len(small)}")
+    for (k, v) in small.items():
+        print("{k}={v}")
+    print("{small.keys().map(it.copy()).collect()} {small.values().map(it.copy()).collect()}")
+    var by: dict[i32, i32] = {}
+    var i = 0
+    while i < 1000:
+        let k = (i * 37 % 1000).to_i32() ?? 0
+        by[k] = k * 2
+        i += 1
+    var total = 0
+    for (k, v) in by.items():
+        total += k.to_int() + v.to_int()
+    print("{len(by)} {total} {by.get(999)} {by.contains(1000)}")
+    let mixed: dict[u8, int] = {7: 70000000000, 8: -1}
+    print(mixed)
+    let other: dict[int, u8] = {70000000000: 7, -1: 8}
+    print(other)
+    var keyed: dict[(u8, u8), u16] = {(1, 2): 12, (2, 1): 21}
+    keyed[(3, 3)] = 33
+    print("{keyed} {keyed.get((2, 1))} {keyed.get((9, 9))}")
+    let items: list[((u8, u8), u16)] = keyed.items().map(p -> (p.0.copy(), p.1.copy())).collect()
+    print(items)
+    var seen: set[(u8, i16)] = {(1, -1), (2, -2)}
+    seen.add((1, -1))
+    seen.add((3, -3))
+    let probe: (u8, i16) = (2, -2)
+    print("{seen} {probe in seen} {seen.contains((4, -4))}")
+    print(sorted(seen.copy()))
+    print(zip_shortest(sorted(seen.copy()), small.values().map(it.copy())).collect())
+    print("{small == {1: 11, 3: 30}} {keyed.copy() == keyed}")

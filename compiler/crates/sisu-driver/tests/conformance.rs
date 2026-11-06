@@ -798,7 +798,8 @@ fn stage_1s_data_commands_answer_as_the_rust_front_end() {
     std::fs::create_dir_all(&dir).expect("a scratch directory");
     let text = "def total(xs: ref list[int]) -> int:\n    var n = 0\n    for x in xs:\n        n += x\n    return n\n\ndef main():\n    var xs = [1, 2, 3]\n    let r = ref xs\n    print(total(r))\n    xs.push(4)\n    let unused = 1\n";
     std::fs::write(dir.join("b.sisu"), text).expect("a file");
-    let deferred = "def main():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    xs.push(4)\n    print(first)\n";
+    let deferred =
+        "def main():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    xs.push(4)\n    print(first)\n";
     std::fs::write(dir.join("d.sisu"), deferred).expect("a file");
     let unreached = "def main():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    if len(xs) > 5:\n        xs.push(4)\n    print(first)\n";
     std::fs::write(dir.join("u.sisu"), unreached).expect("a file");

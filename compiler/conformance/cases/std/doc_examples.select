@@ -146,8 +146,6 @@ test "std.regex/Regex (doc example)" ... ok
 test "std.regex/Regex.find_all (doc example)" ... ok
 test "std.regex/Regex.replace_all (doc example)" ... ok
 test "std.regex/Regex.split (doc example)" ... ok
-test "std.net/Url.parse (doc example)" ... ok
-test "std.net/Url.from_literal (doc example)" ... ok
 test "std.x.http/FakeNet (doc example)" ... ok
 test "std.json/quote (doc example)" ... ok
 test "std.json/encode (doc example)" ... ok
@@ -197,4 +195,4 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 test "std.time/days_in_month (doc example)" ... ok
-199 passed, 0 failed, 0 blocked
+197 passed, 0 failed, 0 blocked

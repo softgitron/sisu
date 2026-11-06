@@ -608,9 +608,17 @@ def main():
     c.stop();
 }
 
+/// On both front ends: stage 1's `query explain` from `sisu1 0.17.0`
+/// (decision 1104), the Rust ownership checker's loans before it.
 #[test]
 fn explain_borrow_is_a_command() {
-    let mut c = Client::start();
+    for front in FRONTS {
+        explain_borrow_is_a_command_on(front);
+    }
+}
+
+fn explain_borrow_is_a_command_on(front: &str) {
+    let mut c = Client::start_on(front);
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance/cases/ownership/explain_borrow.sisu");
     let text = std::fs::read_to_string(&path).expect("the case");
@@ -640,6 +648,24 @@ fn explain_borrow_is_a_command() {
     // Where it starts, as a range of the document (line 15, column 29).
     assert_eq!(loans[0].at(&["start", "start", "line"]).and_then(Json::as_u64), Some(14));
     assert_eq!(loans[0].at(&["start", "start", "character"]).and_then(Json::as_u64), Some(28));
+    // A program with an error has no loans to show.
+    let broken = format!("{text}\ndef broken() -> int:\n    return \"no\"\n");
+    let (uri, _dir) = document("broken.sisu", &broken);
+    c.open(&uri, &broken);
+    let failed = c.request(
+        "workspace/executeCommand",
+        Json::obj(vec![
+            ("command", Json::str("sisu.explainBorrow")),
+            (
+                "arguments",
+                Json::Arr(vec![Json::obj(vec![
+                    ("textDocument", Json::obj(vec![("uri", Json::str(&uri))])),
+                    ("position", Json::obj(vec![("line", Json::num(15)), ("character", Json::num(4))])),
+                ])]),
+            ),
+        ]),
+    );
+    assert!(matches!(failed, Json::Null), "{front}: {}", failed.write());
     c.stop();
 }
 

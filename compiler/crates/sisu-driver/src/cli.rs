@@ -1460,7 +1460,10 @@ fn test_from_sir(
     host: &mut dyn Host,
 ) -> i32 {
     let has = |f: &str| flags.contains(&f);
-    if let Some(bad) = ["--defer-borrow", "--std"].into_iter().find(|f| has(f)) {
+    // The standard library's examples are among the tests of stage 1's SIR
+    // from `sisu1 0.17.0` (decision 1102), and not of a file of SIR.
+    if let Some(bad) = ["--defer-borrow", "--std"].into_iter().find(|f| has(f) && !(sources && *f == "--std"))
+    {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
             &[("option", bad.to_string()), ("command", "test --from-sir".to_string())],
@@ -3690,7 +3693,8 @@ fn deferred_of_stage_1(prog: &sisu_sir::Program, stderr: &str) -> (Vec<Deferred>
         let (Some(col), Some(l)) = (parts.next(), parts.next()) else { continue };
         let (Ok(col), Ok(l)) = (col.parse::<u32>(), l.parse::<u32>()) else { continue };
         let function = at.get(&(l, col)).cloned();
-        let d = Deferred { line: l, code: code.to_string(), id: id.to_string(), at: function.map(|f| (f, col)) };
+        let d =
+            Deferred { line: l, code: code.to_string(), id: id.to_string(), at: function.map(|f| (f, col)) };
         if d.at.is_some() { findings.push(d) } else { declarations.push(d) }
     }
     (declarations, findings)
@@ -3730,7 +3734,12 @@ fn defer_report(
 /// The counterexample mode's account (A2): the conflict was reached, or
 /// no conflict happened and each rejected statement was reached (a
 /// candidate false positive) or not (an untested path).
-fn defer_account(declarations: &[Deferred], findings: &[Deferred], violation: bool, coverage: &Coverage) -> String {
+fn defer_account(
+    declarations: &[Deferred],
+    findings: &[Deferred],
+    violation: bool,
+    coverage: &Coverage,
+) -> String {
     let mut out = String::new();
     if violation {
         out.push_str(&text(msg::DEFER_CONFLICT, &[]));
@@ -3748,11 +3757,10 @@ fn defer_account(declarations: &[Deferred], findings: &[Deferred], violation: bo
     }
     let mut all_reached = true;
     for d in findings {
-        let count = d
-            .at
-            .as_ref()
-            .map(|(f, col)| coverage.get(&(f.clone(), d.line, *col)).copied().unwrap_or(0))
-            .unwrap_or(0);
+        let count =
+            d.at.as_ref()
+                .map(|(f, col)| coverage.get(&(f.clone(), d.line, *col)).copied().unwrap_or(0))
+                .unwrap_or(0);
         let params = [
             ("line", d.line.to_string()),
             ("code", d.code.clone()),

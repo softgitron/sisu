@@ -1,0 +1,37 @@
+# A pointer to a tuple with narrow parts (decision 1100): a tuple lays its
+# parts out at C's offsets in a value too, as a struct does, so `ptr.of`
+# and `ptr.of_mut` of one compile natively, and what a function reads
+# through the pointer, and writes, is the tuple's own parts, where C would
+# see a struct of them; `Layout.of` gives C's size and alignment.
+from std.mem import Layout, ptr
+
+@export("pair_total")
+def total(pair: ptr[(int, u8)]) -> int:
+    # safety: valid, aligned: `pair` points to a live tuple that nothing
+    #   changes while the reference lives.
+    let p = unsafe pair.as_ref()
+    return p.0 + p.1.to_int()
+
+def bump(parts: ptr mut (u8, u16, i32), by: i32):
+    # safety: valid, aligned, writable: `parts` points to a live tuple that
+    #   nothing else reaches meanwhile.
+    unsafe:
+        let (_, _, n) = parts.read()
+        parts.write((255, 65000, n - by))
+
+def main():
+    var pair = (40, 2.to_u8() ?? 0)
+    var parts = (1.to_u8() ?? 0, 2.to_u16() ?? 0, 3.to_i32() ?? 0)
+    let a = Layout.of[(int, u8)]()
+    let b = Layout.of[(u8, u16, i32)]()
+    let c = Layout.of[(u8, u8)]()
+    print("{a.size} {a.align} {b.size} {b.align} {c.size} {c.align}")
+    print(total(ptr.of(ref pair)))
+    pair = (pair.0, 200)
+    print(total(ptr.of_mut(mut pair).as_const()))
+    bump(ptr.of_mut(mut parts), 10)
+    print(parts)
+    # safety: valid, aligned: `parts` is live and nothing writes it while
+    #   the read happens.
+    let again = unsafe ptr.of(ref parts).read()
+    print(again == parts)

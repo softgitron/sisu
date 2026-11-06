@@ -230,6 +230,7 @@ std/json_decode
 std/log_levels
 std/modules
 std/narrow
+std/narrow_tuples
 std/num_exact
 std/ord_impls
 std/par
@@ -304,6 +305,7 @@ unsafe/released checked
 unsafe/released_twice checked
 unsafe/shared_write checked
 unsafe/stale_pointer
+unsafe/tuple_pointer
 unsafe/uninitialised checked
 unsafe/unterminated checked
 unsafe/vector
