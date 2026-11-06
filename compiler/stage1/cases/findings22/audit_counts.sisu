@@ -1,0 +1,13 @@
+# `audit --ownership` and `audit --caps` (RULES.md, R188): the escape
+# hatches a file reaches for, and the capabilities a program threads.
+struct Counter:
+    hits: Shared[Cell[int]]
+
+def stamp(clock: Clock) -> bool:
+    return clock.now().unix_seconds() > 0
+
+def main(sys: System):
+    let c = Counter(hits=Shared(Cell(0)))
+    let d = c.hits.copy()
+    d.set(d.get() + 1)
+    print("{c.hits.get()} {stamp(sys.clock)}")

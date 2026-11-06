@@ -1,0 +1,9 @@
+# `test --std` and `sir --tests --std` (RULES.md, R185): the standard
+# library's doc examples are tests, named `std.core/zip (doc example)`, before
+# the program's own.
+# test-options: --std
+test "the program's own test runs after them":
+    assert 1 + 1 == 2
+
+def main():
+    pass

@@ -35,12 +35,16 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
             let gi = types.function(gn) else:
                 continue
             let g = ref p.functions[gi]
+            # The locals that hold an iterator an impure adapter made, whose
+            # error says why: what consumes or adapts it again is the same
+            # chain, and no second error (RULES.md, R191).
+            var adapted: list[int] = []
             for b in range(len(g.blocks)):
                 let block = ref g.blocks[b]
                 for si in range(len(block.stmts)):
                     let s = ref block.stmts[si]
                     match s.kind:
-                        case StatementKind.Call(_, callee, args):
+                        case StatementKind.Call(dest, callee, args):
                             var impure: String? = None
                             # An `Atomic` observes the schedule, which a
                             # `pure` function may not (06, "Effects";
@@ -98,6 +102,19 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                             # the call keeps it pure (D-085).
                             if impure.is_some() and p.asserted_at(g.source, s.loc):
                                 impure = None
+                            if impure.is_some():
+                                var chained = False
+                                if let Some(a) = args.first():
+                                    match a:
+                                        case Operand.Copy(pl) | Operand.Move(pl):
+                                            chained = adapted.contains(pl.local.index)
+                                        case _:
+                                            pass
+                                if chained:
+                                    impure = None
+                                    adapted.push(dest.local.index)
+                                elif adapter:
+                                    adapted.push(dest.local.index)
                             if let Some(c) = impure:
                                 var found = Finding.new(Msg.TypeImpureCall, g, s.loc).with(
                                     "callee", c

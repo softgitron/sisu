@@ -99,7 +99,17 @@ from stage1.typeck.program import (
     is_ref_item,
 )
 from stage1.typeck.safety import doc_above, missing_comment, safety_list
-from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
+from stage1.typeck.std_sources import (
+    ambient,
+    builtin_impls,
+    display_path,
+    documented,
+    importable,
+    module_for,
+    module_paths,
+    reexports,
+    target,
+)
 from stage1.typeck.template import Src, Templates, returns_impl, template_parts, type_params
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
 
@@ -278,6 +288,9 @@ pub struct Resolver:
     ## The program is built with its tests, so the root package's doc
     ## examples are tests of it (stage 0's `Sources::tests`; decision 243).
     pub tests: bool
+    ## `sir --tests --std` (RULES.md, R185): the texts of the std modules,
+    ## by name, whose doc examples are tests too; empty otherwise.
+    pub std_doc_texts: dict[String, String]
     ## How many instances this resolution declared: the next one's number.
     pub instances_declared: int
     ## The modules that hold an instance, whose functions are never
@@ -413,6 +426,7 @@ impl Resolver:
             instances_asked=0,
             instances_bounded=False,
             tests=True,
+            std_doc_texts={},
             instances_declared=0,
             instance_modules=set(),
             instance_sites={},
@@ -654,6 +668,10 @@ impl Resolver:
                         dev_only=[],
                     )
                 )
+        # `sir --tests --std`: the standard library's doc examples, before
+        # the program's own tests, as stage 0 declares them (RULES.md, R185).
+        if not self.std_doc_texts.is_empty():
+            self.declare_std_doc_tests()
         # The program's own modules, the root module first: each is a module
         # of its package, and a child of the module its path's prefix names.
         var ids: list[ModuleId] = []
@@ -4078,41 +4096,55 @@ impl Resolver:
     ## where it is, so that a diagnostic in an example points at it, and
     ## whose scope is the root module's.
     pure def declare_doc_tests(mut self, module: ModuleId, items: list[ItemId], test_prefix: str):
-        # Where each item that can carry a doc comment starts, with the name
-        # its examples' tests are named after: a method as `Type.method`.
-        var starts: list[(int, String)] = []
-        for it in items:
-            let start = self.ast(module).item(it).range.start
-            match self.ast(module).item(it).kind:
-                case ItemKind.Fn(f):
-                    starts.push((start, f.name.text.copy()))
-                case ItemKind.Const(c):
-                    starts.push((start, c.name.text.copy()))
-                case ItemKind.TypeAlias(a):
-                    starts.push((start, a.name.text.copy()))
-                case ItemKind.Struct(st):
-                    starts.push((start, st.name.text.copy()))
-                    for m in st.methods:
-                        starts.push((m.range.start, "{st.name.text}.{m.name.text}"))
-                case ItemKind.Enum(e):
-                    starts.push((start, e.name.text.copy()))
-                    for m in e.methods:
-                        starts.push((m.range.start, "{e.name.text}.{m.name.text}"))
-                case ItemKind.ErrorSet(e):
-                    starts.push((start, e.name.text.copy()))
-                    for m in e.methods:
-                        starts.push((m.range.start, "{e.name.text}.{m.name.text}"))
-                case ItemKind.Trait(t):
-                    starts.push((start, t.name.text.copy()))
-                    for m in t.methods:
-                        starts.push((m.range.start, "{t.name.text}.{m.name.text}"))
-                case ItemKind.Impl(i):
-                    let owner = impl_owner_name(self.ast(module), i.self_ty)
-                    for m in i.methods:
-                        starts.push((m.range.start, "{owner}.{m.name.text}"))
-                case _:
-                    pass
         let source = self.text_of_module(module)
+        let starts = item_starts(self.ast(module), items)
+        self.declare_doc_tests_in(module, starts, test_prefix, source)
+
+    ## `sir --tests --std` (`sisu test --std`; RULES.md, R185): the doc
+    ## examples of the prelude, as `std.core`, and of every std module
+    ## `doc --std` documents, as `std.NAME`, each loaded when the base has
+    ## not, in stage 0's order, as tests named `std.core/zip (doc
+    ## example)`.
+    pure def declare_std_doc_tests(mut self):
+        let texts = self.std_doc_texts.copy()
+        let p = self.prog.prelude
+        # The base keeps no syntax of its modules for a program (the type
+        # checker never checks their bodies): the items' starts are read
+        # from the text.
+        if let Some(t) = texts.get("prelude"):
+            let syntax = build.module(parse(t, Catalog.parse("")).tree)
+            self.declare_doc_tests_in(p, item_starts(syntax.ast, syntax.items), "std.core", t)
+        for name in documented():
+            let text = texts.get(name.to_string()) else:
+                continue
+            let m = self.std_module_named(name) else:
+                continue
+            let syntax = build.module(parse(text, Catalog.parse("")).tree)
+            let starts = item_starts(syntax.ast, syntax.items)
+            self.declare_doc_tests_in(m, starts, display_path(name), text)
+
+    ## The std module `name`, loaded as an import loads it when the base
+    ## has not; `None` when stage 1 cannot load it.
+    pure def std_module_named(mut self, name: str) -> ModuleId?:
+        if let Some(m) = self.std_loaded.get(name.to_string()):
+            return Some(m)
+        var found: Module? = None
+        if let Some(m) = self.std_parsed.get(name.to_string()):
+            found = Some(m.copy())
+        if found.is_none():
+            if let Some(text) = self.std_sources.get(name.to_string()):
+                found = Some(build.module(parse(text, Catalog.parse("")).tree))
+        let parsed = found else:
+            return None
+        if not self.std_derived.contains(name.to_string()):
+            return None
+        return Some(self.load_std_module(name, parsed.copy(), "", Templates.none()))
+
+    ## `declare_doc_tests` of a module whose text is `source`, whose items
+    ## that can carry a doc comment start at `starts`.
+    pure def declare_doc_tests_in(
+        mut self, module: ModuleId, starts: list[(int, String)], test_prefix: str, source: str
+    ):
         let examples = doc_examples(source, starts)
         if examples.is_empty():
             return
@@ -5897,6 +5929,46 @@ impl Resolver:
 ## The attribute the compiler puts on the function that gives an
 ## associated constant's value (RULES.md, R37), which no program writes.
 pub const ASSOC_CONST_ATTR: str = "<const>"
+
+## Where each item among `items` that can carry a doc comment starts, with
+## the name its examples' tests are named after: a method as
+## `Type.method`.
+pure def item_starts(ast: Ast, items: list[ItemId]) -> list[(int, String)]:
+    # Where each item that can carry a doc comment starts, with the name
+    # its examples' tests are named after: a method as `Type.method`.
+    var starts: list[(int, String)] = []
+    for it in items:
+        let start = ast.item(it).range.start
+        match ast.item(it).kind:
+            case ItemKind.Fn(f):
+                starts.push((start, f.name.text.copy()))
+            case ItemKind.Const(c):
+                starts.push((start, c.name.text.copy()))
+            case ItemKind.TypeAlias(a):
+                starts.push((start, a.name.text.copy()))
+            case ItemKind.Struct(st):
+                starts.push((start, st.name.text.copy()))
+                for m in st.methods:
+                    starts.push((m.range.start, "{st.name.text}.{m.name.text}"))
+            case ItemKind.Enum(e):
+                starts.push((start, e.name.text.copy()))
+                for m in e.methods:
+                    starts.push((m.range.start, "{e.name.text}.{m.name.text}"))
+            case ItemKind.ErrorSet(e):
+                starts.push((start, e.name.text.copy()))
+                for m in e.methods:
+                    starts.push((m.range.start, "{e.name.text}.{m.name.text}"))
+            case ItemKind.Trait(t):
+                starts.push((start, t.name.text.copy()))
+                for m in t.methods:
+                    starts.push((m.range.start, "{t.name.text}.{m.name.text}"))
+            case ItemKind.Impl(i):
+                let owner = impl_owner_name(ast, i.self_ty)
+                for m in i.methods:
+                    starts.push((m.range.start, "{owner}.{m.name.text}"))
+            case _:
+                pass
+    return starts
 
 pure def prefixed(prefix: str, name: str) -> String:
     if prefix.is_empty():

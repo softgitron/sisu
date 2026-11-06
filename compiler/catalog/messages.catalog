@@ -153,7 +153,8 @@ E0237 error   resolve.missing-assoc-type  the impl of `{trait}` for `{ty}` does 
 E0238 error   resolve.unknown-assoc-type  `{trait}` has no associated type `{name}`
 E0239 error   resolve.no-assoc-type       `{ty}` has no associated type `{name}` among its bounds
 E0240 error   resolve.sealed-trait        `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it
-E0241 error   resolve.not-object-safe     `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason}
+# E0241 names a member, a method or a trait's constant (stage 1's RULES.md, R191).
+E0241 error   resolve.not-object-safe     `{trait}` cannot be used as `dyn {trait}`: its member `{method}` cannot be used through it, because {reason}
 E0242 error   resolve.supertrait-missing  `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}`
 E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
 E0244 error   resolve.derive-field        `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}`

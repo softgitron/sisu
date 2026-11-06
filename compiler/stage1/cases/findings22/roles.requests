@@ -1,0 +1,20 @@
+explain-borrow	explain_borrow.sisu:14	--dir	cases/findings22
+explain-borrow	explain_borrow.sisu:21	--dir	cases/findings22
+explain-borrow	explain_borrow.sisu:3	--dir	cases/findings22
+explain-borrow	explain_borrow.sisu	--dir	cases/findings22
+explain-borrow	defer_other.sisu:4	--dir	cases/findings22
+query	explain	explain_borrow.sisu	21	--dir	cases/findings22
+query	explain	explain_borrow.sisu	3	--dir	cases/findings22
+audit	--ownership	audit_counts.sisu	explain_borrow.sisu	--dir	cases/findings22
+audit	--caps	audit_counts.sisu	--dir	cases/findings22
+audit	--caps	defer_other.sisu	--dir	cases/findings22
+audit	--ownership	--dir	cases/findings22
+audit	--caps	--ownership	audit_counts.sisu	--dir	cases/findings22
+audit	--counts	audit_counts.sisu	--dir	cases/findings22
+sir	--defer-borrow	defer_borrow.sisu	--dir	cases/findings22
+sir	--defer-borrow	defer_other.sisu	--dir	cases/findings22
+sir	--defer-borrow	explain_borrow.sisu	--dir	cases/findings22
+build	--for-run	--emit-sir	--defer-borrow	defer_borrow.sisu	--dir	cases/findings22
+check	--holes	hole_empty.sisu	--dir	cases/findings22
+query	references	pattern_refs.sisu	4	5	--dir	cases/findings22
+query	rename	pattern_refs.sisu	9	20	col	--dir	cases/findings22

@@ -11918,3 +11918,52 @@ query layer and the driver"; D-061, D-086; 10, 12; decisions 980, 981, 983,
       `unsafe/narrow_pointer` differ from stage 0's front end under the
       rules that already decide their constructs (R48, R152, R4). Stage 1
       decides it (RULES.md, R184).
+
+**Stage 1's twenty-second round** (stage 1's RULES.md, R185 to R194; the standard library's doc examples as tests of `sir --tests --std`, `check --diary`, `explain-borrow` and `query explain`, `audit --ownership` and `--caps`, `--defer-borrow`, a named function in `filter`, three diagnostics' words, a struct pattern's field names in references, `@derive(Decode)` of a struct with an enum field, narrowing methods decided against; `sisu1 --version` 0.17.0)
+
+1080. `sir --tests --std` and `test --std` lower the standard library's
+      doc examples as tests named `std.core/zip (doc example)`, in stage
+      0's order before the program's own, each example once. `sisu1
+      --version` is 0.17.0. Stage 1 decides it (RULES.md, R185).
+
+1081. `check --diary PATH` appends the driver's `check`, `diagnostic` and
+      `resolved` records to PATH, keeping each text by its hash in
+      `PATH.d/`, so that a diary either front end writes reads the same.
+      Stage 1 decides it (RULES.md, R186).
+
+1082. `explain-borrow FILE:LINE` prints the loans stage 1's ownership
+      checker finds live on the line in the driver's words (`D0014` to
+      `D0020`), and `query explain FILE LINE` answers them as
+      tab-separated lines. Stage 1 decides it (RULES.md, R187).
+
+1083. `audit --ownership FILE...` and `audit --caps [FILE...]` print what
+      the driver's `audit.rs` prints, from stage 1's tokens and SIR, with
+      its messages and statuses. Stage 1 decides it (RULES.md, R188).
+
+1084. `sir --defer-borrow` and `build --for-run --emit-sir --defer-borrow`
+      print the SIR of a program whose only errors are the ownership
+      rules', with every diagnostic in the conformance form and status 3,
+      for stage 0's counterexample mode. Stage 1 decides it (RULES.md,
+      R189).
+
+1085. A function named where an adapter expects a function of references
+      to its parameter type is `E0300` with the closure that calls it as
+      its fix, for a `str` parameter too, and a `ref ref str` is read as
+      the `str` a call expects. Stage 1 decides it (RULES.md, R190).
+
+1086. `E0117` names a kind of token without its article, `E0241` calls
+      what a `dyn` value cannot use a member, and a `pure` function's
+      chain after an impure adapter is one `E0333`, the adapter's. Stage
+      1 decides it (RULES.md, R191).
+
+1087. A field's name in a struct pattern is a reference of the field,
+      which `query references` lists and `query rename` renames. Stage 1
+      decides it (RULES.md, R192).
+
+1088. `@derive(Decode)` of a struct with a field that holds an enum is
+      `E0608` at the derive, naming the field, where the run stopped at an
+      invalid SIR. Stage 1 decides it (RULES.md, R193).
+
+1089. The sized integers narrow with `truncate_to[T]()` alone, with no
+      `to_u8()` and its kin; a checked narrowing compares with the
+      target's bounds first. Stage 1 decides it (RULES.md, R194).

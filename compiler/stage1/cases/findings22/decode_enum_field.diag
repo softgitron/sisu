@@ -1,0 +1,2 @@
+10:9-10:15 E0608 comptime.derive-failed trait="Decode" ty="Day" reason="its field `mood` holds `Mood`, an enum, whose variants `json.decode` cannot make (an enum implements `Decode` with an `impl Decode` of its own)"
+16:11-16:33 E0609 comptime.instance-failed name="from_json[Mood]" reason="json.decode: no JSON form for `Mood` (an enum's variants are not made by reflection yet)"

@@ -1,0 +1,694 @@
+##! `check --diary PATH` (18, Phase 3; 20, I-3; RULES.md, R186): the
+##! diagnostic log of the corpus study, as the driver's `diary.rs` writes
+##! it, so that a diary either writes reads the same. Each check appends to
+##! PATH one JSON object per line: a `check` record (the time, the tool,
+##! the toolchain, each file checked with the hash of its text), a
+##! `diagnostic` record for every diagnostic (its code and catalog
+##! identifier, severity, message and parameters, its span and labels in
+##! lines and columns and in bytes, its fixes with their edits), then, for
+##! each diagnostic of the file's previous check that this one no longer
+##! has, a `resolved` record: the diagnostic as it was, the one edit
+##! between the two texts, and the fix it applied when the edit is one of
+##! its fixes. The text of every file checked is kept by its hash in
+##! `PATH.d/`.
+
+from stage1.audit import module_hash
+from stage1.config import Data
+from stage1.diag import Catalog, Filed, Lines, Param, is_continuation
+
+## RFC 3339 for seconds since the epoch, in UTC (the civil date from the
+## days, H. Hinnant's algorithm, as the driver computes it).
+pub pure def timestamp(secs: int) -> String:
+    let days = floor_div(secs, 86400)
+    let rem = secs - days * 86400
+    let z = days + 719468
+    let era = floor_div(z, 146097)
+    let doe = z - era * 146097
+    let yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    let doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    let mp = (5 * doy + 2) // 153
+    let d = doy - (153 * mp + 2) // 5 + 1
+    var m = mp - 9
+    if mp < 10:
+        m = mp + 3
+    var y = yoe + era * 400
+    if m <= 2:
+        y += 1
+    return "{pad(y, 4)}-{pad(m, 2)}-{pad(d, 2)}T{pad(rem // 3600, 2)}:{pad(rem % 3600 // 60, 2)}:{pad(rem % 60, 2)}Z"
+
+pure def floor_div(a: int, b: int) -> int:
+    var q = a // b
+    if q * b > a:
+        q -= 1
+    return q
+
+pure def pad(n: int, width: int) -> String:
+    var s = "{n}"
+    while s.byte_len() < width:
+        s = "0{s}"
+    return s
+
+# ------------------------------------------------------------------- JSON
+
+## A value as one line of JSON, as the driver's `Json::write` writes it.
+pub pure def write(d: Data) -> String:
+    var out = String.new()
+    write_into(d, mut out)
+    return out
+
+pure def write_into(d: Data, mut out: String):
+    match d:
+        case Data.Null:
+            out.push("null")
+        case Data.Bool(b):
+            if b:
+                out.push("true")
+            else:
+                out.push("false")
+        case Data.Int(n):
+            out.push("{n}")
+        case Data.Float(x):
+            out.push("{x}")
+        case Data.Text(s):
+            quote_into(s, mut out)
+        case Data.List(items):
+            out.push("[")
+            for i in range(len(items)):
+                if i > 0:
+                    out.push(",")
+                write_into(items[i], mut out)
+            out.push("]")
+        case Data.Map(fields):
+            out.push("{{")
+            for i in range(len(fields)):
+                if i > 0:
+                    out.push(",")
+                quote_into(fields[i].0, mut out)
+                out.push(":")
+                write_into(fields[i].1, mut out)
+            out.push("}}")
+
+pure def quote_into(s: str, mut out: String):
+    out.push("\"")
+    for c in s.chars():
+        match c:
+            case '"':
+                out.push("\\\"")
+            case '\\':
+                out.push("\\\\")
+            case '\n':
+                out.push("\\n")
+            case '\r':
+                out.push("\\r")
+            case '\t':
+                out.push("\\t")
+            case _:
+                let n = c.code()
+                if n < 32:
+                    let digits = "0123456789abcdef"
+                    out.push("\\u00")
+                    out.push(digits.byte_slice(n // 16, n // 16 + 1))
+                    out.push(digits.byte_slice(n % 16, n % 16 + 1))
+                else:
+                    out.push_char(c)
+    out.push("\"")
+
+## A line of JSON read back, or `None` where it is not JSON.
+pub pure def parse(text: str) -> Data?:
+    var r = Reader(text=text.to_string(), at=0)
+    let v = r.value()?
+    r.space()
+    if r.at != text.byte_len():
+        return None
+    return Some(v)
+
+struct Reader:
+    text: String
+    at: int
+
+impl Reader:
+    pure def space(mut self):
+        while self.at < self.text.byte_len():
+            let b = self.text.byte_at(self.at)
+            if b != 32 and b != 9 and b != 10 and b != 13:
+                return
+            self.at += 1
+
+    pure def eat(mut self, word: str) -> bool:
+        let end = self.at + word.byte_len()
+        if end <= self.text.byte_len() and self.text.byte_slice(self.at, end) == word:
+            self.at = end
+            return True
+        return False
+
+    pure def value(mut self) -> Data?:
+        self.space()
+        if self.at >= self.text.byte_len():
+            return None
+        let c = self.text.byte_at(self.at)
+        if self.eat("null"):
+            return Some(Data.Null)
+        if self.eat("true"):
+            return Some(Data.Bool(True))
+        if self.eat("false"):
+            return Some(Data.Bool(False))
+        if c == 34:
+            return Some(Data.Text(self.string()?))
+        if c == 91:
+            self.at += 1
+            var items: list[Data] = []
+            self.space()
+            if self.eat("]"):
+                return Some(Data.List(items))
+            while True:
+                items.push(self.value()?)
+                self.space()
+                if self.eat(","):
+                    continue
+                if self.eat("]"):
+                    return Some(Data.List(items))
+                return None
+        if c == 123:
+            self.at += 1
+            var fields: list[(String, Data)] = []
+            self.space()
+            if self.eat("}}"):
+                return Some(Data.Map(fields))
+            while True:
+                self.space()
+                if self.at >= self.text.byte_len() or self.text.byte_at(self.at) != 34:
+                    return None
+                let key = self.string()?
+                self.space()
+                if not self.eat(":"):
+                    return None
+                let v = self.value()?
+                fields.push((key, v))
+                self.space()
+                if self.eat(","):
+                    continue
+                if self.eat("}}"):
+                    return Some(Data.Map(fields))
+                return None
+        return self.number()
+
+    pure def number(mut self) -> Data?:
+        let start = self.at
+        var whole = True
+        while self.at < self.text.byte_len():
+            let b = self.text.byte_at(self.at)
+            if (b >= 48 and b <= 57) or b == 45 or b == 43:
+                self.at += 1
+            elif b == 46 or b == 101 or b == 69:
+                whole = False
+                self.at += 1
+            else:
+                break
+        let t = self.text.byte_slice(start, self.at)
+        if whole:
+            if let Some(n) = t.parse_int():
+                return Some(Data.Int(n))
+            return None
+        if let Some(x) = t.parse_float():
+            return Some(Data.Float(x))
+        return None
+
+    pure def string(mut self) -> String?:
+        self.at += 1
+        var out = String.new()
+        var run = self.at
+        while self.at < self.text.byte_len():
+            let b = self.text.byte_at(self.at)
+            if b == 34:
+                out.push(self.text.byte_slice(run, self.at))
+                self.at += 1
+                return Some(out)
+            if b != 92:
+                self.at += 1
+                continue
+            out.push(self.text.byte_slice(run, self.at))
+            if self.at + 1 >= self.text.byte_len():
+                return None
+            let e = self.text.byte_at(self.at + 1)
+            self.at += 2
+            if e == 110:
+                out.push("\n")
+            elif e == 116:
+                out.push("\t")
+            elif e == 114:
+                out.push("\r")
+            elif e == 98:
+                out.push("\u{8}")
+            elif e == 102:
+                out.push("\u{c}")
+            elif e == 117:
+                var code = self.hex4()?
+                if code >= 55296 and code < 56320 and self.eat("\\u"):
+                    let low = self.hex4()?
+                    code = 65536 + (code - 55296) * 1024 + (low - 56320)
+                out.push_char(char.from_code(code) ?? '\u{FFFD}')
+            else:
+                out.push(self.text.byte_slice(self.at - 1, self.at))
+            run = self.at
+        return None
+
+    pure def hex4(mut self) -> int?:
+        if self.at + 4 > self.text.byte_len():
+            return None
+        var n = 0
+        for k in range(4):
+            let b = self.text.byte_at(self.at + k)
+            var v = -1
+            if b >= 48 and b <= 57:
+                v = b - 48
+            elif b >= 97 and b <= 102:
+                v = b - 87
+            elif b >= 65 and b <= 70:
+                v = b - 55
+            if v < 0:
+                return None
+            n = n * 16 + v
+        self.at += 4
+        return Some(n)
+
+## A field of an object.
+pub pure def get(d: Data, key: str) -> Data?:
+    if let Data.Map(fields) = d:
+        for (k, v) in fields:
+            if k == key:
+                return Some(v.copy())
+    return None
+
+pure def text_of(d: Data?) -> String?:
+    if let Some(Data.Text(s)) = d:
+        return Some(s.copy())
+    return None
+
+pure def int_of(d: Data?) -> int?:
+    if let Some(Data.Int(n)) = d:
+        return Some(n)
+    return None
+
+pure def list_of(d: Data?) -> list[Data]:
+    if let Some(Data.List(xs)) = d:
+        return xs.copy()
+    return []
+
+pure def text(s: str) -> Data:
+    return Data.Text(s.to_string())
+
+pure def pos(line: int, col: int) -> Data:
+    return Data.Map([("line".to_string(), Data.Int(line)), ("col".to_string(), Data.Int(col))])
+
+# ---------------------------------------------------------------- records
+
+## A file's text hash, as the diary names it (FNV-1a, 64 bits, in hex).
+pub pure def hash(t: str) -> String:
+    return module_hash(t)
+
+## A span of file `file` of `files` as the diary writes it.
+pure def span_data(
+    files: list[(String, String)], lines: list[Lines], file: int, start: int, end: int
+) -> Data:
+    var name = "<unknown>".to_string()
+    var a = (0, 0)
+    var b = (0, 0)
+    if file >= 0 and file < len(files):
+        name = files[file].0.copy()
+        a = lines[file].line_col(files[file].1, start)
+        b = lines[file].line_col(files[file].1, end)
+    return Data.Map(
+        [
+            ("file".to_string(), text(name)),
+            ("start".to_string(), pos(a.0, a.1)),
+            ("end".to_string(), pos(b.0, b.1)),
+            ("bytes".to_string(), Data.List([Data.Int(start), Data.Int(end)])),
+        ]
+    )
+
+pure def params_data(ps: list[Param]) -> Data:
+    var fields: list[(String, Data)] = []
+    for p in ps:
+        fields.push((p.name.copy(), text(p.value)))
+    return Data.Map(fields)
+
+## A diagnostic's fields, after its record's own.
+pure def diagnostic_fields(
+    files: list[(String, String)], lines: list[Lines], x: Filed, catalog: Catalog
+) -> list[(String, Data)]:
+    let d = ref x.diag
+    var labels: list[Data] = []
+    for k in range(len(d.labels)):
+        let l = ref d.labels[k]
+        labels.push(
+            Data.Map(
+                [
+                    ("id".to_string(), text(l.msg.id())),
+                    ("message".to_string(), text(catalog.render(l.msg.id(), l.params))),
+                    ("span".to_string(), span_data(files, lines, x.label_file(k), l.start, l.end)),
+                ]
+            )
+        )
+    var fixes: list[Data] = []
+    for f in d.fixes:
+        var edits: list[Data] = []
+        for e in f.edits:
+            edits.push(
+                Data.Map(
+                    [
+                        ("span".to_string(), span_data(files, lines, x.file, e.start, e.end)),
+                        ("text".to_string(), text(e.text)),
+                    ]
+                )
+            )
+        fixes.push(
+            Data.Map(
+                [
+                    ("id".to_string(), text(f.msg.id())),
+                    ("message".to_string(), text(catalog.render(f.msg.id(), f.params))),
+                    ("edits".to_string(), Data.List(edits)),
+                ]
+            )
+        )
+    return [
+        ("code".to_string(), text(catalog.code(d.msg))),
+        ("id".to_string(), text(d.msg.id())),
+        ("severity".to_string(), text(catalog.severity(d.msg))),
+        ("message".to_string(), text(catalog.render(d.msg.id(), d.params))),
+        ("params".to_string(), params_data(d.params)),
+        ("span".to_string(), span_data(files, lines, x.file, d.start, d.end)),
+        ("labels".to_string(), Data.List(labels)),
+        ("fixes".to_string(), Data.List(fixes)),
+    ]
+
+## What the diary needs of a diagnostic of the last check to tell whether
+## this check still has it.
+struct Earlier:
+    record: Data
+    id: String
+    params: String
+    start: int
+    end: int
+    ## Its fixes' edits, as (start, end, text) of the old text.
+    fixes: list[(String, list[(int, int, String)])]
+
+pure def earlier(record: Data) -> Earlier?:
+    let span = get(record, "span")?
+    let bytes = list_of(get(span, "bytes"))
+    if len(bytes) < 2:
+        return None
+    let start = int_of(Some(bytes[0].copy()))?
+    let end = int_of(Some(bytes[1].copy()))?
+    var fixes: list[(String, list[(int, int, String)])] = []
+    for f in list_of(get(record, "fixes")):
+        let id = text_of(get(f, "id")) ?? String.new()
+        var edits: list[(int, int, String)] = []
+        for e in list_of(get(f, "edits")):
+            if let Some(s) = get(e, "span"):
+                let b = list_of(get(s, "bytes"))
+                if len(b) >= 2:
+                    let a = int_of(Some(b[0].copy()))
+                    let z = int_of(Some(b[1].copy()))
+                    let t = text_of(get(e, "text"))
+                    if let Some(a) = a:
+                        if let Some(z) = z:
+                            if let Some(t) = t:
+                                edits.push((a, z, t.copy()))
+        fixes.push((id, edits))
+    var params = write(Data.Null)
+    if let Some(p) = get(record, "params"):
+        params = write(p)
+    return Some(
+        Earlier(
+            record=record.copy(),
+            id=text_of(get(record, "id"))?,
+            params=params,
+            start=start,
+            end=end,
+            fixes=fixes,
+        )
+    )
+
+## The one change between two texts: the bytes `start..end` of `old`
+## replaced by `text`.
+pure def change(old: str, new: str) -> (int, int, String):
+    let n = min(old.byte_len(), new.byte_len())
+    var prefix = 0
+    while prefix < n and old.byte_at(prefix) == new.byte_at(prefix):
+        prefix += 1
+    while not boundary(old, prefix) or not boundary(new, prefix):
+        prefix -= 1
+    let max = n - prefix
+    var suffix = 0
+    while suffix < max
+            and old.byte_at(old.byte_len() - 1 - suffix)
+                    == new.byte_at(new.byte_len() - 1 - suffix):
+        suffix += 1
+    while not boundary(old, old.byte_len() - suffix) or not boundary(new, new.byte_len() - suffix):
+        suffix -= 1
+    return (
+        prefix, old.byte_len() - suffix, new.byte_slice(prefix, new.byte_len() - suffix).to_string()
+    )
+
+pure def boundary(t: str, at: int) -> bool:
+    if at <= 0 or at >= t.byte_len():
+        return True
+    return not is_continuation(t.byte_at(at))
+
+## A text with edits made, or `None` when they overlap or reach outside it.
+pure def apply(t: str, edits: list[(int, int, String)]) -> String?:
+    var sorted = edits.copy()
+    sorted.sort_by((a, b) -> a.0.cmp(b.0))
+    var out = String.new()
+    var at = 0
+    for (s, e, x) in sorted:
+        if s < at or e > t.byte_len() or s > e:
+            return None
+        if not boundary(t, s) or not boundary(t, e):
+            return None
+        out.push(t.byte_slice(at, s))
+        out.push(x)
+        at = e
+    out.push(t.byte_slice(at, t.byte_len()))
+    return Some(out)
+
+## The 1-based line and column (in characters) of a byte of a text.
+pure def line_col(t: str, at: int) -> (int, int):
+    let end = min(at, t.byte_len())
+    var line = 1
+    var col = 1
+    for i in range(end):
+        let b = t.byte_at(i)
+        if b == 10:
+            line += 1
+            col = 1
+        elif not is_continuation(b):
+            col += 1
+    return (line, col)
+
+## This check's lines of the diary, from its previous text `previous` and
+## the texts it kept (`kept`, a file's text by its hash, `None` when it is
+## not kept): `own` the program's own files (each name and text, the first
+## of `files`), `files` every file a diagnostic may be in, `diags` the
+## diagnostics, `time` the check's time.
+pub pure def records(
+    previous: str,
+    kept: dict[String, String],
+    time: str,
+    toolchain: str,
+    ours: int,
+    files: list[(String, String)],
+    diags: list[Filed],
+    catalog: Catalog,
+) -> list[String]:
+    var lines: list[Lines] = []
+    for (_, t) in files:
+        lines.push(Lines.of(t))
+    var out: list[String] = []
+    var listed: list[Data] = []
+    for k in range(ours):
+        listed.push(
+            Data.Map(
+                [
+                    ("name".to_string(), text(files[k].0)),
+                    ("hash".to_string(), text(hash(files[k].1))),
+                ]
+            )
+        )
+    out.push(
+        write(
+            Data.Map(
+                [
+                    ("record".to_string(), text("check")),
+                    ("time".to_string(), text(time)),
+                    ("tool".to_string(), text("sisu check")),
+                    ("toolchain".to_string(), text(toolchain)),
+                    ("files".to_string(), Data.List(listed)),
+                    ("diagnostics".to_string(), Data.Int(len(diags))),
+                ]
+            )
+        )
+    )
+    for x in diags:
+        var name = "<unknown>".to_string()
+        if x.file >= 0 and x.file < len(files):
+            name = files[x.file].0.copy()
+        var h = String.new()
+        for k in range(ours):
+            if files[k].0 == name:
+                h = hash(files[k].1)
+                break
+        var fields = [
+            ("record".to_string(), text("diagnostic")),
+            ("time".to_string(), text(time)),
+            ("file".to_string(), text(name)),
+            ("hash".to_string(), text(h)),
+        ]
+        for f in diagnostic_fields(files, lines, x, catalog):
+            fields.push(f.copy())
+        out.push(write(Data.Map(fields)))
+    # What each file's last check had that this one no longer does.
+    var past: list[Data] = []
+    for l in previous.lines():
+        if let Some(d) = parse(l):
+            past.push(d)
+    for k in range(ours):
+        let (name, now_text) = files[k].copy()
+        let now_hash = hash(now_text)
+        var last: Data? = None
+        var i = len(past) - 1
+        while i >= 0 and last.is_none():
+            let r = ref past[i]
+            if text_of(get(r, "record")) == Some("check".to_string()):
+                for f in list_of(get(r, "files")):
+                    if text_of(get(f, "name")) == Some(name.copy()):
+                        last = Some(r.copy())
+                        break
+            i -= 1
+        let l = last else:
+            continue
+        var old_hash = String.new()
+        for f in list_of(get(l, "files")):
+            if text_of(get(f, "name")) == Some(name.copy()):
+                old_hash = text_of(get(f, "hash")) ?? String.new()
+                break
+        if old_hash == now_hash:
+            continue
+        let old_text = kept.get(old_hash.copy()) else:
+            continue
+        let last_time = write(get(l, "time") ?? Data.Null)
+        var before: list[Earlier] = []
+        for r in past:
+            if text_of(get(r, "record")) != Some("diagnostic".to_string()):
+                continue
+            if text_of(get(r, "file")) != Some(name.copy()):
+                continue
+            if text_of(get(r, "hash")) != Some(old_hash.copy()):
+                continue
+            if let Some(t) = get(r, "time"):
+                if write(t) != last_time:
+                    continue
+            else:
+                continue
+            if let Some(e) = earlier(r):
+                before.push(e)
+        let (start, end, inserted) = change(old_text, now_text)
+        let delta = inserted.byte_len() - (end - start)
+        for e in before:
+            # Where the diagnostic would be now, if the change left it.
+            var moved: (int, int)? = None
+            if e.end <= start:
+                moved = Some((e.start, e.end))
+            elif e.start >= end:
+                moved = Some((e.start + delta, e.end + delta))
+            var still = False
+            if let Some((s, t)) = moved:
+                for x in diags:
+                    if x.file != k or x.diag.msg.id() != e.id:
+                        continue
+                    if x.diag.start == s and x.diag.end == t:
+                        if write(params_data(x.diag.params)) == e.params:
+                            still = True
+                            break
+            if still:
+                continue
+            # The fix it applied: one whose edits make the new text of the
+            # old one.
+            var applied = Data.Null
+            for (id, edits) in e.fixes:
+                if edits.is_empty():
+                    continue
+                if apply(old_text, edits) == Some(now_text.copy()):
+                    applied = text(id)
+                    break
+            let a = line_col(old_text, start)
+            let b = line_col(old_text, end)
+            let span = Data.Map(
+                [
+                    ("start".to_string(), pos(a.0, a.1)),
+                    ("end".to_string(), pos(b.0, b.1)),
+                    ("bytes".to_string(), Data.List([Data.Int(start), Data.Int(end)])),
+                ]
+            )
+            let edit = Data.Map([("span".to_string(), span), ("text".to_string(), text(inserted))])
+            out.push(
+                write(
+                    Data.Map(
+                        [
+                            ("record".to_string(), text("resolved")),
+                            ("time".to_string(), text(time)),
+                            ("file".to_string(), text(name)),
+                            ("from".to_string(), text(old_hash)),
+                            ("to".to_string(), text(now_hash)),
+                            ("diagnostic".to_string(), e.record.copy()),
+                            ("edit".to_string(), edit),
+                            ("fix".to_string(), applied),
+                        ]
+                    )
+                )
+            )
+    return out
+
+## The hashes of the texts `records` reads from `PATH.d/`: each own file's
+## previous hash in the diary (the last `check` record that names it).
+pub pure def wanted(previous: str, files: list[(String, String)], ours: int) -> list[String]:
+    var out: list[String] = []
+    var past: list[Data] = []
+    for l in previous.lines():
+        if let Some(d) = parse(l):
+            past.push(d)
+    for k in range(ours):
+        let name = files[k].0.copy()
+        var i = len(past) - 1
+        var found = False
+        while i >= 0 and not found:
+            if text_of(get(past[i], "record")) == Some("check".to_string()):
+                for f in list_of(get(past[i], "files")):
+                    if text_of(get(f, "name")) == Some(name.copy()):
+                        if let Some(h) = text_of(get(f, "hash")):
+                            if not out.contains(h.copy()):
+                                out.push(h)
+                        found = True
+                        break
+            i -= 1
+    return out
+
+test "the diary's time is RFC 3339 in UTC":
+    assert timestamp(0) == "1970-01-01T00:00:00Z"
+    assert timestamp(1700000000) == "2023-11-14T22:13:20Z"
+
+test "the diary's JSON reads back as it was written":
+    let d = Data.Map(
+        [
+            ("a".to_string(), Data.List([Data.Int(1), Data.Null, Data.Bool(True)])),
+            ("b".to_string(), Data.Text("x\"\n\u{1}é".to_string())),
+        ]
+    )
+    let t = write(d)
+    assert t == "{{\"a\":[1,null,true],\"b\":\"x\\\"\\n\\u0001é\"}}"
+    assert write(parse(t) ?? Data.Null) == t
+
+test "the one change between two texts":
+    assert change("let x = 1\n", "let x = 2\n") == (8, 9, "2".to_string())
+    assert change("ab", "ab") == (2, 2, String.new())
+    assert line_col("ab\ncd", 4) == (2, 2)

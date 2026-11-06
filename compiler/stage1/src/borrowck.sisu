@@ -175,6 +175,36 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
     _ = shared.tag_sites(mut program)
     return Checked(program=program, findings=findings)
 
+## The loans live on a line of one function, for `explain-borrow`.
+pub struct FunctionLoans:
+    pub function: String
+    pub loans: list[loans.LoanReport]
+
+## `explain-borrow` (10, "Language server": the "explain this borrow"
+## command; RULES.md, R187), as stage 0's `explain::live_at`: every
+## function of the checked program `p` with a statement on `line` of its
+## source `source`, and the loans live there.
+pub pure def live_at(p: Program, source: int, line: int) -> list[FunctionLoans]:
+    let types = Types.of(p)
+    var out: list[FunctionLoans] = []
+    for f in p.functions:
+        if f.source != source:
+            continue
+        var on_line = False
+        for b in f.blocks:
+            if b.cleanup:
+                continue
+            for s in b.stmts:
+                if let Some(l) = s.loc:
+                    if l.line == line:
+                        on_line = True
+        if not on_line:
+            continue
+        let a = loans.Analysis.run(p, f, types, True)
+        let found = a.live_at_line(p, f, types, line)
+        out.push(FunctionLoans(function=loans.display_fn(f.name), loans=found))
+    return out
+
 ## The findings as diagnostics of a program of several files: `files`
 ## gives, for each of the program's SIR sources, the position of its file
 ## among the `count` files of the program and its text, or none for a file

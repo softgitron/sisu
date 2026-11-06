@@ -1,0 +1,1 @@
+7:17-7:26 E0241 resolve.not-object-safe trait="Shape" method="SIDES" reason="it is a constant, which each implementing type gives, and a `dyn` value does not say which type it is"

@@ -14,7 +14,23 @@
 ##! `sisu check --format=ids` prints them.
 
 from stage1.diag import Catalog
+from stage1.lexer import lex
 from stage1.parser import parse
+from stage1.sir import (
+    Callee,
+    Function,
+    ImplTarget,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    StatementKind,
+    Type,
+    TypeDecl,
+)
+from stage1.sir.types import Decls, place_ty
+from stage1.sir.write import quote as sir_quote
 from stage1.syntax.ast import (
     Ast,
     Block,
@@ -32,6 +48,8 @@ from stage1.syntax.ast import (
 )
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Token
 from stage1.typeck.safety import doc_above, safety_comment, safety_list
 
 ## A package as the audit shows it.
@@ -390,6 +408,411 @@ pub pure def unsafe_report(
         for l in lints:
             out.push("  {l}\n")
     return out
+
+## `audit --ownership` (18, Phase 3, T1.1 and T1.2; RULES.md, R188): how
+## often a file reaches for the escape hatches of the ownership model, as
+## the driver's `audit::ownership` counts them, from the tokens: the names
+## `Shared`, `Weak`, `Cell`, `Arena` and `Key` where they mean std's types
+## (not after a `.`, and not in a file that declares the name itself), the
+## method calls `.copy()`, and the keyword `unsafe`; `lines` the lines on
+## which a token starts that is not trivia or layout. One line of data:
+## the file's name, then `name=count` for `lines` and each column.
+pub pure def ownership_line(file: str, text: str) -> String:
+    let module = build.module(parse(text, Catalog.parse("")).tree)
+    var declared: list[String] = []
+    declared_names(module, module.items, mut declared)
+    let tokens = lex(text).tokens
+    var code: list[Token] = []
+    for t in tokens:
+        if t.kind.is_trivia():
+            continue
+        match t.kind:
+            case SyntaxKind.Newline | SyntaxKind.Indent | SyntaxKind.Dedent | SyntaxKind.Eof:
+                continue
+            case _:
+                code.push(t)
+    let names = ["Shared", "Weak", "Cell", "Arena", "Key"]
+    var counts = [0, 0, 0, 0, 0, 0, 0]
+    var lines = 0
+    var line = 1
+    var last_line = 0
+    var at = 0
+    for i in range(len(code)):
+        let t = code[i]
+        while at < t.start and at < text.byte_len():
+            if text.byte_at(at) == 10:
+                line += 1
+            at += 1
+        if line != last_line:
+            lines += 1
+            last_line = line
+        let after_dot = i > 0 and code[i - 1].kind == SyntaxKind.Dot
+        let word = text.byte_slice(t.start, t.end)
+        if t.kind == SyntaxKind.UnsafeKw:
+            counts[6] += 1
+        elif t.kind == SyntaxKind.Ident and after_dot:
+            let call = i + 1 < len(code) and code[i + 1].kind == SyntaxKind.LParen
+            if word == "copy" and call:
+                counts[5] += 1
+        elif t.kind == SyntaxKind.Ident and not declared.contains(word.to_string()):
+            for k in range(len(names)):
+                if names[k] == word:
+                    counts[k] += 1
+    var out = "{file} lines={lines}"
+    let columns = ["Shared", "Weak", "Cell", "Arena", "Key", "copy", "unsafe"]
+    for k in range(len(columns)):
+        out.push(" {columns[k]}={counts[k]}")
+    return out
+
+## The names a file declares at its top level, which then mean its own
+## declarations rather than std's.
+pure def declared_names(module: Module, items: list[ItemId], mut out: list[String]):
+    for id in items:
+        match module.ast.item(id).kind:
+            case ItemKind.Fn(f):
+                out.push(f.name.text.copy())
+            case ItemKind.Struct(s):
+                out.push(s.name.text.copy())
+            case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                out.push(e.name.text.copy())
+                for v in e.variants:
+                    out.push(v.name.text.copy())
+            case ItemKind.Trait(t):
+                out.push(t.name.text.copy())
+            case ItemKind.Const(k):
+                out.push(k.name.text.copy())
+            case ItemKind.TypeAlias(a):
+                out.push(a.name.text.copy())
+            case ItemKind.FromImport(f):
+                for (n, alias) in f.names:
+                    match alias:
+                        case Some(a):
+                            out.push(a.text.copy())
+                        case None:
+                            out.push(n.text.copy())
+            case ItemKind.Extern(inner):
+                declared_names(module, inner, mut out)
+            case _:
+                pass
+
+## The capability types of `audit --caps`: the handles of a `System`, the
+## `System`, a test clock, and a `Lent` of a handle.
+const CAPABILITIES: list[str] = [
+    "Fs", "Net", "Clock", "Rand", "Env", "Proc", "Stdin", "System", "TestClock", "Lent"
+]
+
+## The operations traits, whose methods a capability's calls are.
+const OPS_TRAITS: list[str] = [
+    "FsOps", "NetOps", "ClockOps", "RandOps", "EnvOps", "ProcOps", "StdinOps"
+]
+
+## A type without the references around it.
+pure def strip_refs(t: Type) -> Type:
+    var u = t.copy()
+    while True:
+        match u.copy():
+            case Type.Ref(inner, _):
+                u = inner[0].copy()
+            case _:
+                return u
+
+## The capability types a type holds, by name: itself (through
+## references), or the fields of a struct or enum of the program, its
+## tuples, options and collections (decision 240).
+pure def capability_types(decls: Decls, t: Type, mut out: list[String], depth: int):
+    if depth > 8:
+        return
+    match t:
+        case Type.Ref(inner, _):
+            capability_types(decls, inner[0], mut out, depth + 1)
+        case Type.Tuple(es):
+            for e in es:
+                capability_types(decls, e, mut out, depth + 1)
+        case Type.Named(n, args):
+            if CAPABILITIES.contains(n):
+                # A `Lent` is its handle's capability.
+                var name = n.copy()
+                if n == "Lent" and not args.is_empty():
+                    if let Type.Named(h, _) = args[0].copy():
+                        name = h
+                if not out.contains(name.copy()):
+                    out.push(name)
+                return
+            for a in args:
+                capability_types(decls, a, mut out, depth + 1)
+            let d = decls.get(n) else:
+                return
+            match d:
+                case TypeDecl.Struct(_, _, fields, _, _, _):
+                    for f in fields:
+                        capability_types(decls, f.ty.subst(args), mut out, depth + 1)
+                case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                    for v in variants:
+                        for (_, ft) in v.fields:
+                            capability_types(decls, ft.subst(args), mut out, depth + 1)
+        case _:
+            pass
+
+## The type of a place, a `System`'s fields being its handles.
+pure def cap_place_type(decls: Decls, f: Function, p: Place) -> Type?:
+    if let Some(t) = place_ty(decls, f, p):
+        return Some(t)
+    # `sys.fs`: the `System` is a builtin, its fields the handles in the
+    # order `System.assemble` takes them.
+    let handles = ["Fs", "Net", "Clock", "Rand", "Env", "Proc", "Stdin"]
+    if p.local.index >= len(f.locals):
+        return None
+    var k = 0
+    while k < len(p.proj) and p.proj[k] == Proj.Deref:
+        k += 1
+    if k + 1 != len(p.proj):
+        return None
+    if let Type.Named(n, _) = strip_refs(f.locals[p.local.index].ty):
+        if n == "System":
+            if let Proj.Field(i) = p.proj[k]:
+                if i < len(handles):
+                    return Some(Type.Named(name=handles[i].to_string(), args=[]))
+    return None
+
+## A function as `audit --caps` names it: a test as its trace names it,
+## `test "its name"`, where its SIR name numbers it (decision 505).
+pure def caps_name(prog: Program, n: str) -> String:
+    if not n.starts_with("test#"):
+        return n.to_string()
+    return shown_fn(prog, n)
+
+## A SIR function's name as a trace shows it (stage 0's `display_fn_name`),
+## as far as a test's functions need it: `test "its name"`, and `closure in
+## ...` of a closure written in one.
+pure def shown_fn(prog: Program, n: str) -> String:
+    if n.starts_with("test#"):
+        for (t, f) in prog.tests:
+            if f == n:
+                return "test {sir_quote(t)}"
+        if let Some(i) = n.byte_slice(5, n.byte_len()).parse_int():
+            if i < len(prog.tests):
+                return "test {sir_quote(prog.tests[i].0)}"
+    if n.ends_with(".__check_invariant"):
+        return "the invariant of {n.byte_slice(0, n.byte_len() - 18)}"
+    if let Some(k) = n.find("#closure"):
+        return "closure in {shown_fn(prog, n.byte_slice(0, k))}"
+    return n.to_string()
+
+## `audit --caps` (18, Phase 6; T2.1, T2.3 and the threading depth of 20's
+## pre-registration; RULES.md, R188), as the driver's `audit::caps`
+## computes it from the program's SIR: for each function of the program
+## that does I/O (calls an operation of a capability, or a function that
+## does), the number of its parameters that hold a capability; for each
+## such call (a leaf use), the threading depth, the fewest calls from
+## `main` to the function that makes it; and the structs of the program
+## (`own_structs`) that bundle three or more capability types. Every line
+## starts with `file`.
+pub pure def caps_report(file: str, prog: Program, own_structs: list[String]) -> String:
+    let decls = Decls.new(prog.types)
+    let nf = len(prog.functions)
+    # The program's own functions, by name, in the order of their names.
+    var by_name: dict[String, int] = {}
+    var names: list[String] = []
+    for i in range(nf):
+        let f = ref prog.functions[i]
+        if f.source < len(prog.sources) and not prog.sources[f.source].starts_with("<"):
+            if not by_name.contains(f.name.copy()):
+                names.push(f.name.copy())
+            _ = by_name.insert(f.name.copy(), i)
+    names.sort()
+    var order: list[int] = []
+    for n in names:
+        order.push(by_name.get(n) ?? 0)
+    # Each function's calls of the program's functions (a closure counts as
+    # called where it is made), and its uses of capabilities.
+    var edges: list[list[int]] = []
+    var generic_caps: list[list[int]] = []
+    for _ in range(nf):
+        edges.push([])
+        generic_caps.push([])
+    var uses: list[(int, String)] = []
+    for i in order:
+        let f = ref prog.functions[i]
+        for b in f.blocks:
+            for s in b.stmts:
+                match s.kind:
+                    case StatementKind.Call(_, callee, args):
+                        var first_ty: Type? = None
+                        if let Some(a) = args.first():
+                            match a:
+                                case Operand.Copy(p) | Operand.Move(p):
+                                    first_ty = cap_place_type(decls, f, p)
+                                case _:
+                                    pass
+                        # A call on a capability itself (not on a struct that
+                        # holds one) is a use of it.
+                        var on_capability = False
+                        if let Some(t) = first_ty:
+                            if let Type.Named(n, _) = strip_refs(t):
+                                on_capability = CAPABILITIES.contains(n)
+                        match callee:
+                            case Callee.Fn(target, _):
+                                if let Some(j) = by_name.get(target.copy()):
+                                    edges[i].push(j)
+                                elif on_capability:
+                                    uses.push((i, target.copy()))
+                            case Callee.Trait(method, tys):
+                                var tr = method.copy()
+                                var m = method.copy()
+                                if let Some(d) = method.find("."):
+                                    tr = method.byte_slice(0, d).to_string()
+                                var k = method.byte_len() - 1
+                                while k >= 0:
+                                    if method.byte_at(k) == 46:
+                                        m = method.byte_slice(k + 1, method.byte_len()).to_string()
+                                        break
+                                    k -= 1
+                                if OPS_TRAITS.contains(tr):
+                                    uses.push((i, method.copy()))
+                                    # A type parameter that a capability's
+                                    # operation is called on is a capability.
+                                    if let Some(t) = tys.first():
+                                        if let Type.Param(p) = strip_refs(t):
+                                            if not generic_caps[i].contains(p):
+                                                generic_caps[i].push(p)
+                                else:
+                                    # The impls of the program it may run.
+                                    for imp in prog.impls:
+                                        if imp.trait_name != tr:
+                                            continue
+                                        for (mn, target) in imp.methods:
+                                            if mn != m:
+                                                continue
+                                            if let ImplTarget.Fn(t) = target:
+                                                if let Some(j) = by_name.get(t.copy()):
+                                                    edges[i].push(j)
+                            case Callee.Intrinsic(name, _):
+                                # Lending a capability passes it on; it does
+                                # no I/O.
+                                let lends = name.starts_with("cap.") or name.starts_with("Lent.")
+                                if on_capability and not lends:
+                                    uses.push((i, name.copy()))
+                            case _:
+                                pass
+                    case StatementKind.Assign(_, value):
+                        if let Rvalue.Closure(name, _, _) = value:
+                            if let Some(j) = by_name.get(name.copy()):
+                                edges[i].push(j)
+                    case _:
+                        pass
+    # The fewest calls from `main` to each function.
+    var depth: list[int?] = []
+    for _ in range(nf):
+        depth.push(None)
+    if let Some(e) = prog.entry:
+        if let Some(m) = by_name.get(e.function.copy()):
+            depth[m] = Some(0)
+            var queue = [m]
+            var head = 0
+            while head < len(queue):
+                let i = queue[head]
+                head += 1
+                for j in edges[i]:
+                    if depth[j].is_none():
+                        depth[j] = Some((depth[i] ?? 0) + 1)
+                        queue.push(j)
+    # The functions that do I/O: those with a use, and their callers.
+    var io: list[String?] = []
+    for _ in range(nf):
+        io.push(None)
+    for (i, _) in uses:
+        io[i] = Some("direct".to_string())
+    var more = True
+    while more:
+        more = False
+        for i in order:
+            if io[i].is_some():
+                continue
+            for j in edges[i]:
+                if io[j].is_some():
+                    io[i] = Some("calls".to_string())
+                    more = True
+                    break
+    var out = String.new()
+    var counts: list[int] = []
+    for i in order:
+        let kind = io[i].copy() else:
+            continue
+        let f = ref prog.functions[i]
+        var params = 0
+        for k in range(1, f.param_count + 1):
+            if k >= len(f.locals):
+                break
+            let ty = f.locals[k].ty.copy()
+            var found: list[String] = []
+            capability_types(decls, ty, mut found, 0)
+            var generic = False
+            if let Type.Param(p) = strip_refs(ty):
+                generic = generic_caps[i].contains(p)
+            if not found.is_empty() or generic:
+                params += 1
+        counts.push(params)
+        let name = caps_name(prog, f.name)
+        out.push("{file} function {name} caps={params} io={kind} depth={shown_depth(depth[i])}\n")
+    uses.sort_by(
+        (a, b) -> (prog.functions[a.0].name.copy(), a.1.copy()).cmp(
+            (prog.functions[b.0].name.copy(), b.1.copy())
+        )
+    )
+    var kept: list[(int, String)] = []
+    for u in uses:
+        if let Some(last) = kept.last():
+            if last.0 == u.0 and last.1 == u.1:
+                continue
+        kept.push(u.copy())
+    for (i, op) in kept:
+        let name = caps_name(prog, prog.functions[i].name)
+        out.push("{file} use {name} {op} depth={shown_depth(depth[i])}\n")
+    var bundles = 0
+    for d in prog.types:
+        if let TypeDecl.Struct(name, _, fields, _, _, _) = d:
+            if not own_structs.contains(name.copy()):
+                continue
+            var found: list[String] = []
+            for f in fields:
+                capability_types(decls, f.ty, mut found, 0)
+            # A `System` bundles all of them, by the language's design.
+            var held: list[String] = []
+            for c in found:
+                if c != "System":
+                    held.push(c.copy())
+            if len(held) >= 3:
+                bundles += 1
+                out.push("{file} struct {name} caps={len(held)} {held.join(",")}\n")
+    counts.sort()
+    var median = "0".to_string()
+    let n = len(counts)
+    if n % 2 == 1:
+        median = "{counts[n // 2]}"
+    elif n > 0:
+        let twice = counts[n // 2 - 1] + counts[n // 2]
+        if twice % 2 == 0:
+            median = "{twice // 2}"
+        else:
+            median = "{twice // 2}.5"
+    var deepest: int? = None
+    for (i, _) in kept:
+        if let Some(d) = depth[i]:
+            if deepest.is_none() or d > (deepest ?? 0):
+                deepest = Some(d)
+    var max = 0
+    if let Some(m) = counts.last():
+        max = m
+    out.push(
+        "{file} summary functions={n} median={median} max={max} uses={len(kept)} deepest={shown_depth(deepest)} structs={bundles}\n"
+    )
+    return out
+
+## A depth, or `-` for none.
+pure def shown_depth(d: int?) -> String:
+    let k = d else:
+        return "-".to_string()
+    return "{k}"
 
 test "a module's hash is its text's":
     assert module_hash("") == "cbf29ce484222325"

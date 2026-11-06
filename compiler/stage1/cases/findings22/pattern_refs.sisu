@@ -1,0 +1,14 @@
+# A field's name in a struct pattern is a reference of the field (RULES.md,
+# R192), which `query references` lists and `query rename` renames.
+struct Point:
+    x: int
+    y: int
+
+def norm(p: Point) -> int:
+    match p:
+        case Point(x=a, y=b):
+            return a + b
+
+def main():
+    let p = Point(x=1, y=2)
+    print(norm(p) + p.x)

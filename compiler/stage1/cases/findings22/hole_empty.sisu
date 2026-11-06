@@ -1,0 +1,17 @@
+# The hole report of a struct without fields and an enum without variants
+# (RULES.md, R181, amended by R185's round): `cli.hole-struct-empty` and
+# `cli.hole-enum-empty`.
+struct Marker:
+    pass
+
+enum Void:
+    pass
+
+def make() -> Marker:
+    return todo()
+
+def nothing() -> Void:
+    return todo()
+
+def main():
+    pass

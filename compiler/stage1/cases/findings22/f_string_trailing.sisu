@@ -1,0 +1,6 @@
+# E0117 names a kind of token without an article (RULES.md, R191):
+# "unexpected string after the end of the statement".
+def main():
+    let n = 1
+    let s = f"n is {n}"
+    print(s)

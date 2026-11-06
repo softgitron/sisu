@@ -1,0 +1,22 @@
+# `explain-borrow` and `query explain` (RULES.md, R187): every borrow live
+# on a line, with where it starts, who holds it and where it is last used.
+struct Point:
+    x: int
+    y: int
+
+def longest(a: ref str, b: ref str) -> ref str from a, b:
+    if len(a) > len(b):
+        return a
+    return b
+
+def main():
+    var xs = [1, 2, 3]
+    let first = ref xs[0]
+    let total = first + 1
+    var p = Point(x=1, y=2)
+    let q = ref mut p
+    q.x += 1
+    let s = "hello".to_string()
+    let t = "hi".to_string()
+    let l = longest(s, t)
+    print("{total} {l} {p.x}")
