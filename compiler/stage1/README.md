@@ -350,13 +350,14 @@ thirteen on a quiet machine, and the formatter's classes add about five
 
 ## Results
 
-The twenty-fourth round's run (`SISU_FRONT_END=rust SISU_LOWER=rust`, at
-a load of about 4 on four cores, 12 minutes) ended `total: 15947 files
-checked, 14079 identical, 1868 differing (1868 listed in RULES.md or
-DISCREPANCIES.md, 0 not)`, with `served` 11 request files and `fix` 4
-files as expected, `expected` 193 files, `behaviour` 371 programs (370 as
-expected, 351 natively too, 1 refused as listed) and `fixed-sir`
-identical. The run below is an earlier
+The twenty-fifth round's run (`SISU_FRONT_END=rust SISU_LOWER=rust`, at
+a load of about 4 on four cores, 13 minutes) ended `total: 16111 files
+checked, 14214 identical, 1897 differing (1897 listed in RULES.md or
+DISCREPANCIES.md, 0 not)`, with `served` 12 request files and `fix` 4
+files as expected, `expected` 198 files, `behaviour` 378 programs (377 as
+expected, 358 natively too, 1 refused as listed) and `fixed-sir`
+identical. The twenty-fourth round's ended `total: 15947 files checked,
+14079 identical, 1868 differing (1868 listed ..., 0 not)`. The run below is an earlier
 round's, kept for its breakdown of the classes.
 
 `./check.sh --native --names --types --sir` (`--native` implies `--self` and
@@ -3982,6 +3983,15 @@ the skeleton a binary search a character over the 5,147 records. A
 program of all 1,187 lines of `GraphemeBreakTest.txt`, built natively,
 runs in 0.017 s, and `Zone.named` reads its zone's line of the history
 once per call.
+
+The twenty-fifth round's additions cost nothing a check notices,
+natively as processes at a load of about 1 (three runs each): `check` of
+`cases/findings25/no_alloc_kept.sisu` 0.26 to 0.28 s after the first
+run, as the same program without its `@no_alloc` (0.27 to 0.29 s), the
+pass walking the calls of one function into the standard library once,
+each function's answer kept; `sir --tests --cover` of `cover.sisu` 0.26
+to 0.28 s against `sir --tests`'s 0.27 to 0.32 s, the table one parse of
+each module and a read of the SIR's text.
 
 ### The compile-time evaluator
 

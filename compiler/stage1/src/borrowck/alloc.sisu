@@ -13,7 +13,7 @@
 ##! to allocate"). The paths that only end in a panic, and the cleanup
 ##! that drops on the way out, are exempt (04: "Panic paths are exempt").
 
-from stage1.borrowck.finding import Finding, FindingParam, text
+from stage1.borrowck.finding import Finding, text
 from stage1.borrowck.types import Types
 from stage1.diag import Msg
 from stage1.sir import (
@@ -24,7 +24,6 @@ from stage1.sir import (
     FnKind,
     Function,
     Loc,
-    Operand,
     Program,
     Rvalue,
     Statement,

@@ -10910,7 +10910,10 @@ refuses) and `typeck.collect` (`Program.refused_fixtures`).
 that takes something and a number. `cases/findings23/fixture_errors.diag`
 is blessed again without its `E0702`. The Rust front end reads the same
 catalog, so its words of `E0702` change too, and it answers a fixture's
-parameter with `E0702` as before.
+parameter with `E0702` as before, and writes the case's pages, where
+stage 1 refuses them for its `E0281`.
+
+- Differs: `compiler/stage1/cases/findings25/test_params.sisu`: ids, human, doc, doc-output
 
 **Decision 1181**, for docs/architecture.md:
 
@@ -10943,7 +10946,7 @@ under test, as its contract test calls it.
 (its `.out` and `.tests`): a `check` with `requires` and `ensures`,
 whose contract test passes. The Rust front end reports the `E0305`.
 
-- Differs: `compiler/stage1/cases/findings25/check_shadowed.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings25/check_shadowed.sisu`: ids, human, doc, doc-output
 
 **Decision 1182**, for docs/architecture.md:
 
@@ -10996,8 +10999,14 @@ manual's to run, since the page's blocks are grammar, not Sisu.
 **In stage 1.** The `##!` comments of `parser.items` and `parser.types`.
 
 **What it changes.** No output of the corpus.
-`cases/findings23/served.answers` is blessed again with the new text. The
-new cases' outputs are stage 0's.
+`cases/findings23/served.answers` is blessed again with the new text.
+Where the new cases differ from the Rust front end it is under earlier
+rules: `grammar_forms.sisu`'s trait constant, which R37 gives a trait,
+is in its AST and its page, and `grammar_attribute.sisu`'s `@lint.allow`
+is R30's `W0022`.
+
+- Differs: `compiler/stage1/cases/findings25/grammar_forms.sisu`: ast, doc, doc-output
+- Differs: `compiler/stage1/cases/findings25/grammar_attribute.sisu`: names, ids, human
 
 **Decision 1183**, for docs/architecture.md:
 
@@ -11277,7 +11286,7 @@ without it `asks.requests` asks for, and `fixture_sync.sisu` (its
 `@fixture`, and answers both cases' fixtures with `E0702`.
 
 - Differs: `compiler/stage1/cases/findings25/module_fixtures.sisu`: ids, human
-- Differs: `compiler/stage1/cases/findings25/fixture_sync.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings25/fixture_sync.sisu`: ids, human, doc, doc-output
 
 **Decision 1188**, for docs/architecture.md:
 
