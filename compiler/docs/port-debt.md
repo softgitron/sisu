@@ -309,14 +309,18 @@ interpreter and natively (decision 209); there is no event loop, and a
 host socket is closed only by `close` (dropping a `Conn` does not). *Pay*: an event loop (`epoll` or `kqueue`) behind the
 host contract, and a `Drop` for the host's streams.
 
-**`Slice` is a copy, and not `Copy`.** A `Slice[T]` is a list of copies
-of the values it views (like `str`), so making one costs a copy, and it
-is passed by reference because an intrinsic cannot point into a value
-passed to it by value. In the interpreter its pointer from `as_ptr`
+**`Slice` is a copy in the interpreter, and not `Copy`.** A `Slice[T]` is
+a list of copies of the values it views (like `str`), so making one costs
+a copy, and it is passed by reference because an intrinsic cannot point
+into a value passed to it by value; its drop drops none of the copies
+(decision 940). In the interpreter its pointer from `as_ptr`
 views the list or the `bytes` `as_slice` made it from (decision 823), a
 record of the place the slice was stored in, so only that pointer views
-in place, not its references from `Slice.at`. *Pay*: a view is a pointer
-and a length in the backend, and then `Copy`, as `str` is.
+in place, not its references from `Slice.at`. Natively a slice of a list
+views it in place (decision 940), and a slice of `bytes` is still a copy,
+a word a byte. *Pay*: the interpreter's slice a view of its list's
+values, and then `Copy`, as `str` is; natively the packed layout of
+"Foreign calls" below.
 
 **A method's type is read from its name.** The must-consume rule (a
 type's own methods are where its values end) recognises a method by its
@@ -678,7 +682,9 @@ What the driver does around stage 1, because of what its commands are:
   end's `check` 55 ms, and the conformance suite takes about three times
   as long through stage 1 (decision 268).
   *Pay*: what the memo is for the Rust front end ("The memo is not kept
-  between commands" above), for stage 1: its base kept between commands.
+  between commands" above), for stage 1: its base kept between commands,
+  which stage 1's `sir --repl-serve` serves from 0.13.0 (its R158) and the
+  driver is to keep one server of it for each working directory (decision 942).
 - **Tests and benchmarks from stage 1's SIR** (decision 357): `sisu test`
   and `sisu bench` ask stage 1 for `sir --tests` and run its SIR, with the
   program's files for its replay tokens, snapshots and test cache; stage 1
@@ -777,10 +783,10 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   import, a `@repr(c)` struct by value at the boundary (its System V
   classification, an `INTEGER` or `SSE` eightbyte each or memory, in
   both lowerings byte-identically, and AArch64's), a `Slice[u8]` and a
-  `list[u8]` laid out a byte an element (D-086's layouts per type), and a
-  native slice that views what it was made from in place where it holds a
-  copy now (decision 901), after which `CString.as_ptr()` is valid
-  natively (decision 823); the
+  `list[u8]` laid out a byte an element (D-086's layouts per type), so
+  that a slice views `bytes` in place as it views a list since decision
+  940, after which `CString.as_ptr()` is valid natively (decision 823;
+  what is left is decision 941's); the
   runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,

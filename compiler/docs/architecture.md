@@ -2077,8 +2077,9 @@ not seen as overlapping by the monitor (each offset is a place of its
 own); memory still held at the end of a run is not reported; a `Slice` is
 a copy in stage 0 (port-debt.md), whose pointer from `as_ptr` views the
 list or the `bytes` that `as_slice` made it from, where they are, so that
-it is valid while they live (decision 823), where natively it points into
-the copy and dangles with it, and `mem.slice.as_ptr` of a `u8` is refused;
+it is valid while they live (decision 823), as natively a slice of a list
+views it (decision 940), where a slice of `bytes` points into a copy and
+dangles with it, and `mem.slice.as_ptr` of a `u8` is refused;
 and compile-time evaluation runs on the Rust front end's comptime, which
 does not read std.mem.
 
@@ -3363,7 +3364,8 @@ where the parts are:
 | `bool`, `char` | 1 | 0 or 1; the code point |
 | `str` | 2 | the address of the UTF-8 bytes, their length |
 | `String`, `Path`, `bytes` | 3 | a heap buffer, the length and the capacity in bytes (decision 208) |
-| `list[T]`, `Array[T, N]`, `Slice[T]` | 3 | a heap buffer of elements, the length and the capacity in elements |
+| `list[T]`, `Array[T, N]` | 3 | a heap buffer of elements, the length and the capacity in elements |
+| `Slice[T]` | 3 | the address of the first element it views in place, their number, and 0 (decision 940); a slice of `bytes` holds copies of them, a word each, in a buffer of its own, whose capacity is the third word |
 | `ref T`, `ref mut T` | 1 | the address of the value |
 | `dyn Trait` | 2 | the number of the type of the value it holds, and the address of a heap cell holding the value, which the `dyn` owns |
 | `ref dyn Trait` | 2 | the same two words, borrowed: the address is of the value the `dyn` holds |
@@ -3635,7 +3637,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780, 784, 820, 821, 902 and 903). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780, 784, 820, 821, 902, 903 and 940). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3665,7 +3667,7 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
-| the intrinsics of lists, dicts, sets and slices, the lookups by a `str` among them (decision 784), the thirteen that make an iterator or take every item of one (`range`, `enumerate`, `zip`, `zip_shortest`, `reversed`, `iterable_list`, `sorted`, `any`, `all`, `iter.ref`, `iter.mut`, `iter.own`, `Iter.of`; decision 820), and `sum` (decision 903), their descriptors decoded (`sisu_rt_collection`, the first six words read once, decision 862, an argument's place found without a call, decision 902), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups and removals, the five by a `str` among them (`sisu_rt_table_literal`, `_inline_find`, `_inline_take`; decision 861) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625, 646 and 820) |
+| the intrinsics of lists, dicts, sets and slices (a slice of a list a view of it in place, decision 940), the lookups by a `str` among them (decision 784), the thirteen that make an iterator or take every item of one (`range`, `enumerate`, `zip`, `zip_shortest`, `reversed`, `iterable_list`, `sorted`, `any`, `all`, `iter.ref`, `iter.mut`, `iter.own`, `Iter.of`; decision 820), and `sum` (decision 903), their descriptors decoded (`sisu_rt_collection`, the first six words read once, decision 862, an argument's place found without a call, decision 902), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups and removals, the five by a `str` among them (`sisu_rt_table_literal`, `_inline_find`, `_inline_take`; decision 861) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625, 646 and 820) |
 | the scheduler's queues: the run queue, the waiters under their keys and the timers (`sisu_rt_queue_*`) | `queue.sisu` over `list.sisu` | the runtime in Rust's scheduler (`sched.rs`), which keeps their addresses (decision 645) |
 | the channels' buffers: the values sent and not received, in a ring of slots of the value's size (`sisu_rt_channel_*`) | `channel.sisu` | the runtime in Rust's channels (`tasks.rs`, `queue::ChanBuf`), which keep their addresses (decision 680) |
 | the scheduler's seeded generator and, under the default strategy, the choice of the next task (`sisu_rt_draw_*`) | `draw.sisu` over `queue.sisu` | the runtime in Rust's scheduler, `select` and the faults of `sim` (`queue::Rng`), which keep the generator's word (decision 724) |
@@ -3856,7 +3858,8 @@ other sizes with the interpreter's panic; `read_plain` reads from bytes at
 any alignment; `view_plain` gives the bytes in place, or, for a type laid
 out otherwise in a value, a copy as a value that is freed with the bytes it
 views (`views.rs`, decision 214); and `slice_from_raw` copies the values
-into a new slice, which is what a `Slice` is in stage 0.
+into a new slice that owns them, as a slice of `bytes` does; a slice of a
+list views it in place (decision 940).
 
 A place of the program holds its value as a value is laid out, and a
 reference is read so, so a pointer to a place (`ptr.of`, `ptr.of_mut`, a
@@ -11182,3 +11185,123 @@ intrinsics"; D-085, D-086; 12, 17, 22; decisions 686, 726, 787, 820, 823,
 887. The conformance suite's `unsafe/export_by_pointer` differs from stage
      0's front end as the other cases of `unsafe/` do (R4). Stage 1
      decides it (RULES.md, R157).
+
+**Stage 0's seventeenth round: slices that view in place, one module's
+benchmarks, a native executable's sizes explained, and what was left**
+(sections "Stage 2: the native backend", "Values", "The runtime in Sisu",
+"The checked memory model"; D-085, D-086; 10, 12, 17, 22; decisions 214,
+225, 682, 823, 864, 900, 901, 903 and 904; stage 1's R142 and R158)
+
+940. A native `Slice[T]` views the list it was made from in place: three
+     words, the address of the first element it views, their number, and
+     a capacity of 0, which marks a view and whose drop frees nothing and
+     drops nothing (as decision 214's views of `*rest` mark theirs), where
+     it was a copy of every element in a list of its own. Its type has a
+     kind of its own in the type table (`abi::Kind::Slice`, code 47), laid
+     out and encoded alike by both lowerings (`sisu-codegen`'s
+     `layout.rs`, stage 2's `layout.sisu` and `abi.sisu`), so the SIR and
+     LIR paths give the same bytes; equality, order, the hash, `Debug`,
+     `in`, `len`, an iterator's references and `as_ptr` read it as a
+     list, in the runtime in Rust and the runtime in Sisu
+     (`value.sisu`, `show.sisu`, `iter.sisu`, `dispatch.sisu`), and its
+     copy copies its words. `list.as_slice`, `Slice.slice` and
+     `Slice.cut` make views (`dispatch.view_of`), and `Slice.to_list` a
+     list of copies of what the slice views. A slice of `bytes`
+     (`bytes.as_slice`, `mem.slice_from_raw`) is still a copy, a word a
+     byte, in a buffer it owns, whose capacity is not 0, since a view of
+     packed bytes needs decision 941's layout. In the interpreter, whose
+     slice stays a list of copies with its pointer from `as_ptr` viewing
+     the source (decision 823), dropping a slice drops none of the copies
+     (`drops.rs`), as SIR's `drops_something` has said of a `Slice` all
+     along, where a slice of values with a `Drop` ran it for each copy:
+     the checker keeps a view from outliving its list, so nothing a slice
+     holds is the slice's to drop. `std/slices` holds the views to the
+     interpreter's output (two slices of one list have one address, a
+     slice of a slice, a slice handed to a function and back, `iter`,
+     `contains`, `is_sorted`, a slice of `String`s and of values with a
+     `Drop` made and dropped in a loop, a slice of `bytes`), in
+     `native.list`, with no allocation left. 2 000 slices of a list of
+     1 000 `String`s, each cut and read at its ends, take 13.96 million
+     instructions natively where they took 3 572.1 million (callgrind,
+     the release profile), the copies of the `String`s gone. The runtime
+     in Sisu is 7 513 lines where it was 7 483, its seed 777 695 bytes
+     where it was 772 518, and its object 884 584 where it was 879 872
+     (`target/rt/rt.o`), and as the fixed point builds it with the Sisu
+     backend 1 546 336 where it was 1 535 712; the fixed point holds (rt-A.o
+     and rt-B.o the same bytes, as sisu2-A and sisu2-B, 31 127 928, and
+     stage1-A and stage1-B, 64 081 192). This changes no rule of the language.
+
+941. The packed layout of `list[u8]`, `Slice[u8]` and `bytes` viewed as a
+     slice is not this round's, so a native `CString.as_ptr()` stays
+     refused (`unsafe/cstring` out of `native.list`) and so does a pointer
+     to a struct with an `i32` or a `u8` field (`D0103`, decision 864):
+     with 940 a slice views a list in place, but `bytes` are a byte each
+     and a `Slice[u8]` a word each, so `bytes.as_slice()`, which
+     `CString.as_ptr()` calls, still copies. A byte an element is not the
+     element's size alone: `s[i]` and `Slice.at` give a `ref u8` into the
+     buffer, which every read of a `u8` through a reference reads as a
+     word, so a packed element is a `u8` laid out a byte wherever it is
+     reached in memory, the reads and writes through references in both
+     lowerings, the walks of `value.sisu` and `show.sisu` and the
+     runtime in Rust's conversions, which is D-086's per-type layout of a
+     `u8` and of the narrow fields together, the round of its own that
+     port-debt.md describes. This changes no rule of the language.
+
+942. The driver keeps no server of stage 1 for the ordinary commands this
+     round: stage 1's eighteenth round gives `sir --repl-serve` every
+     `sir`, `check`, `parse`, `fmt`, `lint`, `doc` and `tokens` request
+     with its `--dir` (its R158, `sisu1 0.13.0`, decision 920) in its own
+     tree, and the stage 1 of this one is 0.12.0. A server that outlives
+     the command that started it also needs what the driver does not
+     have: the server answers on its standard streams, which only the
+     process that started it holds, so the driver is to start, per
+     working directory, a process of its own that holds the server and
+     answers the commands over a socket under `target/stage1/` (a lock
+     beside it so that one starts), ends after some minutes idle and when
+     `sisu1`'s stamp changes (R158's `stale`, after which the command is
+     sent again), and is left alone under `SISU_STAGE1_SERVE=0`; R158
+     measures a two-line `check` at 0.009 s served where it is 0.22 s as
+     a process. This changes no rule of the language.
+
+943. `sisu bench src/MODULE.sisu` of a module of a package runs the
+     benchmarks that module declares, the package compiled as `sisu bench`
+     compiles it, as `sisu test` of one runs its tests (decision 900),
+     where it compiled the file alone, as `sisu test` of one did before
+     900: the driver asks stage 1 for the package's `sir --tests
+     --modules` and keeps the `bench` lines whose ` in "FILE"` is the
+     module's path from the package's root (`keep_module_benches`, by
+     `sisu_sir::read::bench_files`), and stage 0's SIR reader reads the
+     words on a `bench` line as on a `test` line. The times differ from
+     run to run, so the driver's test
+     `one_modules_benchmarks_run_with_its_package` holds the names and
+     the count rather than a case's output. This changes no rule of the
+     language.
+
+944. `sisu build --native --explain-size` prints, after the `built` line,
+     the executable's size (`D0139`) and its parts (`D0140` to `D0146`):
+     the program's own code (the functions the backend named, the
+     standard library's instances among them, and the C `main`), the
+     runtime in Sisu's (the functions its object `target/rt/rt.o`
+     defines), the runtime in Rust's (its crate's), Rust's standard
+     library's and the rest of the code, the debug information (the
+     `.debug_*` sections), the symbols (the symbol table and its names),
+     and the data, the unwinding tables and the headers, which add up to
+     the file's size, each with its share; the driver reads them from the
+     linked file and the object (`size.rs`, a reader of 64-bit ELF), as
+     decision 682 measured them. The option goes with `--native`
+     (`D0148`), and a file that is not such an executable is `D0147`; it
+     was `D0009` (10, "Binary size"; the manual's "Tooling" finding). A
+     two-line program's executable, the release driver, is 6 319 272
+     bytes: 1 106 of its own code, 526 944 of the runtime in Sisu's,
+     469 303 of the runtime in Rust's, 365 734 of the rest, 4 089 520 of
+     debug information, 435 634 of symbols and 431 031 of the rest. The
+     driver's test `explain_size_gives_the_parts_of_the_executable` holds
+     the form in both profiles (the lines, their order, the parts adding
+     up to the size), not the numbers, which change with the runtime.
+     This changes no rule of the language.
+
+945. The formatting, characters', floats', texts' and bytes' families of
+     the intrinsics (decision 863) stay the runtime in Rust's this round,
+     264 of the 328 decoded there: the round spent its time on 940, 943
+     and 944, and each family moves with its panics' messages, as `sum`
+     did (decision 903). This changes no rule of the language.
