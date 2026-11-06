@@ -37,6 +37,18 @@ pub use write::write;
 
 pub const VERSION: u32 = 0;
 
+/// A fixture a test takes (17; stage 1's R219, decision 1202): its name,
+/// the function that makes its value, and, for one with
+/// `scope="module"`, the parameter of the test's function that receives
+/// the module's value as a `ref T`; a test's own fixture (none) its body
+/// makes and drops.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestFixture {
+    pub name: String,
+    pub function: String,
+    pub module: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     pub sources: Vec<String>,
@@ -64,6 +76,11 @@ pub struct Program {
     /// Each test's `@tag`s, in the order written, by the test's place in
     /// `tests` (a test past its end has none; decision 285).
     pub test_tags: Vec<Vec<String>>,
+    /// Each test's fixtures, in the order of its parameters, by the test's
+    /// place in `tests` (a test past its end has none): the groups
+    /// `fixture NAME FUNCTION test|module K` of `sir --tests
+    /// --module-fixtures` (stage 1's R219; decision 1202).
+    pub test_fixtures: Vec<Vec<TestFixture>>,
     /// Benchmark name and the function that runs it (decision 285).
     pub benches: Vec<(String, String)>,
     /// The trait methods called through `call trait`, with the facts the

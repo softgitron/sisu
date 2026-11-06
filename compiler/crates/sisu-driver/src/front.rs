@@ -635,6 +635,12 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= DIGESTS_SINCE)
     }
 
+    /// Whether this stage 1 has `sir --tests --module-fixtures` (its
+    /// R219): `sisu1 0.20.0` and later (decision 1202).
+    pub fn module_fixtures(&self) -> bool {
+        self.version().is_some_and(|v| v >= FIXTURES_SINCE)
+    }
+
     /// The environment a run of stage 1 gets: none of the runtime's or the
     /// driver's own switches, the lowering and backend the command chose,
     /// and the working directory as the shell's `PWD`.
@@ -1401,6 +1407,11 @@ const BUILDS_SINCE: (u32, u32, u32) = (0, 18, 0);
 /// writes the mutants of `sisu test --mutate` (its R208), served
 /// (decisions 1201 and 1203).
 const DIGESTS_SINCE: (u32, u32, u32) = (0, 19, 0);
+
+/// The version whose `sir --tests --module-fixtures` names each test's
+/// fixtures on its line and gives a module's as a `ref T` parameter (its
+/// R219; decision 1202).
+const FIXTURES_SINCE: (u32, u32, u32) = (0, 20, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.

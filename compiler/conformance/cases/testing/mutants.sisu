@@ -1,0 +1,28 @@
+# `sisu test --mutate` (17, "Coverage and mutation"; decision 1201): stage
+# 1's mutants of the program (its R208), each run against the tests; the
+# negation, `False` made `True` and the removed `sum += x` are killed, and
+# the four that survive are printed by their places as suggestions. The
+# call of `print` is arid and the test is not mutated.
+# select --mutate
+def clamp(n: int, high: int) -> int:
+    print("clamping {n < 0}")
+    if n > high:
+        return high
+    return n + 0
+
+def warm(degrees: int) -> bool:
+    return degrees >= 60 and not False
+
+def total(xs: list[int]) -> int:
+    var sum = 0
+    for x in xs:
+        sum += x
+    return sum
+
+test "clamps":
+    assert clamp(5, 3) == 3
+    assert warm(80)
+    assert total([1, 2]) == 3
+
+def main():
+    print(clamp(2, 9))

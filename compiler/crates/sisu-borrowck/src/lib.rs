@@ -288,6 +288,7 @@ pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCac
         functions,
         tests: p.tests.clone(),
         test_tags: p.test_tags.clone(),
+        test_fixtures: p.test_fixtures.clone(),
         benches: p.benches.clone(),
         trait_methods: p.trait_methods.clone(),
         impls: p.impls.clone(),

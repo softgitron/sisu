@@ -295,6 +295,7 @@ fn sample() -> Program {
         ],
         tests: vec![("a test".into(), "main".into())],
         test_tags: vec![vec!["slow".into(), "net io".into()]],
+        test_fixtures: Vec::new(),
         benches: vec![("a bench".into(), "main".into())],
         trait_methods: vec![IntrinsicDecl {
             name: "Display.fmt".into(),

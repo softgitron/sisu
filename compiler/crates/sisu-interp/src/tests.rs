@@ -334,3 +334,69 @@ fn dicts_keep_insertion_order() {
     assert_eq!(d.position(&Key::Text("c".into())), Some(1));
     assert!(matches!(d.entries[0].1, Value::Int(20)));
 }
+
+/// A module's fixture (stage 1's R219; decision 1202): the tests that name
+/// it share one value, made before the first of them and dropped, by its
+/// glue, after the last; each receives a `ref` to it, and a test that
+/// names no fixture runs alone.
+#[test]
+fn a_modules_fixture_is_made_once_for_its_tests() {
+    let reader = |name: &str| {
+        format!(
+            "fn {name}(1) test source 0 {{
+    let _0: ()
+    let _1: ref Noisy \"n\"
+    let _2: String
+    let _3: ref mut String
+    let _4: ()
+    let _5: ref String
+  bb0:
+    _2 = call intrinsic fmt.new()
+    _3 = ref mut _2
+    _4 = call intrinsic fmt.text(copy _3, const \"seen \")
+    _4 = call intrinsic fmt.display(copy _3, copy _1.*.0, const \"\")
+    _5 = ref _2
+    _4 = call intrinsic print(copy _5)
+    _0 = const ()
+    return
+}}
+"
+        )
+    };
+    let text = format!(
+        "{NOISY}
+fn fresh(0) source 0 {{
+    let _0: Noisy
+    let _1: ()
+  bb0:
+    _1 = call intrinsic print(const \"made\")
+    _0 = struct Noisy(const 7)
+    return
+}}
+
+{}
+{}
+fn alone(0) test source 0 {{
+    let _0: ()
+  bb0:
+    _0 = const ()
+    return
+}}
+",
+        reader("t#0"),
+        reader("t#1")
+    )
+    .replacen(
+        "entry main\n",
+        "test \"first\" t#0 fixture n fresh module 0\ntest \"alone\" alone\ntest \"second\" t#1 fixture n fresh module 0\n",
+        1,
+    );
+    let p = program(&text);
+    assert_eq!(p.test_fixtures[0][0].module, Some(0));
+    assert_eq!(sir::read(&sir::write(&p)).map(|q| q.test_fixtures).ok(), Some(p.test_fixtures.clone()));
+    let mut host = TestHost::default();
+    let results = run_tests_report_at(&p, &mut host, &Options::default(), &[0, 1, 2]);
+    let outs: Vec<(&str, &str)> = results.iter().map(|(n, _, r)| (n.as_str(), r.out.as_str())).collect();
+    assert_eq!(outs, vec![("first", "made\nseen 7\n"), ("alone", ""), ("second", "seen 7\ndrop 7\n")]);
+    assert!(results.iter().all(|(_, r, _)| matches!(r, TestResult::Passed)), "{results:?}");
+}

@@ -28,6 +28,16 @@ pub fn write(p: &Program) -> String {
     }
     for (k, (name, f)) in p.tests.iter().enumerate() {
         let _ = write!(out, "test {} {f}", quote(name));
+        for x in p.test_fixtures.get(k).into_iter().flatten() {
+            match x.module {
+                Some(k) => {
+                    let _ = write!(out, " fixture {} {} module {k}", x.name, x.function);
+                }
+                None => {
+                    let _ = write!(out, " fixture {} {} test", x.name, x.function);
+                }
+            }
+        }
         // The test's `@tag`s, when it has any (decision 285).
         if let Some(tags) = p.test_tags.get(k).filter(|t| !t.is_empty()) {
             out.push_str(" tags");

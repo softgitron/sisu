@@ -557,6 +557,7 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
         functions: Vec::new(),
         tests: Vec::new(),
         test_tags: Vec::new(),
+        test_fixtures: Vec::new(),
         benches: Vec::new(),
         trait_methods: Vec::new(),
         impls: Vec::new(),
@@ -623,6 +624,24 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                 // writes (stage 1's R142; decision 900): `test_files` reads it.
                 if c.eat("in ") {
                     c.string()?;
+                }
+                // Its fixtures (stage 1's R219; decision 1202).
+                let mut fixtures = Vec::new();
+                while c.eat("fixture ") {
+                    let name = c.name()?;
+                    let function = c.name()?;
+                    let module = if c.eat("module ") {
+                        Some(c.uint()?)
+                    } else if c.eat("test") {
+                        None
+                    } else {
+                        return Err(format!("expected `test` or `module K`, found `{}`", c.rest()));
+                    };
+                    fixtures.push(TestFixture { name, function, module });
+                }
+                if !fixtures.is_empty() {
+                    p.test_fixtures.resize(p.tests.len(), Vec::new());
+                    p.test_fixtures.push(fixtures);
                 }
                 let mut tags = Vec::new();
                 if c.eat("tags") {

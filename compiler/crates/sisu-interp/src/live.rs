@@ -246,6 +246,7 @@ impl<'p> Interp<'p, '_> {
             functions: Vec::new(),
             tests: old.tests.clone(),
             test_tags: old.test_tags.clone(),
+            test_fixtures: old.test_fixtures.clone(),
             benches: old.benches.clone(),
             trait_methods: old.trait_methods.clone(),
             impls: old.impls.clone(),

@@ -67,6 +67,13 @@ pub trait Host: Send {
     fn sleep_nanos(&mut self, nanos: u64) {
         std::thread::sleep(std::time::Duration::from_nanos(nanos));
     }
+    /// What a host that holds a test's output (the test runner's) has
+    /// held since it was last asked, standard output and error, taken: a
+    /// module's tests that share a fixture's value run in one interpreter,
+    /// and each keeps its own (decision 1202).
+    fn take_held(&mut self) -> (String, String) {
+        (String::new(), String::new())
+    }
     /// A file's or directory's size in bytes, time of last change in
     /// nanoseconds since the epoch, and whether it is a directory.
     fn metadata(&self, _path: &str) -> Result<(i64, i64, bool), IoErrorKind> {

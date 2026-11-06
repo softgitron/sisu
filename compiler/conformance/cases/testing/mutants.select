@@ -1,0 +1,7 @@
+test "clamps" ... ok (cached)
+1 passed, 0 failed, 0 blocked
+mutants.sisu:9:10: a mutant survived, the boundary changed: `>` to `>=`: every test passes against it, so no test tells the two apart
+mutants.sisu:11:14: a mutant survived, the operator flipped: `+` to `-`: every test passes against it, so no test tells the two apart
+mutants.sisu:14:20: a mutant survived, the boundary changed: `>=` to `>`: every test passes against it, so no test tells the two apart
+mutants.sisu:14:26: a mutant survived, the operator flipped: `and` to `or`: every test passes against it, so no test tells the two apart
+mutants: 7 run against the tests, 3 killed and 4 survived

@@ -172,6 +172,7 @@ pub fn key(prog: &Program, index: usize, salt: &str) -> Option<u64> {
         functions: Vec::new(),
         tests: Vec::new(),
         test_tags: Vec::new(),
+        test_fixtures: Vec::new(),
         benches: Vec::new(),
         trait_methods: prog.trait_methods.clone(),
         impls: prog.impls.clone(),

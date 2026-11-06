@@ -532,6 +532,14 @@ impl<'p, 'h> Interp<'p, 'h> {
     }
 
     pub fn run_test(&mut self, function: &str) -> TestResult {
+        self.run_test_given(function, &[])
+    }
+
+    /// Runs a test whose function takes these values at these parameters,
+    /// counted from 0 among its parameters (a module's fixtures, stage 1's
+    /// R219; decision 1202), its other parameters given as [`run_test`]
+    /// gives them.
+    pub(crate) fn run_test_given(&mut self, function: &str, given: &[(u32, Value)]) -> TestResult {
         let Ok(fi) = self.fn_index(function) else {
             return TestResult::Failed(format!(
                 "internal error in the interpreter: no function `{function}`"
@@ -550,7 +558,7 @@ impl<'p, 'h> Interp<'p, 'h> {
         let takes_system = self.func(fi).is_some_and(sir::takes_real_system);
         let named = self.func(fi).map_or(0, |f| f.param_count);
         let args = if !takes_system && named > 0 {
-            match self.test_fakes(fi) {
+            match self.test_fakes(fi, given) {
                 Ok(args) => args,
                 Err(Unwind::Panic(p)) => return TestResult::Failed(panic_report(&p)),
                 Err(Unwind::Abort(m)) => return TestResult::Failed(m),
@@ -599,15 +607,22 @@ impl<'p> Interp<'p, '_> {
     /// The fakes a test that names capabilities receives, one per
     /// parameter, from a fresh `System.fake` (a `System.sim` in the `sim`
     /// profile), a fake network and the run's test clock (decision 241).
-    fn test_fakes(&mut self, fi: usize) -> Result<Vec<Value>, Unwind> {
+    fn test_fakes(&mut self, fi: usize, given: &[(u32, Value)]) -> Result<Vec<Value>, Unwind> {
         let Some(f) = self.func(fi) else { return Ok(Vec::new()) };
+        if given.len() == f.param_count as usize {
+            return Ok(given.iter().map(|(_, v)| v.clone()).collect());
+        }
         let maker = if self.sim.is_some() { "System.sim" } else { "System.fake" };
         let mut fields = match self.call_by_name(maker, vec![Value::Int(self.case_seed as i64)])? {
             Value::Struct(a) => a.fields,
             other => return Err(ice(format!("{maker} made {other:?}"))),
         };
         let mut args = Vec::new();
-        for l in f.locals.iter().skip(1).take(f.param_count as usize) {
+        for (k, l) in f.locals.iter().skip(1).take(f.param_count as usize).enumerate() {
+            if let Some((_, v)) = given.iter().find(|(at, _)| *at as usize == k) {
+                args.push(v.clone());
+                continue;
+            }
             let name = match &l.ty {
                 sir::Type::Named(n, _) => n.as_str(),
                 _ => "",
@@ -625,6 +640,66 @@ impl<'p> Interp<'p, '_> {
             args.push(v);
         }
         Ok(args)
+    }
+
+    /// A module's fixture (17; stage 1's R219, decision 1202): its
+    /// function called, the value kept in a cell of the heap for the
+    /// tests that read it, which each receive [`Interp::fixture_ref`]; or
+    /// the failure of the call, which fails the test that needed it.
+    pub(crate) fn module_fixture(&mut self, function: &str) -> Result<u32, TestResult> {
+        let failed = |u: Unwind| match u {
+            Unwind::Panic(p) => TestResult::Failed(panic_report(&p)),
+            Unwind::Abort(m) => TestResult::Failed(m),
+            _ => TestResult::Failed("a task switch escaped the run loop".into()),
+        };
+        let fi = self.fn_index(function).map_err(failed)?;
+        let value = self.call_fn(fi, Vec::new()).map_err(failed)?;
+        self.serial += 1;
+        let id = self.heap.len() as u32;
+        self.heap.push(value::HeapCell {
+            value,
+            strong: 1,
+            weak: 0,
+            serial: self.serial,
+            atomic: true,
+            creator: self.sched.cur,
+            crossed: false,
+            label: Some(std::rc::Rc::from("fixture")),
+            site: None,
+        });
+        Ok(id)
+    }
+
+    /// A `ref T` to the value of a module's fixture kept at `id`.
+    pub(crate) fn fixture_ref(&self, id: u32) -> Value {
+        let serial = self.heap.get(id as usize).map_or(0, |c| c.serial);
+        Value::Ref(std::rc::Rc::new(value::Pointer {
+            task: 0,
+            frame: value::HEAP,
+            serial,
+            local: id,
+            path: Vec::new(),
+            tag: 0,
+        }))
+    }
+
+    /// Drops the value of a module's fixture after the last test that
+    /// read it, by its type's glue (its `Drop`, then its fields); the
+    /// failure of that drop, if it panicked.
+    pub(crate) fn drop_fixture(&mut self, id: u32) -> Option<String> {
+        let cell = self.heap.get_mut(id as usize)?;
+        cell.strong = 0;
+        let v = std::mem::replace(&mut cell.value, Value::Moved);
+        let glue = match &v {
+            Value::Struct(a) | Value::Variant(a) => self.glue.get(&*a.ty).copied(),
+            _ => None,
+        }?;
+        match self.call_fn(glue, vec![v]) {
+            Ok(_) => None,
+            Err(Unwind::Panic(p)) => Some(panic_report(&p)),
+            Err(Unwind::Abort(m)) => Some(m),
+            Err(_) => Some("a task switch escaped the run loop".into()),
+        }
     }
 
     /// The body at index `i` of the run's function table.

@@ -6,6 +6,12 @@
 //! test that takes no `System` can reach is shared but the host's clock
 //! and output, and each test's output is held and written in declaration
 //! order: a run prints the same at any number of threads.
+//!
+//! The tests that read one value of a module's fixture (stage 1's R219,
+//! decision 1202) run in one interpreter, in turn and in declaration
+//! order, on one thread beside the others: the value is made before the
+//! first of them that names it, each receives a `ref` to it, and it is
+//! dropped after the last, failed or not.
 
 use crate::host::{Host, IoErrorKind, NetFail, Poll};
 use crate::{Interp, Options, RunReport, STACK_BYTES, TestResult, exit, on_big_stack};
@@ -45,6 +51,9 @@ impl Host for Shared<'_, '_> {
     }
     fn stderr(&mut self, text: &str) {
         self.err.push_str(text)
+    }
+    fn take_held(&mut self) -> (String, String) {
+        (std::mem::take(&mut self.out), std::mem::take(&mut self.err))
     }
     fn args(&self) -> Vec<String> {
         self.with(|h| h.args())
@@ -148,6 +157,122 @@ fn run_one(
     (r, report)
 }
 
+/// The module's fixtures a test takes: each fixture's function and the
+/// parameter that receives its value (decision 1202).
+type Fixtures = Vec<(String, u32)>;
+
+/// Runs tests that share the values of a module's fixtures in one
+/// interpreter over `host`, in the order given: each value made before
+/// the first test that names it (its failure that test's), a `ref` to it
+/// given to each, and the value dropped after the last of them, failed or
+/// not (a drop that panics fails that test). Each test's output is its
+/// own; the steps of its report count the group's so far.
+fn run_group(
+    prog: &sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    tests: &[(String, String)],
+    fixtures: &[Fixtures],
+    members: &[usize],
+) -> Vec<(usize, Done)> {
+    let mut last: Vec<(&str, usize)> = Vec::new();
+    for (pos, &k) in members.iter().enumerate() {
+        for (f, _) in &fixtures[k] {
+            match last.iter_mut().find(|(g, _)| *g == f.as_str()) {
+                Some(l) => l.1 = pos,
+                None => last.push((f.as_str(), pos)),
+            }
+        }
+    }
+    let mut i = Interp::new(prog, host, options);
+    let mut made: Vec<(&str, u32)> = Vec::new();
+    let mut out = Vec::new();
+    for (pos, &k) in members.iter().enumerate() {
+        let mut given = Vec::new();
+        let mut failed = None;
+        for (f, param) in &fixtures[k] {
+            let id = match made.iter().find(|(g, _)| *g == f.as_str()) {
+                Some(&(_, id)) => id,
+                None => match i.module_fixture(f) {
+                    Ok(id) => {
+                        made.push((f.as_str(), id));
+                        id
+                    }
+                    Err(r) => {
+                        failed = Some(r);
+                        break;
+                    }
+                },
+            };
+            given.push((*param, i.fixture_ref(id)));
+        }
+        let mut r = match failed {
+            Some(r) => r,
+            None => i.run_test_given(&tests[k].1, &given),
+        };
+        for (f, _) in last.iter().filter(|(_, at)| *at == pos) {
+            let Some(at) = made.iter().position(|(g, _)| g == f) else { continue };
+            let (_, id) = made.remove(at);
+            if let Some(m) = i.drop_fixture(id)
+                && !matches!(r, TestResult::Failed(_))
+            {
+                r = TestResult::Failed(m);
+            }
+        }
+        let status = if matches!(r, TestResult::Passed) { exit::OK } else { exit::ERROR };
+        let report = i.report(status);
+        let (o, e) = i.host.take_held();
+        out.push((k, (r, report, o, e)));
+    }
+    out
+}
+
+/// The units the tests run in: each test alone, but those that share a
+/// module's fixture, joined (in declaration order) with every test that
+/// shares one of theirs.
+fn units(of: &[usize], fixtures: &[Fixtures]) -> Vec<Vec<usize>> {
+    let mut units: Vec<Vec<usize>> = Vec::new();
+    let mut unit_of: Vec<(String, usize)> = Vec::new();
+    for &k in of {
+        if fixtures[k].is_empty() {
+            units.push(vec![k]);
+            continue;
+        }
+        let mut found: Vec<usize> = fixtures[k]
+            .iter()
+            .filter_map(|(f, _)| unit_of.iter().find(|(g, _)| g == f).map(|(_, u)| *u))
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        let u = match found.first() {
+            Some(&u) => u,
+            None => {
+                units.push(Vec::new());
+                units.len() - 1
+            }
+        };
+        for &other in found.iter().skip(1) {
+            let moved = std::mem::take(&mut units[other]);
+            units[u].extend(moved);
+            for entry in unit_of.iter_mut().filter(|(_, v)| *v == other) {
+                entry.1 = u;
+            }
+        }
+        units[u].push(k);
+        for (f, _) in &fixtures[k] {
+            match unit_of.iter_mut().find(|(g, _)| g == f) {
+                Some(entry) => entry.1 = u,
+                None => unit_of.push((f.clone(), u)),
+            }
+        }
+    }
+    for u in &mut units {
+        u.sort_unstable();
+    }
+    units.retain(|u| !u.is_empty());
+    units
+}
+
 /// Whether the test function takes the real `System`, which it gets in
 /// the `sim` profile too (decision 822): it runs alone.
 fn takes_real_system(prog: &sir::Program, function: &str) -> bool {
@@ -163,7 +288,20 @@ pub(crate) fn run(
     which: &[usize],
 ) -> Vec<(String, TestResult, RunReport)> {
     let tests: Vec<(String, String)> = which.iter().filter_map(|i| prog.tests.get(*i).cloned()).collect();
-    let parallel: Vec<usize> = (0..tests.len()).filter(|&k| !takes_real_system(prog, &tests[k].1)).collect();
+    let fixtures: Vec<Fixtures> = which
+        .iter()
+        .filter(|i| prog.tests.get(**i).is_some())
+        .map(|i| {
+            prog.test_fixtures
+                .get(*i)
+                .into_iter()
+                .flatten()
+                .filter_map(|x| Some((x.function.clone(), x.module?)))
+                .collect()
+        })
+        .collect();
+    let alone: Vec<usize> = (0..tests.len()).filter(|&k| !takes_real_system(prog, &tests[k].1)).collect();
+    let parallel = units(&alone, &fixtures);
     let jobs = if options.jobs == 0 { DEFAULT_JOBS } else { options.jobs }.min(parallel.len()).max(1);
     let virtual_time = host.virtual_time();
     let done: Mutex<Vec<Option<Done>>> = Mutex::new(vec![None; tests.len()]);
@@ -174,14 +312,22 @@ pub(crate) fn run(
             for _ in 0..jobs {
                 let worker = || loop {
                     let at = next.fetch_add(1, Ordering::SeqCst);
-                    let Some(&k) = parallel.get(at) else { break };
+                    let Some(unit) = parallel.get(at) else { break };
                     let mut h =
                         Shared { inner: &shared, out: String::new(), err: String::new(), virtual_time };
-                    let (r, report) = run_one(prog, &mut h, options, &tests[k].1);
-                    let slot = (r, report, h.out, h.err);
-                    match done.lock() {
-                        Ok(mut d) => d[k] = Some(slot),
-                        Err(p) => p.into_inner()[k] = Some(slot),
+                    let slots = match unit.as_slice() {
+                        &[k] if fixtures[k].is_empty() => {
+                            let (r, report) = run_one(prog, &mut h, options, &tests[k].1);
+                            vec![(k, (r, report, h.out, h.err))]
+                        }
+                        members => run_group(prog, &mut h, options, &tests, &fixtures, members),
+                    };
+                    let mut d = match done.lock() {
+                        Ok(d) => d,
+                        Err(p) => p.into_inner(),
+                    };
+                    for (k, slot) in slots {
+                        d[k] = Some(slot);
                     }
                 };
                 // A thread that cannot start leaves its share to the others;
@@ -202,10 +348,14 @@ pub(crate) fn run(
     let rest: Vec<usize> = (0..tests.len()).filter(|&k| done[k].is_none()).collect();
     let later: Vec<(usize, Done)> = on_big_stack(host, |host| {
         rest.iter()
-            .map(|&k| {
+            .flat_map(|&k| {
                 let mut h = Held { inner: &mut *host, out: String::new(), err: String::new() };
-                let (r, report) = run_one(prog, &mut h, options, &tests[k].1);
-                (k, (r, report, h.out, h.err))
+                if fixtures[k].is_empty() {
+                    let (r, report) = run_one(prog, &mut h, options, &tests[k].1);
+                    vec![(k, (r, report, h.out, h.err))]
+                } else {
+                    run_group(prog, &mut h, options, &tests, &fixtures, &[k])
+                }
             })
             .collect()
     })
@@ -294,6 +444,9 @@ impl Host for Held<'_> {
     }
     fn stderr(&mut self, text: &str) {
         self.err.push_str(text)
+    }
+    fn take_held(&mut self) -> (String, String) {
+        (std::mem::take(&mut self.out), std::mem::take(&mut self.err))
     }
     fn args(&self) -> Vec<String> {
         self.inner.args()

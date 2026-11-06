@@ -552,6 +552,7 @@ fn lower_reaching(
         functions,
         tests,
         test_tags,
+        test_fixtures: Vec::new(),
         benches,
         trait_methods,
         impls,

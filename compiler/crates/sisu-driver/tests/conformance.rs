@@ -1032,3 +1032,60 @@ fn eval_writes_a_configurations_constants_with_stage_1() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `sisu doc --digest` and `doc --std --digest` are stage 1's from `sisu1
+/// 0.19.0` (its R207, decision 1203), an unknown option on the Rust front
+/// end; `sisu grammar` prints stage 1's grammar from `sisu1 0.18.0` (its
+/// R202, decision 1204), an unknown command on the Rust front end; and
+/// `sisu test --mutate` reports the mutants its tests leave alive (its
+/// R208, decision 1201), refused where it cannot run.
+#[test]
+fn the_digest_the_grammar_and_the_mutants_are_stage_1s() {
+    let dir = std::env::temp_dir().join(format!("sisu-digest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(
+        dir.join("heat.sisu"),
+        "## How hot.\npub def warm(degrees: int) -> bool:\n    return degrees >= 60\n\ntest \"warm\":\n    assert warm(80)\n",
+    )
+    .expect("a module");
+    let sisu = |args: &[&str], front: &str| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .env("SISU_FRONT_END", front)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let (_, err, status) = sisu(&["doc", "--digest", "heat.sisu"], "rust");
+    assert!(err.starts_with("error[D0009]: unknown option `--digest`"), "{err}");
+    assert_eq!(status, Some(2));
+    let (_, err, status) = sisu(&["grammar"], "rust");
+    assert!(err.starts_with("error[D0003]"), "{err}");
+    assert_eq!(status, Some(2));
+    let (_, err, status) = sisu(&["test", "--mutate", "heat.sisu"], "rust");
+    assert!(err.starts_with("error[D0009]: unknown option `--mutate`"), "{err}");
+    assert_eq!(status, Some(2));
+    if !stage1_at_least(&[0, 19, 0]) {
+        return;
+    }
+    let (out, _, status) = sisu(&["doc", "--digest", "heat.sisu"], "stage1");
+    assert!(out.contains("## How hot.\npub def warm(degrees: int) -> bool\n"), "{out}");
+    assert_eq!(status, Some(0));
+    let (out, _, status) = sisu(&["grammar"], "stage1");
+    assert!(out.starts_with("-- Declarations"), "{out}");
+    assert_eq!(status, Some(0));
+    let (out, _, status) = sisu(&["test", "--mutate", "--no-cache", "heat.sisu"], "stage1");
+    assert!(out.contains("heat.sisu:3:20: a mutant survived, the boundary changed: `>=` to `>`"), "{out}");
+    assert!(out.ends_with("mutants: 1 run against the tests, 0 killed and 1 survived\n"), "{out}");
+    assert_eq!(status, Some(0));
+    let (_, err, status) = sisu(&["test", "--since", "HEAD", "heat.sisu"], "stage1");
+    assert!(err.starts_with("error[D0160]"), "{err}");
+    assert_eq!(status, Some(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
