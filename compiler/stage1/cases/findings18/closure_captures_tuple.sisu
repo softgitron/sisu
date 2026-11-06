@@ -1,0 +1,9 @@
+# A closure that captures a value of more than one part is not kept from a
+# `comptime` result: `E0604` names what it captures, and the note what a
+# result keeps of functions (RULES.md, R160).
+def make(p: (int, int)) -> (int) -> int:
+    return own (x: int) -> x + p.0 * p.1
+
+def main():
+    let h = comptime make((2, 3))
+    print(h(2))

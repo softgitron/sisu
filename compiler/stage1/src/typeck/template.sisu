@@ -189,6 +189,8 @@ pub struct FieldShape:
     pub default: bool
     ## Its `##` comment, which a template reads as `f.doc` (RULES.md, R117).
     pub doc: String
+    ## Its attributes, `f.attributes` (RULES.md, R161).
+    pub attrs: list[(String, list[String])]
 
 pub struct VariantShape:
     pub name: String
@@ -196,6 +198,8 @@ pub struct VariantShape:
     pub fields: list[(String?, list[TypeShape])]
     ## Each field's `##` comment, `f.doc` (RULES.md, R129).
     pub docs: list[String]
+    ## The variant's attributes, `v.attributes` (RULES.md, R161).
+    pub attrs: list[(String, list[String])]
 
 impl TypeShape:
     ## A shape that knows only the type's name.
@@ -231,12 +235,18 @@ impl TypeShape:
                     var doc = String.new()
                     if k < len(t.field_docs):
                         doc = t.field_docs[k].copy()
-                    s.fields.push(FieldShape(name=n.copy(), ty=ty, default=default, doc=doc))
+                    var attrs: list[(String, list[String])] = []
+                    if k < len(t.field_attrs):
+                        attrs = t.field_attrs[k].copy()
+                    s.fields.push(
+                        FieldShape(name=n.copy(), ty=ty, default=default, doc=doc, attrs=attrs)
+                    )
                     k += 1
             case Body.Enum(vs):
                 s.kind = Kind.Enum
                 # The variants' fields' types, in order (RULES.md, R96).
                 var k = 0
+                var vi = 0
                 for (n, fs) in vs:
                     var fields: list[(String?, list[TypeShape])] = []
                     var docs: list[String] = []
@@ -249,7 +259,13 @@ impl TypeShape:
                             if k < len(t.field_docs): t.field_docs[k].copy() else: String.new()
                         )
                         k += 1
-                    s.variants.push(VariantShape(name=n.copy(), fields=fields, docs=docs))
+                    var attrs: list[(String, list[String])] = []
+                    if vi < len(t.variant_attrs):
+                        attrs = t.variant_attrs[vi].copy()
+                    vi += 1
+                    s.variants.push(
+                        VariantShape(name=n.copy(), fields=fields, docs=docs, attrs=attrs)
+                    )
         return s
 
 ## A field's type as its declaration writes it, which a derive sees before
@@ -379,7 +395,9 @@ pub enum Value:
         ## How the unfolded code writes the struct the field is in.
         owner: String?,
         ## Its `##` comment (RULES.md, R117).
-        doc: String
+        doc: String,
+        ## Its attributes (RULES.md, R161).
+        attrs: list[(String, list[String])]
     )
     ## An attribute on a declaration: its name and its arguments' text.
     Attr(name: String, args: list[String])
@@ -391,7 +409,9 @@ pub enum Value:
         receiver: String,
         params: list[Value],
         ret: list[TypeShape],
-        provided: bool
+        provided: bool,
+        ## Its attributes (RULES.md, R161).
+        attrs: list[(String, list[String])]
     )
     ## A method's parameter: its name, its mode (empty, `mut`, `own`) and
     ## its type (a list of one).
@@ -408,7 +428,7 @@ pub enum Value:
         attrs: list[(String, list[String])],
         doc: String
     )
-    Variant(name: String, index: int, fields: list[Value])
+    Variant(name: String, index: int, fields: list[Value], attrs: list[(String, list[String])])
     Str(String)
     Int(int)
     Bool(bool)
@@ -421,8 +441,8 @@ pure def same_value(a: Value, b: Value) -> bool:
         case Value.Type(x):
             if let Value.Type(y) = b:
                 return same_shape(x, y)
-        case Value.Field(n1, i1, v1, nm1, t1, d1, o1, _):
-            if let Value.Field(n2, i2, v2, nm2, t2, d2, o2, _) = b:
+        case Value.Field(n1, i1, v1, nm1, t1, d1, o1, _, _):
+            if let Value.Field(n2, i2, v2, nm2, t2, d2, o2, _, _) = b:
                 return n1 == n2
                     and i1 == i2
                     and v1 == v2
@@ -433,8 +453,8 @@ pure def same_value(a: Value, b: Value) -> bool:
         case Value.Attr(n1, a1):
             if let Value.Attr(n2, a2) = b:
                 return n1 == n2 and a1 == a2
-        case Value.Method(n1, i1, r1, p1, t1, v1):
-            if let Value.Method(n2, i2, r2, p2, t2, v2) = b:
+        case Value.Method(n1, i1, r1, p1, t1, v1, _):
+            if let Value.Method(n2, i2, r2, p2, t2, v2, _) = b:
                 return n1 == n2
                     and i1 == i2
                     and r1 == r2
@@ -447,8 +467,8 @@ pure def same_value(a: Value, b: Value) -> bool:
         case Value.Function(n1, p1, _, _, _, _):
             if let Value.Function(n2, p2, _, _, _, _) = b:
                 return n1 == n2 and p1 == p2
-        case Value.Variant(n1, i1, f1):
-            if let Value.Variant(n2, i2, f2) = b:
+        case Value.Variant(n1, i1, f1, _):
+            if let Value.Variant(n2, i2, f2, _) = b:
                 return n1 == n2 and i1 == i2 and same_values(f1, f2)
         case Value.Str(x):
             if let Value.Str(y) = b:
@@ -500,6 +520,10 @@ pub struct Target:
     pub field_docs: list[String]
     ## The declaration's own `##` comment (RULES.md, R129).
     pub doc: String
+    ## A struct's fields' attributes, in order, and an enum's variants'
+    ## (RULES.md, R161).
+    pub field_attrs: list[list[(String, list[String])]]
+    pub variant_attrs: list[list[(String, list[String])]]
 
 struct Unfold:
     ## The type parameters (`T`) and their arguments.
@@ -1011,11 +1035,11 @@ pure def describe(v: Value) -> str:
     return match v:
         case Value.Type(_): "a type"
         case Value.Attr(_, _): "an attribute"
-        case Value.Method(_, _, _, _, _, _): "a method"
+        case Value.Method(_, _, _, _, _, _, _): "a method"
         case Value.Param(_, _, _, _): "a parameter"
         case Value.Function(_, _, _, _, _, _): "a function"
-        case Value.Field(_, _, _, _, _, _, _, _): "a field"
-        case Value.Variant(_, _, _): "a variant"
+        case Value.Field(_, _, _, _, _, _, _, _, _): "a field"
+        case Value.Variant(_, _, _, _): "a variant"
         case Value.Str(_): "text"
         case Value.Int(_): "an integer"
         case Value.Bool(_): "a boolean"
@@ -1143,6 +1167,7 @@ impl Unfold:
                     case "keys": True
                     case "doc": True
                     case "receiver" | "params" | "ret" | "provided" | "mode": True
+                    case "attributes": True
                     case _: False
                 return attribute and self.is_static(src, base) and not self.names_type(src, base)
             # An element of a compile-time list, `a.args[0]`, is the value
@@ -1332,8 +1357,11 @@ impl Unfold:
                 let b = self.eval(src, base)?
                 var got: Value? = None
                 match b:
-                    case Value.Field(n, index, _, named, ty, default, _, doc):
+                    case Value.Field(n, index, _, named, ty, default, _, doc, attrs):
                         match name.text:
+                            # Its attributes (RULES.md, R161).
+                            case "attributes":
+                                got = Some(attr_values(attrs))
                             # Its `##` comment, empty without one (RULES.md,
                             # R117).
                             case "doc":
@@ -1351,8 +1379,10 @@ impl Unfold:
                                 got = Some(Value.Bool(default))
                             case _:
                                 pass
-                    case Value.Variant(n, index, fields):
+                    case Value.Variant(n, index, fields, attrs):
                         match name.text:
+                            case "attributes":
+                                got = Some(attr_values(attrs))
                             case "name":
                                 got = Some(Value.Str(n.copy()))
                             case "index":
@@ -1361,8 +1391,10 @@ impl Unfold:
                                 got = Some(Value.List(fields.copy()))
                             case _:
                                 pass
-                    case Value.Method(n, index, receiver, params, ret, provided):
+                    case Value.Method(n, index, receiver, params, ret, provided, attrs):
                         match name.text:
+                            case "attributes":
+                                got = Some(attr_values(attrs))
                             case "name":
                                 got = Some(Value.Str(n.copy()))
                             case "index":
@@ -1391,8 +1423,10 @@ impl Unfold:
                                     got = Some(Value.Type(t.copy()))
                             case _:
                                 pass
-                    case Value.Function(n, _, params, ret, _, doc):
+                    case Value.Function(n, _, params, ret, fn_attrs, doc):
                         match name.text:
+                            case "attributes":
+                                got = Some(attr_values(fn_attrs))
                             case "name":
                                 got = Some(Value.Str(n.copy()))
                             case "params":
@@ -1433,6 +1467,20 @@ impl Unfold:
                     vals.push(self.eval(src, a.value)?)
                 match src.ast.expr(callee).kind:
                     case ExprKind.Field(_, name):
+                        # A method's, a field's and a variant's name and
+                        # attributes (RULES.md, R161).
+                        if len(vals) == 1:
+                            if let Some((n, attrs)) = member_attrs(vals[0]):
+                                match name.text:
+                                    case "attributes_of":
+                                        return Ok(attr_values(attrs))
+                                    case "name_of":
+                                        return Ok(Value.Str(n.copy()))
+                                    case _:
+                                        return fail(
+                                            here,
+                                            "`reflect.{name.text}` takes a type, and `{n}` is {describe(vals[0])}",
+                                        )
                         var t = TypeShape.named("", "", Kind.Other)
                         match vals.first():
                             case Some(Value.Type(x)):
@@ -1702,30 +1750,37 @@ impl Unfold:
             case ExprKind.FieldOf(base, field):
                 let f = self.eval(src, field)?
                 let base_text = self.text(src, base)?
-                let Value.Field(name, index, variant, _, _, _, _, _) = f else:
-                    return fail(
-                        src.ast.expr(field).range, "`x.[f]` needs a field, not {describe(f)}"
-                    )
                 var text = String.new()
-                match variant:
-                    case None:
-                        text = "{base_text}.{name}"
-                    case Some(v):
-                        var found = False
-                        var i = len(self.arms) - 1
-                        while i >= 0 and not found:
-                            let a = ref self.arms[i]
-                            if a.key == base_text and a.variant == v:
-                                found = True
-                                if index >= 0 and index < len(a.names):
-                                    text = a.names[index].copy()
-                            i -= 1
-                        if not found:
-                            let written_field = slice(src.source, src.ast.expr(field).range)
-                            return fail(
-                                here,
-                                "`{base_text}.[{written_field}]` is a variant's field, reachable only in an arm `case V(..)` of a `match {base_text}`",
-                            )
+                match f:
+                    # A method, `x.[m]`, is the method of `x`, called as the
+                    # code writes it after (RULES.md, R161).
+                    case Value.Method(method, _, _, _, _, _, _):
+                        text = "{base_text}.{method}"
+                    case Value.Field(name, index, variant, _, _, _, _, _, _):
+                        match variant:
+                            case None:
+                                text = "{base_text}.{name}"
+                            case Some(v):
+                                var found = False
+                                var i = len(self.arms) - 1
+                                while i >= 0 and not found:
+                                    let a = ref self.arms[i]
+                                    if a.key == base_text and a.variant == v:
+                                        found = True
+                                        if index >= 0 and index < len(a.names):
+                                            text = a.names[index].copy()
+                                    i -= 1
+                                if not found:
+                                    let written_field = slice(src.source, src.ast.expr(field).range)
+                                    return fail(
+                                        here,
+                                        "`{base_text}.[{written_field}]` is a variant's field, reachable only in an arm `case V(..)` of a `match {base_text}`",
+                                    )
+                    case _:
+                        return fail(
+                            src.ast.expr(field).range,
+                            "`x.[f]` needs a field or a method, not {describe(f)}",
+                        )
                 out.push((here, text))
             case ExprKind.Str(parts):
                 for p in parts:
@@ -1920,7 +1975,7 @@ impl Unfold:
             return fail(src.ast.expr(e).range, "`reflect.default_of` takes a field")
         let at = src.ast.expr(args[0].value).range
         match self.eval(src, args[0].value)?:
-            case Value.Field(name, _, _, _, _, default, owner, _):
+            case Value.Field(name, _, _, _, _, default, owner, _, _):
                 match owner:
                     case Some(o):
                         if default:
@@ -2238,7 +2293,7 @@ impl Unfold:
         if let PatKind.Ctor(path, args) = src.ast.pattern(a.pat).kind:
             if len(path) == 1:
                 match self.lookup(path[0].text):
-                    case Some(Value.Variant(name, index, fields)):
+                    case Some(Value.Variant(name, index, fields, _)):
                         if not only_rest(args):
                             return fail(
                                 pat_range, "a variant bound at compile time is matched as `V(..)`"
@@ -2404,6 +2459,7 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                         default=f.default,
                         owner=Some(t.written.copy()),
                         doc=f.doc.copy(),
+                        attrs=f.attrs.copy(),
                     )
                 )
                 index += 1
@@ -2428,17 +2484,17 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                             default=False,
                             owner=None,
                             doc=doc,
+                            attrs=[],
                         )
                     )
                     index += 1
-                out.push(Value.Variant(name=v.name.copy(), index=vi, fields=fields))
+                out.push(
+                    Value.Variant(name=v.name.copy(), index=vi, fields=fields, attrs=v.attrs.copy())
+                )
                 vi += 1
             return Some(Value.List(out))
         case "attributes_of":
-            var out: list[Value] = []
-            for (name, args) in t.attrs:
-                out.push(Value.Attr(name=name.copy(), args=args.copy()))
-            return Some(Value.List(out))
+            return Some(attr_values(t.attrs))
         # A module's functions, in the order they are declared (RULES.md,
         # R145), each called as the unfolded code writes it.
         case "functions_of":
@@ -2481,12 +2537,29 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
                         params=params,
                         ret=m.ret.copy(),
                         provided=m.provided,
+                        attrs=m.attrs.copy(),
                     )
                 )
                 index += 1
             return Some(Value.List(out))
         case _:
             return None
+
+## A method's, a field's or a variant's name and attributes, which
+## `reflect.attributes_of` gives (RULES.md, R161).
+pure def member_attrs(v: Value) -> (String, list[(String, list[String])])?:
+    return match v:
+        case Value.Method(n, _, _, _, _, _, attrs): Some((n.copy(), attrs.copy()))
+        case Value.Field(n, _, _, _, _, _, _, _, attrs): Some((n.copy(), attrs.copy()))
+        case Value.Variant(n, _, _, attrs): Some((n.copy(), attrs.copy()))
+        case _: None
+
+## Attributes as compile-time values (RULES.md, R161).
+pure def attr_values(attrs: list[(String, list[String])]) -> Value:
+    var out: list[Value] = []
+    for (name, args) in attrs:
+        out.push(Value.Attr(name=name.copy(), args=args.copy()))
+    return Value.List(out)
 
 ## Whether a closure's block has compile-time statements among its own
 ## (`instances::comptime_stmts`), which unfold where the block is.
@@ -2801,6 +2874,8 @@ test "a derive template unfolds into the impl's source":
         attrs=[],
         field_types=[],
         field_docs=[],
+        field_attrs=[],
+        variant_attrs=[],
         doc=String.new(),
     )
     var expected = String.new("\nimpl Named for Point:\n    def name(self) -> String:\n")

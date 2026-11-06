@@ -11305,3 +11305,41 @@ benchmarks, a native executable's sizes explained, and what was left**
      264 of the 328 decoded there: the round spent its time on 940, 943
      and 944, and each family moves with its panics' messages, as `sum`
      did (decision 903). This changes no rule of the language.
+
+**Stage 1's eighteenth round** (stage 1's RULES.md, R158 to R163; a server for every command at 0.13.0, a template's syntax error once and `E0616` for a plain function's compile-time failure, closures kept in compile-time results, the attributes of fields, variants and methods, `Normalize` and `Graphemes` with generated tables, `BigRatio` and `Decimal`'s `/`)
+
+920. `sisu1 sir --repl-serve` serves any `sir`, `check`, `parse`, `fmt`,
+     `lint`, `doc` or `tokens` request, run in the working directory its
+     `--dir DIR` names, with R112's frame and the status the command gives
+     alone; the base is made again when a std text, the catalog or the
+     request's runtime changed, and a server whose executable was built
+     again answers `stale` and ends. A `check` of a two-line program takes
+     0.009 s served where it takes 0.22 s as a process. `sisu1 --version`
+     is 0.13.0. Stage 1 decides it (RULES.md, R158).
+
+921. A syntax error in an instance of the program's template is reported
+     once, in the template's file, and compile-time code of a function
+     without type parameters that stops is `E0616`, in a plain function's
+     words, where it was `E0609`'s instance words. Stage 1 decides it
+     (RULES.md, R159).
+
+922. A `comptime` result keeps a closure that captures nothing or only
+     constants, as the closure of its function; one that captures more is
+     `E0604` with a note on what a result keeps of functions. Stage 1
+     decides it (RULES.md, R160).
+
+923. Reflection gives a field's and a variant's attributes as
+     `f.attributes`, a method's as `reflect.attributes_of(m)`, and `x.[m]`
+     names a method, so a template routes by a method's attribute. Stage 1
+     decides it (RULES.md, R161).
+
+924. `std.string` has the normalisation forms `nfc`, `nfd`, `nfkc` and
+     `nfkd` (`Normalize`) and `graphemes()` (`Graphemes`) for `str`, from
+     generated Unicode tables; the graphemes keep a base's marks, `\r\n`,
+     Hangul syllables, flags and joined sequences, short of UAX #29's
+     `Prepend`, conjunct and pictograph rules. Stage 1 decides it
+     (RULES.md, R162).
+
+925. `std.num` has `BigRatio`, an exact fraction of `BigInt`s, and a
+     `Decimal`'s `/` gives one, exactly; `Ratio` keeps its `int` parts.
+     Stage 1 decides it (RULES.md, R163).

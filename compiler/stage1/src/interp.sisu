@@ -2321,6 +2321,20 @@ impl Baker:
                     ops.push(self.part(decls, k, type_arg(ty, 0))?)
                     ops.push(self.part(decls, x, type_arg(ty, 1))?)
                 self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.Dict, operands=ops))
+            # A closure that captures nothing, or only what is written as
+            # a constant, is kept as the closure of its function; one that
+            # captures a binding holds a reference to the compile-time
+            # code's frame, which run time does not have (RULES.md, R160).
+            case Value.Closure(name, types, env):
+                var ops: list[Operand] = []
+                for x in env:
+                    let k = scalar(x) else:
+                        if let Value.Ref(_) = x:
+                            return Err(Stop.NotKept("a closure that captures a binding"))
+                        return Err(Stop.NotKept("a closure that captures {captured_kind(x)}"))
+                    ops.push(Operand.Const(k))
+                let rv = Rvalue.Closure(name=name.copy(), args=types.copy(), operands=ops)
+                self.assign(dest.copy(), rv)
             case Value.Adt(name, _, _) if name == SHARED:
                 return Err(Stop.NotKept("a `Shared`"))
             case Value.Adt(name, variant, fields):
@@ -2401,6 +2415,15 @@ pure def field(decls: Decls, ty: Type, name: str, v: int?, i: int) -> Type ! Sto
     let found = field_ty(decls, t, v, i) else:
         return Err(Stop.NotKept("a value of type `{name}`"))
     return Ok(found)
+
+## What a closure kept at compile time captures that is no constant, for
+## its error (RULES.md, R160).
+pure def captured_kind(v: Value) -> String:
+    return match v:
+        case Value.Tuple(_): "a tuple".to_string()
+        case Value.List(_): "a list".to_string()
+        case Value.Adt(_, _, _): "a struct or an enum".to_string()
+        case _: kind_of(v)
 
 ## What a value with no literal form is, for its error (stage 0's
 ## `kind_of`).

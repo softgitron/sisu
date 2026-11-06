@@ -123,6 +123,8 @@ test "std.num/Decimal (doc example)" ... ok
 test "std.num/Decimal.parse (doc example)" ... ok
 test "std.num/Decimal.round (doc example)" ... ok
 test "std.num/Decimal.to_ratio (doc example)" ... ok
+test "std.num/BigRatio (doc example)" ... ok
+test "std.num/Decimal.to_big_ratio (doc example)" ... ok
 test "std.par/join (doc example)" ... ok
 test "std.par/join_all (doc example)" ... ok
 test "std.par/chunks (doc example)" ... ok
@@ -185,6 +187,8 @@ test "std.sort/sort_unstable_by (doc example)" ... ok
 test "std.sort/is_sorted (doc example)" ... ok
 test "std.string/Builder (doc example)" ... ok
 test "std.string/Builder.push_joined (doc example)" ... ok
+test "std.string/Normalize (doc example)" ... ok
+test "std.string/Graphemes (doc example)" ... ok
 test "std.task/scope (doc example)" ... ok
 test "std.task/Once (doc example)" ... ok
 test "std.test/Bench (doc example)" ... ok
@@ -192,4 +196,4 @@ test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
-194 passed, 0 failed, 0 blocked
+198 passed, 0 failed, 0 blocked

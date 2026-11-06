@@ -1,0 +1,2 @@
+4:5-4:9 E0616 comptime.function-failed name="main" reason="`reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`"
+  label 6:27-6:34 comptime.function-here

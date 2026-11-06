@@ -572,6 +572,44 @@ normalisation forms need Unicode's tables, which are not here yet.
 ## Contents
 
 - [`Builder`](#Builder): A text made from many pieces: each `push` keeps its piece, and `build` copies them all into one `String` once, so making a long text from short pieces copies each byte once.
+- [`Normalize`](#Normalize): Unicode's four normalisation forms of a text (11, "normalisation forms"; Unicode's UAX #15): `nfd` decomposes each character canonically and puts its marks in their canonical order, `nfc` composes the result again, and `nfkd` and `nfkc` do the same with the compatibility decompositions besides (`ﬁ` is `fi`, `²` is `2`). Two texts that read the same have the same `nfc`, and the same `nfkc` when they differ only in such forms.
+- [`Graphemes`](#Graphemes): The graphemes of a text, what a reader takes for one character each (03: "`s.graphemes()` ... graphemes one method away"; Unicode's UAX #29), by the rules these tables carry: a base with the marks after it (and the variation selectors, the emoji modifiers and the tag characters), `\r\n`, a Hangul syllable written in jamo, two regional indicators (a flag), and a sequence joined by U+200D, each one grapheme; a control character is one of its own. The full rules would also keep a prepended character with what follows it (`Prepend`), join an Indic conjunct across its virama, and join after U+200D only between pictographs.
+- [`breaks_between`](#breaks_between): Whether a grapheme ends between `p` and `c`, `flags` being the regional indicators of the grapheme so far.
+- [`is_control`](#is_control)
+- [`is_regional`](#is_regional)
+- [`extends`](#extends): What a grapheme keeps after its base: a mark, a variation selector, an emoji modifier, a tag character.
+- [`jamo_l`](#jamo_l)
+- [`jamo`](#jamo): What `n` is of Hangul: a leading, a vowel or a final jamo, an open or a closed syllable, or none.
+- [`JAMO_NONE`](#JAMO_NONE)
+- [`JAMO_L`](#JAMO_L)
+- [`JAMO_V`](#JAMO_V)
+- [`JAMO_T`](#JAMO_T)
+- [`JAMO_LV`](#JAMO_LV)
+- [`JAMO_LVT`](#JAMO_LVT)
+- [`HANGUL_BASE`](#HANGUL_BASE)
+- [`HANGUL_L`](#HANGUL_L)
+- [`HANGUL_V`](#HANGUL_V)
+- [`HANGUL_T`](#HANGUL_T)
+- [`HANGUL_VOWELS`](#HANGUL_VOWELS)
+- [`HANGUL_FINALS`](#HANGUL_FINALS)
+- [`HANGUL_COUNT`](#HANGUL_COUNT)
+- [`is_hangul_syllable`](#is_hangul_syllable)
+- [`normalized`](#normalized): The text `s` decomposed, compatibly with `compat`, its marks put in canonical order, and composed again with `compose`.
+- [`decompose`](#decompose): The full decomposition of `n`, pushed onto `out`.
+- [`pool_at`](#pool_at): The `k`th code point of the pool, six digits each, 24 to a line.
+- [`class_of`](#class_of): The canonical combining class of `n`.
+- [`reorder`](#reorder): Each run of marks put in canonical order: by class, the marks of one class kept in the order written.
+- [`composed`](#composed): The canonical composition of a decomposed, ordered text.
+- [`composition`](#composition): The character `a` and `b` compose, if any.
+- [`record_find`](#record_find): The start of the record of `table` (records of `size` bytes, each with one separator after it) whose first field is `n`.
+- [`record_range`](#record_range): The start of the record of `table` whose range, its first two fields, holds `n`.
+- [`hex_at`](#hex_at): The number written in `width` hexadecimal digits from `at`.
+- [`canonical_table`](#canonical_table): `CCCCCC-AAAAAA-BBBBBB-F`: the canonical decomposition of `C` into `A` and `B` (0 for none), but for the Hangul syllables, which are computed; `F` is 1 where the composition forms compose it again (2061 records).
+- [`compositions_table`](#compositions_table): `AAAAAA-BBBBBB-CCCCCC`: the character `C` that `A` and `B` compose, sorted by `A`, then `B` (941 records).
+- [`compatibility_table`](#compatibility_table): `CCCCCC-OOOO-LL`: the compatibility decomposition of `C`, the `L` code points of `compatibility_pool()` from the `O`th (3796 records).
+- [`compatibility_pool`](#compatibility_pool): The code points of the compatibility decompositions, six hexadecimal digits each, 24 to a line (5576 code points).
+- [`classes_table`](#classes_table): `LLLLLL-HHHHHH-CC`: the canonical combining class of the code points from `L` to `H`, for every class but 0 (388 records).
+- [`marks_table`](#marks_table): `LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a grapheme keeps after its base (310 records).
 
 <a id="Builder"></a>
 ## `Builder`
@@ -674,6 +712,414 @@ pub pure def build(self) -> String
 ```
 
 The text so far, as one `String`; the builder keeps its pieces.
+
+<a id="Normalize"></a>
+## `Normalize`
+
+```sisu
+pub trait Normalize
+```
+
+Unicode's four normalisation forms of a text (11, "normalisation
+forms"; Unicode's UAX #15): `nfd` decomposes each character canonically
+and puts its marks in their canonical order, `nfc` composes the result
+again, and `nfkd` and `nfkc` do the same with the compatibility
+decompositions besides (`ﬁ` is `fi`, `²` is `2`). Two texts that read the
+same have the same `nfc`, and the same `nfkc` when they differ only in
+such forms.
+
+```sisu
+let composed = "\u{e9}t\u{e9}"
+let decomposed = "e\u{301}te\u{301}"
+assert decomposed.nfc() == composed and composed.nfd() == decomposed
+assert "\u{fb01}x\u{b2}".nfkc() == "fix2" and "\u{fb01}".nfc() == "\u{fb01}"
+assert "\u{d55c}".nfd() == "\u{1112}\u{1161}\u{11ab}" and "\u{1112}\u{1161}\u{11ab}".nfc() == "\u{d55c}"
+assert "a\u{323}\u{302}".nfc() == "\u{1ead}" and "a\u{302}\u{323}".nfc() == "\u{1ead}"
+```
+
+<a id="Normalize.nfc"></a>
+### `Normalize.nfc`
+
+```sisu
+pure def nfc(self) -> String
+```
+
+The canonical composition: the canonical decomposition composed again.
+
+<a id="Normalize.nfd"></a>
+### `Normalize.nfd`
+
+```sisu
+pure def nfd(self) -> String
+```
+
+The canonical decomposition, its marks in canonical order.
+
+<a id="Normalize.nfkc"></a>
+### `Normalize.nfkc`
+
+```sisu
+pure def nfkc(self) -> String
+```
+
+The compatibility composition.
+
+<a id="Normalize.nfkd"></a>
+### `Normalize.nfkd`
+
+```sisu
+pure def nfkd(self) -> String
+```
+
+The compatibility decomposition.
+
+<a id="Graphemes"></a>
+## `Graphemes`
+
+```sisu
+pub trait Graphemes
+```
+
+The graphemes of a text, what a reader takes for one character each (03:
+"`s.graphemes()` ... graphemes one method away"; Unicode's UAX #29), by
+the rules these tables carry: a base with the marks after it (and the
+variation selectors, the emoji modifiers and the tag characters), `\r\n`,
+a Hangul syllable written in jamo, two regional indicators (a flag), and
+a sequence joined by U+200D, each one grapheme; a control character is
+one of its own. The full rules would also keep a prepended character
+with what follows it (`Prepend`), join an Indic conjunct across its
+virama, and join after U+200D only between pictographs.
+
+```sisu
+var gs: list[str] = []
+for g in "e\u{301}a\r\n\u{1112}\u{1161}\u{11ab}\u{1f1eb}\u{1f1ee}".graphemes():
+    gs.push(g)
+assert gs == ["e\u{301}", "a", "\r\n", "\u{1112}\u{1161}\u{11ab}", "\u{1f1eb}\u{1f1ee}"]
+var family = 0
+for _ in "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}!".graphemes():
+    family += 1
+assert family == 2
+```
+
+<a id="Graphemes.graphemes"></a>
+### `Graphemes.graphemes`
+
+```sisu
+pure def graphemes(self) -> Iter[str]
+```
+
+Each grapheme, in order.
+
+<a id="breaks_between"></a>
+## `breaks_between`
+
+```sisu
+pure def breaks_between(p: char, c: char, flags: int) -> bool
+```
+
+Whether a grapheme ends between `p` and `c`, `flags` being the regional
+indicators of the grapheme so far.
+
+<a id="is_control"></a>
+## `is_control`
+
+```sisu
+pure def is_control(n: int) -> bool
+```
+
+<a id="is_regional"></a>
+## `is_regional`
+
+```sisu
+pure def is_regional(c: char) -> bool
+```
+
+<a id="extends"></a>
+## `extends`
+
+```sisu
+pure def extends(n: int) -> bool
+```
+
+What a grapheme keeps after its base: a mark, a variation selector, an
+emoji modifier, a tag character.
+
+<a id="jamo_l"></a>
+## `jamo_l`
+
+```sisu
+pure def jamo_l(n: int) -> bool
+```
+
+<a id="jamo"></a>
+## `jamo`
+
+```sisu
+pure def jamo(n: int) -> int
+```
+
+What `n` is of Hangul: a leading, a vowel or a final jamo, an open or
+a closed syllable, or none.
+
+<a id="JAMO_NONE"></a>
+## `JAMO_NONE`
+
+```sisu
+const JAMO_NONE: int
+```
+
+<a id="JAMO_L"></a>
+## `JAMO_L`
+
+```sisu
+const JAMO_L: int
+```
+
+<a id="JAMO_V"></a>
+## `JAMO_V`
+
+```sisu
+const JAMO_V: int
+```
+
+<a id="JAMO_T"></a>
+## `JAMO_T`
+
+```sisu
+const JAMO_T: int
+```
+
+<a id="JAMO_LV"></a>
+## `JAMO_LV`
+
+```sisu
+const JAMO_LV: int
+```
+
+<a id="JAMO_LVT"></a>
+## `JAMO_LVT`
+
+```sisu
+const JAMO_LVT: int
+```
+
+<a id="HANGUL_BASE"></a>
+## `HANGUL_BASE`
+
+```sisu
+const HANGUL_BASE: int
+```
+
+<a id="HANGUL_L"></a>
+## `HANGUL_L`
+
+```sisu
+const HANGUL_L: int
+```
+
+<a id="HANGUL_V"></a>
+## `HANGUL_V`
+
+```sisu
+const HANGUL_V: int
+```
+
+<a id="HANGUL_T"></a>
+## `HANGUL_T`
+
+```sisu
+const HANGUL_T: int
+```
+
+<a id="HANGUL_VOWELS"></a>
+## `HANGUL_VOWELS`
+
+```sisu
+const HANGUL_VOWELS: int
+```
+
+<a id="HANGUL_FINALS"></a>
+## `HANGUL_FINALS`
+
+```sisu
+const HANGUL_FINALS: int
+```
+
+<a id="HANGUL_COUNT"></a>
+## `HANGUL_COUNT`
+
+```sisu
+const HANGUL_COUNT: int
+```
+
+<a id="is_hangul_syllable"></a>
+## `is_hangul_syllable`
+
+```sisu
+pure def is_hangul_syllable(n: int) -> bool
+```
+
+<a id="normalized"></a>
+## `normalized`
+
+```sisu
+pure def normalized(s: str, compat: bool, compose: bool) -> String
+```
+
+The text `s` decomposed, compatibly with `compat`, its marks put in
+canonical order, and composed again with `compose`.
+
+<a id="decompose"></a>
+## `decompose`
+
+```sisu
+pure def decompose(n: int, compat: bool, mut out: list[int])
+```
+
+The full decomposition of `n`, pushed onto `out`.
+
+<a id="pool_at"></a>
+## `pool_at`
+
+```sisu
+pure def pool_at(pool: str, k: int) -> int
+```
+
+The `k`th code point of the pool, six digits each, 24 to a line.
+
+<a id="class_of"></a>
+## `class_of`
+
+```sisu
+pure def class_of(n: int) -> int
+```
+
+The canonical combining class of `n`.
+
+<a id="reorder"></a>
+## `reorder`
+
+```sisu
+pure def reorder(mut cs: list[int])
+```
+
+Each run of marks put in canonical order: by class, the marks of one
+class kept in the order written.
+
+<a id="composed"></a>
+## `composed`
+
+```sisu
+pure def composed(cs: list[int]) -> list[int]
+```
+
+The canonical composition of a decomposed, ordered text.
+
+<a id="composition"></a>
+## `composition`
+
+```sisu
+pure def composition(a: int, b: int) -> int?
+```
+
+The character `a` and `b` compose, if any.
+
+<a id="record_find"></a>
+## `record_find`
+
+```sisu
+pure def record_find(table: str, size: int, n: int) -> int?
+```
+
+The start of the record of `table` (records of `size` bytes, each with
+one separator after it) whose first field is `n`.
+
+<a id="record_range"></a>
+## `record_range`
+
+```sisu
+pure def record_range(table: str, size: int, n: int) -> int?
+```
+
+The start of the record of `table` whose range, its first two fields,
+holds `n`.
+
+<a id="hex_at"></a>
+## `hex_at`
+
+```sisu
+pure def hex_at(text: str, at: int, width: int) -> int
+```
+
+The number written in `width` hexadecimal digits from `at`.
+
+<a id="canonical_table"></a>
+## `canonical_table`
+
+```sisu
+pure def canonical_table() -> str
+```
+
+`CCCCCC-AAAAAA-BBBBBB-F`: the canonical decomposition of `C` into `A` and
+`B` (0 for none), but for the Hangul syllables, which are computed; `F` is
+1 where the composition forms compose it again (2061 records).
+
+<a id="compositions_table"></a>
+## `compositions_table`
+
+```sisu
+pure def compositions_table() -> str
+```
+
+`AAAAAA-BBBBBB-CCCCCC`: the character `C` that `A` and `B` compose, sorted
+by `A`, then `B` (941 records).
+
+<a id="compatibility_table"></a>
+## `compatibility_table`
+
+```sisu
+pure def compatibility_table() -> str
+```
+
+`CCCCCC-OOOO-LL`: the compatibility decomposition of `C`, the `L` code
+points of `compatibility_pool()` from the `O`th (3796 records).
+
+<a id="compatibility_pool"></a>
+## `compatibility_pool`
+
+```sisu
+pure def compatibility_pool() -> str
+```
+
+The code points of the compatibility decompositions, six hexadecimal
+digits each, 24 to a line (5576 code points).
+
+<a id="classes_table"></a>
+## `classes_table`
+
+```sisu
+pure def classes_table() -> str
+```
+
+`LLLLLL-HHHHHH-CC`: the canonical combining class of the code points from
+`L` to `H`, for every class but 0 (388 records).
+
+<a id="marks_table"></a>
+## `marks_table`
+
+```sisu
+pure def marks_table() -> str
+```
+
+`LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a
+grapheme keeps after its base (310 records).
+
+## Implementations
+
+```sisu
+impl Normalize for str
+impl Graphemes for str
+```
 <!-- std.time.md -->
 # `std.time`
 

@@ -1,0 +1,18 @@
+# A closure in a `comptime` result is kept when it captures nothing or only
+# numbers, text, booleans and characters (RULES.md, R160), as a function
+# value is kept as the function it names (R151).
+def twice(x: int) -> int:
+    return x * 2
+
+def scaled(k: int) -> (int) -> int:
+    return own (x: int) -> x * k
+
+def main():
+    let table = comptime [("double", twice)]
+    let (_, f) = table[0]
+    print(f(4))
+    let ops = comptime [("add", (x: int) -> x + 1), ("neg", (x: int) -> -x)]
+    for (name, g) in ops:
+        print("{name} {g(4)}")
+    let triple = comptime scaled(3)
+    print(triple(5))

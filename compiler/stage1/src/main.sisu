@@ -143,7 +143,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.12.0"
+const VERSION: str = "0.13.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -177,6 +177,27 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Ok(())
     let catalog_file = catalog_path ?? "{home}/catalog/messages.catalog"
     let catalog = Catalog.parse(sys.fs.read_to_string(Path.new(catalog_file))?)
+    # What a command prints goes to standard output and standard error as it
+    # prints it; `sir --repl-serve` holds what each request prints, for its
+    # answer (RULES.md, R158).
+    var o = Out.direct()
+    return run_command(sys, home, catalog_file, rest, catalog, mut o, Served.alone())
+
+## The command `rest` (its name and its arguments, without `--home`,
+## `--catalog` and `--target-runtime`), run with the message catalog
+## `catalog`, read from `catalog_file`: what it prints goes to `o`, and
+## the standard library's base it checks a program against is `served`'s
+## when that holds one (`sir --repl-serve`, RULES.md, R158), else the one
+## `base_of` makes.
+def run_command(
+    sys: System,
+    home: str,
+    catalog_file: str,
+    rest: list[String],
+    catalog: Catalog,
+    mut o: Out,
+    served: Served,
+) -> ! {IoError, UsageError, CommandError}:
     if rest.is_empty():
         return Err(Usage(text=usage()))
     let command = rest[0].copy()
@@ -185,7 +206,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         let path = rest[len(rest) - 1].copy()
         let text = sys.fs.read_to_string(Path.new(path))?
         let (out, errs) = tokens(text, trivia, catalog)
-        emit(out, errs)
+        o.emit(out, errs)
         return Ok(())
     if command == "parse" and len(rest) >= 2:
         let path = rest[len(rest) - 1].copy()
@@ -194,7 +215,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # statements with what each binds, reads and changes (RULES.md,
         # R95).
         if rest.contains("--bindings"):
-            emit(session.bindings(text, catalog), "")
+            o.emit(session.bindings(text, catalog), "")
             return Ok(())
         let parsed = parse(text, catalog)
         let errs = render_ids(text, parsed.diagnostics, catalog)
@@ -205,17 +226,17 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         if rest.contains("--shape"):
             match fmt.shape.shape(text, catalog):
                 case Some(s):
-                    emit(s, "")
+                    o.emit(s, "")
                     return Ok(())
                 case None:
-                    emit("", errs)
+                    o.emit("", errs)
                     return Err(Exit(status=1))
         if rest.contains("--ast"):
-            emit(module_debug(build.module(parsed.tree)), errs)
+            o.emit(module_debug(build.module(parsed.tree)), errs)
         elif rest.contains("--print"):
-            emit(parsed.tree.to_source(), errs)
+            o.emit(parsed.tree.to_source(), errs)
         else:
-            emit(parsed.tree.dump(rest.contains("--trivia")), errs)
+            o.emit(parsed.tree.dump(rest.contains("--trivia")), errs)
         return Ok(())
     if command == "batch" and len(rest) == 3:
         let out_dir = rest[1].copy()
@@ -255,7 +276,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.print"), reprint)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.ast"), ast)?
         let phases = "lex {ms(times.lex)} ms parse {ms(times.parse)} ms dump {ms(times.dump)} ms"
-        print("files {n} bytes {bytes} {phases} ast {ms(times.ast)} ms")
+        o.put("files {n} bytes {bytes} {phases} ast {ms(times.ast)} ms")
         return Ok(())
     if command == "profile" and len(rest) == 2:
         let text = sys.fs.read_to_string(Path.new(rest[1].copy()))?
@@ -272,15 +293,15 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         let t5 = now(sys)
         let reprint = parsed.tree.to_source()
         let t6 = now(sys)
-        print(
+        o.put(
             "lex {ms(t1 - t0)} tokens-dump {ms(t2 - t1)} parse {ms(t3 - t2)} tree-dump {ms(t4 - t3)} trivia-dump {ms(t5 - t4)} reprint {ms(t6 - t5)}"
         )
-        print("{out.byte_len()} {tree.byte_len()} {trivia_tree.byte_len()} {reprint.byte_len()}")
+        o.put("{out.byte_len()} {tree.byte_len()} {trivia_tree.byte_len()} {reprint.byte_len()}")
         return Ok(())
     if command == "names" and len(rest) == 2:
         var env = environment(sys, home)?
         let out = names_of(sys, home, rest[1], mut env, catalog)?
-        emit(out, "")
+        o.emit(out, "")
         return Ok(())
     if command == "names-batch" and len(rest) == 3:
         var env = environment(sys, home)?
@@ -319,7 +340,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             out.push(typeck.render(input.modules[0].text, checked, catalog))
             for b in checked.beyond:
                 why.push("beyond the slice: {b}\n")
-        emit(out, why)
+        o.emit(out, why)
         return Ok(())
     if command == "types-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys, home)?, catalog)
@@ -348,7 +369,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     # `sir --repl-serve`: the three served by one process that keeps the
     # standard library's base (RULES.md, R112).
     if command == "sir" and rest.contains("--repl-serve"):
-        repl_serve(sys, home, catalog)?
+        repl_serve(sys, home, catalog_file, catalog)?
         return Ok(())
     if command == "sir" and rest.contains("--repl"):
         return repl_command(sys, home, rest, catalog)
@@ -368,7 +389,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 let chosen = w.byte_slice(12, w.byte_len())
                 let l = contract_level(chosen) else:
                     let params = [Param(name="value".to_string(), value=chosen.to_string())]
-                    emit("", catalog.plain_error("cli.bad-contract-level", params))
+                    o.emit("", catalog.plain_error("cli.bad-contract-level", params))
                     return Err(Failed)
                 level = l
             else:
@@ -389,75 +410,27 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
-            let found = nearest_package(sys, "sir", catalog) else:
+            let found = nearest_package(sys, "sir", catalog, mut o) else:
                 return Err(Failed)
             path = found
         if let Some(e) = workspace_run_error(sys, path, catalog):
-            emit("", e)
+            o.emit("", e)
             return Err(Failed)
         if let Some(e) = unknown_feature(sys, path, request):
-            emit("", catalog.plain_error("cli.unknown-feature", e))
+            o.emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
         let accept = words.contains("--accept-unsafe")
         if not write_lockfile(
-            sys, path, True, words.contains("--locked"), accept, catalog, "cli.errors-found"
+            sys, path, True, words.contains("--locked"), accept, catalog, "cli.errors-found", mut o
         )?:
             return Err(Failed)
-        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-        var kept = Kept.new()
-        var env = base.environment()
-        var times = SirTimes(check=0, lower=0, ownership=0)
-        # `--partial`: the SIR of what lowering reached, also of a program
-        # beyond its slice (for comparing a package's modules one by one).
-        let partial = words.contains("--partial")
-        # `--tests`: the program built with its tests, as `sisu test` and
-        # `sisu bench` run it, its tests' tags and its benchmarks written
-        # (decision 285).
-        let tests = words.contains("--tests")
-        if tests and not partial:
-            # What `sisu test` runs (decision 357), from one check of the
-            # program: a program with an error of a phase is not run, as
-            # `sisu test` says (RULES.md, R46); another has its SIR, and
-            # its warnings on standard error, in the form `check` prints
-            # them (RULES.md, R47).
-            let ids = words.contains("--format=ids")
-            let input = app_input(sys, home, path, True, request, mut env, catalog)? else:
-                return Ok(())
-            var built = input.copy()
-            built.contracts = level
-            built.roots = transcript_roots(sys, built.disk, True)
-            # `--modules`: each test's and benchmark's module beside it
-            # (RULES.md, R142), which the driver reads to run one module's.
-            let modules = words.contains("--modules")
-            let (r, sir) = report_with(base, built, path, catalog, mut kept, True, modules)
-            if let Some(why) = refusal(r, catalog, ids):
-                emit("", why)
-                return Err(Failed)
-            var warned = r.human(catalog)
-            if ids:
-                warned = r.ids(catalog)
-            emit(sir, warned)
-            return Ok(())
-        let done = lowering_of(
-            sys,
-            home,
-            path,
-            base,
-            mut env,
-            catalog,
-            mut times,
-            partial,
-            Some(level),
-            False,
-            tests,
-            request,
-            mut kept,
-        )?
-        var errs = String.new()
-        for b in done.beyond:
-            errs.push("beyond the slice: {b}\n")
-        emit(done.sir, errs)
-        return Ok(())
+        # The served base, or one made for this command (RULES.md, R158).
+        match served.base:
+            case Some(b):
+                return sir_with(sys, home, path, words, level, request, b, catalog, mut o)
+            case None:
+                let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+                return sir_with(sys, home, path, words, level, request, base, catalog, mut o)
     if command == "ownership" and len(rest) == 2:
         let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -481,7 +454,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var errs = String.new()
         for b in done.beyond:
             errs.push("beyond the slice: {b}\n")
-        emit(done.ownership, errs)
+        o.emit(done.ownership, errs)
         return Ok(())
     if command == "sir-batch" and (len(rest) == 3 or len(rest) == 4):
         # With `--contracts=LEVEL`, the SIR alone, lowered with the
@@ -527,7 +500,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.ownership"), done.ownership)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), reasons)?
         let counts = "std bodies lowered {kept.lowered.lowered}, reused {kept.lowered.reused}"
-        print(
+        o.put(
             "files {n} check {ms(times.check)} ms lower {ms(times.lower)} ms ownership {ms(times.ownership)} ms ({counts})"
         )
         return Ok(())
@@ -544,43 +517,26 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
-            let found = nearest_package(sys, "check", catalog) else:
+            let found = nearest_package(sys, "check", catalog, mut o) else:
                 return Err(Failed)
             path = found
         if let Some(e) = unknown_feature(sys, path, request):
-            emit("", catalog.plain_error("cli.unknown-feature", e))
+            o.emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
         # `--locked` keeps the lockfile as it is, or stops the command;
         # `--accept-unsafe` lets a package's `unsafe` level rise (22).
         let accept = words.contains("--accept-unsafe")
-        if not write_lockfile(sys, path, False, words.contains("--locked"), accept, catalog, "")?:
+        if not write_lockfile(
+            sys, path, False, words.contains("--locked"), accept, catalog, "", mut o
+        )?:
             return Err(Failed)
-        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-        var kept = Kept.new()
-        var env = base.environment()
-        let reports = reports_of(
-            sys, home, path, path, True, request, base, mut env, catalog, mut kept
-        )?
-        var out = String.new()
-        var why = String.new()
-        var failed = False
-        for r in reports:
-            if ids:
-                out.push(r.ids(catalog))
-            else:
-                out.push(r.human(catalog))
-            if r.has_error:
-                failed = True
-            for b in r.beyond:
-                why.push("beyond the slice: {b}\n")
-        if ids:
-            emit(out, why)
-        else:
-            out.push(why)
-            emit("", out)
-        if failed:
-            return Err(Failed)
-        return Ok(())
+        # The served base, or one made for this command (RULES.md, R158).
+        match served.base:
+            case Some(b):
+                return check_with(sys, home, path, ids, request, b, catalog, mut o)
+            case None:
+                let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+                return check_with(sys, home, path, ids, request, base, catalog, mut o)
     if command == "lint":
         # `sisu lint` (10: "lints beyond the compiler's warnings, with
         # fix-its"; RULES.md, R11): the lints of a program the front end
@@ -593,63 +549,29 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         ]
         # An option `lint` does not take, `--help` among them, is `D0009`,
         # as the driver's commands answer it (RULES.md, R69).
-        if let Some(o) = unknown_option(words, flags):
+        if let Some(unknown) = unknown_option(words, flags):
             let params = [
-                Param(name="option".to_string(), value=o),
+                Param(name="option".to_string(), value=unknown),
                 Param(name="command".to_string(), value="lint".to_string()),
             ]
-            emit("", catalog.plain_error("cli.unknown-option", params))
+            o.emit("", catalog.plain_error("cli.unknown-option", params))
             return Err(Exit(status=2))
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
-            let found = nearest_package(sys, "lint", catalog) else:
+            let found = nearest_package(sys, "lint", catalog, mut o) else:
                 return Err(Failed)
             path = found
         if let Some(e) = unknown_feature(sys, path, request):
-            emit("", catalog.plain_error("cli.unknown-feature", e))
+            o.emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
-        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-        var kept = Kept.new()
-        var env = base.environment()
-        let reports = reports_of(
-            sys, home, path, path, True, request, base, mut env, catalog, mut kept
-        )?
-        var out = String.new()
-        var failed = False
-        for r in reports:
-            var shown = r.copy()
-            if r.has_error:
-                failed = True
-                shown = r.front(catalog, Some(True))
-            for x in r.lints:
-                shown.diags.push(x.copy())
-            # The imports a module does not use (RULES.md, R87), in the
-            # program's own files.
-            for k in range(len(r.files)):
-                let (name, text) = r.files[k].copy()
-                if name.ends_with(".sisu") and not name.starts_with("<"):
-                    # An import the resolver refused (`E0204`, `E0203`,
-                    # `E0220`) is reported once, by its error (RULES.md,
-                    # R103).
-                    var refused: list[(int, int)] = []
-                    for x in r.diags:
-                        if x.file == k and catalog.is_error(x.diag.msg):
-                            refused.push((x.diag.start, x.diag.end))
-                    for d in fmt.prune.lints(text, refused, catalog):
-                        shown.diags.push(Filed(file=k, diag=d.copy(), label_files=[]))
-            sort_filed(mut shown.diags, catalog, True)
-            if ids:
-                out.push(shown.ids(catalog))
-            else:
-                out.push(shown.human(catalog))
-        if ids:
-            emit(out, "")
-        else:
-            emit("", out)
-        if failed:
-            return Err(Failed)
-        return Ok(())
+        # The served base, or one made for this command (RULES.md, R158).
+        match served.base:
+            case Some(b):
+                return lint_with(sys, home, path, ids, request, b, catalog, mut o)
+            case None:
+                let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+                return lint_with(sys, home, path, ids, request, base, catalog, mut o)
     if command == "check-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -722,7 +644,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
-            let found = nearest_package(sys, "build", catalog) else:
+            let found = nearest_package(sys, "build", catalog, mut o) else:
                 return Err(Failed)
             path = found
         # As stage 0 takes the options: `--output` and `--contracts` go with
@@ -734,25 +656,25 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 option = Some("--output".to_string())
             elif contracts.is_some():
                 option = Some("--contracts".to_string())
-            if let Some(o) = option:
+            if let Some(given) = option:
                 let params = [
-                    Param(name="option".to_string(), value=o.copy()),
+                    Param(name="option".to_string(), value=given.copy()),
                     Param(name="command".to_string(), value="build".to_string()),
                 ]
-                emit("", catalog.plain_error("cli.unknown-option", params))
+                o.emit("", catalog.plain_error("cli.unknown-option", params))
                 return Err(Failed)
         var level: int? = None
         if let Some(c) = contracts:
             level = contract_level(c)
             if level.is_none():
                 let params = [Param(name="value".to_string(), value=c.copy())]
-                emit("", catalog.plain_error("cli.bad-contract-level", params))
+                o.emit("", catalog.plain_error("cli.bad-contract-level", params))
                 return Err(Failed)
         if release and not native:
-            emit("", catalog.plain_error("native.release", []))
+            o.emit("", catalog.plain_error("native.release", []))
             return Err(Failed)
         if let Some(e) = unknown_feature(sys, path, request):
-            emit("", catalog.plain_error("cli.unknown-feature", e))
+            o.emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
         let locked = words.contains("--locked")
         let accept = words.contains("--accept-unsafe")
@@ -774,7 +696,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if command == "doc":
         # `doc [PATH] [--output DIR]` and `doc --std [MODULE...]`: what
         # `sisu doc` does, its exit status given as `Exit(status=N)`.
-        let status = doc_command(sys, home, rest, catalog)?
+        let status = doc_command(sys, home, rest, catalog, mut o, served)?
         if status != 0:
             return Err(Exit(status=status))
         return Ok(())
@@ -805,7 +727,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 if let Some(t) = asked.targets.first():
                     if not asked.std_lib:
                         name = Some(package.file_name(t))
-                report = doc_report(sys, home, asked, name, base, texts, mut env, catalog)?
+                report = doc_report(sys, home, asked, name, base, texts, mut env, catalog, mut o)?
             var out = report.out.copy()
             if report.status == 0:
                 out = doc.printed(report.pages)
@@ -822,12 +744,12 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                     errs = failed
             sys.fs.write_text(Path.new("{out_dir}/{n}.pages.err"), errs)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.pages.status"), "{status}\n")?
-        print("files {n}")
+        o.put("files {n}")
         return Ok(())
     if command == "fmt":
         # `fmt [--check] [PATH...]`: what `sisu fmt` does, its exit status
         # given as `Exit(status=N)`.
-        let status = fmt_command(sys, home, rest, catalog)?
+        let status = fmt_command(sys, home, rest, catalog, mut o, served)?
         if status != 0:
             return Err(Exit(status=status))
         return Ok(())
@@ -862,7 +784,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.check.status"), "{report.status}\n")?
             sys.fs.write_text(Path.new("{out_dir}/{n}.fmt"), report.changed ?? text)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.again"), again)?
-        print("files {n}")
+        o.put("files {n}")
         return Ok(())
     if command == "fmt-profile" and len(rest) == 2:
         # Where the formatter's time goes over the files LIST names, each
@@ -898,9 +820,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             times[4] += t5 - t4
             times[5] += t6 - t5
             if a != b or d.is_empty():
-                print("{path}: the shapes differ, or no hunks")
+                o.put("{path}: the shapes differ, or no hunks")
         let parts = "parse {ms(times[0])} ms layout {ms(times[1])} ms parse again {ms(times[2])} ms"
-        print(
+        o.put(
             "files {n} {parts} shapes {ms(times[3])} and {ms(times[4])} ms hunks {ms(times[5])} ms"
         )
         return Ok(())
@@ -934,6 +856,166 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/m{k + 1}.sisu"), mutant)?
         return Ok(())
     return Err(Usage(text=usage()))
+
+## `sir` of the program at `path` with the base `base` (the words after the
+## command, `words`; the contracts `level` checks; the features `request`
+## asks for).
+def sir_with(
+    sys: System,
+    home: str,
+    path: str,
+    words: list[String],
+    level: int,
+    request: FeatureRequest,
+    base: typeck.Base,
+    catalog: Catalog,
+    mut o: Out,
+) -> ! {IoError, UsageError, CommandError}:
+    var kept = Kept.new()
+    var env = base.environment()
+    var times = SirTimes(check=0, lower=0, ownership=0)
+    # `--partial`: the SIR of what lowering reached, also of a program
+    # beyond its slice (for comparing a package's modules one by one).
+    let partial = words.contains("--partial")
+    # `--tests`: the program built with its tests, as `sisu test` and
+    # `sisu bench` run it, its tests' tags and its benchmarks written
+    # (decision 285).
+    let tests = words.contains("--tests")
+    if tests and not partial:
+        # What `sisu test` runs (decision 357), from one check of the
+        # program: a program with an error of a phase is not run, as
+        # `sisu test` says (RULES.md, R46); another has its SIR, and
+        # its warnings on standard error, in the form `check` prints
+        # them (RULES.md, R47).
+        let ids = words.contains("--format=ids")
+        let input = app_input(sys, home, path, True, request, mut env, catalog)? else:
+            return Ok(())
+        var built = input.copy()
+        built.contracts = level
+        built.roots = transcript_roots(sys, built.disk, True)
+        # `--modules`: each test's and benchmark's module beside it
+        # (RULES.md, R142), which the driver reads to run one module's.
+        let modules = words.contains("--modules")
+        let (r, sir) = report_with(base, built, path, catalog, mut kept, True, modules)
+        if let Some(why) = refusal(r, catalog, ids):
+            o.emit("", why)
+            return Err(Failed)
+        var warned = r.human(catalog)
+        if ids:
+            warned = r.ids(catalog)
+        o.emit(sir, warned)
+        return Ok(())
+    let done = lowering_of(
+        sys,
+        home,
+        path,
+        base,
+        mut env,
+        catalog,
+        mut times,
+        partial,
+        Some(level),
+        False,
+        tests,
+        request,
+        mut kept,
+    )?
+    var errs = String.new()
+    for b in done.beyond:
+        errs.push("beyond the slice: {b}\n")
+    o.emit(done.sir, errs)
+    return Ok(())
+
+## `check` of the program at `path` with the base `base`, in the form
+## `ids` asks for.
+def check_with(
+    sys: System,
+    home: str,
+    path: str,
+    ids: bool,
+    request: FeatureRequest,
+    base: typeck.Base,
+    catalog: Catalog,
+    mut o: Out,
+) -> ! {IoError, UsageError, CommandError}:
+    var kept = Kept.new()
+    var env = base.environment()
+    let reports = reports_of(
+        sys, home, path, path, True, request, base, mut env, catalog, mut kept
+    )?
+    var out = String.new()
+    var why = String.new()
+    var failed = False
+    for r in reports:
+        if ids:
+            out.push(r.ids(catalog))
+        else:
+            out.push(r.human(catalog))
+        if r.has_error:
+            failed = True
+        for b in r.beyond:
+            why.push("beyond the slice: {b}\n")
+    if ids:
+        o.emit(out, why)
+    else:
+        out.push(why)
+        o.emit("", out)
+    if failed:
+        return Err(Failed)
+    return Ok(())
+
+## `lint` of the program at `path` with the base `base`, in the form `ids`
+## asks for.
+def lint_with(
+    sys: System,
+    home: str,
+    path: str,
+    ids: bool,
+    request: FeatureRequest,
+    base: typeck.Base,
+    catalog: Catalog,
+    mut o: Out,
+) -> ! {IoError, UsageError, CommandError}:
+    var kept = Kept.new()
+    var env = base.environment()
+    let reports = reports_of(
+        sys, home, path, path, True, request, base, mut env, catalog, mut kept
+    )?
+    var out = String.new()
+    var failed = False
+    for r in reports:
+        var shown = r.copy()
+        if r.has_error:
+            failed = True
+            shown = r.front(catalog, Some(True))
+        for x in r.lints:
+            shown.diags.push(x.copy())
+        # The imports a module does not use (RULES.md, R87), in the
+        # program's own files.
+        for k in range(len(r.files)):
+            let (name, text) = r.files[k].copy()
+            if name.ends_with(".sisu") and not name.starts_with("<"):
+                # An import the resolver refused (`E0204`, `E0203`,
+                # `E0220`) is reported once, by its error (RULES.md,
+                # R103).
+                var refused: list[(int, int)] = []
+                for x in r.diags:
+                    if x.file == k and catalog.is_error(x.diag.msg):
+                        refused.push((x.diag.start, x.diag.end))
+                for d in fmt.prune.lints(text, refused, catalog):
+                    shown.diags.push(Filed(file=k, diag=d.copy(), label_files=[]))
+        sort_filed(mut shown.diags, catalog, True)
+        if ids:
+            out.push(shown.ids(catalog))
+        else:
+            out.push(shown.human(catalog))
+    if ids:
+        o.emit(out, "")
+    else:
+        o.emit("", out)
+    if failed:
+        return Err(Failed)
+    return Ok(())
 
 ## What stage 1 makes of a program for `sisu sir` and for the ownership
 ## checker's part of `sisu check`: the SIR (nothing when the front end
@@ -1496,7 +1578,8 @@ def audit_command(
     var path = path_of(rest, flags) else:
         return Err(Usage(text=usage()))
     if not names_path(rest, flags):
-        let found = nearest_package(sys, "audit", catalog) else:
+        var direct = Out.direct()
+        let found = nearest_package(sys, "audit", catalog, mut direct) else:
             return Err(Failed)
         path = found
     match layouts_of(sys, path, False, build_request(sys)):
@@ -2320,6 +2403,9 @@ pure def comptime_diagnostic(
             d = Diagnostic.new(Msg.ComptimeIo, start, end).with("what", what)
         case interp.Failure.NotKept(what):
             d = Diagnostic.new(Msg.ComptimeNotKept, start, end).with("what", what)
+            # What a result keeps of functions (RULES.md, R160).
+            if what.starts_with("a closure"):
+                d = d.note(Msg.ComptimeKeptFunctions)
     return Some((at, d))
 
 ## For each struct and enum of the program by name (the first of a name),
@@ -2401,7 +2487,8 @@ def build_command(
     var stopped = "cli.not-compiled"
     if how.for_run:
         stopped = "cli.errors-found"
-    if not write_lockfile(sys, path, False, locked, accept, catalog, stopped)?:
+    var direct = Out.direct()
+    if not write_lockfile(sys, path, False, locked, accept, catalog, stopped, mut direct)?:
         return Err(Failed)
     let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
@@ -2645,42 +2732,344 @@ def answered(a: Answer) -> ! {UsageError, CommandError}:
         case Ending.Failed: Err(Failed)
         case Ending.Misused: Err(Usage(text=usage()))
 
-## `sir --repl-serve` (RULES.md, R112): the REPL's commands served by one
-## process, which makes the standard library's base once and keeps it
-## between them. Each line of standard input is a request, the arguments
-## of one command separated by tabs, `sir --repl ...`, `sir --worksheet
-## ...` or `parse --bindings INPUT`, which it answers on standard error
-## with the frame of what the command alone prints and the status it gives
-## (`Answer.frame`); an empty line or the end of the input ends it, status
-## 0. Standard error, because the native run time writes it at once and
-## keeps standard output until it holds 64 KB or the program ends.
-def repl_serve(sys: System, home: str, catalog: Catalog) -> ! IoError:
-    # The lines of every std text, found once for all its inputs (RULES.md,
-    # R125).
-    let base = typeck.with_lines(base_of(sys, home, std_texts(sys, home)?, catalog))
+## `sir --repl-serve` (RULES.md, R112 and R158): stage 1's commands
+## served by one process, which makes the standard library's base once and
+## keeps it between them. Each line of standard input is a request, the
+## arguments of one command separated by tabs: `sir --repl ...`, `sir
+## --worksheet ...` or `parse --bindings INPUT` (R112), or `sir`, `check`,
+## `parse`, `fmt`, `lint`, `doc` or `tokens` with its arguments and `--dir
+## DIR`, the working directory it runs in (R158). Each is answered on
+## standard error with the frame of what the command alone prints and the
+## status it gives (`Answer.frame`, `held_frame`); an empty line or the end
+## of the input ends it, status 0. Before each request the base is made
+## again when a std text, the catalog or the runtime the request builds for
+## changed, and the server answers `stale` and ends when its own executable
+## was built again. Standard error, because the native run time writes it
+## at once and keeps standard output until it holds 64 KB or the program
+## ends.
+def repl_serve(sys: System, given_home: str, catalog_file: str, given: Catalog) -> ! IoError:
+    # The server's own directories, which a request's working directory
+    # does not move.
+    let home = absolute(sys, given_home)
+    let catalog_path = absolute(sys, catalog_file)
+    let cwd = absolute(sys, ".")
+    let stamp = ServerStamp.of(sys, home)
+    var catalog = given.copy()
+    var key = String.new()
+    var served = Served.alone()
     while let Some(line) = sys.stdin.read_line():
         if line.is_empty():
+            break
+        if stamp.stale(sys, home):
+            print_err("stale")
             break
         var args: list[String] = []
         for part in line.split("\t"):
             args.push(part.to_string())
         let command = if args.is_empty(): String.new() else: args[0].copy()
-        var served: Answer ! IoError = Ok(Answer.misused())
-        if command == "sir" and args.contains("--repl"):
-            served = repl_answer(sys, home, base, args, catalog)
-        elif command == "sir" and args.contains("--worksheet"):
-            served = worksheet_answer(sys, home, base, args, catalog)
-        elif command == "parse" and len(args) == 3 and args[1] == "--bindings":
-            served = bindings_answer(sys, args[2], catalog)
-        match served:
-            case Ok(a):
-                print_err(a.frame().strip_suffix("\n"))
+        let repl = command == "sir" and (args.contains("--repl") or args.contains("--worksheet"))
+        # The working directory of a command (`--dir DIR`, the server's own
+        # without one); `sir --repl` and `sir --worksheet` take `--dir` as
+        # where their program stands (R95) and run in the server's.
+        var dir = cwd.copy()
+        var words: list[String] = []
+        var misused = not served_command(command) or args.contains("--repl-serve")
+        var k = 0
+        while k < len(args):
+            if not repl and args[k] == "--dir":
+                if k + 1 >= len(args):
+                    misused = True
+                    break
+                dir = package.canonical(package.join(cwd, args[k + 1]))
+                if args[k + 1].starts_with("/"):
+                    dir = package.canonical(args[k + 1])
+                k += 2
+                continue
+            if args[k] == "--home" or args[k] == "--catalog":
+                misused = True
+            words.push(args[k].copy())
+            k += 1
+        let at = request_system(sys, dir, words)
+        # The base the request's command checks against: the one held, when
+        # the std texts, the catalog and the runtime it builds for are the
+        # ones it was made of.
+        match served_key(at, home, catalog_path):
+            case Ok(now):
+                if now != key:
+                    match remade(at, home, catalog_path):
+                        case Ok((c, s)):
+                            catalog = c
+                            served = s
+                            key = now
+                        case Err(e):
+                            print_err(io_frame(e))
+                            continue
             case Err(e):
-                # What the run time prints of an error that stops `main`,
-                # without the line of the source it stopped at.
-                let text = "error: {e:?}\n"
-                print_err("answer 1 0 {text.byte_len()}\n{text.strip_suffix("\n")}")
+                print_err(io_frame(e))
+                continue
+        serve_one(at, home, catalog_path, args, words, misused, served, catalog)
     return Ok(())
+
+## One request of `sir --repl-serve` answered (RULES.md, R112 and R158):
+## `args` as given, `words` without the working directory's `--dir`, with
+## the system `at` of that directory and the base `served` holds.
+def serve_one(
+    at: System,
+    home: str,
+    catalog_path: str,
+    args: list[String],
+    words: list[String],
+    misused: bool,
+    served: Served,
+    catalog: Catalog,
+):
+    let command = if args.is_empty(): String.new() else: args[0].copy()
+    let repl = command == "sir" and (args.contains("--repl") or args.contains("--worksheet"))
+    let bindings = command == "parse" and len(args) == 3 and args[1] == "--bindings"
+    match served.base:
+        case None:
+            print_err(Answer.misused().frame().strip_suffix("\n"))
+        case Some(base):
+            if misused:
+                print_err(Answer.misused().frame().strip_suffix("\n"))
+                return
+            var answered: Answer ! IoError = Ok(Answer.misused())
+            if repl and args.contains("--repl"):
+                answered = repl_answer(at, home, base, args, catalog)
+            elif repl:
+                answered = worksheet_answer(at, home, base, args, catalog)
+            elif bindings:
+                answered = bindings_answer(at, args[2], catalog)
+            else:
+                # Any other command, as `main` runs it, with what it prints held
+                # and the base served.
+                let (rest, fine) = command_words(words)
+                if not fine:
+                    print_err(Answer.misused().frame().strip_suffix("\n"))
+                    return
+                var o = Out.held()
+                var failure: String? = None
+                if let Err(e) = run_command(at, home, catalog_path, rest, catalog, mut o, served):
+                    failure = Some("error: {e:?}\n")
+                print_err(held_frame(o, failure))
+                return
+            match answered:
+                case Ok(a):
+                    print_err(a.frame().strip_suffix("\n"))
+                case Err(e):
+                    print_err(io_frame(e))
+
+## Whether `sir --repl-serve` runs the command for a request, besides the
+## REPL's (RULES.md, R158).
+pure def served_command(command: str) -> bool:
+    return match command:
+        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens": True
+        case _: False
+
+## What the run time prints of an I/O error that stops `main`, without the
+## lines of the source it passed through, as an answer (RULES.md, R112).
+pure def io_frame(e: IoError) -> String:
+    let text = "error: {e:?}\n"
+    return "answer 1 0 {text.byte_len()}\n{text.strip_suffix("\n")}"
+
+## The frame of a command run with what it printed held in `o` (RULES.md,
+## R158): status 1 when it failed, and then after what it printed on
+## standard error the run time's last line, `failure`, `error: ` and the
+## error's form (`Failed`, `Exit(status=N)`, `Usage(...)` or an I/O
+## error); without the trailing line break, which `print_err` adds.
+pure def held_frame(o: Out, failure: String?) -> String:
+    var err = o.err.copy()
+    var status = 0
+    if let Some(f) = failure:
+        err.push(f)
+        status = 1
+    let frame = "answer {status} {o.out.byte_len()} {err.byte_len()}\n{o.out}{err}"
+    return frame.strip_suffix("\n").to_string()
+
+## A request's words as `main` takes them: without `--target-runtime` and
+## its value, which `target_runtime` reads from the request's arguments,
+## and whether they are fine (a runtime is one of two).
+pure def command_words(words: list[String]) -> (list[String], bool):
+    var rest: list[String] = []
+    var i = 0
+    while i < len(words):
+        if words[i] == "--target-runtime" and i + 1 < len(words):
+            if words[i + 1] != "native" and words[i + 1] != "interpreter":
+                return (rest, False)
+            i += 2
+            continue
+        rest.push(words[i].copy())
+        i += 1
+    return (rest, True)
+
+## What a served base is made of: each std text's and the catalog's size
+## and time, and the runtime and runtime profile the request builds for
+## (its `target`, RULES.md, R116 and R122). A request whose key is the
+## held one is served the held base.
+def served_key(sys: System, home: str, catalog_path: str) -> String ! IoError:
+    var names = ["prelude", "task", "log", "cap", "live"]
+    for name in importable():
+        names.push(name)
+    var all = "{target_runtime(sys)} {runtime_profile(sys)}\n"
+    let c = sys.fs.metadata(Path.new(catalog_path))?
+    all.push("catalog {c.len} {c.modified}\n")
+    for name in names:
+        let m = sys.fs.metadata(Path.new(std_file(home, name)))?
+        all.push("{name} {m.len} {m.modified}\n")
+    return Ok(all)
+
+## The catalog and the base a request is served, made again (RULES.md,
+## R158): the base through the cache, as `base_of` makes it, with the
+## lines of every std text found once for all its requests (R125).
+def remade(sys: System, home: str, catalog_path: str) -> (Catalog, Served) ! IoError:
+    let catalog = Catalog.parse(sys.fs.read_to_string(Path.new(catalog_path))?)
+    let texts = std_texts(sys, home)?
+    let base = typeck.with_lines(base_of(sys, home, texts, catalog))
+    return Ok((catalog, Served(base=Some(base), texts=texts)))
+
+## What tells a server's executable (RULES.md, R158): the running
+## executable's size and time, and those of the driver's build of stage 1,
+## `HOME/target/stage1/sisu1`, when the server is that build. A build
+## replaces the file, so the running one keeps its own; the file at the
+## driver's path is the build a new server would run.
+struct ServerStamp:
+    running: String
+    built: String?
+
+impl ServerStamp:
+    def of(sys: System, home: str) -> ServerStamp:
+        let running = file_stamp(sys, "/proc/self/exe")
+        let at = file_stamp(sys, "{home}/target/stage1/sisu1")
+        var built: String? = None
+        if not running.is_empty() and at == running:
+            built = Some(at)
+        return ServerStamp(running=running, built=built)
+
+    ## Whether the server's executable was built again since it started.
+    def stale(self, sys: System, home: str) -> bool:
+        if file_stamp(sys, "/proc/self/exe") != self.running:
+            return True
+        if let Some(b) = self.built:
+            return file_stamp(sys, "{home}/target/stage1/sisu1") != b
+        return False
+
+## A file's size and time, empty when it cannot be read.
+def file_stamp(sys: System, path: str) -> String:
+    let m = sys.fs.metadata(Path.new(path)) else:
+        return String.new()
+    return "{m.len} {m.modified}"
+
+## The system a served request runs with (RULES.md, R158): the server's,
+## but for a file system whose relative paths are relative to `dir` and an
+## environment whose arguments are the request's `words` and whose working
+## directory (`PWD`, which `absolute` reads) is `dir`.
+def request_system(sys: System, dir: str, words: list[String]) -> System:
+    var vars: dict[String, String] = {}
+    _ = vars.insert("PWD".to_string(), dir.to_string())
+    let env = cap.FakeEnv(args=words.copy(), vars=vars)
+    return cap.system_with(sys, InDir(inner=sys.fs, dir=dir.to_string()), env)
+
+## The file system of a served request (RULES.md, R158): a relative path is
+## relative to `dir`, an absolute one is itself; what it lists starts with
+## the path as it was given, and an error names that path.
+struct InDir:
+    inner: Fs
+    dir: String
+
+impl InDir:
+    pure def full(self, path: Path) -> Path:
+        let text = path.as_str()
+        if text.starts_with("/"):
+            return path.copy()
+        return Path.new("{self.dir}/{text}")
+
+pure def given_path(own e: IoError, path: Path) -> IoError:
+    return match e:
+        case NotFound(_): NotFound(path=path.copy())
+        case PermissionDenied(_): PermissionDenied(path=path.copy())
+        case AlreadyExists(_): AlreadyExists(path=path.copy())
+        case InvalidData(_): InvalidData(path=path.copy())
+        case _: e
+
+impl FsOps for InDir:
+    def read(self, path: Path) -> bytes ! IoError:
+        return self.inner.read(self.full(path)).map_err((e) -> given_path(e, path))
+    def write(self, path: Path, data: bytes) -> ! IoError:
+        return self.inner.write(self.full(path), data).map_err((e) -> given_path(e, path))
+    def read_to_string(self, path: Path) -> String ! IoError:
+        return self.inner.read_to_string(self.full(path)).map_err((e) -> given_path(e, path))
+    def write_text(self, path: Path, text: str) -> ! IoError:
+        return self.inner.write_text(self.full(path), text).map_err((e) -> given_path(e, path))
+    def exists(self, path: Path) -> bool:
+        return self.inner.exists(self.full(path))
+    def metadata(self, path: Path) -> Metadata ! IoError:
+        return self.inner.metadata(self.full(path)).map_err((e) -> given_path(e, path))
+    def remove(self, path: Path) -> ! IoError:
+        return self.inner.remove(self.full(path)).map_err((e) -> given_path(e, path))
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        let whence = self.full(source)
+        let to = self.full(target)
+        let Err(e) = self.inner.rename(whence.copy(), to) else:
+            return Ok(())
+        if cap.error_path(e) == Some(whence):
+            return Err(given_path(e, source))
+        return Err(given_path(e, target))
+    def list_dir(self, path: Path) -> list[Path] ! IoError:
+        let full = self.full(path)
+        let found = self.inner.list_dir(full.copy()).map_err((e) -> given_path(e, path))?
+        let cut = full.as_str().byte_len()
+        var out: list[Path] = []
+        for f in found:
+            let text = f.as_str()
+            out.push(Path.new("{path.as_str()}{text.byte_slice(cut, text.byte_len())}"))
+        return Ok(out)
+    def create_dir(self, path: Path) -> ! IoError:
+        return self.inner.create_dir(self.full(path)).map_err((e) -> given_path(e, path))
+    def sync(self, path: Path) -> ! IoError:
+        return self.inner.sync(self.full(path)).map_err((e) -> given_path(e, path))
+
+## Where a command prints (RULES.md, R158): straight to standard output and
+## standard error, as a command run alone prints, or held for a served
+## request's answer.
+struct Out:
+    direct: bool
+    out: String
+    err: String
+
+impl Out:
+    pure def direct() -> Out:
+        return Out(direct=True, out=String.new(), err=String.new())
+
+    pure def held() -> Out:
+        return Out(direct=False, out=String.new(), err=String.new())
+
+    ## `print(text)`: the text and a line break, on standard output.
+    def put(mut self, text: str):
+        if self.direct:
+            print(text)
+            return
+        self.out.push(text)
+        self.out.push("\n")
+
+    ## `emit(out, errs)`: each text with one line break at its end, on its
+    ## stream, nothing for an empty one.
+    def emit(mut self, out: str, errs: str):
+        if self.direct:
+            emit(out, errs)
+            return
+        self.out.push(Answer.written(out))
+        self.err.push(Answer.written(errs))
+
+## The base a command checks a program against when it is served one
+## (RULES.md, R158), with the std texts it was made of; a command run alone
+## has none and makes its own.
+struct Served:
+    base: typeck.Base?
+    texts: dict[String, String]
+
+impl Served:
+    pure def alone() -> Served:
+        return Served(base=None, texts={})
 
 ## What `parse --bindings INPUT` answers (RULES.md, R95).
 def bindings_answer(sys: System, path: str, catalog: Catalog) -> Answer ! IoError:
@@ -3060,7 +3449,8 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
         emit("", "{usage()}\n")
         return Ok(2)
     if not names_path(words, flags):
-        let found = nearest_package(sys, "test", catalog) else:
+        var direct = Out.direct()
+        let found = nearest_package(sys, "test", catalog, mut direct) else:
             return Ok(1)
         path = found
     if let Some(e) = unknown_feature(sys, path, request):
@@ -3068,7 +3458,10 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
         return Ok(2)
     let locked = words.contains("--locked")
     let accept = words.contains("--accept-unsafe")
-    if not write_lockfile(sys, path, False, locked, accept, catalog, "cli.errors-found")?:
+    var direct = Out.direct()
+    if not write_lockfile(
+        sys, path, False, locked, accept, catalog, "cli.errors-found", mut direct
+    )?:
         return Ok(1)
     let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
@@ -3306,6 +3699,7 @@ def write_lockfile(
     accept_unsafe: bool,
     catalog: Catalog,
     stopped: str,
+    mut o: Out,
 ) -> bool ! IoError:
     let abs = absolute(sys, arg)
     let target = package.locate(sys.fs, abs) else:
@@ -3349,21 +3743,21 @@ def write_lockfile(
     # A package whose `unsafe` level rises past what the lockfile records
     # waits for `--accept-unsafe` (22, D-082), which unattended runs never
     # pass.
-    if let Some(o) = old:
+    if let Some(was) = old:
         if not accept_unsafe:
-            if let Some(err) = raised_level(o, text, catalog):
+            if let Some(err) = raised_level(was, text, catalog):
                 var errs = err.copy()
                 if not stopped.is_empty():
                     let count = Param(name="count".to_string(), value="1")
                     errs.push(catalog.plain_error(stopped, [count]))
-                emit("", errs)
+                o.emit("", errs)
                 return Ok(False)
     if locked:
         var what = "there is none".to_string()
-        if let Some(o) = old:
-            what = diff.lines(o, text)
+        if let Some(was) = old:
+            what = diff.lines(was, text)
         let params = [Param(name="what".to_string(), value=what)]
-        emit("", catalog.plain_error("cli.locked", params))
+        o.emit("", catalog.plain_error("cli.locked", params))
         return Ok(False)
     sys.fs.write_text(Path.new(at), text)?
     return Ok(True)
@@ -3419,7 +3813,7 @@ def workspace_run_error(sys: System, arg: str, catalog: Catalog) -> String?:
 ## The package of the working directory or the nearest directory above it,
 ## which a command that names no path works on (stage 0's `locate` without
 ## an argument): `None`, after `cli.no-package`, when there is none.
-def nearest_package(sys: System, command: str, catalog: Catalog) -> String?:
+def nearest_package(sys: System, command: str, catalog: Catalog, mut o: Out) -> String?:
     let cwd = absolute(sys, ".")
     var dir = cwd.copy()
     while True:
@@ -3432,7 +3826,7 @@ def nearest_package(sys: System, command: str, catalog: Catalog) -> String?:
         Param(name="dir".to_string(), value=cwd),
         Param(name="command".to_string(), value=command.to_string()),
     ]
-    emit("", catalog.plain_error("cli.no-package", params))
+    o.emit("", catalog.plain_error("cli.no-package", params))
     return None
 
 ## Whether the words after a command name a path, beside the options
@@ -4263,24 +4657,43 @@ pure def flag_value(rest: list[String], mut i: int, flag: str) -> String?:
 ## reports it, then `D0114`, and nothing is written. The exit status is
 ## stage 0's: 0, 1 for a program with an error or a file that cannot be
 ## read or written, 2 for a usage error.
-def doc_command(sys: System, home: str, rest: list[String], catalog: Catalog) -> int ! IoError:
+def doc_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> int ! IoError:
     let (args, wrong) = doc_args(rest, catalog)
     if not wrong.is_empty():
-        emit("", wrong)
+        o.emit("", wrong)
         return Ok(2)
-    let texts = std_texts(sys, home)?
-    let base = base_of(sys, home, texts, catalog)
+    # The served base, or one made for this command (RULES.md, R158).
+    match served.base:
+        case Some(b):
+            return doc_with(sys, home, args, b, served.texts, catalog, mut o)
+        case None:
+            let texts = std_texts(sys, home)?
+            let base = base_of(sys, home, texts, catalog)
+            return doc_with(sys, home, args, base, texts, catalog, mut o)
+
+## `doc` of what it was asked, `args`, with the base `base` made of `texts`.
+def doc_with(
+    sys: System,
+    home: str,
+    args: DocArgs,
+    base: typeck.Base,
+    texts: dict[String, String],
+    catalog: Catalog,
+    mut o: Out,
+) -> int ! IoError:
     var env = base.environment()
-    let report = doc_report(sys, home, args, None, base, texts, mut env, catalog)?
+    let report = doc_report(sys, home, args, None, base, texts, mut env, catalog, mut o)?
     if report.status != 0:
-        emit(report.out, report.err)
+        o.emit(report.out, report.err)
         return Ok(report.status)
-    let dir = args.output else:
-        emit(doc.printed(report.pages), "")
+    let dir = args.output.copy() else:
+        o.emit(doc.printed(report.pages), "")
         return Ok(0)
     let failed = write_pages(sys, dir, report.pages, catalog)
     if not failed.is_empty():
-        emit("", failed)
+        o.emit("", failed)
         return Ok(1)
     return Ok(0)
 
@@ -4297,6 +4710,7 @@ def doc_report(
     texts: dict[String, String],
     mut env: Environment,
     catalog: Catalog,
+    mut o: Out,
 ) -> DocReport ! IoError:
     if args.std_lib:
         # The standard library: a program that imports each module, so that
@@ -4320,13 +4734,13 @@ def doc_report(
             elif let Err(e) = sys.fs.read_to_string(Path.new(t)):
                 return Ok(DocReport.failed(cannot_read(t, e, catalog), 1))
         case None:
-            let found = nearest_package(sys, "doc", catalog) else:
+            let found = nearest_package(sys, "doc", catalog, mut o) else:
                 return Ok(DocReport.failed(String.new(), 2))
             path = found
     if let Some(e) = unknown_feature(sys, path, args.request):
         return Ok(DocReport.failed(catalog.plain_error("cli.unknown-feature", e), 2))
     # `--locked` keeps the lockfile as it is, or stops the command.
-    if not write_lockfile(sys, path, False, args.locked, args.accept_unsafe, catalog, "")?:
+    if not write_lockfile(sys, path, False, args.locked, args.accept_unsafe, catalog, "", mut o)?:
         return Ok(DocReport.failed(String.new(), 1))
     var inputs: list[Input] = []
     match layouts_of(sys, path, False, args.request):
@@ -4553,7 +4967,9 @@ struct FmtReport:
 ## with a syntax error is reported and left as it is. The exit status is
 ## stage 0's: 0, 1 when a file is not formatted or could not be, 2 for a
 ## usage error and 70 for a file the formatter refused as changed.
-def fmt_command(sys: System, home: str, rest: list[String], catalog: Catalog) -> int ! IoError:
+def fmt_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> int ! IoError:
     var flags: list[String] = []
     var paths: list[String] = []
     for k in range(1, len(rest)):
@@ -4567,12 +4983,12 @@ def fmt_command(sys: System, home: str, rest: list[String], catalog: Catalog) ->
                 Param(name="option".to_string(), value=f.copy()),
                 Param(name="command".to_string(), value="fmt".to_string()),
             ]
-            emit("", catalog.plain_error("cli.unknown-option", params))
+            o.emit("", catalog.plain_error("cli.unknown-option", params))
             return Ok(2)
     let check = not flags.is_empty()
     var files: list[String] = []
     if paths.is_empty():
-        let found = nearest_package(sys, "fmt", catalog) else:
+        let found = nearest_package(sys, "fmt", catalog, mut o) else:
             return Ok(2)
         sisu_files(sys, found, mut files)
     for p in paths:
@@ -4581,7 +4997,7 @@ def fmt_command(sys: System, home: str, rest: list[String], catalog: Catalog) ->
             sisu_files(sys, p, mut files)
             if len(files) == before:
                 let params = [Param(name="path".to_string(), value=p.copy())]
-                emit("", catalog.plain_error("cli.fmt-nothing", params))
+                o.emit("", catalog.plain_error("cli.fmt-nothing", params))
         else:
             files.push(p.copy())
     var status = 0
@@ -4592,11 +5008,17 @@ def fmt_command(sys: System, home: str, rest: list[String], catalog: Catalog) ->
             case Ok(t):
                 text = t
             case Err(e):
-                emit("", cannot_read(f, e, catalog))
+                o.emit("", cannot_read(f, e, catalog))
                 status = 1
                 continue
-        let report = fmt_file(sys, home, f, text, check, mut base, catalog)?
-        emit(report.out, report.err)
+        # A served base where the file needs one (RULES.md, R158).
+        let written = format.to_resolve(text, catalog)
+        var report = FmtReport(out=String.new(), err=String.new(), status=0, changed=None)
+        if served.base.is_some() and not written.is_empty():
+            report = fmt_report(served.base, f, text, written, check, catalog)
+        else:
+            report = fmt_file(sys, home, f, text, check, mut base, catalog)?
+        o.emit(report.out, report.err)
         if report.status != 0:
             status = report.status
         if check:
@@ -4607,7 +5029,7 @@ def fmt_command(sys: System, home: str, rest: list[String], catalog: Catalog) ->
                     Param(name="path".to_string(), value=f.copy()),
                     Param(name="reason".to_string(), value=io_reason(e)),
                 ]
-                emit("", catalog.plain_error("cli.cannot-write", params))
+                o.emit("", catalog.plain_error("cli.cannot-write", params))
                 status = 1
     return Ok(status)
 
@@ -4763,3 +5185,24 @@ test "an answer of `sir --repl-serve` is framed by its lengths in bytes":
     assert Answer.failed("é").frame() == "answer 1 0 17\né\nerror: Failed\n"
     assert Answer.done("").frame() == "answer 0 0 0\n"
     assert Answer.misused().frame().starts_with("answer 1 0 ")
+
+test "a served command's answer holds what it printed and the run time's last line":
+    var o = Out.held()
+    o.put("fn main")
+    o.emit("", "error[E0300]: x\n")
+    assert held_frame(o, None) == "answer 0 8 16\nfn main\nerror[E0300]: x"
+    assert held_frame(o, Some("error: Failed\n"))
+        == "answer 1 8 30\nfn main\nerror[E0300]: x\nerror: Failed"
+    assert held_frame(Out.held(), None) == "answer 0 0 0"
+    let (rest, fine) = command_words(["sir", "--target-runtime", "native", "a.sisu"])
+    assert fine and rest == ["sir", "a.sisu"]
+    let (_, wrong) = command_words(["sir", "--target-runtime", "wasm", "a.sisu"])
+    assert not wrong
+    assert served_command("check") and served_command("tokens") and not served_command("build")
+
+test "a served request's relative paths are its directory's":
+    let fs = InDir(inner=Fs.in_memory(), dir="/w/d".to_string())
+    assert fs.full(Path.new("a.sisu")) == Path.new("/w/d/a.sisu")
+    assert fs.full(Path.new("/x/a.sisu")) == Path.new("/x/a.sisu")
+    assert given_path(NotFound(path=Path.new("/w/d/a")), Path.new("a"))
+        == NotFound(path=Path.new("a"))

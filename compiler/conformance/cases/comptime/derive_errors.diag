@@ -1,3 +1,3 @@
 9:18-9:24 E0607 comptime.derive-template trait="Wrong"
-22:9-22:14 E0608 comptime.derive-failed trait="Named" ty="Point" reason="`x.[f]` needs a field, not text"
+22:9-22:14 E0608 comptime.derive-failed trait="Named" ty="Point" reason="`x.[f]` needs a field or a method, not text"
   label 19:34-19:40 comptime.derive-here

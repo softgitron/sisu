@@ -1,0 +1,5 @@
+guest_name, hour, paid
+cold (1), Medium (0), very hot (1)
+heat 80
+half 40
+no route for /cold

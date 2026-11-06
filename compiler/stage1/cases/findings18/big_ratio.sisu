@@ -1,0 +1,17 @@
+# `std.num`'s `BigRatio`, an exact fraction of `BigInt`s, and a `Decimal`'s
+# `/`, which gives one (RULES.md, R163; 03: "division yields a `Ratio`").
+from std.num import BigInt, BigRatio, Decimal, Ratio, Rounding
+
+def main():
+    let third = BigRatio.of(BigInt.of(1), BigInt.of(3))
+    let big = BigRatio.whole(BigInt.of(10).pow(30))
+    print("{big * third} {big / third} {big - third}")
+    print(third + third + third == BigRatio.whole(BigInt.of(1)))
+    print("{-third} {(-third).floor()} {third < big}")
+    let a: Decimal = 1.5
+    let b: Decimal = 0.4
+    print("{a / b} {(a / b).to_ratio() == Some(Ratio.of(15, 4))}")
+    let c = Decimal.parse("123456789012345678901234567890.5").expect("digits")
+    let q = c / b
+    print("{q} {q.to_ratio().is_none()}")
+    print("{a.div(b, 2, Rounding.HalfEven)}")

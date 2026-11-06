@@ -1,0 +1,6 @@
+# A reflection query that stops the compile-time code of a function without
+# type parameters says so in a plain function's words (RULES.md, R159),
+# not those of a generic function's instance.
+def main():
+    let degrees = 3
+    print(reflect.name_of(degrees))

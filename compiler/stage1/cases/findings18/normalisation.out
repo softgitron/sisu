@@ -1,0 +1,13 @@
+e9 74 e9: nfd 65 301 74 65 301 | nfc e9 74 e9 | nfkd 65 301 74 65 301 | nfkc e9 74 e9
+65 301: nfd 65 301 | nfc e9 | nfkd 65 301 | nfkc e9
+1e69: nfd 73 323 307 | nfc 1e69 | nfkd 73 323 307 | nfkc 1e69
+73 323 307: nfd 73 323 307 | nfc 1e69 | nfkd 73 323 307 | nfkc 1e69
+73 307 323: nfd 73 323 307 | nfc 1e69 | nfkd 73 323 307 | nfkc 1e69
+fb01: nfd fb01 | nfc fb01 | nfkd 66 69 | nfkc 66 69
+78 b2: nfd 78 b2 | nfc 78 b2 | nfkd 78 32 | nfkc 78 32
+212b: nfd 41 30a | nfc c5 | nfkd 41 30a | nfkc c5
+d55c: nfd 1112 1161 11ab | nfc d55c | nfkd 1112 1161 11ab | nfkc d55c
+1112 1161 11ab: nfd 1112 1161 11ab | nfc d55c | nfkd 1112 1161 11ab | nfkc d55c
+2126: nfd 3a9 | nfc 3a9 | nfkd 3a9 | nfkc 3a9
+fdfa: nfd fdfa | nfc fdfa | nfkd 635 644 649 20 627 644 644 647 20 639 644 64a 647 20 648 633 644 645 | nfkc 635 644 649 20 627 644 644 647 20 639 644 64a 647 20 648 633 644 645
+True
