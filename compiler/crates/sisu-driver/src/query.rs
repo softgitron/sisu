@@ -2,7 +2,9 @@
 //! `sisu1 query KIND FILE [LINE COL] --text PATH` (its R164, `sisu1
 //! 0.14.0` and later), served by the driver's server of stage 1 (decision
 //! 980), for the diagnostics, hover, go-to-definition, references,
-//! completion and document symbols. A document's text is written to a
+//! completion and document symbols, and from `sisu1 0.15.0` (its R169,
+//! decision 1060) selection ranges, rename, code actions, inlay hints and
+//! formatting too. A document's text is written to a
 //! file of the server's own, which `--text` names. An answer is one line
 //! per item, its fields separated by tabs, positions `LINE:COL` with the
 //! column in characters; the server turns them into the protocol's. A
@@ -101,6 +103,18 @@ impl Server {
     /// given, as its lines of fields; none without a stage 1 that answers
     /// queries, or when it failed.
     fn query(&mut self, kind: &str, uri: &str, pos: Option<&Json>) -> Option<Vec<Vec<String>>> {
+        self.query_with(kind, uri, pos, &[])
+    }
+
+    /// [`Server::query`], with words after the position (`rename`'s new
+    /// name).
+    fn query_with(
+        &mut self,
+        kind: &str,
+        uri: &str,
+        pos: Option<&Json>,
+        more: &[String],
+    ) -> Option<Vec<Vec<String>>> {
         let stage1 = self.stage1.as_ref()?;
         let text = self.docs.get(uri).map(|d| d.text.clone())?;
         let path = uri_path(uri);
@@ -115,6 +129,7 @@ impl Server {
             words.push(line.to_string());
             words.push(col.to_string());
         }
+        words.extend(more.iter().cloned());
         words.push("--text".into());
         words.push(buffer.display().to_string());
         let ran = stage1.ask(&words)?;
@@ -264,6 +279,307 @@ impl Server {
                 })
                 .collect(),
         ))
+    }
+}
+
+/// The lines of a document that a range of an answer covers, as `(first,
+/// end)`, the end past its last line: a range that ends at a line's start
+/// stops before that line.
+fn line_span(field: &str) -> Option<(usize, usize)> {
+    let (from, to) = field.split_once('-')?;
+    let ((l1, _), (l2, c2)) = (position(from)?, position(to)?);
+    Some((l1.saturating_sub(1), if c2 == 1 { l2.saturating_sub(1) } else { l2 }))
+}
+
+/// The protocol's kind and padding of an inlay hint, by the kind `query
+/// inlay` names: a type and an error set after what they describe, a mode
+/// before its argument.
+fn hint_kind(kind: &str) -> (f64, bool, bool) {
+    match kind {
+        "errors" => (1.0, true, false),
+        "mode" => (2.0, false, true),
+        _ => (1.0, false, false),
+    }
+}
+
+/// What `query format` answered: the runs of changed lines, each its range
+/// and the lines that replace it; none when it refused the text.
+type Runs = Option<Vec<(String, String)>>;
+
+impl Server {
+    /// Whether stage 1 answers the language server's other requests:
+    /// selection ranges, rename, code actions, inlay hints and formatting
+    /// (`sisu1 0.15.0` and later, its R169; decision 1060).
+    fn assists(&self) -> bool {
+        self.stage1.as_ref().is_some_and(crate::front::Stage1::assists)
+    }
+
+    /// The selection ranges at each position, from `query selection`: its
+    /// ranges innermost first, each the parent of the one before.
+    pub(crate) fn stage1_selection(&mut self, uri: &str, positions: &[Json]) -> Option<Json> {
+        if !self.assists() {
+            return None;
+        }
+        let text = self.docs.get(uri).map(|d| d.text.clone())?;
+        let mut out = Vec::new();
+        for p in positions {
+            let rows = self.query_with("selection", uri, Some(p), &[])?;
+            let lines = Lines::new(&text, self.utf8);
+            let mut sel = Json::Null;
+            for row in rows.iter().rev() {
+                let Some(r) = row.first().and_then(|f| range(f, &lines)) else { continue };
+                let mut fields = vec![("range", r)];
+                if sel != Json::Null {
+                    fields.push(("parent", sel));
+                }
+                sel = Json::obj(fields);
+            }
+            out.push(sel);
+        }
+        Some(Json::Arr(out))
+    }
+
+    /// The URI of a file an answer names: the document's own, or the file's.
+    fn uri_of(&self, path: &Path, uri: &str) -> String {
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        if canon(path) == canon(&uri_path(uri)) { uri.to_string() } else { path_uri(path) }
+    }
+
+    /// A rename, from `query rename`: its lines as one workspace edit, or
+    /// why it cannot be made (`refused`).
+    pub(crate) fn stage1_rename(
+        &mut self,
+        uri: &str,
+        pos: &Json,
+        new_name: &str,
+    ) -> Option<Result<Json, String>> {
+        if !self.assists() {
+            return None;
+        }
+        let rows = self.query_with("rename", uri, Some(pos), &[new_name.to_string()])?;
+        if let Some(["refused", reason]) =
+            rows.first().map(|r| r.iter().map(String::as_str).collect::<Vec<_>>()).as_deref()
+        {
+            return Some(Err(match *reason {
+                "not-a-name" => {
+                    crate::cli::text(sisu_diag::msg::LSP_NOT_A_NAME, &[("name", new_name.to_string())])
+                }
+                _ => crate::cli::text(sisu_diag::msg::LSP_CANNOT_RENAME, &[]),
+            }));
+        }
+        let mut by_file: Vec<(String, Vec<Json>)> = Vec::new();
+        for row in &rows {
+            let [path, at, new_text] = row.as_slice() else { continue };
+            let path = PathBuf::from(path);
+            let text = self.text_at(&path);
+            let lines = Lines::new(&text, self.utf8);
+            let Some(r) = range(at, &lines) else { continue };
+            let file = self.uri_of(&path, uri);
+            let edit = Json::obj(vec![("range", r), ("newText", Json::str(new_text.clone()))]);
+            match by_file.iter_mut().find(|(f, _)| *f == file) {
+                Some((_, edits)) => edits.push(edit),
+                None => by_file.push((file, vec![edit])),
+            }
+        }
+        if by_file.is_empty() {
+            return Some(Err(crate::cli::text(sisu_diag::msg::LSP_CANNOT_RENAME, &[])));
+        }
+        by_file.sort_by(|a, b| a.0.cmp(&b.0));
+        Some(Ok(Json::obj(vec![(
+            "changes",
+            Json::Obj(by_file.into_iter().map(|(f, e)| (f, Json::Arr(e))).collect()),
+        )])))
+    }
+
+    /// `prepareRename`, from `query references` (the name at the position)
+    /// and `query rename` to that name (whether it can be renamed).
+    pub(crate) fn stage1_prepare_rename(&mut self, uri: &str, pos: &Json) -> Option<Json> {
+        if !self.assists() {
+            return None;
+        }
+        let text = self.docs.get(uri).map(|d| d.text.clone())?;
+        let offset = Lines::new(&text, self.utf8).offset(pos);
+        let rows = self.query_with("references", uri, Some(pos), &[])?;
+        let found = rows.iter().find_map(|row| {
+            let [path, at, _] = row.as_slice() else { return None };
+            let (from, to) = at.split_once('-')?;
+            let ((l1, c1), (l2, c2)) = (position(from)?, position(to)?);
+            let (s, e) = (offset_at(&text, l1, c1), offset_at(&text, l2, c2));
+            (self.uri_of(Path::new(path), uri) == uri && s <= offset && offset <= e).then_some((s, e))
+        });
+        let Some((s, e)) = found else { return Some(Json::Null) };
+        let name = text[s..e].to_string();
+        let renamed = self.query_with("rename", uri, Some(pos), std::slice::from_ref(&name))?;
+        if renamed.first().is_none_or(|r| r.first().map(String::as_str) == Some("refused")) {
+            return Some(Json::Null);
+        }
+        let lines = Lines::new(&text, self.utf8);
+        Some(Json::obj(vec![("range", lines.range(s, e)), ("placeholder", Json::str(name))]))
+    }
+
+    /// The code actions at the start of a range, from `query actions`: each
+    /// fix of a diagnostic there, a quick fix with its edits, the
+    /// diagnostic as `query diagnostics` published it.
+    pub(crate) fn stage1_code_actions(&mut self, uri: &str, at: &Json) -> Option<Json> {
+        if !self.assists() {
+            return None;
+        }
+        let start = at
+            .get("start")
+            .cloned()
+            .unwrap_or_else(|| Json::obj(vec![("line", Json::num(0)), ("character", Json::num(0))]));
+        let rows = self.query_with("actions", uri, Some(&start), &[])?;
+        let published = self.stage1_diagnostics(uri).unwrap_or_default();
+        let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
+        let lines = Lines::new(&text, self.utf8);
+        let mut out = Vec::new();
+        let mut open: Option<(bool, String, Json, Vec<Json>)> = None;
+        let close = |open: &mut Option<(bool, String, Json, Vec<Json>)>, out: &mut Vec<Json>| {
+            if let Some((preferred, title, diagnostic, edits)) = open.take() {
+                out.push(Json::obj(vec![
+                    ("title", Json::str(title)),
+                    ("kind", Json::str("quickfix")),
+                    ("isPreferred", Json::Bool(preferred)),
+                    ("diagnostics", Json::Arr(vec![diagnostic])),
+                    (
+                        "edit",
+                        Json::obj(vec![("changes", Json::Obj(vec![(uri.to_string(), Json::Arr(edits))]))]),
+                    ),
+                ]));
+            }
+        };
+        for row in &rows {
+            match row.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+                ["fix", k, title, at, code, id] => {
+                    close(&mut open, &mut out);
+                    let r = range(at, &lines)?;
+                    let diagnostic = published
+                        .iter()
+                        .find(|d| {
+                            d.get("range") == Some(&r) && d.get("code").and_then(Json::as_str) == Some(code)
+                        })
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            Json::obj(vec![
+                                ("range", r.clone()),
+                                ("code", Json::str(*code)),
+                                ("source", Json::str("sisu")),
+                                ("data", Json::obj(vec![("id", Json::str(*id))])),
+                            ])
+                        });
+                    open = Some((*k == "0", title.to_string(), diagnostic, Vec::new()));
+                }
+                ["edit", at, new_text] => {
+                    if let Some((_, _, _, edits)) = open.as_mut() {
+                        edits.push(Json::obj(vec![
+                            ("range", range(at, &lines)?),
+                            ("newText", Json::str(*new_text)),
+                        ]));
+                    }
+                }
+                _ => {}
+            }
+        }
+        close(&mut open, &mut out);
+        Some(Json::Arr(out))
+    }
+
+    /// The inlay hints in a range, from `query inlay`.
+    pub(crate) fn stage1_inlay_hints(&mut self, uri: &str, within: &Json) -> Option<Json> {
+        if !self.assists() {
+            return None;
+        }
+        let rows = self.query_with("inlay", uri, None, &[])?;
+        let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
+        let lines = Lines::new(&text, self.utf8);
+        let from = within.get("start").map(|p| lines.offset(p)).unwrap_or(0);
+        let to = within.get("end").map(|p| lines.offset(p)).unwrap_or(text.len());
+        let mut out = Vec::new();
+        for row in &rows {
+            let [at, kind, label] = row.as_slice() else { continue };
+            let Some((line, col)) = position(at) else { continue };
+            let offset = offset_at(&text, line, col);
+            if offset < from || offset > to {
+                continue;
+            }
+            let (number, left, right) = hint_kind(kind);
+            out.push(Json::obj(vec![
+                ("position", lines.position(offset)),
+                ("label", Json::str(label.clone())),
+                ("kind", Json::num(number)),
+                ("paddingLeft", Json::Bool(left)),
+                ("paddingRight", Json::Bool(right)),
+            ]));
+        }
+        Some(Json::Arr(out))
+    }
+
+    /// `query format`'s runs of changed lines; none without a stage 1 that
+    /// answers it, `Some(None)` when it refused the text.
+    fn stage1_runs(&mut self, uri: &str) -> Option<Runs> {
+        if !self.assists() {
+            return None;
+        }
+        let rows = self.query_with("format", uri, None, &[])?;
+        if rows.first().and_then(|r| r.first()).is_some_and(|f| f == "refused") {
+            return Some(None);
+        }
+        Some(Some(
+            rows.into_iter()
+                .filter_map(|r| match <[String; 2]>::try_from(r) {
+                    Ok([at, text]) => Some((at, text)),
+                    Err(_) => None,
+                })
+                .collect(),
+        ))
+    }
+
+    /// The formatting of a document, from `query format`: its runs made in
+    /// the text, one edit of the whole document as `sisu fmt` writes it.
+    pub(crate) fn stage1_formatting(&mut self, uri: &str) -> Option<Json> {
+        let Some(runs) = self.stage1_runs(uri)? else { return Some(Json::Null) };
+        let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
+        let mut spans = Vec::new();
+        for (at, new_text) in &runs {
+            let (from, to) = at.split_once('-')?;
+            let ((l1, c1), (l2, c2)) = (position(from)?, position(to)?);
+            spans.push((offset_at(&text, l1, c1), offset_at(&text, l2, c2), new_text));
+        }
+        let mut out = text.clone();
+        for (s, e, new_text) in spans.into_iter().rev() {
+            out.replace_range(s..e, new_text);
+        }
+        if out == text {
+            return Some(Json::Arr(Vec::new()));
+        }
+        let lines = Lines::new(&text, self.utf8);
+        Some(Json::Arr(vec![Json::obj(vec![
+            ("range", lines.range(0, text.len())),
+            ("newText", Json::str(out)),
+        ])]))
+    }
+
+    /// The formatting of a range, from `query format`: each run of changed
+    /// lines that the range touches and holds, as `sisu fmt` would write it.
+    pub(crate) fn stage1_range_formatting(&mut self, uri: &str, within: &Json) -> Option<Json> {
+        let Some(runs) = self.stage1_runs(uri)? else { return Some(Json::Null) };
+        let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
+        let lines = Lines::new(&text, self.utf8);
+        let first = within.at(&["start", "line"]).and_then(Json::as_u64).unwrap_or(0) as usize;
+        let last = within.at(&["end", "line"]).and_then(Json::as_u64).unwrap_or(u64::MAX) as usize;
+        let mut out = Vec::new();
+        for (at, new_text) in &runs {
+            let Some((a0, a1)) = line_span(at) else { continue };
+            let touches = a0 <= last && (a1.max(a0 + 1) - 1) >= first;
+            let inside = a0 >= first && a1 <= last.saturating_add(1);
+            if touches && inside {
+                out.push(Json::obj(vec![
+                    ("range", range(at, &lines)?),
+                    ("newText", Json::str(new_text.clone())),
+                ]));
+            }
+        }
+        Some(Json::Arr(out))
     }
 }
 

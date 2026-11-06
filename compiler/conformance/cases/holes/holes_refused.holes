@@ -1,0 +1,15 @@
+--- stderr
+error[E0300]: expected `int`, found `str`
+  --> holes_refused.sisu:4:18
+  |
+4 |     let n: int = "three"
+  |                  ^^^^^^^
+  |            --- expected because of this
+
+warning[W0001]: typed hole `` of type `int`
+  --> holes_refused.sisu:5:11
+  |
+5 |     print(todo[int]())
+  |           ^^^^^^^^^^^
+
+--- status 1

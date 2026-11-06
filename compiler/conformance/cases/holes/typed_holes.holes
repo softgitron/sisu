@@ -1,0 +1,8 @@
+typed_holes.sisu:12:16: the typed hole `todo("discount")` of type `int`, in `Order.total`
+  in scope: `self: ref Order`, `price: int`, `base: int`
+  of its type: `price`, `base`
+typed_holes.sisu:16:12: the typed hole `todo()` of type `str`, in `label`
+  in scope: `count: int`, `plural: bool`
+  nothing in scope is of its type
+--- stderr
+--- status 0

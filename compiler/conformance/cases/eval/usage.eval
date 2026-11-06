@@ -1,0 +1,10 @@
+--- sisu eval usage.sisu --to xml
+--- stderr
+usage: sisu eval <file>
+
+the constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator
+--- status 2
+--- sisu eval usage.sisu --to toml
+PORT = 8080
+--- stderr
+--- status 0

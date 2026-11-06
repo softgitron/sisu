@@ -3038,8 +3038,10 @@ diagnostics, hover, go-to-definition, references, completion and document
 symbols are stage 1's `query` answers instead (its R164; `query.rs`,
 decision 983), each document's text written to a file of the server's own
 for `--text` and the query served by the driver's server of stage 1
-(decision 980); the other features, an older stage 1 and `--front-end=rust`
-keep the answers above.
+(decision 980); from 0.15.0 so are selection ranges, rename and
+`prepareRename`, code actions, inlay hints and formatting (its R169,
+decision 1060). Worksheets' inline values and `sisu.explainBorrow`, an older
+stage 1 and `--front-end=rust` keep the answers above.
 
 Documents are synchronised whole. Positions are UTF-16 code units unless
 the client offers UTF-8. A request it does not know is answered
@@ -3165,7 +3167,8 @@ sisu run [FILE] [ARGS...]    check, lower and run; `--watch` swaps in each save 
                              `--native [--release]` builds it natively and runs that
 sisu replay LOG              run a recorded program again against its log (`--monitor`)
 sisu check [FILE]            diagnostics; `--format=ids` for the conformance form,
-                             `--diary LOG` appends them to the friction log
+                             `--diary LOG` appends them to the friction log,
+                             `--holes FILE` each typed hole and what fits it (decision 1063)
 sisu doc [PATH]              the documentation, a Markdown page per module, printed;
                              `--output DIR` writes the pages there, `--std [MODULE...]`
                              documents the standard library (decision 258)
@@ -3226,7 +3229,12 @@ queries answer from 0.14.0 (decision 983), as `eval` is stage 1's alone
 0.13.0: `check`, `sir`, `parse`, `fmt`, `lint`, `doc`, `tokens`, and the
 `sir --tests` of `test` and `bench`) is asked of the driver's server of
 stage 1, which keeps the standard library's base between commands
-(`serve.rs`, decision 980; `SISU_STAGE1_SERVE=0` runs a process for each).
+(`serve.rs`, decision 980; `SISU_STAGE1_SERVE=0` runs a process for each),
+and so, from 0.15.0, is the SIR `run` runs (`build --for-run --emit-sir`,
+decision 1061), `check --holes` (decision 1063) and the rest of `lsp`'s
+questions (decision 1060). A run of stage 1 that ends with stage 1's own
+usage error is shown the driver's usage of the command (`D0151`, decision
+1065).
 
 `sisu audit --ownership` is the corpus study's count (18, Phase 3; T1.1
 and T1.2): for each file, one line of data, the file's name and then

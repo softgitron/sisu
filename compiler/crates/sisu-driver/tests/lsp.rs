@@ -167,6 +167,27 @@ impl Client {
 }
 
 /// A document's URI, in a fresh directory of its own (no package above).
+/// The front ends whose answers the tests of a feature hold: the Rust
+/// front end's, and stage 1's queries (decisions 983 and 1060), which are
+/// the Rust front end's too with a stage 1 older than 0.15.0.
+const FRONTS: [&str; 2] = ["rust", "stage1"];
+
+/// Whether the stage 1 the driver runs answers the language server's other
+/// requests (`sisu1 0.15.0` and later, decision 1060).
+fn stage1_assists() -> bool {
+    let exe = std::env::var_os("SISU_STAGE1")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/stage1/sisu1"));
+    let printed = Command::new(exe).arg("--version").output().map(|o| o.stdout).unwrap_or_default();
+    let version: Vec<u32> = String::from_utf8_lossy(&printed)
+        .trim()
+        .trim_start_matches("sisu1 ")
+        .split('.')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    version.as_slice() >= [0, 15, 0].as_slice()
+}
+
 fn document(name: &str, text: &str) -> (String, PathBuf) {
     let dir = std::env::temp_dir().join(format!("sisu-lsp-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -265,7 +286,13 @@ fn definition_goes_to_the_program_and_to_the_standard_library() {
 
 #[test]
 fn symbols_selection_ranges_and_formatting() {
-    let mut c = Client::start();
+    for front in FRONTS {
+        symbols_selection_ranges_and_formatting_on(front);
+    }
+}
+
+fn symbols_selection_ranges_and_formatting_on(front: &str) {
+    let mut c = Client::start_on(front);
     let (uri, _dir) = document("prog.sisu", PROGRAM);
     c.open(&uri, PROGRAM);
     let s = c.request(
@@ -385,7 +412,13 @@ fn completion_offers_members_and_names_in_scope() {
 
 #[test]
 fn rename_changes_every_use() {
-    let mut c = Client::start();
+    for front in FRONTS {
+        rename_changes_every_use_on(front);
+    }
+}
+
+fn rename_changes_every_use_on(front: &str) {
+    let mut c = Client::start_on(front);
     let (uri, _dir) = document("rename.sisu", SHAPES);
     c.open(&uri, SHAPES);
     let edits_of = |r: &Json| -> Vec<(u64, u64, String)> {
@@ -446,7 +479,12 @@ fn rename_changes_every_use() {
         ]),
     );
     let lines: Vec<u64> = edits_of(&r).iter().map(|e| e.0).collect();
-    assert_eq!(lines, vec![1, 5, 5, 11, 12], "{}", r.write());
+    // Stage 1's `query rename` (its R169) leaves out the keyword of the
+    // construction, `Point(x=1, ...)` on line 11, which the Rust front
+    // end's renames (decision 1060).
+    let expected: &[u64] =
+        if front == "stage1" && stage1_assists() { &[1, 5, 5, 12] } else { &[1, 5, 5, 11, 12] };
+    assert_eq!(lines, expected, "{front}: {}", r.write());
     // The references of `area`: its definition and its call.
     let r = c.request(
         "textDocument/references",
@@ -477,7 +515,13 @@ fn rename_changes_every_use() {
 
 #[test]
 fn code_actions_carry_the_catalogs_fixes() {
-    let mut c = Client::start();
+    for front in FRONTS {
+        code_actions_carry_the_catalogs_fixes_on(front);
+    }
+}
+
+fn code_actions_carry_the_catalogs_fixes_on(front: &str) {
+    let mut c = Client::start_on(front);
     let text = "def main():\n    let count = 3\n    print(cuont)\n";
     let (uri, _dir) = document("fix.sisu", text);
     c.open(&uri, text);
@@ -506,7 +550,13 @@ fn code_actions_carry_the_catalogs_fixes() {
 
 #[test]
 fn inlay_hints_show_types_error_sets_and_conventions() {
-    let mut c = Client::start();
+    for front in FRONTS {
+        inlay_hints_show_types_error_sets_and_conventions_on(front);
+    }
+}
+
+fn inlay_hints_show_types_error_sets_and_conventions_on(front: &str) {
+    let mut c = Client::start_on(front);
     let text = "\
 error Missing:
     Gone
@@ -595,7 +645,13 @@ fn explain_borrow_is_a_command() {
 
 #[test]
 fn range_formatting_and_worksheet_values() {
-    let mut c = Client::start();
+    for front in FRONTS {
+        range_formatting_and_worksheet_values_on(front);
+    }
+}
+
+fn range_formatting_and_worksheet_values_on(front: &str) {
+    let mut c = Client::start_on(front);
     let messy = "def a( ):\n    print( 1+2 )\n\ndef b( ):\n    print( 3+4 )\n";
     let (uri, _dir) = document("range.sisu", messy);
     c.open(&uri, messy);
@@ -809,7 +865,9 @@ fn stage_1s_queries_answer_as_the_rust_front_end() {
 /// server of stage 1 serves them and when each runs stage 1 as a process
 /// (`SISU_STAGE1_SERVE=0`, decision 980): a document's diagnostics, a
 /// definition, a hover, its symbols, a function's references and the
-/// members after a `.` (decision 1023).
+/// members after a `.` (decision 1023), and from `sisu1 0.15.0` a rename
+/// and its prepare, the inlay hints, the selection ranges, the code actions
+/// and the formatting (decision 1060).
 #[test]
 fn stage_1s_queries_answer_alike_served_and_as_a_process() {
     let (uri, _dir) = document("served.sisu", PROGRAM);
@@ -839,11 +897,58 @@ fn stage_1s_queries_answer_alike_served_and_as_a_process() {
             )
             .write(),
         );
-        let _ = c.change(&uri, 3, &format!("{PROGRAM}    print(p.)\n"));
+        // The other requests (decision 1060): a rename and its prepare, the
+        // fixes at a misspelt name, the inlay hints, the selection ranges
+        // and the formatting.
+        let doc = || Json::obj(vec![("uri", Json::str(uri.clone()))]);
+        let pos =
+            |line: u32, ch: u32| Json::obj(vec![("line", Json::num(line)), ("character", Json::num(ch))]);
+        got.push(c.at("textDocument/prepareRename", &uri, 20, 11).write());
+        got.push(
+            c.request(
+                "textDocument/rename",
+                Json::obj(vec![
+                    ("textDocument", doc()),
+                    ("position", pos(20, 11)),
+                    ("newName", Json::str("size")),
+                ]),
+            )
+            .write(),
+        );
+        let whole = Json::obj(vec![("start", pos(0, 0)), ("end", pos(22, 0))]);
+        got.push(
+            c.request("textDocument/inlayHint", Json::obj(vec![("textDocument", doc()), ("range", whole)]))
+                .write(),
+        );
+        got.push(
+            c.request(
+                "textDocument/selectionRange",
+                Json::obj(vec![("textDocument", doc()), ("positions", Json::Arr(vec![pos(20, 16)]))]),
+            )
+            .write(),
+        );
+        let _ = c.change(&uri, 3, &format!("{PROGRAM}    print(aera(1, 2))\n"));
+        let at = Json::obj(vec![("start", pos(22, 10)), ("end", pos(22, 10))]);
+        got.push(
+            c.request(
+                "textDocument/codeAction",
+                Json::obj(vec![
+                    ("textDocument", doc()),
+                    ("range", at),
+                    ("context", Json::obj(vec![("diagnostics", Json::Arr(Vec::new()))])),
+                ]),
+            )
+            .write(),
+        );
+        let _ = c.change(&uri, 4, &format!("{PROGRAM}    print( 1+2 )\n"));
+        got.push(c.request("textDocument/formatting", Json::obj(vec![("textDocument", doc())])).write());
+        let _ = c.change(&uri, 5, &format!("{PROGRAM}    print(p.)\n"));
         got.push(c.at("textDocument/completion", &uri, 22, 12).write());
         c.stop();
         answers.push(got);
     }
     assert!(answers[0][2].contains("area"), "{}", answers[0][2]);
+    assert!(answers[0][9].contains("area"), "{}", answers[0][9]);
+    assert!(answers[0][10].contains("print(1 + 2)"), "{}", answers[0][10]);
     assert_eq!(answers[0], answers[1], "served, then as a process");
 }

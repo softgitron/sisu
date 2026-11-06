@@ -1,0 +1,21 @@
+# `sisu check --holes` (10, "Holes"; decision 1063): each typed hole of the
+# program, with the type its place needs, the function it is written in,
+# the bindings in scope before it and those of them of its type.
+struct Order:
+    item: String
+    count: int
+
+impl Order:
+    ## The total of the order at a price.
+    def total(self, price: int) -> int:
+        let base = self.count * price
+        return todo("discount")
+
+## The label of a count of items.
+def label(count: int, plural: bool) -> str:
+    return todo()
+
+def main():
+    let o = Order(item="tea".to_string(), count=3)
+    print(o.total(4))
+    print(label(o.count, True))

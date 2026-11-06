@@ -810,6 +810,14 @@ impl Runner<'_> {
             }
             self.compare(case, "sisu eval", Some("eval"), &expected, &shown);
         }
+        // `NAME.holes`: `sisu check --holes NAME.sisu`, each typed hole of
+        // the program with its type and the bindings that fit it (decision
+        // 1063).
+        if let Some(expected) = case.expected("holes") {
+            let out = invoke(self.sisu, &sandbox.dir, &s(&["check", "--holes", &file]));
+            let shown = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
+            self.compare(case, "sisu check --holes", Some("holes"), &expected, &shown);
+        }
         // `# explore N`: the run (and the tests) again under N schedule
         // seeds; every seed must give the expected result.
         let explore = source

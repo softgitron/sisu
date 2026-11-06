@@ -327,6 +327,13 @@ impl Server {
                     )];
                 }
                 let new_name = params.get("newName").and_then(Json::as_str).unwrap_or("").to_string();
+                let pos = params.get("position").unwrap_or(&Json::Null).clone();
+                if let Some(answer) = self.stage1_rename(&uri, &pos, &new_name) {
+                    return match answer {
+                        Ok(r) => vec![respond(&id, r)],
+                        Err(m) => vec![fail(&id, REQUEST_FAILED, &m)],
+                    };
+                }
                 match self.rename(&uri, params.get("position").unwrap_or(&Json::Null), &new_name) {
                     Ok(r) => vec![respond(&id, r)],
                     Err(m) => vec![fail(&id, REQUEST_FAILED, &m)],
@@ -363,6 +370,22 @@ impl Server {
                     "textDocument/documentSymbol" => self.stage1_symbols(&uri),
                     "textDocument/completion" => self.stage1_completion(&uri, pos),
                     "textDocument/references" => self.stage1_references(&uri, pos),
+                    // From `sisu1 0.15.0` (its R169; decision 1060).
+                    "textDocument/selectionRange" => {
+                        let ps = params.get("positions").and_then(Json::as_array).unwrap_or(&[]).to_vec();
+                        self.stage1_selection(&uri, &ps)
+                    }
+                    "textDocument/prepareRename" => self.stage1_prepare_rename(&uri, pos),
+                    "textDocument/codeAction" => {
+                        self.stage1_code_actions(&uri, params.get("range").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/inlayHint" => {
+                        self.stage1_inlay_hints(&uri, params.get("range").unwrap_or(&Json::Null))
+                    }
+                    "textDocument/formatting" => self.stage1_formatting(&uri),
+                    "textDocument/rangeFormatting" => {
+                        self.stage1_range_formatting(&uri, params.get("range").unwrap_or(&Json::Null))
+                    }
                     _ => None,
                 };
                 if let Some(result) = asked {

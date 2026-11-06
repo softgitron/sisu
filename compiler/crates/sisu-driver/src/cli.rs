@@ -1847,6 +1847,13 @@ fn holes(rest: &[String], host: &mut dyn Host) -> i32 {
         ));
         return EXIT_USAGE;
     }
+    if let Some(bad) = rest.iter().find(|a| a.starts_with("--") && *a != "--holes") {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.clone()), ("command", "check".into())],
+        ));
+        return EXIT_USAGE;
+    }
     let paths: Vec<&String> = rest.iter().filter(|a| !a.starts_with("--")).collect();
     let cwd = std::env::current_dir().unwrap_or_default();
     match paths.as_slice() {
@@ -2262,6 +2269,56 @@ fn stage1_command(
                     .unwrap_or_default()
             };
             let exe = target.file.then(|| aside.join(target.path.as_deref().map(stem).unwrap_or_default()));
+            // A file's run from `sisu1 0.15.0`: the SIR from the served
+            // `build --for-run --emit-sir` (its R170), compiled here, where
+            // the build would hand it to this executable as its backend
+            // (decision 1061). A package's executable goes where stage 1's
+            // build puts it, so its run asks stage 1 for the build.
+            if let Some(e) = exe.as_ref().filter(|_| stage1.assists()) {
+                let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                if opts.release {
+                    words.push("--release".into());
+                }
+                words.extend(contracts);
+                program(&mut words);
+                let r = match run(host, &words, Backend::Unused) {
+                    Ok(r) => r,
+                    Err(code) => return code,
+                };
+                host.stderr(&r.stderr);
+                if r.status != exit::OK {
+                    return r.status;
+                }
+                if r.stdout.is_empty() {
+                    return no_main(target, host);
+                }
+                let prog = match read_sir(&r.stdout, host) {
+                    Ok(p) => p,
+                    Err(code) => return code,
+                };
+                if prog.entry.is_none() {
+                    return no_main(target, host);
+                }
+                let profile = crate::native::Profile::of(opts.release);
+                let _ = std::fs::create_dir_all(&aside);
+                let code = match crate::native::build(crate::native::Code::Sir(&prog), e, profile, host) {
+                    Ok(()) => {
+                        let how = crate::native::Run {
+                            seed: opts.seeds.first,
+                            explore: opts.seeds.explore,
+                            stats: has("--stats"),
+                            profile,
+                            strategy: opts.strategy.clone(),
+                            bound: opts.bound,
+                            keep: None,
+                        };
+                        crate::native::run_built(e, &args, &how, host)
+                    }
+                    Err(code) => code,
+                };
+                let _ = std::fs::remove_dir_all(&aside);
+                return code;
+            }
             // `--for-run`: a program's errors stop it with the line that says
             // it was not run (`D0006`, `D0021`), where a build says it was
             // not compiled (stage 1's R57).
@@ -2316,7 +2373,8 @@ fn stage1_command(
                 program(&mut words);
                 match run(host, &words, Backend::Unused) {
                     Ok(mut r) => {
-                        let text = (r.status == exit::OK && !r.stdout.is_empty()).then(|| std::mem::take(&mut r.stdout));
+                        let text = (r.status == exit::OK && !r.stdout.is_empty())
+                            .then(|| std::mem::take(&mut r.stdout));
                         (Ok(r), text)
                     }
                     Err(code) => (Err(code), None),

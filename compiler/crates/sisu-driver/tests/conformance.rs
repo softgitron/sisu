@@ -656,6 +656,15 @@ fn the_server_of_stage_1_answers_as_a_process_does() {
         &["doc", "pkg"],
         &["check", "missing.sisu"],
         &["test", "loose.sisu"],
+        // From `sisu1 0.15.0`: a run's SIR from `build --for-run --emit-sir`
+        // (decision 1061), a program's typed holes (decision 1063) and a
+        // usage error of stage 1's shown as the command's (decision 1065).
+        &["run", "loose.sisu"],
+        &["run", "bad.sisu"],
+        &["run", "pkg"],
+        &["run", "--native", "pkg/src/main.sisu"],
+        &["check", "--holes", "bad.sisu"],
+        &["eval"],
     ];
     for words in commands {
         let ran = |serve: &str| {
@@ -677,6 +686,58 @@ fn the_server_of_stage_1_answers_as_a_process_does() {
         assert_eq!(served, ran("1"), "{words:?}, again");
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A command whose run of stage 1 ends with stage 1's own usage error
+/// (`error: Usage(text="usage: sisu run -- tokens ...")`, its `main`'s) is
+/// shown the driver's usage of the command, `D0151`, with the usage's
+/// status (the manual's nineteenth round; decision 1065); `sisu check
+/// --holes` without a file is its command's usage too (decision 1063).
+#[test]
+fn stage_1s_usage_errors_are_shown_as_the_commands_usage() {
+    let dir = std::env::temp_dir().join(format!("sisu-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(dir.join("conf.sisu"), "const PORT: int = 8080\n").expect("a module");
+    let sisu = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        (String::from_utf8_lossy(&out.stderr).into_owned(), out.status.code())
+    };
+    if !stage1_at_least(&[0, 15, 0]) {
+        return;
+    }
+    let eval = "usage: sisu eval <file>\n\nthe constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator\n";
+    assert_eq!(sisu(&["eval"]), (eval.to_string(), Some(2)));
+    assert_eq!(sisu(&["eval", "conf.sisu", "--to", "xml"]), (eval.to_string(), Some(2)));
+    let (check, status) = sisu(&["check", "--holes"]);
+    assert!(check.starts_with("usage: sisu check [<file>]\n\nreport diagnostics"), "{check}");
+    assert!(check.contains("`--holes <file>`"), "{check}");
+    assert_eq!(status, Some(2));
+    for (err, _) in [sisu(&["eval"]), sisu(&["check", "--holes"])] {
+        assert!(!err.contains("Usage("), "{err}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Whether the stage 1 the driver runs is `version` or later, as `sisu1
+/// --version` names it.
+fn stage1_at_least(version: &[u32]) -> bool {
+    let exe = std::env::var_os("SISU_STAGE1")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/stage1/sisu1"));
+    let printed =
+        std::process::Command::new(exe).arg("--version").output().map(|o| o.stdout).unwrap_or_default();
+    let found: Vec<u32> = String::from_utf8_lossy(&printed)
+        .trim()
+        .trim_start_matches("sisu1 ")
+        .split('.')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    found.as_slice() >= version
 }
 
 /// A replay token of one module's run given to its package's run, and of

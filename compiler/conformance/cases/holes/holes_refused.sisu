@@ -1,0 +1,5 @@
+# `sisu check --holes` of a program with an error (decision 1063): the
+# error, as `sisu check` reports it, and status 1, with no hole listed.
+def main():
+    let n: int = "three"
+    print(todo[int]())

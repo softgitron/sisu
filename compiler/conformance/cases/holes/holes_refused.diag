@@ -1,0 +1,3 @@
+4:18-4:25 E0300 type.mismatch expected="int" found="str"
+  label 4:12-4:15 type.expected-because
+5:11-5:22 W0001 type.hole name="" ty="int"
