@@ -1,8 +1,8 @@
 //! Layouts of concrete SIR types and the type table the runtime reads
 //! (`sisu_rt::abi`): a sized integer narrower than 64 bits and an `f32`
-//! are their own width (decision 1020), a struct its fields at C's offsets
-//! (decision 1021), and every other type a whole number of words: a tuple
-//! its parts in order, an enum a tag word and its variants' payloads over
+//! are their own width (decision 1020), a struct its fields and a tuple its
+//! parts at C's offsets (decisions 1021 and 1100), and every other type a
+//! whole number of words: an enum a tag word and its variants' payloads over
 //! each other, an error set three words (its type's number, its return
 //! trace, its tag) and the payload, each part of them starting on a word
 //! and taking a word at least.
@@ -88,18 +88,25 @@ impl<'p> Types<'p> {
             .collect()
     }
 
-    /// The bytes a part of the type takes in a larger value (a field, a
-    /// payload, an element of a tuple, a table's key or value): its size
-    /// rounded up to a word, so that every part starts on a word (decision
-    /// 1020).
+    /// The bytes a part of the type takes in a larger value (a payload, a
+    /// variant's field, what a mutex or a cell holds): its size rounded up
+    /// to a word, so that every part starts on a word (decision 1020).
     pub(crate) fn room(&mut self, t: &Type) -> Result<u32, Error> {
         Ok(self.size(t)?.div_ceil(abi::WORD) * abi::WORD)
     }
 
     /// The alignment of a value of the type: a narrow integer's and an
-    /// `f32`'s width, a struct's widest field's, a type of no bytes 1, and
-    /// a word for any other (decision 1021).
+    /// `f32`'s width, a struct's widest field's and a tuple's widest
+    /// part's, a type of no bytes 1, and a word for any other (decisions
+    /// 1021 and 1100).
     pub(crate) fn align(&mut self, t: &Type) -> Result<u32, Error> {
+        if let Type::Tuple(items) = t {
+            let mut a = 1;
+            for it in items {
+                a = a.max(self.align(it)?);
+            }
+            return Ok(a);
+        }
         if let Type::Named(n, args) = t {
             if let Some(w) = narrow_width(n) {
                 return Ok(w);
@@ -127,6 +134,20 @@ impl<'p> Types<'p> {
             align = align.max(a);
         }
         Ok((out, off.div_ceil(align) * align))
+    }
+
+    /// Where a table's entry, after its key's hash, holds its value (the
+    /// key's size up to the value's alignment), and the bytes from its key
+    /// to the next entry's hash, a whole number of words: the key and the
+    /// value as the tuple of the two lays them out (decision 1100), a set's
+    /// key alone. A table's literal lays its entries out so, without the
+    /// hashes (`rt/src/table.sisu`, `new`).
+    pub(crate) fn entry_layout(&mut self, key: &Type, val: Option<&Type>) -> Result<(u32, u32), Error> {
+        let ks = self.size(key)?;
+        let Some(val) = val else { return Ok((ks, ks.div_ceil(abi::WORD) * abi::WORD)) };
+        let a = self.align(val)?;
+        let off = ks.div_ceil(a) * a;
+        Ok((off, (off + self.size(val)?).div_ceil(abi::WORD) * abi::WORD))
     }
 
     /// The bytes of a value of the type. Computed from the type alone, so
@@ -158,13 +179,8 @@ impl<'p> Types<'p> {
             Type::Str | Type::Dyn(..) => 2 * w,
             Type::Fn(..) => (2 + self.env_words) * w,
             Type::Unit | Type::Never | Type::Const(_) => 0,
-            Type::Tuple(items) => {
-                let mut n = 0;
-                for it in items {
-                    n += self.room(it)?;
-                }
-                n
-            }
+            // A tuple's parts at C's offsets, as a struct's (decision 1100).
+            Type::Tuple(items) => self.struct_layout(items)?.1,
             Type::ErrSet(names) => {
                 let mut n = abi::ERROR_PAYLOAD;
                 for name in names {
@@ -234,30 +250,27 @@ impl<'p> Types<'p> {
 
     /// Whether a value of the type lies in raw memory as it lies in a value
     /// (the runtime's `rawmem::layout`, decision 302): no option of a raw
-    /// pointer is among the parts it holds in place, and no sized integer
-    /// narrower than 64 bits or `f32` is a part of a tuple, which gives each
-    /// part a word where C packs them. A narrow number is its width, and a
-    /// struct its fields at C's offsets, in a value as in raw memory
-    /// (decisions 1020 and 1021). A reference into raw memory is only made
-    /// to such a value, since the code reads a reference's value as a value
-    /// is laid out.
+    /// pointer is among the parts it holds in place. A narrow number is its
+    /// width, and a struct its fields and a tuple its parts at C's offsets,
+    /// in a value as in raw memory (decisions 1020, 1021 and 1100). A
+    /// reference into raw memory is only made to such a value, since the
+    /// code reads a reference's value as a value is laid out.
     pub(crate) fn same_in_memory(&self, t: &Type) -> bool {
-        self.same_in_memory_at(t, 0, false)
+        self.same_in_memory_at(t, 0)
     }
 
-    fn same_in_memory_at(&self, t: &Type, depth: u32, in_tuple: bool) -> bool {
+    fn same_in_memory_at(&self, t: &Type, depth: u32) -> bool {
         if depth > 64 {
             return false;
         }
         match t {
-            Type::Tuple(items) => items.iter().all(|x| self.same_in_memory_at(x, depth + 1, true)),
+            Type::Tuple(items) => items.iter().all(|x| self.same_in_memory_at(x, depth + 1)),
             Type::Named(n, args) => match n.as_str() {
-                n if narrow_width(n).is_some() => !in_tuple,
                 "Option" => !matches!(args.first(), Some(Type::Named(p, _)) if p == "ptr" || p == "ptr_mut"),
                 _ => match self.decl(n) {
                     // A builtin that SIR declares as a struct has no fields.
                     Some(sir::TypeDecl::Struct { fields, .. }) => {
-                        fields.iter().all(|f| self.same_in_memory_at(&f.ty.subst(args), depth + 1, false))
+                        fields.iter().all(|f| self.same_in_memory_at(&f.ty.subst(args), depth + 1))
                     }
                     _ => true,
                 },
@@ -316,14 +329,12 @@ impl<'p> Types<'p> {
             Type::Dyn(..) => simple(Kind::Dyn, 2 * w),
             Type::Fn(..) => simple(Kind::Fn, (2 + self.env_words) * w),
             Type::Tuple(items) => {
-                let mut slots = Vec::new();
-                let mut off = 0;
-                for it in items {
-                    let (ty, size) = self.part(it)?;
-                    slots.push(Slot { offset: off, ty });
-                    off += size;
+                let (offs, size) = self.struct_layout(items)?;
+                let mut slots = Vec::with_capacity(items.len());
+                for (it, offset) in items.iter().zip(offs) {
+                    slots.push(Slot { offset, ty: self.id(it)? });
                 }
-                simple(Kind::Tuple(slots), off)
+                simple(Kind::Tuple(slots), size)
             }
             Type::ErrSet(names) => {
                 let mut members = Vec::new();
@@ -756,14 +767,11 @@ impl<'p> Types<'p> {
         let bad = || Error::internal(format!("no field {i} in `{}`", sir::write::ty(t)));
         match (t, variant) {
             (Type::Tuple(items), None) => {
-                let mut off = 0;
-                for (k, it) in items.iter().enumerate() {
-                    if k as u32 == i {
-                        return Ok((off, it.clone()));
-                    }
-                    off += self.room(it)?;
+                let (offs, _) = self.struct_layout(items)?;
+                match (offs.get(i as usize), items.get(i as usize)) {
+                    (Some(off), Some(it)) => Ok((*off, it.clone())),
+                    _ => Err(bad()),
                 }
-                Err(bad())
             }
             (Type::Named(n, args), Some(v)) if n == "Option" || n == "Result" => {
                 let pt = match (n.as_str(), v) {

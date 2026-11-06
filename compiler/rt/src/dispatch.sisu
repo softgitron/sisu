@@ -647,7 +647,7 @@ def table_call(c: Call, id: int) -> int:
         # safety: in_bounds, writable: an entry has room for the key after its
         #   table's address; returns_promptly: memmove moves the key in.
         unsafe:
-            _ = memmove(c.ret.offset(8), c.arg(1).as_const(), table.key_size(tb))
+            _ = memmove(c.ret.offset(8), c.arg(1).as_const(), ts.size(table.key_type(tb)))
         return OK
     let i = table.find(ts, tb, c.arg(1), c.ty(1))
     if id == DICT_GET:
@@ -684,7 +684,7 @@ def table_call(c: Call, id: int) -> int:
             else:
                 c.set_bool(False)
             return OK
-        let out = scratch(ksize + vsize)
+        let out = scratch(table.pair_room(tb))
         table.remove(tb, i, out)
         if id == DICT_REMOVE:
             c.set(0, 0)
@@ -936,7 +936,7 @@ def iter_call(c: Call, id: int) -> int:
         return OK
     if id == ZIP or id == ZIP_SHORTEST:
         let second = iter.iterable(ts, c.arg(1), c.ty(1), c.item(1))
-        c.set(0, iter.new_zip(first, second, id == ZIP, c.targ(0), c.targ(1)).addr())
+        c.set(0, iter.new_zip(ts, first, second, id == ZIP, c.targ(0), c.targ(1)).addr())
         return OK
     if id == ANY or id == ALL:
         let want = id == ANY
@@ -980,7 +980,8 @@ def iter_call(c: Call, id: int) -> int:
     return st
 
 ## A dict or a set of type `t` from a literal's `n` entries at `items`, each
-## the key's bytes and then the value's, moved in, its table's address
+## the key's bytes and then the value's as an entry holds them after its
+## hash (`table.pair_room` bytes, decision 1100), moved in, its table's address
 ## written at `out`: a key given again replaces the value and is itself
 ## dropped, as `insert` does (decision 646). The status of the drops.
 ##
@@ -993,12 +994,12 @@ pub(package) def literal(ts: Types, t: int, items: ptr mut u8, n: int, out: ptr 
     if ts.kind(t) == DICT:
         vt = ts.header(t).b
     let tb = table.new(ts, kt, vt)
-    let (ksize, vsize) = (table.key_size(tb), table.value_size(tb))
+    let (ksize, vsize, stride) = (table.key_size(tb), table.value_size(tb), table.pair_room(tb))
     var st = OK
     var i = 0
     while i < n:
         # safety: in_bounds: entry `i` is in `items`, by `typed`.
-        let key = unsafe items.offset(i * (ksize + vsize))
+        let key = unsafe items.offset(i * stride)
         # safety: in_bounds: its value follows its key.
         let val = unsafe key.offset(ksize)
         let j = table.find(ts, tb, key, kt)
@@ -1061,7 +1062,7 @@ pub(package) def take(
         unsafe w.write(if want_value: 1 else: 0)
         return OK
     let (ksize, vsize) = (table.key_size(tb), table.value_size(tb))
-    let room = scratch(ksize + vsize)
+    let room = scratch(table.pair_room(tb))
     table.remove(tb, i, room)
     if want_value:
         # safety: in_bounds, writable: the result is an option of a value;

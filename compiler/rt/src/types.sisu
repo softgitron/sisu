@@ -178,6 +178,26 @@ impl Types:
     pub(package) pure def size(self, t: int) -> int:
         return self.at(t * WORDS + 1)
 
+    ## The alignment of type `t`, as the backend lays it out (decisions 1021
+    ## and 1100): a narrow number's width, a tuple's or a struct's widest
+    ## part's, 1 for a type of no bytes, and a word for any other.
+    pub(package) pure def align(self, t: int) -> int:
+        let (kind, size) = (self.kind(t), self.size(t))
+        if size == 0:
+            return 1
+        if kind == SIZED or kind == F32:
+            return size
+        if kind != TUPLE and kind != STRUCT:
+            return 8
+        let parts = self.at(t * WORDS + PARTS)
+        var a = 1
+        var i = 0
+        while i < self.count(parts):
+            let (_, part, _) = self.field(parts, i)
+            a = max(a, self.align(part))
+            i += 1
+        return a
+
     ## Whether dropping a value of type `t` can do something.
     pub(package) pure def needs_drop(self, t: int) -> bool:
         return (self.at(t * WORDS + 2) & NEEDS_DROP) != 0

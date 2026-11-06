@@ -1,8 +1,9 @@
 ##! The tables of dicts and sets over raw memory (decision 422): a `dict`'s
 ##! or a `set`'s value is the address of a table, a header of nine words and
 ##! the blocks it names. Its entries are in the order they were inserted,
-##! each the hash of its key, the key and the value (a set's entries have no
-##! value), one after another in one block, as a list holds its elements;
+##! each the hash of its key, then the key and the value as the tuple of the
+##! two lays them out (decision 1100), padded to a word (a set's entries have
+##! no value), one after another in one block, as a list holds its elements;
 ##! its index is a block of slots, a power of two of them at least twice the
 ##! room for entries, each 0 or one more than the position of an entry, the
 ##! entry whose key's hash leads there by linear probing. A key is hashed by
@@ -28,9 +29,10 @@ from rt.types import Types
 from std.mem import ptr
 
 ## The words of a table's header: its key's type, its value's type (-1 for
-## a set's), the bytes of a key and of a value, the address of its entries,
-## their number, the room for them, the address of its index, and the
-## index's slots less one (0 when it has none).
+## a set's), where an entry's value is after its key (a set's key's size)
+## and the bytes of a value, the address of its entries, their number, the
+## room for them, the address of its index, and the index's slots less one
+## (0 when it has none).
 const KEY: int = 0
 const VALUE: int = 1
 const KEY_SIZE: int = 2
@@ -83,20 +85,28 @@ pub(package) def length(tb: ptr mut u8) -> int:
 pub(package) def key_type(tb: ptr mut u8) -> int:
     return word(tb, KEY)
 
-## The bytes a key of the table at `tb` takes in an entry.
+## The bytes a key of the table at `tb` takes in an entry: where its value
+## is after it, its size up to the value's alignment (a set's key's size).
 ##
 ## Requires:
 ## - `table`: `tb` is the address of a live table
 pub(package) def key_size(tb: ptr mut u8) -> int:
     return word(tb, KEY_SIZE)
 
-## The bytes a value of the table at `tb` takes in an entry (0 for a
-## set's).
+## The bytes of a value of the table at `tb` (0 for a set's).
 ##
 ## Requires:
 ## - `table`: `tb` is the address of a live table
 pub(package) def value_size(tb: ptr mut u8) -> int:
     return word(tb, VALUE_SIZE)
+
+## The bytes of an entry of the table at `tb` after its key's hash: its key
+## and its value, padded to a word, as a table's literal lays each out.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+pub(package) def pair_room(tb: ptr mut u8) -> int:
+    return room(word(tb, KEY_SIZE) + word(tb, VALUE_SIZE))
 
 ## The bytes of an entry of the table at `tb`: its key's hash, its key and
 ## its value.
@@ -104,7 +114,17 @@ pub(package) def value_size(tb: ptr mut u8) -> int:
 ## Requires:
 ## - `table`: `tb` is the address of a live table
 pub(package) def entry_size(tb: ptr mut u8) -> int:
-    return 8 + word(tb, KEY_SIZE) + word(tb, VALUE_SIZE)
+    return 8 + pair_room(tb)
+
+## The bytes of the tuple of a key and a value of the dict's table at `tb`,
+## which its owned iterator gives: the two as an entry holds them, up to the
+## wider one's alignment (decision 1100).
+##
+## Requires:
+## - `typed`: `tb` is the address of a live dict's table
+pub(package) def pair_size(ts: Types, tb: ptr mut u8) -> int:
+    let a = max(ts.align(word(tb, KEY)), ts.align(word(tb, VALUE)))
+    return (word(tb, KEY_SIZE) + word(tb, VALUE_SIZE) + a - 1) // a * a
 
 ## The address of entry `i` of the table at `tb`: its key's hash, then the
 ## key and the value.
@@ -151,10 +171,16 @@ pub(package) def new(ts: Types, key: int, val: int) -> ptr mut u8:
     let tb = unsafe sisu_rt_alloc(HEADER * 8)
     set_word(tb, KEY, key)
     set_word(tb, VALUE, val)
-    # Each part of an entry takes a word at least, a `u8` too (decision
-    # 1020).
-    set_word(tb, KEY_SIZE, room(ts.size(key)))
-    set_word(tb, VALUE_SIZE, if val < 0: 0 else: room(ts.size(val)))
+    # The key and the value as the tuple of the two lays them out (decision
+    # 1100): the value at the key's size up to its alignment.
+    let ks = ts.size(key)
+    if val < 0:
+        set_word(tb, KEY_SIZE, ks)
+        set_word(tb, VALUE_SIZE, 0)
+    else:
+        let a = ts.align(val)
+        set_word(tb, KEY_SIZE, (ks + a - 1) // a * a)
+        set_word(tb, VALUE_SIZE, ts.size(val))
     set_word(tb, ENTRIES, 0)
     set_word(tb, LEN, 0)
     set_word(tb, CAP, 0)
@@ -281,7 +307,7 @@ pub(package) def find(ts: Types, tb: ptr mut u8, k: ptr mut u8, kt: int) -> int:
                 return -1
         let h = hash_key(ts, k, kt)
         let mask = w.offset(MASK).read()
-        let size = 8 + w.offset(KEY_SIZE).read() + w.offset(VALUE_SIZE).read()
+        let size = 8 + room(w.offset(KEY_SIZE).read() + w.offset(VALUE_SIZE).read())
         let index = tb.cast[ptr[int]]().offset(INDEX).read()
         let entries = tb.cast[ptr[u8]]().offset(ENTRIES).read().cast_mut()
         var slot = h & mask
@@ -316,7 +342,7 @@ pub(package) def push(ts: Types, tb: ptr mut u8, k: ptr mut u8) -> int:
     #   bytes in.
     unsafe:
         let key = e.offset(8)
-        _ = memmove(key, k.as_const(), word(tb, KEY_SIZE))
+        _ = memmove(key, k.as_const(), ts.size(word(tb, KEY)))
         let h = hash_key(ts, key, word(tb, KEY))
         e.cast[int]().write(h)
         place(tb.cast[ptr[int]]().offset(INDEX).read().cast_mut(), word(tb, MASK), h, n)
@@ -352,7 +378,7 @@ pub(package) def push_copy(ts: Types, tb: ptr mut u8, k: ptr mut u8, kt: int) ->
 ##
 ## Requires:
 ## - `table`: `tb` is the address of a live table of more than `i` entries,
-##   and `out` has room for a key and a value
+##   and `out` has room for `pair_room` bytes
 pub(package) def remove(tb: ptr mut u8, i: int, out: ptr mut u8):
     let n = word(tb, LEN)
     let size = entry_size(tb)

@@ -785,6 +785,81 @@ fn fix_applies_the_preferred_fixes_with_stage_1() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `sisu explain-borrow`, `sisu audit --ownership` and `--caps`, `sisu
+/// check --diary` and `sisu run --defer-borrow` run stage 1's commands from
+/// `sisu1 0.17.0` (its R186 to R189; decisions 1103 to 1106), served and
+/// as a process, and print what the Rust front end prints: the same lines
+/// and statuses, and a diary of the same records but for the time and the
+/// toolchain.
+#[test]
+fn stage_1s_data_commands_answer_as_the_rust_front_end() {
+    let dir = std::env::temp_dir().join(format!("sisu-roles-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let text = "def total(xs: ref list[int]) -> int:\n    var n = 0\n    for x in xs:\n        n += x\n    return n\n\ndef main():\n    var xs = [1, 2, 3]\n    let r = ref xs\n    print(total(r))\n    xs.push(4)\n    let unused = 1\n";
+    std::fs::write(dir.join("b.sisu"), text).expect("a file");
+    let deferred = "def main():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    xs.push(4)\n    print(first)\n";
+    std::fs::write(dir.join("d.sisu"), deferred).expect("a file");
+    let unreached = "def main():\n    var xs = [1, 2, 3]\n    let first = ref xs[0]\n    if len(xs) > 5:\n        xs.push(4)\n    print(first)\n";
+    std::fs::write(dir.join("u.sisu"), unreached).expect("a file");
+    let sisu = |args: &[&str], serve: &str| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .env("SISU_STAGE1_SERVE", serve)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let _ = sisu(&["check", "b.sisu"], "1");
+    let asks: [&[&str]; 9] = [
+        &["run", "--defer-borrow", "d.sisu"],
+        &["run", "--defer-borrow", "u.sisu"],
+        &["run", "--defer-borrow", "b.sisu"],
+        &["explain-borrow", "b.sisu:10"],
+        &["explain-borrow", "b.sisu:12"],
+        &["explain-borrow"],
+        &["audit", "--ownership", "b.sisu"],
+        &["audit", "--caps", "b.sisu"],
+        &["audit", "b.sisu"],
+    ];
+    for ask in asks {
+        let mut rust = vec!["--front-end=rust"];
+        rust.extend_from_slice(ask);
+        let oracle = sisu(&rust, "1");
+        for serve in ["1", "0"] {
+            assert_eq!(sisu(ask, serve), oracle, "{ask:?} with SISU_STAGE1_SERVE={serve}");
+        }
+    }
+    // A diary each way, read without the time and the toolchain.
+    let records = |name: &str| -> Vec<String> {
+        std::fs::read_to_string(dir.join(name))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| {
+                l.split(',')
+                    .filter(|f| !f.starts_with("\"time\"") && !f.starts_with("\"toolchain\""))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect()
+    };
+    let rust = sisu(&["--front-end=rust", "check", "--diary", "rust.jsonl", "b.sisu"], "1");
+    for (serve, name) in [("1", "served.jsonl"), ("0", "process.jsonl")] {
+        assert_eq!(sisu(&["check", "--diary", name, "b.sisu"], serve), rust);
+        if stage1_at_least(&[0, 17, 0]) {
+            assert!(dir.join(format!("{name}.d")).is_dir(), "{name}");
+        }
+        assert_eq!(records(name), records("rust.jsonl"), "{name}");
+        assert!(!records(name).is_empty());
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Whether the stage 1 the driver runs is `version` or later, as `sisu1
 /// --version` names it.
 fn stage1_at_least(version: &[u32]) -> bool {

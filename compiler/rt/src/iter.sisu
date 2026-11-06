@@ -116,8 +116,9 @@ def get_ptr(it: ptr mut u8, k: int) -> ptr mut u8:
     #   eleven words, by `iterator`.
     return unsafe it.cast[ptr[u8]]().offset(k).read().cast_mut()
 
-## The bytes an item of `size` bytes takes as a part of a pair: a word at
-## least, a `u8`'s too (decision 1020).
+## The bytes an item of `size` bytes takes after an index in a pair of
+## `enumerate`: a word at least, as the tuple lays it out (decisions 1020
+## and 1100).
 pure def room(size: int) -> int:
     return (size + 7) // 8 * 8
 
@@ -348,28 +349,42 @@ pub(package) def next(ts: Types, it: ptr mut u8, out: ptr mut u8, mode: int) -> 
 ## The next pair of the iterator of pairs at `it` (`zip`), as [`next`]
 ## writes an item: none when either ends, the item of the other dropped,
 ## and a panic when the lengths must agree and do not. The first item's
-## option is written where the pair's goes, and the second's after the
-## first item, over the first item's last word, which is kept aside.
+## option is written where the pair's goes, and the second's where its tag
+## word ends at the second item's place, over the first item's bytes there,
+## which are kept aside; a second item not on a word (decision 1100) has
+## its option written in a block of its own and its item moved to its place.
 ##
 ## Requires:
 ## - `typed`: `it` is the address of a live iterator of pairs, and `out`
 ##   has room for a tag word and a pair
 def next_pair(ts: Types, it: ptr mut u8, out: ptr mut u8, mode: int) -> int:
     let (a, b) = (get_ptr(it, P), get_ptr(it, P + 1))
-    let sa = room(get(a, SIZE))
+    let at = get(it, A)
     # safety: in_bounds, valid, aligned, writable: `out` has room for a tag
-    #   word and both items, by `typed`; returns_promptly: the runtime in Rust
-    #   raises the panic.
+    #   word and both items, by `typed`, and the block for a tag word and the
+    #   second item; returns_promptly: the runtime in Rust gives and frees
+    #   the block and raises the panic.
     unsafe:
         var st = next(ts, a, out, mode)
         if st != value.OK:
             return st
         let x = out.cast[int]().read() == 0
-        let second = out.offset(sa)
-        let kept = second.cast[int]().read()
-        st = next(ts, b, second, mode)
-        let y = second.cast[int]().read() == 0
-        second.cast[int]().write(kept)
+        let second = out.offset(8 + at)
+        var y = False
+        if at % 8 == 0:
+            let tag = out.offset(at)
+            let kept = tag.cast[int]().read()
+            st = next(ts, b, tag, mode)
+            y = tag.cast[int]().read() == 0
+            tag.cast[int]().write(kept)
+        else:
+            let size = get(b, SIZE)
+            let block = sisu_rt_alloc(8 + size)
+            st = next(ts, b, block, mode)
+            y = st == value.OK and block.cast[int]().read() == 0
+            if y:
+                _ = memmove(second, block.offset(8).as_const(), size)
+            sisu_rt_free(block)
         if st != value.OK:
             if x:
                 st = value.after_part(st, value.drop(ts, out.offset(8), get(it, P + 3), mode))
@@ -384,7 +399,7 @@ def next_pair(ts: Types, it: ptr mut u8, out: ptr mut u8, mode: int) -> int:
         if x:
             st = value.drop(ts, out.offset(8), get(it, P + 3), mode)
         if y:
-            st = value.after_part(st, value.drop(ts, second.offset(8), get(it, P + 4), mode))
+            st = value.after_part(st, value.drop(ts, second, get(it, P + 4), mode))
         if st == value.OK and get(it, P + 2) != 0:
             st = sisu_rt_zip_lengths().to_int()
         if st == value.OK:
@@ -530,9 +545,7 @@ pub(package) def iterable(ts: Types, p: ptr mut u8, arg: int, item: int) -> ptr 
             let tb = p.cast[ptr[u8]]().read().cast_mut()
             # A dict's pairs, their parts a word at least, or a set's keys
             # (decision 1020).
-            base = make(
-                S_TABLE_OWN, if ak == SET: ts.size(ts.a(arg)) else: table.entry_size(tb) - 8
-            )
+            base = make(S_TABLE_OWN, if ak == SET: ts.size(ts.a(arg)) else: table.pair_size(ts, tb))
             set(base, P, tb.addr())
         elif ak == ITER:
             base = p.cast[ptr[u8]]().read().cast_mut()
@@ -648,14 +661,22 @@ pub(package) def new_enumerate(inner: ptr mut u8) -> ptr mut u8:
 
 ## The iterator of the pairs of the iterators at `a` and `b`, which it
 ## owns, of items of types `ta` and `tb`; with `strict`, their lengths must
-## agree.
+## agree. A pair is the tuple of the two at C's offsets (decision 1100):
+## the second item at the first's size up to its alignment, which the
+## header's second word keeps (compiled code reads it only for a range or a
+## list's kind), the pair's size a multiple of the wider alignment.
 ##
 ## Requires:
-## - `iterator`: `a` and `b` are the addresses of live iterators' objects
+## - `typed`: `a` and `b` are the addresses of live iterators' objects, of
+##   items of types `ta` and `tb` in the program's table `ts`
 pub(package) def new_zip(
-    a: ptr mut u8, b: ptr mut u8, strict: bool, ta: int, tb: int
+    ts: Types, a: ptr mut u8, b: ptr mut u8, strict: bool, ta: int, tb: int
 ) -> ptr mut u8:
-    let it = make(S_ZIP, room(get(a, SIZE)) + room(get(b, SIZE)))
+    let (aa, ab) = (ts.align(ta), ts.align(tb))
+    let second = (get(a, SIZE) + ab - 1) // ab * ab
+    let align = max(aa, ab)
+    let it = make(S_ZIP, (second + get(b, SIZE) + align - 1) // align * align)
+    set(it, A, second)
     set(it, P, a.addr())
     set(it, P + 1, b.addr())
     set(it, P + 2, if strict: 1 else: 0)

@@ -2243,14 +2243,17 @@ impl<'a, 'p> Cx<'a, 'p> {
                         )));
                     }
                 };
-                // Each part of an entry takes a word at least (decision 1020).
-                let (ks, vs) = (self.cg.types.room(&key)?, self.cg.types.room(&val)?);
-                let per = if matches!(kind, Aggregate::Dict) { 2 } else { 1 };
+                // Each entry's key and value as the tuple of the two lays
+                // them out, a whole number of words (decision 1100).
+                let dict = matches!(kind, Aggregate::Dict);
+                let (voff, stride) = self.cg.types.entry_layout(&key, dict.then_some(&val))?;
+                let (ks, vs) = (self.size(&key)?, self.size(&val)?);
+                let per = if dict { 2 } else { 1 };
                 let n = ops.len() / per;
-                let buf = self.slot((ks + vs) * n as u32);
+                let buf = self.slot(stride * n as u32);
                 for (i, o) in ops.iter().enumerate() {
-                    let entry = (i / per) as u32 * (ks + vs);
-                    let (off, size) = if i % per == 0 { (entry, ks) } else { (entry + ks, vs) };
+                    let entry = (i / per) as u32 * stride;
+                    let (off, size) = if i % per == 0 { (entry, ks) } else { (entry + voff, vs) };
                     let (v, vt) = self.operand(o)?;
                     let size = size.min(self.size(&vt)?);
                     let at = self.b.ins().iadd_imm(buf, i64::from(off));

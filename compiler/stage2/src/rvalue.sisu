@@ -1173,18 +1173,22 @@ impl Cg:
                             val = arg(a, 1)
                     case _:
                         return internal("a table literal of type `{write.ty(dest)}`")
-                # Each part of an entry takes a word at least (decision 1020).
-                let ks = self.types.room(key)?
-                let vs = self.types.room(val)?
-                let per = if kind == Aggregate.Dict: 2 else: 1
+                # Each entry's key and value as the tuple of the two lays
+                # them out, a whole number of words (decision 1100).
+                let dict = kind == Aggregate.Dict
+                let held = if dict: Some(val.copy()) else: None
+                let (voff, stride) = self.types.entry_layout(key.copy(), held)?
+                let ks = self.size(key)?
+                let vs = self.size(val)?
+                let per = if dict: 2 else: 1
                 let n = len(ops) // per
-                let buf = self.slot((ks + vs) * n)
+                let buf = self.slot(stride * n)
                 for i in range(len(ops)):
-                    let entry = (i // per) * (ks + vs)
+                    let entry = (i // per) * stride
                     var off = entry
                     var sz = ks
                     if i % per != 0:
-                        off = entry + ks
+                        off = entry + voff
                         sz = vs
                     let (v, vt) = self.operand(p, ops[i])?
                     let fsz = min(sz, self.size(vt)?)

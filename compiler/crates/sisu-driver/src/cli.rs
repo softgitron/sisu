@@ -740,6 +740,13 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         // as `sisu` does, with its messages and exit statuses.
         "fmt" | "doc" if front == FrontEnd::Stage1 => stage1_as_is(cmd, rest, host),
         "fmt" => fmt(rest, host),
+        // `sisu explain-borrow FILE:LINE`: stage 1's (its R187) from `sisu1
+        // 0.17.0` (decision 1104); the Rust front end's before it.
+        "explain-borrow" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
+            Ok(stage1) if stage1.takes_the_roles() => stage1_as_is(cmd, rest, host),
+            Ok(_) => explain_borrow(rest, host),
+            Err(code) => code,
+        },
         "explain-borrow" => explain_borrow(rest, host),
         "doc" => doc(rest, host),
         "replay" => replay(rest, host),
@@ -750,6 +757,13 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         {
             stage1_as_is(cmd, rest, host)
         }
+        // `sisu audit --ownership` and `--caps`: stage 1's (its R188) from
+        // `sisu1 0.17.0` (decision 1105), every form of `audit` then its.
+        "audit" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
+            Ok(stage1) if stage1.takes_the_roles() => stage1_as_is(cmd, rest, host),
+            Ok(_) => audit(rest, host),
+            Err(code) => code,
+        },
         "audit" => audit(rest, host),
         // `sisu eval FILE [--to json|toml|yaml]` (08, "Configuration
         // files"; decision 984): stage 1's `eval` (its R165), from `sisu1
@@ -1710,18 +1724,19 @@ fn from_lir(
 /// `sisu test` and `sisu bench` run from its SIR of the program built with
 /// its tests (decision 357), a program's transcripts on the Rust front
 /// end's beside them (decision 380), but for the standard library's
-/// examples; the Rust front end keeps the modes that need more of the
-/// front end than its output: `run --watch` (the front end again at each
-/// save), `run --defer-borrow` and `test --defer-borrow` (the ownership
-/// checker's findings beside the run), `check --diary` (the diagnostics as
-/// data). `run --record` is stage 1's, its log holding the SIR that `sisu
+/// examples before `sisu1 0.17.0`; the Rust front end keeps the modes that
+/// need more of the front end than its output: `run --watch` (the front end
+/// again at each save), `run --defer-borrow` and `test --defer-borrow` (the
+/// ownership checker's findings beside the run, decision 1106), and
+/// `check --diary` (the diagnostics as data) before `sisu1 0.17.0`, which
+/// writes the diary itself (decision 1103). `run --record` is stage 1's, its log holding the SIR that `sisu
 /// replay` runs (decision 303), and so is `parse --shape`, which refuses
 /// what stage 1's `fmt` refuses (decision 621). A file of SIR needs no
 /// front end at all.
 fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
     let value = |k: &str| p.values.iter().any(|(v, _)| *v == k);
     match cmd {
-        "check" => !value("--diary"),
+        "check" => !value("--diary") || crate::front::stage1_takes_the_roles(),
         "sir" => true,
         // A program's tests and benchmarks run from the SIR stage 1 prints
         // of it built with them (decision 357), but for what only the Rust
@@ -1731,14 +1746,24 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
         // and 424).
         "test" | "bench" => {
             let features = value("--features") || p.flags.contains(&"--no-default-features");
-            !p.flags.iter().any(|f| matches!(*f, "--std" | "--defer-borrow"))
+            // The standard library's examples from `sisu1 0.17.0`'s `sir
+            // --tests --std` (its R185, decision 1102), of a program it
+            // reads: with no file and no package, the Rust front end's.
+            let std_from_stage1 = cmd == "test"
+                && (p.file.is_some()
+                    || crate::package::locate(None, &std::env::current_dir().unwrap_or_default()).is_some())
+                && crate::front::stage1_takes_the_roles();
+            !p.flags.iter().any(|f| *f == "--defer-borrow" || (*f == "--std" && !std_from_stage1))
                 && !value("--from-sir")
                 && (!features || crate::front::stage1_sir_reports())
         }
         "tokens" => true,
         "build" => !value("--from-sir") && !value("--from-lir"),
+        // `run --defer-borrow` from `sisu1 0.17.0`'s deferred SIR (its R189,
+        // decision 1106).
         "run" => {
-            !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch" | "--defer-borrow"))
+            let defers = p.flags.contains(&"--defer-borrow") && crate::front::stage1_takes_the_roles();
+            !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch") || (*f == "--defer-borrow" && !defers))
                 && !value("--from-sir")
                 && !value("--from-lir")
         }
@@ -2001,6 +2026,12 @@ fn stage1_command(
             if has_ids(&p.flags) {
                 words.push("--format=ids".into());
             }
+            // `--diary PATH`, which `sisu1 0.17.0` appends to as the Rust
+            // front end does (its R186, decision 1103).
+            if let Some(path) = &opts.diary {
+                words.push("--diary".into());
+                words.push(path.clone());
+            }
             program(&mut words);
             match run(host, &words, Backend::Unused) {
                 Ok(r) => shown(host, &r),
@@ -2080,6 +2111,9 @@ fn stage1_command(
                 let mut words = vec!["sir".to_string(), "--tests".to_string()];
                 if module.is_some() {
                     words.push("--modules".into());
+                }
+                if has("--std") {
+                    words.push("--std".into());
                 }
                 runtime_words(&mut words);
                 words.extend(contracts.clone());
@@ -2398,14 +2432,22 @@ fn stage1_command(
             // driver's server of stage 1 answers, so a run no longer pays
             // the standard library's base (decision 1061); an empty one is a
             // program without `main`.
+            // `--defer-borrow` (its R189, decision 1106): the SIR of a program
+            // whose only errors are the ownership rules', status 3 when one
+            // was deferred, each diagnostic on standard error in the
+            // conformance form, which the counterexample mode's account reads.
+            let defer = has("--defer-borrow");
             let (r, text) = if stage1.assists() {
                 let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                if defer {
+                    words.push("--defer-borrow".into());
+                }
                 words.extend(contracts);
                 program(&mut words);
                 match run(host, &words, Backend::Unused) {
                     Ok(mut r) => {
-                        let text = (r.status == exit::OK && !r.stdout.is_empty())
-                            .then(|| std::mem::take(&mut r.stdout));
+                        let ran = r.status == exit::OK || (defer && r.status == DEFERRED);
+                        let text = (ran && !r.stdout.is_empty()).then(|| std::mem::take(&mut r.stdout));
                         (Ok(r), text)
                     }
                     Err(code) => (Err(code), None),
@@ -2428,8 +2470,12 @@ fn stage1_command(
                 Ok(r) => r,
                 Err(code) => return code,
             };
-            host.stderr(&r.stderr);
-            if r.status != exit::OK {
+            let deferring = defer && r.status == DEFERRED;
+            // The deferred run's diagnostics are its account's, not shown.
+            if !(defer && (r.status == exit::OK || deferring)) {
+                host.stderr(&r.stderr);
+            }
+            if r.status != exit::OK && !deferring {
                 return r.status;
             }
             let Some(text) = text else { return no_main(target, host) };
@@ -2441,6 +2487,29 @@ fn stage1_command(
                 return no_main(target, host);
             }
             let mut h = WithArgs { inner: host, args, watch: Vec::new() };
+            if defer {
+                let options = Options {
+                    monitor: true,
+                    coverage: deferring,
+                    seed: opts.seeds.first,
+                    stats: has("--stats"),
+                    stats_kind: opts.stats,
+                    strategy: opts.strategy.clone(),
+                    ..Options::default()
+                };
+                if deferring {
+                    h.stderr(&format!("{}\n", crate::cli::text(msg::DEFER_HEADER, &[])));
+                }
+                let report = sisu_interp::run_main_report(&prog, &mut h, &options);
+                if let Some(st) = &report.stats {
+                    h.stderr(st);
+                }
+                if deferring {
+                    let (declarations, findings) = deferred_of_stage_1(&prog, &r.stderr);
+                    h.stderr(&defer_account(&declarations, &findings, report.violation, &report.coverage));
+                }
+                return report.status;
+            }
             let options = Options {
                 monitor: has("--monitor"),
                 seed: opts.seeds.first,
@@ -3581,9 +3650,53 @@ fn merge_coverage(reports: &[sisu_interp::RunReport]) -> Coverage {
     c
 }
 
-/// The counterexample mode's account (A2): the conflict was reached, or
-/// no conflict happened and each rejected statement was reached (a
-/// candidate false positive) or not (an untested path).
+/// The status of stage 1's deferred SIR, with an error of the ownership
+/// rules deferred (its R189).
+const DEFERRED: i32 = 3;
+
+/// A rule the counterexample mode's account names: its line, code and
+/// catalog identifier, and for a finding of the ownership checker, its
+/// function and column, by which the run counts its statement.
+struct Deferred {
+    line: u32,
+    code: String,
+    id: String,
+    at: Option<(String, u32)>,
+}
+
+/// The deferred diagnostics of stage 1's run, from its standard error in
+/// the conformance form (`LINE:COL-LINE:COL CODE ID ...`, after the file
+/// for a program of several): a finding of the ownership checker is at a
+/// statement of the SIR, of the function that has it; any other is a rule
+/// about a declaration.
+fn deferred_of_stage_1(prog: &sisu_sir::Program, stderr: &str) -> (Vec<Deferred>, Vec<Deferred>) {
+    let mut at: std::collections::HashMap<(u32, u32), String> = std::collections::HashMap::new();
+    for f in &prog.functions {
+        for b in &f.blocks {
+            for loc in b.stmts.iter().map(|s| s.loc).chain([b.loc]).flatten() {
+                at.entry((loc.line, loc.col)).or_insert_with(|| f.name.clone());
+            }
+        }
+    }
+    let (mut declarations, mut findings) = (Vec::new(), Vec::new());
+    for line in stderr.lines().filter(|l| !l.starts_with(' ')) {
+        let mut words = line.split(' ');
+        let (Some(span), Some(code), Some(id)) = (words.next(), words.next(), words.next()) else { continue };
+        if !code.starts_with('E') {
+            continue;
+        }
+        let start = span.split('-').next().unwrap_or("");
+        let mut parts = start.rsplit(':');
+        let (Some(col), Some(l)) = (parts.next(), parts.next()) else { continue };
+        let (Ok(col), Ok(l)) = (col.parse::<u32>(), l.parse::<u32>()) else { continue };
+        let function = at.get(&(l, col)).cloned();
+        let d = Deferred { line: l, code: code.to_string(), id: id.to_string(), at: function.map(|f| (f, col)) };
+        if d.at.is_some() { findings.push(d) } else { declarations.push(d) }
+    }
+    (declarations, findings)
+}
+
+/// The counterexample mode's account (A2) of the Rust front end's build.
 fn defer_report(
     lowered: &crate::db::Lowered,
     declarations: &[sisu_diag::Diagnostic],
@@ -3591,6 +3704,33 @@ fn defer_report(
     violation: bool,
     coverage: &Coverage,
 ) -> String {
+    let declarations: Vec<Deferred> = declarations
+        .iter()
+        .map(|d| Deferred {
+            line: map.line_col(d.span).0.line,
+            code: d.code().to_string(),
+            id: d.msg.id().to_string(),
+            at: None,
+        })
+        .collect();
+    let findings: Vec<Deferred> = lowered
+        .findings
+        .iter()
+        .zip(&lowered.diagnostics_by_finding)
+        .map(|(f, d)| Deferred {
+            line: f.loc.map(|l| l.line).unwrap_or(0),
+            code: d.code().to_string(),
+            id: d.msg.id().to_string(),
+            at: f.loc.map(|l| (f.function.clone(), l.col)),
+        })
+        .collect();
+    defer_account(&declarations, &findings, violation, coverage)
+}
+
+/// The counterexample mode's account (A2): the conflict was reached, or
+/// no conflict happened and each rejected statement was reached (a
+/// candidate false positive) or not (an untested path).
+fn defer_account(declarations: &[Deferred], findings: &[Deferred], violation: bool, coverage: &Coverage) -> String {
     let mut out = String::new();
     if violation {
         out.push_str(&text(msg::DEFER_CONFLICT, &[]));
@@ -3601,26 +3741,22 @@ fn defer_report(
     out.push('\n');
     // Rules about declarations hold or not whatever the program does.
     for d in declarations {
-        let params = [
-            ("line", map.line_col(d.span).0.line.to_string()),
-            ("code", d.code().to_string()),
-            ("id", d.msg.id().to_string()),
-        ];
+        let params = [("line", d.line.to_string()), ("code", d.code.clone()), ("id", d.id.clone())];
         out.push_str("  ");
         out.push_str(&text(msg::DEFER_SIGNATURE, &params));
         out.push('\n');
     }
     let mut all_reached = true;
-    for (f, d) in lowered.findings.iter().zip(&lowered.diagnostics_by_finding) {
-        let line = f.loc.map(|l| l.line).unwrap_or(0).to_string();
-        let count = f
-            .loc
-            .map(|l| coverage.get(&(f.function.clone(), l.line, l.col)).copied().unwrap_or(0))
+    for d in findings {
+        let count = d
+            .at
+            .as_ref()
+            .map(|(f, col)| coverage.get(&(f.clone(), d.line, *col)).copied().unwrap_or(0))
             .unwrap_or(0);
         let params = [
-            ("line", line),
-            ("code", d.code().to_string()),
-            ("id", d.msg.id().to_string()),
+            ("line", d.line.to_string()),
+            ("code", d.code.clone()),
+            ("id", d.id.clone()),
             ("count", count.to_string()),
         ];
         let m = if count > 0 { msg::DEFER_REACHED } else { msg::DEFER_NOT_REACHED };
@@ -3631,7 +3767,7 @@ fn defer_report(
         out.push_str(&text(m, &params));
         out.push('\n');
     }
-    let verdict = if lowered.findings.is_empty() {
+    let verdict = if findings.is_empty() {
         msg::DEFER_DECLARATIONS_ONLY
     } else if all_reached {
         msg::DEFER_FALSE_POSITIVE

@@ -715,6 +715,10 @@ impl Server {
         let lines = Lines::new(&text, self.utf8);
         let offset = lines.offset(first.get("position").unwrap_or(&Json::Null));
         let line = text[..offset.min(text.len())].matches('\n').count() as u32 + 1;
+        // Stage 1's loans from `sisu1 0.17.0` (decision 1104).
+        if let Some(answer) = self.stage1_explain_borrow(&uri, line) {
+            return answer;
+        }
         let Some((a, c, file)) = self.file_of(&uri) else {
             return Err(crate::cli::text(msg::LSP_NOT_ANALYSED, &[]));
         };

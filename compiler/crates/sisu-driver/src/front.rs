@@ -325,6 +325,20 @@ pub fn stage1_keeps_transcripts() -> bool {
     Stage1 { exe, compiler }.keeps_transcripts()
 }
 
+/// [`Stage1::takes_the_roles`] of the stage-1 executable as it is, without
+/// building it: false when it is missing or a source of stage 1 is newer.
+pub fn stage1_takes_the_roles() -> bool {
+    let compiler = compiler_dir();
+    if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
+        return Stage1 { exe: PathBuf::from(given), compiler }.takes_the_roles();
+    }
+    let exe = stage1_exe(&compiler);
+    if stale(&exe, &compiler.join("stage1").join("src")) {
+        return false;
+    }
+    Stage1 { exe, compiler }.takes_the_roles()
+}
+
 /// The stage-1 front end, built and ready to run.
 pub struct Stage1 {
     exe: PathBuf,
@@ -596,6 +610,14 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= FIX_SINCE)
     }
 
+    /// Whether this stage 1 has `sir --tests --std`, `check --diary`,
+    /// `explain-borrow` and `query explain`, `audit --ownership` and
+    /// `--caps`, and `--defer-borrow` (its R185 to R189), and serves them:
+    /// `sisu1 0.17.0` and later (decisions 1102 to 1106).
+    pub fn takes_the_roles(&self) -> bool {
+        self.version().is_some_and(|v| v >= ROLES_SINCE)
+    }
+
     /// The environment a run of stage 1 gets: none of the runtime's or the
     /// driver's own switches, the lowering and backend the command chose,
     /// and the working directory as the shell's `PWD`.
@@ -702,7 +724,9 @@ impl Stage1 {
             && (crate::serve::served(args)
                 || (matches!(args.first().map(String::as_str), Some("eval" | "query")) && self.evaluates())
                 || (emits_sir(args) && self.assists())
-                || (args.first().is_some_and(|a| a == "fix") && self.fixes()))
+                || (args.first().is_some_and(|a| a == "fix") && self.fixes())
+                || (matches!(args.first().map(String::as_str), Some("explain-borrow" | "audit"))
+                    && self.takes_the_roles()))
             && self.serves_every_command()
             && let Some((stdout, stderr, status)) = crate::serve::ask(&self.compiler, &self.exe, args)
         {
@@ -1333,6 +1357,12 @@ const ASSISTS_SINCE: (u32, u32, u32) = (0, 15, 0);
 
 /// The first stage 1 with `fix` (its twenty-first round; decision 1064).
 const FIX_SINCE: (u32, u32, u32) = (0, 16, 0);
+
+/// The first stage 1 with the Rust front end's last commands of data:
+/// `sir --tests --std`, `check --diary`, `explain-borrow`, `audit
+/// --ownership` and `--caps`, `--defer-borrow` (its R185 to R189;
+/// decisions 1102 to 1106).
+const ROLES_SINCE: (u32, u32, u32) = (0, 17, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.

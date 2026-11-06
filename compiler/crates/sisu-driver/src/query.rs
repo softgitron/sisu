@@ -314,6 +314,67 @@ impl Server {
         self.stage1.as_ref().is_some_and(crate::front::Stage1::assists)
     }
 
+    /// `sisu.explainBorrow` of line `line` of a document, from `query
+    /// explain` (`sisu1 0.17.0` and later, its R187; decision 1104): a loan a
+    /// line, `FUNCTION KIND PLACE START HOLDERS END`, each with the line the
+    /// CLI prints for it. The query gives where a loan starts and where it
+    /// is last used as positions, so each range is that position. A program
+    /// with an error has none to show, as `query diagnostics` says.
+    pub(crate) fn stage1_explain_borrow(&mut self, uri: &str, line: u32) -> Option<Result<Json, String>> {
+        if !self.stage1.as_ref().is_some_and(crate::front::Stage1::takes_the_roles) {
+            return None;
+        }
+        let diagnostics = self.query("diagnostics", uri, None)?;
+        if diagnostics.iter().any(|r| r.get(3).is_some_and(|s| s == "error")) {
+            return Some(Err(crate::cli::text(sisu_diag::msg::LSP_HAS_ERRORS, &[])));
+        }
+        let rows = self.query_with("explain", uri, None, &[line.to_string()])?;
+        let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
+        let lines = Lines::new(&text, self.utf8);
+        let mut loans = Vec::new();
+        for row in &rows {
+            let [function, kind, place, start, holders, end] = row.as_slice() else { continue };
+            let mutable = kind == "mut";
+            let holders: Vec<String> =
+                holders.split(", ").filter(|h| !h.is_empty()).map(str::to_string).collect();
+            let quoted: Vec<String> = holders.iter().map(|h| format!("`{h}`")).collect();
+            let m = if quoted.is_empty() {
+                sisu_diag::msg::CLI_EXPLAIN_BORROW_TEMPORARY
+            } else {
+                sisu_diag::msg::CLI_EXPLAIN_BORROW_LOAN
+            };
+            let kind_text = crate::cli::text(
+                if mutable {
+                    sisu_diag::msg::CLI_EXPLAIN_BORROW_MUT
+                } else {
+                    sisu_diag::msg::CLI_EXPLAIN_BORROW_SHARED
+                },
+                &[],
+            );
+            let message = crate::cli::text(
+                m,
+                &[
+                    ("kind", kind_text),
+                    ("place", place.clone()),
+                    ("start", start.clone()),
+                    ("holders", quoted.join(", ")),
+                    ("end", end.clone()),
+                ],
+            );
+            let at = |p: &str| range(&format!("{p}-{p}"), &lines).unwrap_or(Json::Null);
+            loans.push(Json::obj(vec![
+                ("function", Json::str(function.clone())),
+                ("mutable", Json::Bool(mutable)),
+                ("place", Json::str(place.clone())),
+                ("start", at(start)),
+                ("until", at(end)),
+                ("holders", Json::Arr(holders.into_iter().map(Json::str).collect())),
+                ("message", Json::str(message)),
+            ]));
+        }
+        Some(Ok(Json::obj(vec![("line", Json::num(line)), ("loans", Json::Arr(loans))])))
+    }
+
     /// The selection ranges at each position, from `query selection`: its
     /// ranges innermost first, each the parent of the one before.
     pub(crate) fn stage1_selection(&mut self, uri: &str, positions: &[Json]) -> Option<Json> {
