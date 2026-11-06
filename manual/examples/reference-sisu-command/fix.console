@@ -1,0 +1,4 @@
+$ sisu fix --dry-run tally.sisu
+$ sisu fix tally.sisu
+$ sisu run tally.sisu
+$ sisu fix tally.sisu

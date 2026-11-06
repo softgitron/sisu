@@ -352,14 +352,19 @@ again; a process of stage 1 that was built again is replaced. A two-line `sisu c
 where it takes 0.244 as a process of its own.
 
 Served are `check`, `sir`, `parse`, `fmt`, `lint`, `doc`, `tokens`,
-the builds of `test` and `bench`, `eval`, and the language server's
-questions ([sisu lsp](#sisu-lsp)). `sisu run` and `sisu build` are not
-served yet: their SIR comes from a build that stage 1 serves from
-`sisu1 0.15.0`, which the driver does not ask the server for yet. Whatever goes wrong with the server, the command runs stage 1
+the builds of `test` and `bench`, `eval`, `check --holes`, `fix`, the
+language server's questions ([sisu lsp](#sisu-lsp)), and from `sisu1
+0.15.0` the build that gives `sisu run` its SIR, also for `sisu run
+--native` of a file: a two-line `sisu run` takes 0.039 seconds served
+where it takes 0.246 as a process, and `sisu run --native` 0.121 where
+it takes 0.347 (with a release build of `sisu`). `sisu build`, with
+`--native` too, and `sisu run --native` of a package still start stage
+1 as a process of their own, since stage 1 serves only the build for a
+run. Whatever goes wrong with the server, the command runs stage 1
 as a process of its own, and `SISU_STAGE1_SERVE=0` makes it do so every
 time. What a command prints is the same either way.
 
-**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942 and 980 of
+**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980 and 1061 of
 the [architecture notes](../../compiler/docs/architecture.md)).
 
 ## Running programs
@@ -1758,23 +1763,22 @@ starts it, as [Set up your editor](../guides/editor.md) shows. It takes
 no options (D0009).
 
 **Stage 0 differs.** The proposal has one front end. With stage 1 built
-and at `sisu1 0.14.0` or later, stage 1 answers the diagnostics, hover,
-go-to-definition, references, completion and document symbols, each a
-query of its own sent to [the server of
-stage 1](#the-server-of-stage-1), a hover in about 9 ms; a file with a
-syntax error still answers what its tree allows, such as its whole
-items' symbols. Stage 1's completion offers the prelude's `pub` names
-only ([R13](modules.md#names-every-module-sees)), and its references
-count the names in import lines, where hover and go-to-definition
-answer too. The Rust front end answers the rest,
-selection ranges, formatting, rename, code actions, inlay hints, a
-worksheet's values and `sisu.explainBorrow`, and every question when
-stage 1 is not built (the server does not build it under an editor) or
-`--front-end=rust` is given. From `sisu1 0.15.0` stage 1 has a query
-for each of rename, code actions, inlay hints, selection ranges and
-formatting too, but the driver does not route them yet; once it does,
-only a worksheet's values and `sisu.explainBorrow` stay with the Rust
-front end.
+and at `sisu1 0.15.0` or later, stage 1 answers every request but two,
+each a query of its own sent to [the server of
+stage 1](#the-server-of-stage-1), a hover in about 9 ms: the
+diagnostics, hover, go-to-definition, references, completion, document
+symbols, selection ranges, rename and its `prepareRename`, code
+actions, inlay hints, and the formatting of a document or a range. A
+file with a syntax error still answers what its tree allows, such as
+its whole items' symbols. Stage 1's completion offers the prelude's
+`pub` names only ([R13](modules.md#names-every-module-sees)), and its
+references count the names in import lines, where hover and
+go-to-definition answer too; from `sisu1 0.16.0` they count the keyword
+of a field in a struct's construction, `Sauna(turn=1)`, which a rename
+of the field renames. A worksheet's values and `sisu.explainBorrow`
+stay with the Rust front end, which answers every question when stage 1
+is not built (the server does not build it under an editor) or
+`--front-end=rust` is given.
 
 **Status.** In stage 0, with the differences noted. The proposal's
 always-on evaluation, structural editing and stepper come after 0.1
@@ -1927,6 +1931,44 @@ with status 2, as for the other commands; `sisu help` lists them.
 
 **Status.** In stage 0 (10), stage 1's alone (its decisions 292 and 588
 in the [architecture notes](../../compiler/docs/architecture.md)).
+
+### sisu fix
+
+- `sisu fix [--dry-run] [--all] FILE`
+
+`sisu fix` applies the preferred fix of each diagnostic of FILE, the
+first fix the diagnostic prints, and checks the file again, until no
+fix applies. Each fix it applies is a line, D0175, with the code it
+fixed and what the fix does; then the count (D0177), and the file is
+written once. `--dry-run` prints each fix's edit under its line, the
+range it replaces and the text, and leaves the file as it is (D0178);
+`--all` fixes the lints of [sisu lint](#sisu-lint) too. The status is 0
+whether or not something was fixed, so read the dry run first: the
+preferred fix is the cheapest to write, not always the one you want.
+
+<!-- file: examples/reference-sisu-command/tally.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-sisu-command/fix.console -->
+```console
+PLACEHOLDER
+```
+
+The first fix copies `name` where `own name: String` would move it
+in, the second fix E0300 offers; the dry run is where you choose. A
+file with nothing to fix is D0176. A diagnostic whose first fix has no
+edit is left as it is, and a fix that would undo an earlier round's is
+D0179, which stops the rounds. An option `sisu fix` does not take,
+`--edition` and `--deps` among them, is D0009 with status 2, and no
+file, or more than one, prints the command's usage (D0151).
+
+**Status.** In stage 0, stage 1's alone, from `sisu1 0.16.0` (its
+decisions 1040 and 1064 in the [architecture
+notes](../../compiler/docs/architecture.md)); the Rust front end
+answers it with D0003. 10's `--edition` and `--deps` are designed
+([sisu fix --edition and --deps](#sisu-fix---edition-and---deps)).
 
 ### sisu explain-borrow
 
@@ -2261,11 +2303,13 @@ revisions.
 
 **Status.** Leaning (D-066).
 
-### sisu fix
+### sisu fix --edition and --deps
 
 `sisu fix --edition YEAR` rewrites a package for a new edition, and
 `sisu fix --deps` replaces calls of a dependency's deprecated items with
-their `@fix_inline` bodies.
+their `@fix_inline` bodies in the packages that depend on it. [sisu
+fix](#sisu-fix) of a file applies the fix of `@fix_inline` in the
+file's own program.
 
 **Status.** Designed ([10](../../proposal/10-tooling.md), "Migration";
 [13](../../proposal/13-evolution-and-governance.md)); `--deps` leans

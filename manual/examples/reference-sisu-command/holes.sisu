@@ -1,0 +1,16 @@
+# A hole with a contract around it, for `sisu check --holes`.
+struct Chore:
+    name: String
+    hours: int
+
+    def doubled(self) -> int:
+        return self.hours * 2
+
+## The hours to plan for `chore`, with a margin.
+def planned(chore: Chore) -> int:
+    requires chore.hours >= 0
+    ensures result >= chore.hours
+    return todo("add a margin")
+
+test "a margin is never negative":
+    assert planned(Chore("sauna", 2)) >= 2

@@ -1,0 +1,8 @@
+# Three mistakes, each with a fix that `sisu fix` can apply.
+def add_turn(mut turns: list[String], name: String):
+    turns.push(name)
+
+def main():
+    var turns: list[String] = []
+    add_turn(turns, "Aino")
+    print("{len(turn)} in the sauna")

@@ -1,0 +1,2 @@
+$ sisu check --holes holes.sisu
+$ sisu check --holes --format=json holes.sisu

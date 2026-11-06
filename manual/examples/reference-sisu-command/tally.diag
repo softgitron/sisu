@@ -1,0 +1,7 @@
+3:16-3:20 E0300 type.mismatch expected="String" found="ref String"
+  fix type.add-copy 3:20-3:20 ".copy()"
+  fix type.take-own 2:39-2:39 "own "
+7:14-7:19 E0339 type.mut-argument-missing param="turns"
+  fix type.add-mut 7:14-7:14 "mut "
+8:17-8:21 E0200 resolve.undefined-name name="turn"
+  fix resolve.similar-name 8:17-8:21 "turns"
