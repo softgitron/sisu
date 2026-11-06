@@ -290,6 +290,10 @@ pub struct Resolver:
     ## template's module and the statement that wrote each stretch of its
     ## code (RULES.md, R131).
     pub instance_origins: dict[ModuleId, (ModuleId, list[(int, int, TextRange)])]
+    ## The instances whose template's own text has a syntax error, which
+    ## its file reports: their copies of it are not reported again
+    ## (RULES.md, R159).
+    pub broken_instances: set[ModuleId]
     ## While an import is declared: whether it is `@cfg(test)`, as an import
     ## of a dev-dependency must be (RULES.md, R75).
     pub import_for_tests: bool
@@ -319,6 +323,9 @@ pub struct Resolver:
     ## The attributes on the root module's types, as data for
     ## `reflect.attributes_of`: each name and its arguments' text.
     pub attrs_of: dict[DefId, list[(String, list[String])]]
+    ## The attributes on the program's functions and methods, as data for
+    ## `reflect.attributes_of` of a method (RULES.md, R161).
+    pub fn_attrs: dict[DefId, list[(String, list[String])]]
     ## The modules the compiler wrote from templates (derived impls and
     ## instances), with their text, in the order they were made: their
     ## bodies are checked.
@@ -409,6 +416,7 @@ impl Resolver:
             instance_modules=set(),
             instance_sites={},
             instance_origins={},
+            broken_instances=set(),
             import_for_tests=False,
             base_defs=0,
             base_eager=[],
@@ -418,6 +426,7 @@ impl Resolver:
             arbitrary_by_hand=[],
             arbitrary_derived=[],
             attrs_of={},
+            fn_attrs={},
             generated=[],
             shims=[],
             derive_checks=[],
@@ -851,6 +860,21 @@ impl Resolver:
         if self.is_std(module):
             return String.new()
         return own_line_doc(self.root_text, at)
+
+    ## Attributes as reflection gives them: each name and its arguments'
+    ## text, none in the standard library (RULES.md, R161).
+    pub pure def attr_data(
+        self, module: ModuleId, attrs: list[Attr]
+    ) -> list[(String, list[String])]:
+        var out: list[(String, list[String])] = []
+        if self.is_std(module):
+            return out
+        for a in attrs:
+            var args: list[String] = []
+            for x in a.args:
+                args.push(self.text_in(module, x.range))
+            out.push((a.name.copy(), args))
+        return out
 
     pub pure def text_in(self, module: ModuleId, range: TextRange) -> String:
         if let Some(t) = self.module_texts.get(module):
@@ -2441,6 +2465,7 @@ impl Resolver:
                     span=f.range,
                     vis=f.vis,
                     doc=doc,
+                    attrs=self.attr_data(module, f.attrs),
                 )
             )
         if not s.unsupported.is_empty():
@@ -2499,7 +2524,13 @@ impl Resolver:
                     fname = Some(n.text.copy())
                 fields.push((fname, ty))
             variants.push(
-                VariantInfo(name=v.name.text.copy(), fields=fields, span=v.range, docs=docs)
+                VariantInfo(
+                    name=v.name.text.copy(),
+                    fields=fields,
+                    span=v.range,
+                    docs=docs,
+                    attrs=self.attr_data(module, v.attrs),
+                )
             )
         let copy = self.has_derive(module, attrs, "Copy")
         let must_consume = has_attr(attrs, "must_consume")
@@ -2709,6 +2740,10 @@ impl Resolver:
             info.intrinsic = Some("extern.{library}.{f.name.text}")
         info.structural = self.builtin_attr(module, f.attrs, "structural")
         info.internal = has_attr(f.attrs, "internal")
+        # A function's or a method's attributes, as data for reflection
+        # (RULES.md, R161).
+        if not f.attrs.is_empty() and not self.is_std(module):
+            _ = self.fn_attrs.insert(def_, self.attr_data(module, f.attrs))
         info.assoc_const = has_attr(f.attrs, ASSOC_CONST_ATTR)
         if has_attr(f.attrs, "deprecated"):
             info.deprecated = Some(self.builtin_attr(module, f.attrs, "deprecated") ?? String.new())

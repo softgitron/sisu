@@ -214,15 +214,125 @@ def text():
     return "".join(out)
 
 
+# ---------------------------------------------------------------- std.string's
+
+# The line after which `std/string.sisu` holds the tables this script
+# writes (RULES.md, R162): the normalisation forms' and the graphemes'.
+STD_MARK = "# ---------------------------------------------------------------- Unicode's tables, generated\n"
+
+
+def is_hangul_syllable(c):
+    return 0xAC00 <= c <= 0xD7A3
+
+
+def std_tables():
+    canonical, compat, pool, comps, classes, marks = [], [], [], [], [], []
+    for c in range(0x110000):
+        if is_hangul_syllable(c):
+            continue
+        d = unicodedata.decomposition(chr(c))
+        if not d:
+            continue
+        if d.startswith("<"):
+            parts = [int(x, 16) for x in d.split()[1:]]
+            compat.append((c, len(pool), len(parts)))
+            pool.extend(parts)
+            continue
+        parts = [int(x, 16) for x in d.split()]
+        again = len(parts) == 2 and unicodedata.normalize("NFC", chr(c)) == chr(c)
+        canonical.append((c, parts[0], parts[1] if len(parts) == 2 else 0, 1 if again else 0))
+        if again:
+            comps.append((parts[0], parts[1], c))
+    comps.sort()
+    for c in range(0x110000):
+        k = unicodedata.combining(chr(c))
+        if k == 0:
+            continue
+        if classes and classes[-1][1] == c - 1 and classes[-1][2] == k:
+            classes[-1][1] = c
+        else:
+            classes.append([c, c, k])
+    for c in range(0x110000):
+        if unicodedata.category(chr(c)) not in ("Mn", "Me", "Mc"):
+            continue
+        if marks and marks[-1][1] == c - 1:
+            marks[-1][1] = c
+        else:
+            marks.append([c, c])
+    return canonical, compat, pool, comps, classes, marks
+
+
+def std_text():
+    canonical, compat, pool, comps, classes, marks = std_tables()
+    out = [STD_MARK, "\n"]
+    out.append("# Written by `stage1/tools/unicode_tables.py` from Unicode {} as Python's\n".format(unicodedata.unidata_version))
+    out.append("# `unicodedata` has it (RULES.md, R162): do not edit them by hand. Each is a\n")
+    out.append("# text of fixed-width records in hexadecimal, sorted by their first field\n")
+    out.append("# and each followed by one space or line break, which `record_find`\n")
+    out.append("# searches.\n")
+    def fn(name, doc, records):
+        out.append("\n")
+        for d in doc:
+            out.append("## {}\n".format(d))
+        out.append("pure def {}() -> str:\n".format(name))
+        out.append('    return """' + block(records) + '"""\n')
+    fn("canonical_table", [
+        "`CCCCCC-AAAAAA-BBBBBB-F`: the canonical decomposition of `C` into `A` and",
+        "`B` (0 for none), but for the Hangul syllables, which are computed; `F` is",
+        "1 where the composition forms compose it again ({} records).".format(len(canonical)),
+    ], ["{:06x}-{:06x}-{:06x}-{:x}".format(*r) for r in canonical])
+    fn("compositions_table", [
+        "`AAAAAA-BBBBBB-CCCCCC`: the character `C` that `A` and `B` compose, sorted",
+        "by `A`, then `B` ({} records).".format(len(comps)),
+    ], ["{:06x}-{:06x}-{:06x}".format(*r) for r in comps])
+    fn("compatibility_table", [
+        "`CCCCCC-OOOO-LL`: the compatibility decomposition of `C`, the `L` code",
+        "points of `compatibility_pool()` from the `O`th ({} records).".format(len(compat)),
+    ], ["{:06x}-{:04x}-{:02x}".format(*r) for r in compat])
+    out.append("\n")
+    out.append("## The code points of the compatibility decompositions, six hexadecimal\n")
+    out.append("## digits each, {} to a line ({} code points).\n".format(PER_LINE * 4, len(pool)))
+    out.append("pure def compatibility_pool() -> str:\n")
+    lines = []
+    for i in range(0, len(pool), PER_LINE * 4):
+        lines.append("".join("{:06x}".format(x) for x in pool[i:i + PER_LINE * 4]))
+    out.append('    return """' + "\n".join(lines) + '\n"""\n')
+    fn("classes_table", [
+        "`LLLLLL-HHHHHH-CC`: the canonical combining class of the code points from",
+        "`L` to `H`, for every class but 0 ({} records).".format(len(classes)),
+    ], ["{:06x}-{:06x}-{:02x}".format(*r) for r in classes])
+    fn("marks_table", [
+        "`LLLLLL-HHHHHH`: the marks (`Mn`, `Mc` and `Me`) from `L` to `H`, which a",
+        "grapheme keeps after its base ({} records).".format(len(marks)),
+    ], ["{:06x}-{:06x}".format(*r) for r in marks])
+    return "".join(out)
+
+
+def std_path():
+    return Path(__file__).resolve().parent.parent.parent / "std" / "string.sisu"
+
+
+def std_made(current):
+    head = current.split(STD_MARK)[0]
+    return head + std_text()
+
+
 def main():
     path = Path(__file__).resolve().parent.parent / "src" / "unicode_tables.sisu"
     made = text()
+    std = std_path()
+    std_now = std.read_text()
     if sys.argv[1:] == ["--check"]:
         if not path.exists() or path.read_text() != made:
             print("unicode_tables: {} is stale; run tools/unicode_tables.py".format(path), file=sys.stderr)
             sys.exit(1)
+        if STD_MARK in std_now and std_now != std_made(std_now):
+            print("unicode_tables: {} is stale; run tools/unicode_tables.py".format(std), file=sys.stderr)
+            sys.exit(1)
         return
     path.write_text(made)
+    if STD_MARK in std_now:
+        std.write_text(std_made(std_now))
 
 
 if __name__ == "__main__":

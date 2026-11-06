@@ -1112,3 +1112,21 @@ impl[T: NetOps, I: Interceptor] NetOps for Wrap[T, I]:
             case Err(e): "Err({e:?})"
         self.hook.after(c, outcome)
         return r
+
+# ------------------------------------------------------------------ a system with other parts
+
+## `sys` with `fs` and `env` in place of its file system and environment,
+## its other capabilities its own (06, "Capabilities": a holder passes on
+## what it holds, or a wrapper of it): what a process that runs commands
+## for other working directories gives each, stage 1's `sir
+## --repl-serve` among them.
+def system_with(sys: System, own fs: Fs, own env: Env) -> System:
+    return System.assemble(
+        fs=fs,
+        net=sys.net,
+        clock=sys.clock,
+        rand=sys.rand,
+        env=env,
+        proc=sys.proc,
+        stdin=sys.stdin,
+    )

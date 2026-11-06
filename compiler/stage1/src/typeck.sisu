@@ -1363,9 +1363,24 @@ pure def finish_file(
         # wrote it: it stays.
         var moved: list[Diagnostic] = []
         var stay: list[Diagnostic] = []
+        # A syntax error in the instance of the program's own template is
+        # reported once, by the template's file: where the template's text
+        # has one, the instance's copies of it are that error; else it
+        # stands at the template's line that wrote it (RULES.md, R159).
+        var copied: list[(ModuleId, Diagnostic)] = []
         for d in files[k].1:
             let id = d.msg.id()
-            if id.starts_with("lex.") or id.starts_with("parse.") or id.starts_with("resolve."):
+            if id.starts_with("lex.") or id.starts_with("parse."):
+                if r.broken_instances.contains(file_modules[k]):
+                    continue
+                if let Some((template, origins)) = r.instance_origins.get(file_modules[k]):
+                    if let Some(line) = origin_at(origins, d.start):
+                        var x = Diagnostic.new(d.msg, line.start, line.end)
+                        x.params = d.params.copy()
+                        copied.push((template, x))
+                        continue
+                stay.push(d.copy())
+            elif id.starts_with("resolve."):
                 stay.push(d.copy())
             else:
                 var p = placed_at_call(d, at, name, files[k].0)
@@ -1381,6 +1396,16 @@ pure def finish_file(
                             )
                 moved.push(p)
         files[k].1 = stay
+        for (template, x) in copied:
+            if template == r.prog.root:
+                kept.push(x.copy())
+                sort_unique(mut kept, catalog)
+            for j in range(len(file_modules)):
+                if j < len(files) and file_modules[j] == template and j != k:
+                    var ds = files[j].1.copy()
+                    ds.push(x.copy())
+                    sort_unique(mut ds, catalog)
+                    files[j].1 = ds
         if moved.is_empty():
             continue
         if t < 0:

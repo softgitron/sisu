@@ -1,0 +1,72 @@
+# The attributes of a field, a variant and a method reach compile-time
+# code (RULES.md, R161; 08, "Attributes are data"): `f.attributes` of a
+# field and of a variant, and `reflect.attributes_of(m)` of a method, so a
+# type's handlers are routed by their methods' attributes.
+struct Booking:
+    @column("guest_name")
+    name: String
+    hour: int
+    @column("paid", note="cents")
+    price: int
+
+enum Heat:
+    @label("cold")
+    Low
+    Medium
+    @label("very hot")
+    High(degrees: int)
+
+struct Sauna:
+    heat: int
+
+impl Sauna:
+    @route("/heat")
+    def heat_text(self) -> String:
+        return "heat {self.heat}"
+
+    def helper(self) -> int:
+        return self.heat + 1
+
+    @route("/half")
+    def half(self) -> String:
+        return "half {self.heat // 2}"
+
+## Each field's column: its `@column` argument, or its own name.
+def columns[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for f in reflect.fields_of(T):
+        var column: str = f.name
+        comptime for a in f.attributes:
+            comptime if a.name == "column":
+                column = a.args[0]
+        out.push(column.to_string())
+    return out
+
+## Each variant's label, and how many attributes it has.
+def labels[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for v in reflect.variants_of(T):
+        var label = v.name
+        comptime for a in v.attributes:
+            comptime if a.name == "label":
+                label = a.args[0]
+        out.push("{label} ({len(v.attributes)})")
+    return out
+
+## What the routed method answers for `path`: the method whose `@route`
+## names it, called on `s`.
+def route[T](s: T, path: str) -> String:
+    comptime for m in reflect.methods_of(T):
+        comptime for a in reflect.attributes_of(m):
+            comptime if a.name == "route":
+                if path == a.args[0]:
+                    return s.[m]()
+    return "no route for {path}"
+
+def main():
+    print(columns[Booking]().join(", "))
+    print(labels[Heat]().join(", "))
+    let s = Sauna(heat=80)
+    print(route(s, "/heat"))
+    print(route(s, "/half"))
+    print(route(s, "/cold"))

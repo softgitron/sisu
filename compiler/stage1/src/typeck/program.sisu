@@ -161,6 +161,10 @@ pub struct FieldInfo:
     pub vis: Vis
     ## Its `##` comment (RULES.md, R117).
     pub doc: String
+    ## Its attributes, each name and its arguments' text, which reflection
+    ## gives as `f.attributes` (RULES.md, R161); none in the standard
+    ## library.
+    pub attrs: list[(String, list[String])]
 
 pub struct EnumInfo:
     pub generics: list[Generic]
@@ -179,6 +183,9 @@ pub struct VariantInfo:
     ## Each field's `##` comment, which reflection gives as `f.doc`
     ## (RULES.md, R129).
     pub docs: list[String]
+    ## Its attributes, which reflection gives as `v.attributes` (RULES.md,
+    ## R161).
+    pub attrs: list[(String, list[String])]
 
 @derive(Eq, Debug)
 pub enum FnKind:

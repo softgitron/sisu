@@ -871,3 +871,141 @@ impl Display for Decimal:
 impl Debug for Decimal:
     def fmt_debug(self, mut f: Formatter):
         f.write("{self}")
+
+# ---------------------------------------------------------------- exact fractions of any size
+
+## An exact fraction of integers of any size (03: "`Ratio` (exact
+## fractions)"; RULES.md, R163), in lowest terms with a positive
+## denominator: `Ratio`'s parts are `int`s, which a fraction of large
+## numbers would overflow, and this one's are `BigInt`s. It is what a
+## `Decimal`'s `/` gives, exactly.
+##
+## ```
+## let third = BigRatio.of(BigInt.of(1), BigInt.of(3))
+## let big = BigRatio.whole(BigInt.of(10).pow(30))
+## assert "{big * third}" == "1000000000000000000000000000000/3"
+## assert third + third + third == BigRatio.whole(BigInt.of(1))
+## assert (big / big).is_whole() and -third < third
+## assert BigRatio.of(BigInt.of(6), BigInt.of(-4)) == BigRatio.of_ratio(Ratio.of(-3, 2))
+## assert BigRatio.of(BigInt.of(-7), BigInt.of(2)).floor() == BigInt.of(-4)
+## let a: Decimal = 1.5
+## let b: Decimal = 0.4
+## assert a / b == BigRatio.of(BigInt.of(15), BigInt.of(4))
+## assert (a / b).to_ratio() == Some(Ratio.of(15, 4))
+## ```
+@derive(Eq, Hash)
+pub struct BigRatio:
+    pub num: BigInt
+    pub den: BigInt
+
+    invariant not self.den.is_negative() and not self.den.is_zero()
+
+    ## `num / den` in lowest terms; panics when `den` is 0.
+    pub pure def of(num: BigInt, den: BigInt) -> BigRatio:
+        requires not den.is_zero()
+        let g = big_gcd(num, den)
+        var n = num.floor_div(g)
+        var d = den.floor_div(g)
+        if d.is_negative():
+            n = -n
+            d = -d
+        return BigRatio(num=n, den=d)
+
+    ## The whole number `n`.
+    pub pure def whole(n: BigInt) -> BigRatio:
+        return BigRatio(num=n.copy(), den=BigInt.of(1))
+
+    ## The fraction a `Ratio` holds.
+    pub pure def of_ratio(r: Ratio) -> BigRatio:
+        return BigRatio(num=BigInt.of(r.num), den=BigInt.of(r.den))
+
+    ## Whether it is a whole number.
+    pub pure def is_whole(self) -> bool:
+        return self.den == BigInt.of(1)
+
+    ## The value rounded toward negative infinity.
+    pub pure def floor(self) -> BigInt:
+        return self.num.floor_div(self.den)
+
+    ## The same fraction as a `Ratio`, when both parts fit an `int`.
+    pub pure def to_ratio(self) -> Ratio?:
+        let num = self.num.to_int()?
+        let den = self.den.to_int()?
+        return Some(Ratio(num=num, den=den))
+
+    ## The nearest `f64`, near for parts of many digits.
+    pub pure def to_f64(self) -> f64:
+        return self.num.to_f64() / self.den.to_f64()
+
+## The greatest common divisor of two integers of any size, never
+## negative.
+pure def big_gcd(a: BigInt, b: BigInt) -> BigInt:
+    var x = a.abs()
+    var y = b.abs()
+    while not y.is_zero():
+        let r = x % y
+        x = y
+        y = r
+    return x
+
+impl Add for BigRatio:
+    def add(self, other: BigRatio) -> BigRatio:
+        return BigRatio.of(self.num * other.den + other.num * self.den, self.den * other.den)
+
+impl Sub for BigRatio:
+    def sub(self, other: BigRatio) -> BigRatio:
+        return BigRatio.of(self.num * other.den - other.num * self.den, self.den * other.den)
+
+impl Mul for BigRatio:
+    def mul(self, other: BigRatio) -> BigRatio:
+        return BigRatio.of(self.num * other.num, self.den * other.den)
+
+impl Div for BigRatio:
+    ## Panics when `other` is 0.
+    def div(self, other: BigRatio) -> BigRatio:
+        return BigRatio.of(self.num * other.den, self.den * other.num)
+
+impl Neg for BigRatio:
+    def neg(self) -> BigRatio:
+        return BigRatio(num=-self.num, den=self.den.copy())
+
+impl PartialOrd for BigRatio:
+    def partial_cmp(self, other: BigRatio) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for BigRatio:
+    ## By value: `a/b < c/d` exactly when `a*d < c*b`, the denominators
+    ## being positive.
+    def cmp(self, other: BigRatio) -> Ordering:
+        return (self.num * other.den).cmp(other.num * self.den)
+
+impl Display for BigRatio:
+    def fmt(self, mut f: Formatter):
+        if self.is_whole():
+            f.write("{self.num}")
+        else:
+            f.write("{self.num}/{self.den}")
+
+impl Debug for BigRatio:
+    def fmt_debug(self, mut f: Formatter):
+        f.write("{self}")
+
+impl Decimal:
+    ## The exact fraction it is, of any size.
+    ##
+    ## ```
+    ## let x: Decimal = 0.125
+    ## assert x.to_big_ratio() == BigRatio.of(BigInt.of(1), BigInt.of(8))
+    ## ```
+    pub pure def to_big_ratio(self) -> BigRatio:
+        return BigRatio.of(self.digits, BigInt.of(10).pow(self.places))
+
+impl Div for Decimal:
+    ## The exact quotient (03: "division yields a `Ratio`"), a `BigRatio`,
+    ## since a quotient of `Decimal`s may need parts larger than an `int`;
+    ## `a.div(b, places, mode)` rounds it to a `Decimal`. Panics when
+    ## `other` is 0.
+    type Output = BigRatio
+
+    def div(self, other: Decimal) -> BigRatio:
+        return self.to_big_ratio() / other.to_big_ratio()

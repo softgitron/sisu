@@ -577,6 +577,8 @@ E0601 error   comptime.io                 the compile-time evaluation of this ex
 E0602 error   comptime.panicked           the compile-time evaluation of this expression panicked: {message}
 E0603 error   comptime.budget             the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}`
 E0604 error   comptime.not-kept           {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+# Stage 1's (RULES.md, R160): what a compile-time result keeps of functions.
+-     note    comptime.kept-functions     a function is kept as the function it names, and a closure as that closure when it captures nothing or only numbers, text, booleans and characters; a closure that captures a binding would reach the compile-time code's bindings, which run time does not have
 E0605 error   comptime.only               `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime`
 E0606 error   comptime.budget-attribute   `@comptime_budget` takes `steps=N`, a positive number of steps
 E0607 error   comptime.derive-template    a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods
@@ -588,6 +590,10 @@ E0609 error   comptime.instance-failed    making `{name}` stopped at compile tim
 -     label   comptime.instance-here      the template, where it stopped
 # Stage 1's (RULES.md, R34; 08): a `for` over what compile time knows.
 -     fix     comptime.write-comptime-for  unroll the loop at compile time with `comptime for`
+# Stage 1's (RULES.md, R159): a function that takes no type parameters is
+# made once and is no instance, so its words are a plain function's.
+E0609 error   comptime.function-failed    the compile-time code of `{name}` stopped: {reason}
+-     label   comptime.function-here      the compile-time code, where it stopped
 E0610 error   comptime.instances-unbounded  `{name}` needs more than {count} instances: its instances call it with ever more types
 E0611 error   comptime.template-value     `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value
 E0612 error   comptime.embed-failed       cannot embed `{path}`: {reason}

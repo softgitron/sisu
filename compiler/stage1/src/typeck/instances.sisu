@@ -187,6 +187,8 @@ impl Resolver:
             var field_tys: list[TypeExprId] = []
             var field_names: list[String] = []
             var field_docs: list[String] = []
+            var field_attrs: list[list[(String, list[String])]] = []
+            var variant_attrs: list[list[(String, list[String])]] = []
             var doc = String.new()
             var body = Body.Struct([])
             var is_struct = False
@@ -200,6 +202,7 @@ impl Resolver:
                         field_tys.push(f.ty)
                         field_names.push(f.name.text.copy())
                         field_docs.push(self.doc_in(module, f.range.start))
+                        field_attrs.push(self.attr_data(module, f.attrs))
                         fields.push((f.name.text.copy(), f.default.is_some()))
                     body = Body.Struct(fields)
                     is_struct = True
@@ -209,6 +212,7 @@ impl Resolver:
                     gps = e.generics.copy()
                     var variants: list[(String, list[String?])] = []
                     for v in e.variants:
+                        variant_attrs.push(self.attr_data(module, v.attrs))
                         var fields: list[String?] = []
                         for f in v.fields:
                             field_tys.push(f.ty)
@@ -357,6 +361,8 @@ impl Resolver:
                     attrs=attrs,
                     field_types=field_types,
                     field_docs=field_docs.copy(),
+                    field_attrs=field_attrs.copy(),
+                    variant_attrs=variant_attrs.copy(),
                     doc=doc.copy(),
                 )
                 var unfolded: String? = None
@@ -800,7 +806,16 @@ impl Resolver:
             # `comptime.instance-failed`, at the call that needed it.
             let (site_module, at) = site
             if let Some((range, reason)) = failed:
-                var d = Diagnostic.new(Msg.ComptimeInstanceFailed, at.start, at.end)
+                # A function that takes no type parameters is made once, and
+                # is no instance: its words are a plain function's (RULES.md,
+                # R159).
+                let plain = args.is_empty() and generics.is_empty()
+                var failed_msg = Msg.ComptimeInstanceFailed
+                var here_msg = Msg.ComptimeInstanceHere
+                if plain:
+                    failed_msg = Msg.ComptimeFunctionFailed
+                    here_msg = Msg.ComptimeFunctionHere
+                var d = Diagnostic.new(failed_msg, at.start, at.end)
                 d = d.with("name", what).with("reason", reason)
                 # Where the program's own template stopped; a standard
                 # library template's reason is the whole story.
@@ -808,9 +823,9 @@ impl Resolver:
                     if module != site_module:
                         # A label in another file than the message's.
                         let (s, e) = (range.start, range.end)
-                        d = d.label_in(Msg.ComptimeInstanceHere, s, e, module.index)
+                        d = d.label_in(here_msg, s, e, module.index)
                     else:
-                        d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
+                        d = d.label(here_msg, range.start, range.end)
                         # A plain `for` over what compile time knows is the
                         # `comptime for` the template meant (RULES.md, R34).
                         if let Some(at) = self.plain_for_over(module, range):
@@ -824,6 +839,8 @@ impl Resolver:
         _ = self.instance_sites.insert(m, (site_module, site_at, what.to_string()))
         if not self.is_std(module):
             _ = self.instance_origins.insert(m, (module, origins))
+        if f.header_broken or f.body_broken:
+            _ = self.broken_instances.add(m)
         # The types, by the names the unfolded code uses.
         for (alias, t) in aliases:
             let d = self.new_def(m, alias, TextRange.empty(0), Vis.Private, DefKind.TypeAlias(t))
@@ -1030,6 +1047,7 @@ impl Resolver:
                 continue
             var shape = self.method_shape(fd, []) else:
                 continue
+            shape.attrs = []
             for a in item.attrs:
                 var args: list[String] = []
                 for x in a.args:
@@ -1056,6 +1074,10 @@ impl Resolver:
                 receiver = "self".to_string()
             else:
                 receiver = "{mode_text(mode)} self"
+        # Its attributes (RULES.md, R161).
+        var attrs: list[(String, list[String])] = []
+        if let Some(found_attrs) = self.fn_attrs.get(m):
+            attrs = found_attrs.copy()
         return Some(
             MethodShape(
                 name=self.prog.defs[m.index].name.copy(),
@@ -1063,7 +1085,7 @@ impl Resolver:
                 params=params,
                 ret=[self.signature_shape(f.ret, names)],
                 provided=f.body.is_some(),
-                attrs=[],
+                attrs=attrs,
                 doc=String.new(),
             )
         )
@@ -1192,6 +1214,7 @@ impl Resolver:
                                 ty=[shape],
                                 default=f.default.is_some(),
                                 doc=f.doc.copy(),
+                                attrs=f.attrs.copy(),
                             )
                         )
                         k += 1
@@ -1225,7 +1248,11 @@ impl Resolver:
                 let shape = self.shape(t, "{written}_v{vi}_{k}", depth + 1, mut aliases)
                 fields.push((n.copy(), [shape]))
                 k += 1
-            out.push(VariantShape(name=v.name.copy(), fields=fields, docs=v.docs.copy()))
+            out.push(
+                VariantShape(
+                    name=v.name.copy(), fields=fields, docs=v.docs.copy(), attrs=v.attrs.copy()
+                )
+            )
             vi += 1
         return out
 
