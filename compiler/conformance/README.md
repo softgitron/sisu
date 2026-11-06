@@ -97,7 +97,11 @@ A case is run when any of `.out`, `.err` or `.status` exists.
 Every command runs in a fresh temporary directory holding only
 `NAME.sisu` and the contents of `NAME.files/`, with an empty environment,
 and names the file by its bare name, so paths in messages are the same on
-every machine. A program that writes files writes them there.
+every machine. A program that writes files writes them there. A case's
+`sisu test` runs share that directory, so a selection run after the plain
+one takes the tests that passed from its test cache and prints them `ok
+(cached)` (decision 1145); a native run caches nothing and reads such a
+line as `ok`.
 
 ## A package case
 

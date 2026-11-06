@@ -765,6 +765,11 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
     };
     let start = Instant::now();
     for (given, expected) in runs {
+        // A native run takes nothing from the test cache, so a test the
+        // interpreted run of the same sandbox took from it (`ok (cached)`,
+        // decision 1145) is a plain `ok` here.
+        let expected =
+            if flags.is_empty() { expected } else { expected.replace(" ... ok (cached)\n", " ... ok\n") };
         let mut a = s(&["test"]);
         a.extend(flags.iter().cloned());
         a.extend(given.iter().cloned());

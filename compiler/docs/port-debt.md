@@ -597,23 +597,22 @@ driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 role to replace before it can be deleted, when the flag and the Rust
 branches of `cli.rs` go with it:
 
-- **The language server's worksheets**, and **hot replacement** (`sisu
-  run --watch`, and a run under it recorded, whose log replays the saves).
-  From `sisu1 0.15.0` every other request of `sisu lsp` is answered by
-  stage 1's queries (its R164 and R169, decisions 983 and 1060), and from
+- **Hot replacement** (`sisu run --watch`, and a run under it recorded,
+  whose log replays the saves). The language server is no longer a role
+  of the Rust front end: from `sisu1 0.15.0` its requests are answered by
+  stage 1's queries (its R164 and R169, decisions 983 and 1060), from
   `sisu1 0.17.0` `sisu.explainBorrow` too (its `query explain`, R187,
-  decision 1104), so the language server is no longer a role of the Rust
-  front end but for one feature: a document's inline values
-  (`textDocument/inlineValue`), the worksheet run by stage 0's interpreter
-  from the Rust front end's build of it. Hot replacement needs the front
-  end in the process, its queries kept between edits (the memo), or the
-  program as data. (The capability log and replay of a plain run are
-  stage 1's, the log holding the SIR that ran, decision 303.) *Pay*: the
-  worksheet's inline values from stage 1 (a `query values`, which stage
-  1's twenty-third round is asked for), as `sisu ws` already runs its
-  `sir --worksheet` (R95); the ends of `query explain`'s loans, whose
-  ranges are their starts until then; for hot replacement a program kept
-  between edits. **The REPL** (`sisu repl`) and **worksheets**
+  decision 1104), and from `sisu1 0.18.0` a worksheet's inline values
+  (its `query values`, R196, decision 1141), the driver's interpreter
+  running stage 1's program of the worksheet where stage 1's evaluator
+  stops at the world; the Rust front end answers only an older stage 1
+  and `--front-end=rust`. Hot replacement needs the front end in the
+  process, its queries kept between edits (the memo), or the program as
+  data. (The capability log and replay of a plain run are stage 1's, the
+  log holding the SIR that ran, decision 303.) *Pay*: for hot
+  replacement a program kept between edits; for the language server the
+  ends of `query explain`'s loans, whose ranges are their starts until
+  then. **The REPL** (`sisu repl`) and **worksheets**
   (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
   --worksheet` (`sisu1 0.8.0` and later, decisions 563 and 620), and
   `:why` reads the inputs' trees from its `parse --tree` (decision 621);
@@ -627,8 +626,7 @@ branches of `cli.rs` go with it:
   front end reads it from the working directory: stage 1 told the
   program's directory apart from its file's (a `--dir` of `sir`) would
   serve both.
-- **A program's transcripts, `sisu test --defer-borrow` and
-  `--features`**: a program's tests and benchmarks run
+- **A program's transcripts and `--features`**: a program's tests and benchmarks run
   from stage 1's SIR (decision 357), and so do those of a program with
   transcripts, but those of a run that asks for a package's features run on
   the Rust front end until stage 1's `sir` took `--features` and
@@ -639,16 +637,15 @@ branches of `cli.rs` go with it:
   `sir_with` adds to the SIR, so they run on its build of the program,
   which must check (`D0128` otherwise; decision 380). The standard
   library's doc examples are stage 1's from `sisu1 0.17.0` (`sir --tests
-  --std`, its R185, decision 1102), but for `sisu test --std` without a
-  program, which the Rust front end still builds alone. A test run's
-  deferral is the Rust ownership checker's: stage 1 has `sir --tests
-  --defer-borrow` (its R189), but the counterexample mode's account of a
-  test run is made inside the runner of tests, which the SIR's path does
-  not reach yet (decision 1106). Stage 1's own tests run on the Rust front
-  end too. *Pay*: stage 1's `sir --tests` writing the world of transcripts
-  (`--transcripts`, rooting the two functions); the account of a test
-  run read from stage 1's deferred SIR, as `sisu run --defer-borrow`'s
-  is.
+  --std`, its R185, decisions 1102 and 1144), `sisu test --std` without a
+  program too, from an empty program written aside, and so is a test
+  run's deferral (`sir --tests --defer-borrow`, its R189, decision 1143),
+  its account read from stage 1's diagnostics as `run --defer-borrow`'s
+  is. What the Rust front end has left of `sisu test` is a program's
+  transcripts, `sisu test --std --defer-borrow`, a stage 1 that does not
+  report its program itself (decision 424), and stage 1's own tests, which
+  run on it too. *Pay*: stage 1's `sir --tests` writing the world of
+  transcripts (`--transcripts`, rooting the two functions).
 - (Done: **`sisu run --defer-borrow`**, **`sisu check --diary`**,
   **`sisu explain-borrow`** and **`sisu audit --ownership`** and
   **`--caps`** are stage 1's from `sisu1 0.17.0`, its R186 to R189,
@@ -689,16 +686,18 @@ What the driver does around stage 1, because of what its commands are:
   run time prints last: the driver takes stage 1's `error: Failed` off its
   standard error, and `error: Exit(status=N)` too, whose N is the status.
   Stage 1 knows the working directory by `PWD`, which the driver sets.
-- **Stage 1's base is kept by a server, but not for `sisu build`**: the
-  driver keeps processes of stage 1's `sir --repl-serve` (its R158) in a
-  server of its own (decision 980), so a two-line `check` takes 0.014 s
-  where it took 0.24 s; from `sisu1 0.15.0` `sisu run`'s SIR comes from
-  the served `build --for-run --emit-sir` (its R170, decision 1061), a
-  two-line run 0.039 s where it took 0.246 s, and a file's `run --native`
-  compiles it in the driver. `sisu build`, `build --native` and a
-  package's `run --native` still pay the base (decision 1062). *Pay*: a
-  served `build --emit-sir` without `--for-run`, and the executable's path
-  in its answer.
+- **Stage 1's base is kept by a server**: the driver keeps processes of
+  stage 1's `sir --repl-serve` (its R158) in a server of its own
+  (decision 980), so a two-line `check` takes 0.014 s where it took
+  0.24 s; from `sisu1 0.15.0` `sisu run`'s SIR comes from the served
+  `build --for-run --emit-sir` (its R170, decision 1061), a two-line run
+  0.039 s where it took 0.246 s, and a file's `run --native` compiles it
+  in the driver; from `sisu1 0.18.0` `sisu build`, `build --native` and a
+  package's `run --native` are served too (`build --emit-sir`, its R195,
+  decision 1140), the driver compiling each program into the executable
+  the answer names: a package's `build --native` 0.136 s where it took
+  0.33 s. An older stage 1 still pays the base for them (decision
+  1062).
 - **Tests and benchmarks from stage 1's SIR** (decision 357): `sisu test`
   and `sisu bench` ask stage 1 for `sir --tests` and run its SIR, with the
   program's files for its replay tokens, snapshots and test cache; stage 1

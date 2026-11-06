@@ -12159,3 +12159,161 @@ and 1067; stage 1's R185 to R189)
       front end in its SIR under R27 (a hole's closure, printed where a
       run reaches it); `holes/holes_refused` and `eval/usage` do not
       differ. Stage 1 decides it (RULES.md, R203).
+
+**Stage 0's twenty-second round: `sisu build` and a package's run served,
+the language server wholly on stage 1, stage 1's counterexample mode of a
+test run, a cached test's line, and what was left** (sections "The query
+layer and the driver", "The language server", "The REPL and worksheets",
+"Testing", "The counterexample mode", "Stage 2: the native backend";
+D-085, D-086; 10, 12, 17; decisions 242, 1060, 1062, 1101, 1102, 1106 to
+1108; stage 1's R195, R196, R189, R200 and R209)
+
+1140. From `sisu1 0.18.0` (its R195) `sisu build --native` (with
+      `--release`, `--contracts`, `--output` and `--explain-size`) gets
+      its SIR from stage 1's served `build --emit-sir`: its standard error
+      and status are the build's, and for each program the answer names,
+      in the build's order, the driver compiles the SIR after its line `#
+      executable PATH` into PATH, making its directory, and prints the
+      backend's `built` line, or prints a library's `# built ...` line as
+      the build prints it (`build_emitted`); the first program that fails
+      stops the build. A plain `sisu build`, which calls no backend, is
+      served as it is. A package's `run --native` reads its executable
+      from the same line of `build --for-run --emit-sir`'s answer, where a
+      file's is built aside as before (decision 1061). `sisu check --holes
+      DIR` and `sisu check --holes` in a package are stage 1's, the
+      package found first as for the other commands of a package
+      (`D0064`, status 2); a file stays the path it was, and more than one
+      path the usage (`D0151`). An older stage 1 keeps the process of
+      decision 1062. The executables are the same bytes served, as a
+      process and on the Rust front end (`conformance/cases/packages/
+      workspace.pkg`, an application and a library, in the driver's test
+      `a_packages_build_is_served_as_it_runs_as_a_process`), and the same
+      bytes as stage 1's own `build --native` gives with the release
+      driver as its backend. Measured on stage 1's
+      `cases/packages/served_build.pkg` (two modules, a typed hole) with
+      the release driver, the median of 5 under a load of 5: `sisu build
+      --native` 0.136 s served where it takes 0.326 s as a process
+      (`SISU_STAGE1_SERVE=0`) and stage 1's own `build --native` 0.335 s;
+      a plain `sisu build` 0.065 s where it takes 0.275 s; a package's
+      `run --native` 0.167 s where it takes 0.333 s; `check --holes` of
+      the package 0.053 s. This changes no rule of the language.
+
+1141. From `sisu1 0.18.0` (its R196) `sisu lsp` shows a worksheet's inline
+      values from `query values FILE --text BUFFER` (`stage1_values`):
+      its `value` and `output` lines by the line each statement ends on,
+      rendered as before. Where stage 1's evaluator stops at a line (a
+      `stopped` line: the standard error or another use of the world, an
+      intrinsic it lacks, its budget), the driver's interpreter runs stage
+      1's program of the worksheet (`sir --worksheet` of the buffer,
+      served) against a test's fakes within the server's budget, as `sisu
+      ws` runs it (`repl::run_sheet`, taken out of `evaluate_sheet`); a
+      `panicked` line ends the values; a document that is not a script,
+      which stage 1 stops at its line 0, and one that does not build have
+      none. So no request of the language server is answered by the Rust
+      front end with a stage 1 of 0.18.0 or later; an older stage 1, a
+      query stage 1 cannot answer and `--front-end=rust` keep the Rust
+      front end's build of the worksheet. The driver's test
+      `worksheet_values_answer_as_the_rust_front_end` holds a worksheet
+      that stops at `print_err` and a program that is not a script the
+      same on both front ends, the values after the stop included. This
+      changes no rule of the language.
+
+1142. An `Option[ptr[T]]` as one nullable word (decision 1101's order) is
+      not this round's either. Counted before starting, it is: the layout
+      tables and a kind of the type table in both lowerings (`layout.rs`
+      and `layout.sisu`, 7 and 8 sites naming `Option`); the construction,
+      `discriminant`, downcast, inline `==` and debug information of an
+      option in both lowerings (`func.rs`, `facts.rs`, `debug.rs`;
+      `call.sisu`, `rvalue.sisu`, `facts.sisu`, `debug.sisu`); every
+      result of an `Option[T]` the runtimes write with a tag word, whose
+      tag is 0 for `Some` and 1 for `None` where the nullable word's is
+      the reverse (`Rets::none` and `some_word` and their 10 uses in
+      `intrinsics.rs`, `write_some` in `tasks.rs`, and 36 calls of `none`
+      and `some` in `iter.sisu` and `dispatch.sisu`), each converted where
+      its `T` is a raw pointer; and the walks of equality, the hash,
+      `Debug` and the copy in both runtimes; then the fixed point. Neither
+      runtime nor stage 2 holds an `Option` of a raw pointer itself, so
+      the change reaches them only through the code they compile. The
+      round spent its time on 1140, 1141 and 1143 to 1146, which retire
+      the Rust front end's last roles but one; the order of 1101 stands,
+      and a pointer to such an option, or to a struct that holds one,
+      stays `D0103`. This changes no rule of the language.
+
+1143. `sisu test --defer-borrow` gets its SIR from stage 1's `sir --tests
+      --defer-borrow` (its R189) when stage 1 is 0.17.0 or later and
+      reports the program itself (decision 424): status 3 is a deferred
+      error, and its diagnostics in the conformance form are read for the
+      account as `run --defer-borrow`'s are (decision 1106, the findings
+      at statements of the SIR counted by the run), after the header and
+      the tests run under the monitor with each statement counted and no
+      test cache (`test_from_sir`'s `deferred`); status 0 runs the tests
+      under the monitor without an account; any other status is reported
+      by the build without the option, its errors in the human form. A
+      package's black-box test files are answered so too. The output is
+      the Rust front end's for a conflict reached, a conflict not reached
+      and a type error. `--front-end=rust` keeps the Rust ownership
+      checker's deferral. This changes no rule of the language.
+
+1144. `sisu test --std` without a file and outside a package runs the
+      standard library's examples from stage 1's `sir --tests --std` of an
+      empty program written aside, when stage 1 is 0.17.0 or later
+      (`std_examples_of_stage1`), the replay lines naming `--std` as the
+      Rust front end's run names them, and no test cache, which has no
+      file to sit beside. Stage 1 declares 197 examples where the Rust
+      front end declares 199, `std.net`'s two once more (decision 1102),
+      and the run takes 3.1 s where the Rust front end's takes 0.7 s (the
+      debug driver, the median of 3), as decision 1102's run with a
+      program does: its SIR holds the whole standard library. Under
+      `--front-end=rust` and `--defer-borrow` the Rust front end builds
+      them. This changes no rule of the language.
+
+1145. A test whose result `sisu test` took from the test cache (decision
+      242) prints `ok (cached)` (`D0152`, `cli.test-cached`) where it
+      printed `ok`, so that what the cache remembered shows (the manual's
+      finding from chapter 19 and R16; 17, "Output and caching"); its
+      count, status and held output are a passed test's. The conformance
+      suite runs a case's `sisu test` commands in one sandbox, so a
+      selection after the plain run takes from its cache:
+      `packages/test_modules.select` and `testing/parametrised.select`
+      are blessed again with `ok (cached)`, and the native modes, which
+      cache nothing, read such a line as `ok`. The driver's test
+      `the_test_cache_keeps_what_passed` holds both lines. This changes no
+      rule of the language.
+
+1146. The language server's `latency` test holds a change or a hover past
+      its bound of 1,000 ms to a second and a third measurement before it
+      fails, the change made with another body each time (two `pass`
+      lines, then three), and the fastest of the three to the bound: a
+      pause of the machine, another test suite running at once, is then
+      not taken for the server's time (it failed once at 1,228 ms so), and
+      a server that is slow at each edit still fails. The bound is not
+      made relative to a baseline of the run, which a machine slow
+      throughout would raise with it. This changes no rule of the
+      language.
+
+1147. `@fixture(scope="module")` stays a value made for each test that
+      names it (stage 1's R200 and R209), since the SIR does not carry
+      what the runner needs to keep one: the parameter is lowered into the
+      test's body as a `let` of the fixture's call, so the runner sees a
+      test that takes nothing, and it runs each test in an interpreter of
+      its own, in parallel and in a random order (17, "Isolation and
+      parallelism"), each value living in one interpreter's heap. For the
+      runner to make the value once, before the first of the module's
+      tests that names it, and drop it after the last, failed or not, the
+      SIR must carry: the fixtures each test takes on its `test` line, in
+      its parameters' order, with the fixture's function and its scope;
+      the test's function taking each module-scoped value as a `ref T`
+      parameter in place of the body's `let`, so that no test moves or
+      changes it, with `T: Sync` checked; and `T`'s drop, which the SIR
+      has. The runner then runs the tests that share one value in one
+      interpreter, in turn, the value made before the first and dropped
+      after the last, and the others in parallel as now; a replay token
+      of such a test calls the fixture before it. Stage 1 lowers so once
+      the runner reads those lines, which this round's runner does not
+      (What stage 1 must do). This changes no rule of the language.
+
+1148. The formatting, characters', floats', texts' and bytes' families of
+      the intrinsics (decision 1107) and tagged-pointer provenance
+      (decision 1108) are not this round's: the round spent its time on
+      1140, 1141 and 1143 to 1146, and each family wants 903's
+      measurement of its own. This changes no rule of the language.

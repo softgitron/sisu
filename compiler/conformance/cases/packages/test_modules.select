@@ -1,4 +1,4 @@
-test "heat/levels/eighty is hot" ... ok
-test "heat/levels/sixty is warm" ... ok
-test "heat/steam from a sibling module" ... ok
+test "heat/levels/eighty is hot" ... ok (cached)
+test "heat/levels/sixty is warm" ... ok (cached)
+test "heat/steam from a sibling module" ... ok (cached)
 3 passed, 0 failed, 0 blocked
