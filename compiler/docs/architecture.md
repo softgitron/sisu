@@ -11136,3 +11136,49 @@ intrinsics"; D-085, D-086; 12, 17, 22; decisions 686, 726, 787, 820, 823,
      no lowering writing a tag yet would be code that nothing runs, so the
      round leaves it to the round that starts the lowerings with it. This
      changes no rule of the language.
+
+**Stage 1's seventeenth round** (stage 1's RULES.md, R150 to R157; stage 1's own builds on the driver's release build, compile-time function values and attribute arguments as values, a missing key's panic at the index, `ptrsize`, `uptrsize`, `Sized`, the `Array` literal and `Url` literals, `try_collect` after other adapters and `Decimal`'s `/` decided against, compile-time types planned, the `export_by_pointer` case's differences)
+
+880. `stage1/sisu1` runs the stage 1 the driver builds (decision 860, the
+     release profile with every contract checked, the stamp
+     `target/stage1/profile`) and asks the driver to build it, so the two
+     no longer build over each other's executable; `check.sh --native`
+     runs it for its batches, and the classes `self` and `fixed` a debug
+     stage1-A of their own. Stage 1 decides it (RULES.md, R150).
+
+881. A `comptime` expression's function values are kept as the constants
+     that name them, so a table of routed functions is evaluated at
+     compile time, and an attribute's arguments are values (a string
+     literal's text, an integer, a boolean, a name's text) with their
+     keywords in `keys`, where they were their source text. Stage 1
+     decides it (RULES.md, R151).
+
+882. A `dict`'s entry read inside an expression is read at the index, so
+     a missing key's panic names the index whether the key is a literal,
+     a `str` or a `String`. Stage 1 decides it (RULES.md, R152).
+
+883. The prelude has `ptrsize` and `uptrsize` (`i64` and `u64` on every
+     target now) and the marker trait `Sized`, which every type but a
+     `dyn` one implements; a list literal of `N` elements where an
+     `Array[T, N]` is expected is that array; and `std.net` has
+     `FromLiteral[str] for Url`. Stage 1 decides it (RULES.md, R153).
+
+884. `try_collect` after an adapter whose item is its inner iterator's is
+     decided against until the type system has a bound on an associated
+     type's value or associated types of associated types; the chain ends
+     in its `map`, or in `map(r -> r)`. Stage 1 decides it (RULES.md,
+     R154).
+
+885. Compile-time code that makes types starts with a `comptime def ... ->
+     type` that the template engine runs and a type position written
+     `comptime f(args)`, whose syntax is the owner's; `@diagnostic_name`
+     follows it, and `E0900` stays until then. Stage 1 decides it
+     (RULES.md, R155).
+
+886. `Decimal`'s `/` giving a `Ratio` waits for a `Ratio` of `BigInt`s,
+     since today's `Ratio` of `int`s cannot hold every quotient 03
+     promises exactly. Stage 1 decides it (RULES.md, R156).
+
+887. The conformance suite's `unsafe/export_by_pointer` differs from stage
+     0's front end as the other cases of `unsafe/` do (R4). Stage 1
+     decides it (RULES.md, R157).

@@ -91,3 +91,20 @@ pure def default_port(scheme: str) -> int:
     if scheme == "http":
         return 80
     return 0
+
+# A `Url` written as a string literal where one is expected (03: literals
+# take their expected type; 11's `FromLiteral` for `Path` and `Url`),
+# appended as R137's were (stage 1's RULES.md, R153).
+
+impl FromLiteral[str] for Url:
+    ## The URL the literal spells, as `Url.parse` reads it; a literal that
+    ## is not of the form stops the program, naming it.
+    ##
+    ## ```
+    ## let home: Url = "https://example.com/sauna?day=1"
+    ## assert home.host == "example.com" and home.query == "day=1"
+    ## ```
+    pure def from_literal(literal: str) -> Url:
+        return Url.parse(literal).expect(
+            "a URL literal of the form `scheme://host[:port][/path][?query]`"
+        )

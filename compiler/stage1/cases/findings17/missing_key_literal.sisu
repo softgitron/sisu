@@ -1,0 +1,10 @@
+# A missing key's panic stands at the index, whichever way the key is
+# written: a string literal of a `dict` of `str` keys here, as a `str` of
+# `String` keys does since R134 (RULES.md, R152; the manual's fifteenth
+# round), where it stood at the start of the statement that read it.
+def main():
+    let ages = {"Aino": 7, "Eero": 9}
+    print(1 + ages["Aino"])
+    let older: dict[String, int] = {"Aino": 8}
+    print(older["Aino"] + ages["Eero"])
+    print(1 + ages["Roni"])

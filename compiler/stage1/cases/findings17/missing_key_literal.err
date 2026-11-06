@@ -1,0 +1,2 @@
+panic: the key "Roni" is not in the dict
+  at main (missing_key_literal.sisu:10:15)

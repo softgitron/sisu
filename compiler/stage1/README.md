@@ -302,10 +302,13 @@ and swapped characters), where a difference must carry the mark of a
 listed discrepancy. Stage 0 writes a package's `sisu.lock` when it checks
 it; `check.sh` removes the ones its run wrote.
 
-With `--native` it builds stage 1 once with stage 0's native backend
-(`sisu build --native --output WORK/stage1`, about 5 s for its 2450 SIR
-functions) and runs that executable for every batch instead of `sisu run
---` on the interpreter; nothing else changes, but for the class `build`,
+With `--native` it runs the stage 1 the driver builds for every `sisu`
+command (the release profile with every contract checked, decision 860;
+`sisu1` asks the driver for it, RULES.md, R150), copied into the work
+directory, for every batch instead of `sisu run --` on the interpreter,
+and builds stage1-A, the debug build the fixed point is about (`sisu
+build --native --output WORK/stage1-A`), for the classes `self` and
+`fixed`; nothing else changes, but for the class `build`,
 which needs the executable: stage 0's `sisu build` and stage 1's `build`,
 one after the other, of copies of a file, of a package whose manifest
 names its `[profile.release] contracts`, of a workspace and of a package
@@ -2640,6 +2643,49 @@ Stage 1's version is 0.12.0: the driver may rely on `sir --tests
 --modules` (RULES.md, R142). The new cases are in `cases/findings16/`,
 `cases/packages/test_modules.pkg` and `cases/packages/routed_functions.pkg`.
 
+### The seventeenth round: stage 1's builds in the release profile, compile-time function values and attribute arguments, the index's panic, the small types of 03
+
+This round took decision 860's notes for stage 1 (its own builds in the
+release profile), the sixteenth round's open items of reflection, the
+manual's fifteenth round's missing key, the narrowed "missing beside 03"
+item, R146's open item, the first step of compile-time types and
+`Decimal`'s quotient. RULES.md has the rules (R150 to R157, decisions
+880 to 887) and their decision texts:
+
+- **The release profile** (R150): `sisu1` runs the driver's build of
+  stage 1 and asks the driver for it, so the two no longer build over
+  each other; `check.sh --native`'s batches run it, and `self` and
+  `fixed` a debug stage1-A (below, "Where the time goes").
+- **Function values and attribute arguments** (R151): a table of
+  function values written `comptime [...]` is kept as the constants that
+  name them, and `reflect.attributes_of` gives each argument as a value,
+  with `keys` for their keywords.
+- **The index's panic** (R152): a `dict`'s entry read inside an
+  expression is read at the index, so a missing key's panic names the
+  index for a literal key too.
+- **The small types** (R153): `ptrsize`, `uptrsize` and `Sized` in the
+  prelude, a list literal where an `Array[T, N]` is expected, and
+  `FromLiteral[str] for Url`.
+- **`try_collect` after every adapter** (R154): decided against; the
+  chain ends in its `map`, or in `map(r -> r)`.
+- **Compile-time types** (R155): the plan, a `comptime def ... -> type`
+  and a type position written `comptime f(args)`, whose syntax waits for
+  the owner.
+- **`Decimal`'s `/`** (R156): decided against for the round, until a
+  `Ratio` of `BigInt`s.
+- **The merge's differences** (R157): the conformance suite's
+  `unsafe/export_by_pointer`.
+
+Decided against: `try_collect` after the other adapters (R154),
+`Decimal`'s `/` giving a `Ratio` (R156), and `@derive(Into, From)`, the
+owner's Q-80, left. Open: compile-time types and `@diagnostic_name`
+(R155), a closure in a `comptime` result (R151), and the manual's
+reference pages that show an attribute's arguments as text (R151) and
+the missing key at `4:5` (R152).
+
+Stage 1's version stays 0.12.0: the driver relies on no new form. The new
+cases are in `cases/findings17/` and `cases/packages/routed_comptime.pkg`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3299,6 +3345,22 @@ and the lexer and the parser themselves, which a batch pays for every
 program's text and every command for the base's (above; and below,
 "Starting up").
 
+The seventeenth round runs the batches on the release profile (RULES.md,
+R150): `sisu1` and `check.sh --native` take the stage 1 the driver builds
+for every command (decision 860, Cranelift's `speed` level, every contract
+checked), where they built the debug profile's. Measured one build
+against the other on the same machine, each batch in turn and twice,
+`types-batch` of the 549 programs of `types.list` takes 5.2 to 5.9 s
+where the debug build took 7.3 to 7.9 s, and `sir-batch` of `sir.list`
+17.5 to 18.6 s where it took 22.9 to 23.9 s: a quarter and a fifth less,
+less than the 2.6 times fewer instructions of R135's parse of the prelude,
+since a batch's time is mostly the run time's copies, drops, allocations
+and intrinsics, which are the same code in both. The whole `check.sh
+--native --names --types --sir` took 955 s, against 1990 s before on a
+machine twice as loaded (the same classes listed below R150); the
+classes `self` and `fixed` keep the debug stage1-A the fixed point is
+about, `self-sir` 67 s of it.
+
 ### Starting up
 
 A command of stage 1 that checks one program (`check`, `sir`, `build`,
@@ -3408,9 +3470,10 @@ place: the prelude's parse takes 353 M instructions where it took 464 M,
 and the two-line `check` 3.23 G where it took 3.43 G. What is left of a
 command's start is the parser's 0.70 G, the lexer's 0.53 G and the AST
 builder's 0.54 G, and the code of the debug profile, in which `sisu1` and
-`check.sh` build stage 1: the release profile parses the prelude in 373 M
+`check.sh` built stage 1: the release profile parses the prelude in 373 M
 instructions, 2.6 times fewer, which makes the profile the larger lever
-(the driver's and `sisu1`'s to choose).
+(the driver's and `sisu1`'s to choose; the driver chose it in decision
+860, and `sisu1` and `check.sh` run its build since R150).
 
 The sixteenth round profiled resolving and the trait check of the same
 cached `check` (3.392 G instructions, the base 3.03 G of it): resolving
@@ -3606,7 +3669,14 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     borrowed index by a `str` (R146) and Hangul names (R148); decided
     against: `@derive(Into, From)` (R148); left: `try_collect` after the
     other adapters and a compile-time table of function values written
-    `comptime`. The tenth round took a variant's
+    `comptime`. The seventeenth round took the table of function values
+    and an attribute's arguments as values (R151), the missing key's
+    panic at the index (R152) and `ptrsize`, `uptrsize`, `Sized`, a list
+    literal as an `Array` and a `Url` literal (R153); decided against:
+    `try_collect` after the other adapters (R154) and `Decimal`'s `/`
+    giving a `Ratio` (R156); left: compile-time types (R155, planned),
+    `graphemes` and the normalisation forms, and the sharing of instances
+    with `--explain-size`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

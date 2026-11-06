@@ -1,0 +1,8 @@
+# RULES.md, R151: the table of routed functions written `comptime [...]`,
+# which the compile-time evaluator after lowering keeps as the constants
+# that name the functions (`const fn sauna_web.routes.index`), where it
+# was beyond the slice; and each `@route`'s argument the text its string
+# literal holds.
+[package]
+name = "sauna_web"
+version = "0.1.0"

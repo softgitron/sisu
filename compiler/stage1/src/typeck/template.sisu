@@ -34,8 +34,10 @@
 ##! A field has `name` (for
 ##! a positional variant field, its position), `index`, `named`, `ty` (its
 ##! type, when known) and `default` (whether it has a default); a variant
-##! has `name`, `index` and `fields`; an attribute has `name` and `args`
-##! (the text of each argument). `x.[field]` is that field of `x`; a
+##! has `name`, `index` and `fields`; an attribute has `name`, `args`
+##! (each argument as a value: a string literal's text, an integer, a
+##! boolean, or else the text written, a name's among it) and `keys` (each
+##! argument's keyword, empty for one given by position). `x.[field]` is that field of `x`; a
 ##! variant's field is reachable only inside an arm `case V(..)` that
 ##! `comptime for V in reflect.variants_of(T)` made for a `match x`, where
 ##! it is the arm's binding. Compile-time code may also use `enumerate`,
@@ -914,6 +916,78 @@ pure def written(v: Value) -> String?:
         case _:
             return None
 
+## The keyword of an attribute's argument as written, `method` of
+## `method="GET"`; empty for one given by position.
+pure def argument_key(text: str) -> String:
+    let (key, _) = keyword_split(text)
+    return key
+
+## An attribute's argument, as written, as a value (RULES.md, R151): a
+## string literal without interpolation its text (`"/x"` is `/x`), an
+## integer literal its number, `True` and `False` booleans, and anything
+## else, a name among it, its text; a keyword argument the value after its
+## `=`.
+pure def argument_value(text: str) -> Value:
+    let (_, written) = keyword_split(text)
+    let w: str = written
+    if w == "True":
+        return Value.Bool(True)
+    if w == "False":
+        return Value.Bool(False)
+    if let Some(n) = w.replace("_", "").parse_int():
+        if w.byte_len() > 0 and w.byte_at(0).to_int() != 95:
+            return Value.Int(n)
+    if w.byte_len() >= 2 and w.starts_with("\"") and w.ends_with("\"") and not w.contains("{{"):
+        let inner = w.byte_slice(1, w.byte_len() - 1)
+        var out = String.new()
+        var escaped = False
+        for c in inner.chars():
+            if escaped:
+                match c:
+                    case 'n':
+                        out.push_char('\n')
+                    case 't':
+                        out.push_char('\t')
+                    case 'r':
+                        out.push_char('\r')
+                    case '0':
+                        out.push_char('\0')
+                    case _:
+                        out.push_char(c)
+                escaped = False
+            elif c == '\\':
+                escaped = True
+            else:
+                out.push_char(c)
+        return Value.Str(out)
+    return Value.Str(written.copy())
+
+## An argument's keyword and the text of its value: `("method", "\"GET\"")`
+## of `method="GET"`, `("", "hour")` of `hour`.
+pure def keyword_split(text: str) -> (String, String):
+    var i = 0
+    let n = text.byte_len()
+    while i < n:
+        let b = text.byte_at(i).to_int()
+        let word = (b >= 97 and b <= 122)
+            or (b >= 65 and b <= 90)
+            or (b >= 48 and b <= 57)
+            or b == 95
+            or b >= 128
+        if not word:
+            break
+        i += 1
+    if i == 0:
+        return (String.new(), text.trim().to_string())
+    var j = i
+    while j < n and text.byte_at(j).to_int() == 32:
+        j += 1
+    if j < n
+            and text.byte_at(j).to_int() == 61
+            and (j + 1 >= n or text.byte_at(j + 1).to_int() != 61):
+        return (text.byte_slice(0, i).to_string(), text.byte_slice(j + 1, n).trim().to_string())
+    return (String.new(), text.trim().to_string())
+
 ## Text as it is written inside a string literal.
 pure def escape(s: str) -> String:
     var q = String.new()
@@ -1066,10 +1140,22 @@ impl Unfold:
             case ExprKind.Field(base, name):
                 let attribute = match name.text:
                     case "name" | "index" | "named" | "fields" | "ty" | "default" | "args": True
+                    case "keys": True
                     case "doc": True
                     case "receiver" | "params" | "ret" | "provided" | "mode": True
                     case _: False
                 return attribute and self.is_static(src, base) and not self.names_type(src, base)
+            # An element of a compile-time list, `a.args[0]`, is the value
+            # itself, whatever the others' types (RULES.md, R151).
+            case ExprKind.Index(base, args):
+                if len(args) != 1:
+                    return False
+                let IndexArg.Expr(i) = args[0] else:
+                    return False
+                if let ExprKind.Field(_, name) = src.ast.expr(base).kind:
+                    if name.text == "args" or name.text == "keys":
+                        return self.is_static(src, base) and self.is_static(src, i)
+                return False
             case ExprKind.Call(callee, args, trailing):
                 if trailing.is_some():
                     return False
@@ -1228,6 +1314,16 @@ impl Unfold:
                                         here, "{describe(again)} cannot be written into text"
                                     )
                 return Ok(Value.Str(s))
+            case ExprKind.Index(base, args):
+                let IndexArg.Expr(ix) = args[0] else:
+                    return fail(here, "this cannot be evaluated at compile time")
+                let Value.List(xs) = self.eval(src, base)? else:
+                    return fail(here, "only a list is indexed at compile time")
+                let Value.Int(k) = self.eval(src, ix)? else:
+                    return fail(here, "a compile-time list is indexed by an integer")
+                if k < 0 or k >= len(xs):
+                    return fail(here, "the index {k} is outside the {len(xs)} arguments")
+                return Ok(xs[k].copy())
             case ExprKind.Paren(x):
                 return self.eval(src, x)
             case ExprKind.Comptime(x):
@@ -1312,10 +1408,17 @@ impl Unfold:
                         match name.text:
                             case "name":
                                 got = Some(Value.Str(n.copy()))
+                            # Each argument as a value, a keyword's too, and
+                            # each one's keyword (RULES.md, R151).
                             case "args":
                                 var xs: list[Value] = []
                                 for a in args:
-                                    xs.push(Value.Str(a.copy()))
+                                    xs.push(argument_value(a))
+                                got = Some(Value.List(xs))
+                            case "keys":
+                                var xs: list[Value] = []
+                                for a in args:
+                                    xs.push(Value.Str(argument_key(a)))
                                 got = Some(Value.List(xs))
                             case _:
                                 pass

@@ -14,7 +14,7 @@ an enum with 3 variants
 Rect[0=2, 1=3]
 Circle[radius=4]
 Empty[]
-["derive[Debug]", "route[\"/boxes\", method=\"GET\"]"]
+["derive[Debug]", "route[/boxes, GET]"]
 main.Box has area 10
 Dot has no area
 Box(width=4, height=10, label="box")

@@ -1,0 +1,33 @@
+# An attribute's arguments are values (RULES.md, R151; 08, "a framework
+# collects routed functions"): a string literal is its text without its
+# quotes, an integer its number, `True` a boolean, and a name its text;
+# `keys` gives each argument's keyword, empty for one given by position.
+@table("bookings", 3)
+@index(hour, unique=True, note="a \"quoted\" word")
+struct Booking:
+    name: String
+    hour: int
+
+comptime def describe(T: type) -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for a in reflect.attributes_of(T):
+        out = "{out} @{a.name}"
+        comptime for i, arg in enumerate(a.args):
+            out = "{out} [{a.keys[i]}:{arg}]"
+    return out
+
+## The table a type is stored in, and how many copies: the first and the
+## second argument as the values they are.
+def stored[T]() -> (str, int):
+    var name = ""
+    var copies = 0
+    comptime for a in reflect.attributes_of(T):
+        comptime if a.name == "table":
+            name = a.args[0]
+            copies = a.args[1] + 1
+    return (name, copies)
+
+def main():
+    print(comptime describe(Booking))
+    let (name, copies) = stored[Booking]()
+    print("{name} {copies}")

@@ -862,6 +862,14 @@ impl Checker:
                     if let TyData.Adt(d, a) = self.data(t):
                         if Some(d) == cx.prog.wk.list:
                             elem = first_of(a)
+                        # A literal of `N` elements where an `Array[T, N]`
+                        # is expected is that array (03, "Type inference";
+                        # RULES.md, R153).
+                        elif cx.prog.builtin(d) == Some("Array".to_string()) and len(a) == 2:
+                            if let TyData.Const(n) = self.data(a[1]):
+                                if n == len(items) and n > 0:
+                                    let (elems, _) = self.homogeneous(cx, items, Some(a[0]))
+                                    return self.add(TExprKind.List(elems), t, span)
                 let (elems, ty) = self.homogeneous(cx, items, elem)
                 let list_ty = self.list_of(cx, ty)
                 return self.add(TExprKind.List(elems), list_ty, span)

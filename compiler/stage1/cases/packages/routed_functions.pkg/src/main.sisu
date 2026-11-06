@@ -1,8 +1,8 @@
 from sauna_web import routes
 
 ## The routed functions of `routes` by their paths: a table made at compile
-## time from each function's `@route`, whose argument is its text as
-## written, quotes and all.
+## time from each function's `@route`, whose argument is the text the
+## string literal holds (RULES.md, R151).
 def serve(path: str) -> String:
     let table: list[(str, () -> String)] = [
         (a.args[0], f)
@@ -11,7 +11,7 @@ def serve(path: str) -> String:
         if a.name == "route"
     ]
     for (p, f) in table:
-        if p == "\"{path}\"":
+        if p == path:
             return f()
     return "no page at {path}".to_string()
 

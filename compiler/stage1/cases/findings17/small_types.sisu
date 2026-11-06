@@ -1,0 +1,20 @@
+# The small types 03 names (RULES.md, R153): `ptrsize` and `uptrsize`, the
+# address-sized integers, `Sized`, which every type but a `dyn` one is, a
+# list literal where an `Array[T, N]` is expected, and a `Url` written as a
+# string literal.
+from std.net import Url
+
+def widest[T: Sized + Display](xs: list[T]) -> String:
+    return xs.iter().map(x -> "{x}").join(" ")
+
+def main():
+    let offset: ptrsize = -16
+    let length: uptrsize = 4096
+    print("{offset} {length} {offset + 1}")
+    let a: Array[int, 3] = [1, 2, 3]
+    var names: Array[String, 2] = ["Aino".to_string(), "Eero".to_string()]
+    names[1] = "Liisa".to_string()
+    print("{a} {a.len()} {names}")
+    print(widest([3, 1, 2]))
+    let home: Url = "https://example.com:8080/sauna?day=1"
+    print("{home.host} {home.port} {home.path} {home.query}")
