@@ -345,6 +345,14 @@ thirteen on a quiet machine, and the formatter's classes add about five
 
 ## Results
 
+The twenty-third round's run (`SISU_LOWER=rust`, at a load of 7 to 13 on
+four cores) ended `total: 15867 files checked, 14011 identical, 1856
+differing (1856 listed in RULES.md or DISCREPANCIES.md, 0 not)`, with
+`served` 10 request files and `fix` 4 files as expected, `expected` 192
+files, `behaviour` 366 programs (365 as expected, 346 natively too, 1
+refused as listed) and `fixed-sir` identical. The run below is an earlier
+round's, kept for its breakdown of the classes.
+
 `./check.sh --native --names --types --sir` (`--native` implies `--self` and
 `--check`), run this round, as the rounds before it, with
 `SISU_FRONT_END=rust`, so that `sisu`, whose front end is stage 1 since
