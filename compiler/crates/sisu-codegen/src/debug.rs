@@ -570,8 +570,15 @@ impl TypeBuilder<'_, '_> {
     ) -> UnitEntryId {
         let arg = |i: usize| args.get(i).cloned().unwrap_or(Type::Unit);
         let simple = match n {
-            "u8" | "u16" | "u32" | "u64" => Some(self.base(dwarf, "u64", constants::DW_ATE_unsigned, 8)),
-            "i8" | "i16" | "i32" | "DateTime" => Some(self.base(dwarf, "i64", constants::DW_ATE_signed, 8)),
+            // A narrow number is its width (decision 1020).
+            "u8" => Some(self.base(dwarf, "u8", constants::DW_ATE_unsigned_char, 1)),
+            "u16" => Some(self.base(dwarf, "u16", constants::DW_ATE_unsigned, 2)),
+            "u32" => Some(self.base(dwarf, "u32", constants::DW_ATE_unsigned, 4)),
+            "i8" => Some(self.base(dwarf, "i8", constants::DW_ATE_signed, 1)),
+            "i16" => Some(self.base(dwarf, "i16", constants::DW_ATE_signed, 2)),
+            "i32" => Some(self.base(dwarf, "i32", constants::DW_ATE_signed, 4)),
+            "u64" => Some(self.base(dwarf, "u64", constants::DW_ATE_unsigned, 8)),
+            "DateTime" => Some(self.base(dwarf, "i64", constants::DW_ATE_signed, 8)),
             "u128" => Some(self.base(dwarf, "u128", constants::DW_ATE_unsigned, 16)),
             "i128" => Some(self.base(dwarf, "i128", constants::DW_ATE_signed, 16)),
             "f32" => Some(self.base(dwarf, "f32", constants::DW_ATE_float, 4)),

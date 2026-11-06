@@ -1,0 +1,26 @@
+--- sisu eval stops.sisu
+--- stderr
+error[E0602]: the compile-time evaluation of this expression panicked: assertion failed: n % 2 == 0
+  message: odd
+    n % 2 == 0
+    │ │
+    7 1
+  --> stops.sisu:11:7
+   |
+11 | const BAD: int = halve(7)
+   |       ^^^
+
+--- status 1
+--- sisu eval stops.sisu --to toml
+--- stderr
+error[E0602]: the compile-time evaluation of this expression panicked: assertion failed: n % 2 == 0
+  message: odd
+    n % 2 == 0
+    │ │
+    7 1
+  --> stops.sisu:11:7
+   |
+11 | const BAD: int = halve(7)
+   |       ^^^
+
+--- status 1

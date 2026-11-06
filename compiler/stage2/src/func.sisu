@@ -40,7 +40,7 @@ from stage2.gen import (
     returned_constant,
     runtime_results,
 )
-from stage2.layout import fat
+from stage2.layout import fat, narrow
 from stage2.lir import Fb, LirError, internal, unsupported
 from stage2.scan import (
     building_begun,
@@ -290,6 +290,54 @@ impl Cg:
     pub pure def store_word(mut self, v: int, addr: int, off: int):
         self.b.store(v, addr, off)
 
+    ## The `width` bytes at `off` from `addr` (1, 2, 4 or 8), as a word,
+    ## extended by their sign when `signed` (decision 1020).
+    pub pure def load_bits(mut self, addr: int, off: int, width: int, signed: bool) -> int:
+        if width == 1:
+            if signed:
+                return self.b.sload8(addr, off)
+            return self.b.uload8(addr, off)
+        if width != 2 and width != 4:
+            return self.load(addr, off)
+        let narrow = self.b.load(if width == 2: "i16" else: "i32", addr, off)
+        return self.b.convert(if signed: "sextend" else: "uextend", "i64", narrow)
+
+    ## The low `width` bytes of the word `v` (1, 2, 4 or 8), written at
+    ## `off` from `addr`.
+    pub pure def store_bits(mut self, v: int, addr: int, off: int, width: int):
+        var low = v
+        if width == 1:
+            low = self.b.convert("ireduce", "i8", v)
+        elif width == 2:
+            low = self.b.convert("ireduce", "i16", v)
+        elif width == 4:
+            low = self.b.convert("ireduce", "i32", v)
+        self.store_word(low, addr, off)
+
+    ## The word of the scalar of type `ty` at `addr`: a narrow number's
+    ## bytes, extended as its type says, any other's word.
+    pub pure def load_scalar(mut self, addr: int, ty: Type) -> int ! LirError:
+        if let Some((w, signed)) = narrow(ty):
+            return Ok(self.load_bits(addr, 0, w, signed))
+        return Ok(self.load(addr, 0))
+
+    ## Writes the scalar `v` of type `ty` at `addr`, a narrow number at its
+    ## width.
+    pub pure def store_scalar(mut self, v: int, addr: int, ty: Type) -> () ! LirError:
+        var w = WORD
+        if let Some((n, _)) = narrow(ty):
+            w = n
+        self.store_bits(v, addr, 0, w)
+        return Ok(())
+
+    ## The value of type `ty` at `addr`: a narrow number's word, extended as
+    ## its type says (decision 1020), another's as `read` reads it.
+    pub pure def read_value(mut self, addr: int, ty: Type) -> Val ! LirError:
+        if let Some((w, signed)) = narrow(ty):
+            return Ok(Val.Words([self.load_bits(addr, 0, w, signed)]))
+        let size = self.size(ty)?
+        return Ok(self.read(addr, size))
+
     ## The address of what the reference of type `ty` at `addr` refers to:
     ## the address it holds, except that a reference to a `dyn` is the
     ## `dyn`'s own two words, in place.
@@ -347,9 +395,10 @@ impl Cg:
             )
         return self.types.id(t)
 
-    ## The words of the value at `addr`.
+    ## The words of the value at `addr`, or a copy in memory of one that is
+    ## not a whole number of words (decision 1021).
     pub pure def read(mut self, addr: int, size: int) -> Val:
-        if size // 8 > MAX_WORDS:
+        if size // 8 > MAX_WORDS or size % 8 != 0:
             let tmp = self.slot(size)
             self.copy_bytes(tmp, addr, size)
             return Val.Mem(tmp)
@@ -358,10 +407,15 @@ impl Cg:
             ws.push(self.load(addr, i * 8))
         return Val.Words(ws)
 
-    ## Writes a value of `size` bytes at `addr`.
+    ## Writes a value of `size` bytes at `addr`: a narrow number at its
+    ## width, since where it is may have room for no more (decision 1020).
     pub pure def write(mut self, addr: int, v: Val, size: int):
         match v:
             case Val.Words(ws):
+                if size < 8:
+                    if not ws.is_empty():
+                        self.store_bits(ws[0], addr, 0, size)
+                    return
                 for i in range(min(len(ws), size // 8)):
                     self.store_word(ws[i], addr, i * 8)
             case Val.Mem(src):
@@ -372,6 +426,14 @@ impl Cg:
             for i in range(size // 8):
                 let w = self.load(src, i * 8)
                 self.store_word(w, dst, i * 8)
+            # What is left of a value that is not a whole number of words,
+            # four, two and one bytes at a time (decisions 1020 and 1021).
+            var off = size // 8 * 8
+            for w in [4, 2, 1]:
+                if size - off >= w:
+                    let v = self.load_bits(src, off, w, False)
+                    self.store_bits(v, dst, off, w)
+                    off += w
             return
         let n = self.iconst(size)
         self.b.memcpy(dst, src, n)

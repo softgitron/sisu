@@ -1,7 +1,8 @@
 # A `Slice` views the list it was made from in place (decision 940): its
 # elements are the list's own, so two slices of one list point to one
 # place, a slice of a slice views the same elements, and dropping a slice
-# drops nothing it views. `bytes` still give a slice of copies.
+# drops nothing it views. A slice of `bytes` views them in place too, a
+# byte to a `u8` (decision 1020).
 
 from std.mem import as_ptr
 

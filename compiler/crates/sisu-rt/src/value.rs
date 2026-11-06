@@ -37,6 +37,43 @@ pub(crate) unsafe fn target(mut p: *mut u8, mut t: u32) -> (*mut u8, u32) {
     }
 }
 
+/// The word of the scalar of type `t` at `p`: a narrow number's bytes,
+/// extended by its sign when it is a signed integer (decision 1020),
+/// another's word.
+///
+/// # Safety
+/// `p` must hold a value of type `t`, a scalar.
+pub(crate) unsafe fn scalar((p, t): (*mut u8, u32)) -> u64 {
+    let e = ty(t);
+    let w = e.size as usize;
+    if w >= 8 {
+        // SAFETY: as the caller guarantees.
+        return unsafe { mem::word(p, 0) };
+    }
+    let mut b = [0u8; 8];
+    // SAFETY: as the caller guarantees, `w` bytes.
+    unsafe { std::ptr::copy_nonoverlapping(p, b.as_mut_ptr(), w) };
+    let v = u64::from_le_bytes(b);
+    match &e.kind {
+        Kind::Sized(n) if n.starts_with('i') && w > 0 => {
+            let shift = 64 - 8 * w as u32;
+            (((v << shift) as i64) >> shift) as u64
+        }
+        _ => v,
+    }
+}
+
+/// Writes the scalar `v` of type `t` at `p`: a narrow number's low bytes,
+/// another's word (decision 1020).
+///
+/// # Safety
+/// `p` must have room for a value of type `t`, a scalar.
+pub(crate) unsafe fn set_scalar(p: *mut u8, t: u32, v: u64) {
+    let w = (ty(t).size as usize).min(8);
+    // SAFETY: as the caller guarantees.
+    unsafe { std::ptr::copy_nonoverlapping(v.to_le_bytes().as_ptr(), p, w) };
+}
+
 /// The text of a `str`, `String` or `Path`, through references; `None`
 /// for any other value.
 ///

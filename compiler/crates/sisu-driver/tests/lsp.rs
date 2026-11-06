@@ -34,7 +34,18 @@ impl Client {
     /// The server on the front end `front`, `rust` or `stage1` (decision
     /// 983).
     fn start_on(front: &str) -> Client {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_sisu"))
+        Client::start_with(front, None)
+    }
+
+    /// The server on the front end `front`, its stage 1 served by the
+    /// driver's server or run as a process for each query as `served` says
+    /// (`SISU_STAGE1_SERVE`, decision 980), or as the environment says.
+    fn start_with(front: &str, served: Option<bool>) -> Client {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_sisu"));
+        if let Some(on) = served {
+            cmd.env("SISU_STAGE1_SERVE", if on { "1" } else { "0" });
+        }
+        let mut child = cmd
             .arg(format!("--front-end={front}"))
             .arg("lsp")
             .stdin(Stdio::piped())
@@ -791,4 +802,48 @@ fn stage_1s_queries_answer_as_the_rust_front_end() {
     assert_eq!(answers[0], answers[1], "stage 1's queries, then the Rust front end's answers");
     assert_eq!(answers[1].1, Some(1), "{:?}", answers[1]);
     assert_eq!(answers[1].4, ["x", "y"], "{:?}", answers[1]);
+}
+
+/// The language server's answers from stage 1's queries (its R164,
+/// decision 983) are the same, message for message, when the driver's
+/// server of stage 1 serves them and when each runs stage 1 as a process
+/// (`SISU_STAGE1_SERVE=0`, decision 980): a document's diagnostics, a
+/// definition, a hover, its symbols, a function's references and the
+/// members after a `.` (decision 1025).
+#[test]
+fn stage_1s_queries_answer_alike_served_and_as_a_process() {
+    let (uri, _dir) = document("served.sisu", PROGRAM);
+    let broken = format!("{PROGRAM}    print(nope)\n");
+    let mut answers = Vec::new();
+    for served in [true, false] {
+        let mut c = Client::start_with("stage1", Some(served));
+        let mut got = vec![c.open(&uri, &broken).write()];
+        let _ = c.change(&uri, 2, PROGRAM);
+        got.push(c.at("textDocument/definition", &uri, 20, 11).write());
+        got.push(c.at("textDocument/hover", &uri, 20, 11).write());
+        got.push(
+            c.request(
+                "textDocument/documentSymbol",
+                Json::obj(vec![("textDocument", Json::obj(vec![("uri", Json::str(uri.clone()))]))]),
+            )
+            .write(),
+        );
+        got.push(
+            c.request(
+                "textDocument/references",
+                Json::obj(vec![
+                    ("textDocument", Json::obj(vec![("uri", Json::str(uri.clone()))])),
+                    ("position", Json::obj(vec![("line", Json::num(20)), ("character", Json::num(11))])),
+                    ("context", Json::obj(vec![("includeDeclaration", Json::Bool(true))])),
+                ]),
+            )
+            .write(),
+        );
+        let _ = c.change(&uri, 3, &format!("{PROGRAM}    print(p.)\n"));
+        got.push(c.at("textDocument/completion", &uri, 22, 12).write());
+        c.stop();
+        answers.push(got);
+    }
+    assert!(answers[0][2].contains("area"), "{}", answers[0][2]);
+    assert_eq!(answers[0], answers[1], "served, then as a process");
 }

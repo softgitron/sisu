@@ -448,6 +448,53 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.b.ins().store(MemFlags::trusted(), v, addr, off as i32);
     }
 
+    /// The `width` bytes at `off` from `addr` (1, 2, 4 or 8), as a word,
+    /// extended by their sign when `signed` (decision 1020).
+    fn load_bits(&mut self, addr: Value, off: u32, width: u32, signed: bool) -> Value {
+        let f = MemFlags::trusted();
+        let narrow = match width {
+            1 if signed => return self.b.ins().sload8(types::I64, f, addr, off as i32),
+            1 => return self.b.ins().uload8(types::I64, f, addr, off as i32),
+            2 => self.b.ins().load(types::I16, f, addr, off as i32),
+            4 => self.b.ins().load(types::I32, f, addr, off as i32),
+            _ => return self.load(addr, off),
+        };
+        if signed {
+            self.b.ins().sextend(types::I64, narrow)
+        } else {
+            self.b.ins().uextend(types::I64, narrow)
+        }
+    }
+
+    /// The low `width` bytes of the word `v` (1, 2, 4 or 8), written at
+    /// `off` from `addr`.
+    fn store_bits(&mut self, v: Value, addr: Value, off: u32, width: u32) {
+        let low = match width {
+            1 => self.b.ins().ireduce(types::I8, v),
+            2 => self.b.ins().ireduce(types::I16, v),
+            4 => self.b.ins().ireduce(types::I32, v),
+            _ => v,
+        };
+        self.store_word(low, addr, off);
+    }
+
+    /// The word of the scalar of type `ty` at `addr`: a narrow number's
+    /// bytes, extended as its type says, any other's word.
+    fn load_scalar(&mut self, addr: Value, ty: &Type) -> Result<Value, Error> {
+        Ok(match narrow(ty) {
+            Some((w, signed)) => self.load_bits(addr, 0, w, signed),
+            None => self.load(addr, 0),
+        })
+    }
+
+    /// Writes the scalar `v` of type `ty` at `addr`, a narrow number at its
+    /// width.
+    fn store_scalar(&mut self, v: Value, addr: Value, ty: &Type) -> Result<(), Error> {
+        let w = narrow(ty).map_or(abi::WORD, |(w, _)| w);
+        self.store_bits(v, addr, 0, w);
+        Ok(())
+    }
+
     /// The address of what the reference of type `ty` at `addr` refers
     /// to: the address it holds, except that a reference to a `dyn` is the
     /// `dyn`'s own two words, in place.
@@ -517,9 +564,20 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.cg.types.id(t)
     }
 
-    /// The words of the value at `addr`.
+    /// The value of type `ty` at `addr`: a narrow number's word, extended
+    /// as its type says (decision 1020), another's as [`Self::read`] reads it.
+    fn read_value(&mut self, addr: Value, ty: &Type) -> Result<Val, Error> {
+        if let Some((w, signed)) = narrow(ty) {
+            return Ok(Val::Words(vec![self.load_bits(addr, 0, w, signed)]));
+        }
+        let size = self.size(ty)?;
+        Ok(self.read(addr, size))
+    }
+
+    /// The words of the value at `addr`, or a copy in memory of one that is
+    /// not a whole number of words (decision 1021).
     fn read(&mut self, addr: Value, size: u32) -> Val {
-        if size / 8 > MAX_WORDS {
+        if size / 8 > MAX_WORDS || !size.is_multiple_of(8) {
             let tmp = self.slot(size);
             self.copy_bytes(tmp, addr, size);
             return Val::Mem(tmp);
@@ -527,9 +585,15 @@ impl<'a, 'p> Cx<'a, 'p> {
         Val::Words((0..size / 8).map(|i| self.load(addr, i * 8)).collect())
     }
 
-    /// Writes a value of `size` bytes at `addr`.
+    /// Writes a value of `size` bytes at `addr`: a narrow number at its
+    /// width, since where it is may have room for no more (decision 1020).
     fn write(&mut self, addr: Value, v: &Val, size: u32) {
         match v {
+            Val::Words(ws) if size < 8 => {
+                if let Some(w) = ws.first() {
+                    self.store_bits(*w, addr, 0, size);
+                }
+            }
             Val::Words(ws) => {
                 for (i, w) in ws.iter().enumerate().take((size / 8) as usize) {
                     self.store_word(*w, addr, (i * 8) as u32);
@@ -547,6 +611,16 @@ impl<'a, 'p> Cx<'a, 'p> {
             for i in 0..size / 8 {
                 let w = self.load(src, i * 8);
                 self.store_word(w, dst, i * 8);
+            }
+            // What is left of a value that is not a whole number of words,
+            // four, two and one bytes at a time (decisions 1020 and 1021).
+            let mut off = size / 8 * 8;
+            for w in [4, 2, 1] {
+                if size - off >= w {
+                    let v = self.load_bits(src, off, w, false);
+                    self.store_bits(v, dst, off, w);
+                    off += w;
+                }
             }
             return;
         }
@@ -1321,8 +1395,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
             Operand::Copy(p) | Operand::Move(p) => {
                 let (addr, ty) = self.place(p, None)?;
-                let size = self.size(&ty)?;
-                let v = self.read(addr, size);
+                let v = self.read_value(addr, &ty)?;
                 if matches!(o, Operand::Move(_)) {
                     self.moved_out_of_box(p)?;
                     self.moved_out_of_error(p)?;
@@ -1409,7 +1482,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         };
         while let Type::Ref(inner, _) = ty {
             ty = *inner;
-            w = if self.size(&ty)? == 0 { self.iconst(0) } else { self.load(w, 0) };
+            w = if self.size(&ty)? == 0 { self.iconst(0) } else { self.load_scalar(w, &ty)? };
         }
         Ok((w, ty))
     }
@@ -1750,11 +1823,11 @@ impl<'a, 'p> Cx<'a, 'p> {
             for ft in &fields {
                 let size = self.size(ft)?;
                 if self.word_compared(ft) {
-                    words.push(off);
+                    words.push((off, size.min(abi::WORD)));
                 } else if size > 0 {
                     runtime = true;
                 }
-                off += size;
+                off += self.cg.types.room(ft)?;
             }
             shape.push(match (runtime, words.is_empty()) {
                 (true, _) => Same::Runtime,
@@ -1825,8 +1898,8 @@ impl<'a, 'p> Cx<'a, 'p> {
         for (blk, offs) in by_words {
             self.b.switch_to_block(blk);
             let mut all = None;
-            for &off in offs {
-                let (wa, wb) = (self.load(xa, off), self.load(xb, off));
+            for &(off, width) in offs {
+                let (wa, wb) = (self.load_bits(xa, off, width, false), self.load_bits(xb, off, width, false));
                 let e = self.b.ins().icmp(IntCC::Equal, wa, wb);
                 all = Some(match all {
                     Some(x) => self.b.ins().band(x, e),
@@ -2170,7 +2243,8 @@ impl<'a, 'p> Cx<'a, 'p> {
                         )));
                     }
                 };
-                let (ks, vs) = (self.size(&key)?, self.size(&val)?);
+                // Each part of an entry takes a word at least (decision 1020).
+                let (ks, vs) = (self.cg.types.room(&key)?, self.cg.types.room(&val)?);
                 let per = if matches!(kind, Aggregate::Dict) { 2 } else { 1 };
                 let n = ops.len() / per;
                 let buf = self.slot((ks + vs) * n as u32);
@@ -2750,8 +2824,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             _ if ct != types::I64 => self.b.ins().uextend(types::I64, v),
             _ => v,
         };
-        self.store_word(word, d, 0);
-        Ok(())
+        self.store_scalar(word, d, &dest_ty)
     }
 
     /// An argument of a foreign call as its C type: its value loaded from
@@ -2948,14 +3021,14 @@ impl<'a, 'p> Cx<'a, 'p> {
                     (1, true) => self.b.ins().sload8(types::I64, MemFlags::trusted(), p, 0),
                     _ => self.load(p, 0),
                 };
-                let (d, _) = self.place(dest, None)?;
-                self.store_word(v, d, 0);
+                let (d, dt) = self.place(dest, None)?;
+                self.store_scalar(v, d, &dt)?;
                 Ok(Some(Fast::Done))
             }
             I::MemPtrWrite => {
                 let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(None) };
-                let (va, _) = self.base_of(a1, &t1);
-                let v = self.load(va, 0);
+                let (va, vt) = self.base_of(a1, &t1);
+                let v = self.load_scalar(va, &vt)?;
                 let p = self.load(b, 0);
                 if width == 1 {
                     let byte = self.b.ins().ireduce(types::I8, v);
@@ -3203,8 +3276,9 @@ impl<'a, 'p> Cx<'a, 'p> {
                 self.b.switch_to_block(fast);
                 let data = self.load(b, 0);
                 let at = self.b.ins().iadd(data, idx);
-                let byte = self.b.ins().uload8(types::I64, MemFlags::trusted(), at, 0);
-                self.store_word(byte, d, 0);
+                let byte = self.load_bits(at, 0, 1, false);
+                let dt = self.place_type(dest)?;
+                self.store_scalar(byte, d, &dt)?;
                 self.b.ins().jump(done, &[]);
                 self.b.switch_to_block(slow);
                 Ok(Fast::Slow(done))
@@ -3509,8 +3583,8 @@ impl<'a, 'p> Cx<'a, 'p> {
             _ => None,
         };
         if let Some(r) = fast {
-            let (addr, _) = self.place(dest, None)?;
-            self.store_word(r, addr, 0);
+            let (addr, ty) = self.place(dest, None)?;
+            self.store_scalar(r, addr, &ty)?;
             return Ok(());
         }
         let out = self.slot(16);
@@ -3548,6 +3622,15 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 }
 
+/// The width and signedness of a sized integer narrower than 64 bits or
+/// of an `f32` (decision 1020).
+fn narrow(t: &Type) -> Option<(u32, bool)> {
+    match t {
+        Type::Named(n, a) if a.is_empty() => crate::layout::narrow_width(n).map(|w| (w, n.starts_with('i'))),
+        _ => None,
+    }
+}
+
 /// Whether a local is a flag of drop elaboration's: named `flag`, with no
 /// place in the source (a variable the program names `flag` has one).
 /// Whether a local of type `t` is one word the release profile may keep
@@ -3557,6 +3640,8 @@ fn one_word(t: &Type) -> bool {
     match t {
         Type::Ref(inner, _) => !crate::layout::fat(inner),
         Type::Named(n, a) if (n == "ptr" || n == "ptr_mut") && a.len() == 1 => true,
+        // A narrow number is its width, which a slot holds (decision 1020).
+        t if narrow(t).is_some() => false,
         _ => matches!(
             scalar_kind(t),
             Some(Scalar::Int | Scalar::U64 | Scalar::Float | Scalar::F32 | Scalar::Bool | Scalar::Char)
@@ -4139,8 +4224,9 @@ enum Same {
     /// By their tags alone: the variant has no fields that hold anything.
     Tag,
     /// By the words at these offsets, which hold the fields the runtime
-    /// compares as words.
-    Words(Vec<u32>),
+    /// compares as words, each a narrow number's bytes at the width it
+    /// gives (decision 1020).
+    Words(Vec<(u32, u32)>),
     /// By the runtime.
     Runtime,
 }

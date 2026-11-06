@@ -1,8 +1,11 @@
 //! Layouts of concrete SIR types and the type table the runtime reads
-//! (`sisu_rt::abi`): every type is a whole number of words, a struct or a
-//! tuple its parts in order, an enum a tag word and its variants' payloads
-//! over each other, an error set three words (its type's number, its
-//! return trace, its tag) and the payload.
+//! (`sisu_rt::abi`): a sized integer narrower than 64 bits and an `f32`
+//! are their own width (decision 1020), a struct its fields at C's offsets
+//! (decision 1021), and every other type a whole number of words: a tuple
+//! its parts in order, an enum a tag word and its variants' payloads over
+//! each other, an error set three words (its type's number, its return
+//! trace, its tag) and the payload, each part of them starting on a word
+//! and taking a word at least.
 
 use crate::Error;
 use crate::fx::FxMap;
@@ -85,6 +88,47 @@ impl<'p> Types<'p> {
             .collect()
     }
 
+    /// The bytes a part of the type takes in a larger value (a field, a
+    /// payload, an element of a tuple, a table's key or value): its size
+    /// rounded up to a word, so that every part starts on a word (decision
+    /// 1020).
+    pub(crate) fn room(&mut self, t: &Type) -> Result<u32, Error> {
+        Ok(self.size(t)?.div_ceil(abi::WORD) * abi::WORD)
+    }
+
+    /// The alignment of a value of the type: a narrow integer's and an
+    /// `f32`'s width, a struct's widest field's, a type of no bytes 1, and
+    /// a word for any other (decision 1021).
+    pub(crate) fn align(&mut self, t: &Type) -> Result<u32, Error> {
+        if let Type::Named(n, args) = t {
+            if let Some(w) = narrow_width(n) {
+                return Ok(w);
+            }
+            if let Some(sir::TypeDecl::Struct { fields, .. }) = self.decl(n) {
+                let mut a = 1;
+                for f in fields {
+                    a = a.max(self.align(&f.ty.subst(args))?);
+                }
+                return Ok(a);
+            }
+        }
+        Ok(if self.size(t)? == 0 { 1 } else { abi::WORD })
+    }
+
+    /// The offsets of a struct's fields of the types `fields`, at C's
+    /// offsets, and its size, a multiple of its alignment (decision 1021).
+    pub(crate) fn struct_layout(&mut self, fields: &[Type]) -> Result<(Vec<u32>, u32), Error> {
+        let (mut off, mut align, mut out) = (0u32, 1u32, Vec::with_capacity(fields.len()));
+        for f in fields {
+            let a = self.align(f)?;
+            off = off.div_ceil(a) * a;
+            out.push(off);
+            off += self.size(f)?;
+            align = align.max(a);
+        }
+        Ok((out, off.div_ceil(align) * align))
+    }
+
     /// The bytes of a value of the type. Computed from the type alone, so
     /// that a type may hold itself through a list, a box or a reference
     /// while its entry is being made.
@@ -117,14 +161,14 @@ impl<'p> Types<'p> {
             Type::Tuple(items) => {
                 let mut n = 0;
                 for it in items {
-                    n += self.size(it)?;
+                    n += self.room(it)?;
                 }
                 n
             }
             Type::ErrSet(names) => {
                 let mut n = abi::ERROR_PAYLOAD;
                 for name in names {
-                    n = n.max(self.size(&Type::Named(name.clone(), Vec::new()))?);
+                    n = n.max(self.room(&Type::Named(name.clone(), Vec::new()))?);
                 }
                 n
             }
@@ -133,8 +177,9 @@ impl<'p> Types<'p> {
                 match n.as_str() {
                     "String" | "Path" | "list" | "Array" | "Slice" | "bytes" => 3 * w,
                     "i128" | "u128" => 2 * w,
-                    "u64" | "f32" | "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime" | "Iter"
-                    | "Box" | "dict" | "set" => w,
+                    // A narrow number is its width (decision 1020).
+                    n if narrow_width(n).is_some() => narrow_width(n).unwrap_or(w),
+                    "u64" | "DateTime" | "Iter" | "Box" | "dict" | "set" => w,
                     // A raw pointer is an address (22, "Raw pointers").
                     "ptr" | "ptr_mut" => w,
                     // The values of tasks and channels are numbers in the
@@ -143,30 +188,27 @@ impl<'p> Types<'p> {
                     "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard"
                     | "ReadGuard" => w,
                     "Timer" => 2 * w,
-                    "Mutex" | "RwLock" => abi::MUTEX_HEADER + self.size(&arg(0))?,
+                    "Mutex" | "RwLock" => abi::MUTEX_HEADER + self.room(&arg(0))?,
                     // A `Shared` (or `Weak`) is the address of the value in
                     // its cell, an `Arena` the address of its slots, a
                     // `Cell` its value.
                     "Shared" | "Weak" | "Arena" => w,
                     // An `Atomic` is a `Cell` that tasks may share.
-                    "Cell" | "Atomic" => self.size(&arg(0))?,
+                    "Cell" | "Atomic" => self.room(&arg(0))?,
                     // A `Cap` is the address of its value's cell, a test
                     // clock its clock's number, and a `Lent` its handle.
                     "Cap" | "TestClock" | "HostStream" | "HostListener" => w,
                     "Iterable" => 2 * w,
                     "Lent" => self.size(&arg(0))?,
-                    "Entry" => w + self.size(&arg(0))?,
+                    "Entry" => w + self.room(&arg(0))?,
                     "System" => abi::CAPABILITIES.len() as u32 * w,
                     c if abi::CAPABILITIES.iter().any(|(h, o)| *h == c || *o == c) => w,
-                    "Option" => w + self.size(&arg(0))?,
-                    "Result" => w + self.size(&arg(0))?.max(self.size(&arg(1))?),
+                    "Option" => w + self.room(&arg(0))?,
+                    "Result" => w + self.room(&arg(0))?.max(self.room(&arg(1))?),
                     _ => match self.decl(n) {
                         Some(sir::TypeDecl::Struct { fields, .. }) => {
-                            let mut s = 0;
-                            for f in fields {
-                                s += self.size(&f.ty.subst(args))?;
-                            }
-                            s
+                            let tys: Vec<Type> = fields.iter().map(|f| f.ty.subst(args)).collect();
+                            self.struct_layout(&tys)?.1
                         }
                         Some(sir::TypeDecl::Enum { variants, error, .. }) => {
                             let start = if *error { abi::ERROR_PAYLOAD } else { w };
@@ -174,7 +216,7 @@ impl<'p> Types<'p> {
                             for v in variants {
                                 let mut off = start;
                                 for (_, ft) in &v.fields {
-                                    off += self.size(&ft.subst(args))?;
+                                    off += self.room(&ft.subst(args))?;
                                 }
                                 s = s.max(off);
                             }
@@ -191,28 +233,31 @@ impl<'p> Types<'p> {
     }
 
     /// Whether a value of the type lies in raw memory as it lies in a value
-    /// (the runtime's `rawmem::layout`, decision 302): no sized integer
-    /// narrower than 64 bits, `f32` or option of a raw pointer is among the
-    /// parts it holds in place, which raw memory keeps at their own width.
-    /// A reference into raw memory is only made to such a value, since the
-    /// code reads a reference's value as a value is laid out.
+    /// (the runtime's `rawmem::layout`, decision 302): no option of a raw
+    /// pointer is among the parts it holds in place, and no sized integer
+    /// narrower than 64 bits or `f32` is a part of a tuple, which gives each
+    /// part a word where C packs them. A narrow number is its width, and a
+    /// struct its fields at C's offsets, in a value as in raw memory
+    /// (decisions 1020 and 1021). A reference into raw memory is only made
+    /// to such a value, since the code reads a reference's value as a value
+    /// is laid out.
     pub(crate) fn same_in_memory(&self, t: &Type) -> bool {
-        self.same_in_memory_at(t, 0)
+        self.same_in_memory_at(t, 0, false)
     }
 
-    fn same_in_memory_at(&self, t: &Type, depth: u32) -> bool {
+    fn same_in_memory_at(&self, t: &Type, depth: u32, in_tuple: bool) -> bool {
         if depth > 64 {
             return false;
         }
         match t {
-            Type::Tuple(items) => items.iter().all(|x| self.same_in_memory_at(x, depth + 1)),
+            Type::Tuple(items) => items.iter().all(|x| self.same_in_memory_at(x, depth + 1, true)),
             Type::Named(n, args) => match n.as_str() {
-                "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "f32" => false,
+                n if narrow_width(n).is_some() => !in_tuple,
                 "Option" => !matches!(args.first(), Some(Type::Named(p, _)) if p == "ptr" || p == "ptr_mut"),
                 _ => match self.decl(n) {
                     // A builtin that SIR declares as a struct has no fields.
                     Some(sir::TypeDecl::Struct { fields, .. }) => {
-                        fields.iter().all(|f| self.same_in_memory_at(&f.ty.subst(args), depth + 1))
+                        fields.iter().all(|f| self.same_in_memory_at(&f.ty.subst(args), depth + 1, false))
                     }
                     _ => true,
                 },
@@ -246,10 +291,10 @@ impl<'p> Types<'p> {
         Ok(id)
     }
 
-    /// A part held by value: its number and size.
+    /// A part held by value: its number and the room it takes.
     fn part(&mut self, t: &Type) -> Result<(u32, u32), Error> {
-        let size = self.size(t)?;
-        Ok((self.id(t)?, size))
+        let room = self.room(t)?;
+        Ok((self.id(t)?, room))
     }
 
     fn make(&mut self, t: &Type) -> Result<TypeEntry, Error> {
@@ -329,8 +374,10 @@ impl<'p> Types<'p> {
             "u64" => return simple(Kind::U64, w),
             "i128" => return simple(Kind::I128, 2 * w),
             "u128" => return simple(Kind::U128, 2 * w),
-            "f32" => return simple(Kind::F32, w),
-            "u8" | "u16" | "u32" | "i8" | "i16" | "i32" => return simple(Kind::Sized(n.to_string()), w),
+            "f32" => return simple(Kind::F32, 4),
+            "u8" | "u16" | "u32" | "i8" | "i16" | "i32" => {
+                return simple(Kind::Sized(n.to_string()), narrow_width(n).unwrap_or(w));
+            }
             "DateTime" => return simple(Kind::DateTime, w),
             "System" => {
                 let mut fields = Vec::new();
@@ -480,16 +527,15 @@ impl<'p> Types<'p> {
         let flag = |v: usize, i: usize| by_glue.get(v).and_then(|f| f.get(i)).copied().unwrap_or(false);
         match decl {
             sir::TypeDecl::Struct { fields, .. } => {
+                let tys: Vec<Type> = fields.iter().map(|f| f.ty.subst(args)).collect();
+                let (offs, size) = self.struct_layout(&tys)?;
                 let mut out = Vec::new();
-                let mut off = 0;
-                for (i, f) in fields.iter().enumerate() {
+                for (i, (f, ft)) in fields.iter().zip(&tys).enumerate() {
                     let glue = flag(0, i);
-                    let ft = f.ty.subst(args);
-                    let (ty, size) = self.part(&ft)?;
-                    out.push(Field { name: Some(f.name.clone()), offset: off, ty, glue });
-                    off += size;
+                    let ty = self.id(ft)?;
+                    out.push(Field { name: Some(f.name.clone()), offset: offs[i], ty, glue });
                 }
-                Ok(TypeEntry { size: off, kind: Kind::Struct { name: n.to_string(), fields: out, glue } })
+                Ok(TypeEntry { size, kind: Kind::Struct { name: n.to_string(), fields: out, glue } })
             }
             sir::TypeDecl::Enum { variants, error, .. } => {
                 let start = if *error { abi::ERROR_PAYLOAD } else { w };
@@ -715,7 +761,7 @@ impl<'p> Types<'p> {
                     if k as u32 == i {
                         return Ok((off, it.clone()));
                     }
-                    off += self.size(it)?;
+                    off += self.room(it)?;
                 }
                 Err(bad())
             }
@@ -738,15 +784,12 @@ impl<'p> Types<'p> {
                 let decl = self.decl(n).ok_or_else(bad)?;
                 match (decl, variant) {
                     (sir::TypeDecl::Struct { fields, .. }, None) => {
-                        let mut off = 0;
-                        for (k, f) in fields.iter().enumerate() {
-                            let ft = f.ty.subst(args);
-                            if k as u32 == i {
-                                return Ok((off, ft));
-                            }
-                            off += self.size(&ft)?;
+                        let tys: Vec<Type> = fields.iter().map(|f| f.ty.subst(args)).collect();
+                        let (offs, _) = self.struct_layout(&tys)?;
+                        match (offs.get(i as usize), tys.get(i as usize)) {
+                            (Some(off), Some(ft)) => Ok((*off, ft.clone())),
+                            _ => Err(bad()),
                         }
-                        Err(bad())
                     }
                     (sir::TypeDecl::Enum { variants, error, .. }, Some(v)) => {
                         let var = variants.get(v as usize).ok_or_else(bad)?;
@@ -756,7 +799,7 @@ impl<'p> Types<'p> {
                             if k as u32 == i {
                                 return Ok((off, ft));
                             }
-                            off += self.size(&ft)?;
+                            off += self.room(&ft)?;
                         }
                         Err(bad())
                     }
@@ -789,5 +832,16 @@ impl<'p> Types<'p> {
             Type::Named(n, _) => matches!(self.decl(n), Some(sir::TypeDecl::Enum { error: true, .. })),
             _ => false,
         }
+    }
+}
+
+/// The width of a sized integer narrower than 64 bits or of an `f32`, in
+/// bytes (decision 1020).
+pub(crate) fn narrow_width(n: &str) -> Option<u32> {
+    match n {
+        "u8" | "i8" => Some(1),
+        "u16" | "i16" => Some(2),
+        "u32" | "i32" | "f32" => Some(4),
+        _ => None,
     }
 }

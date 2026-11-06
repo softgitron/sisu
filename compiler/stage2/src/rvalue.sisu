@@ -67,10 +67,11 @@ pub pure def scalar_kind(t: Type) -> Scalar?:
             return None
 
 ## How `==` compares each variant of an enum compiled inline: by the tags
-## alone, by the words at these offsets, or by the runtime.
+## alone, by the words at these offsets (each a narrow number's bytes at the
+## width it gives, decision 1020), or by the runtime.
 pub enum Same:
     Tag
-    Words(list[int])
+    Words(list[(int, int)])
     Runtime
 
 pure def is_named(t: Type, names: list[str]) -> bool:
@@ -341,8 +342,7 @@ impl Cg:
                         let ty = self.fx.locals[pl.local.index].ty.copy()
                         return Ok((Val.Words([self.b.use_var(var_)]), ty))
                 let (addr, ty) = self.place(p, pl, None)?
-                let size = self.size(ty)?
-                let v = self.read(addr, size)
+                let v = self.read_value(addr, ty)?
                 if let Operand.Move(_) = o:
                     self.moved_out_of_box(p, pl)?
                     self.moved_out_of_error(p, pl)?
@@ -438,7 +438,7 @@ impl Cg:
                     if self.size(ty)? == 0:
                         w = self.iconst(0)
                     else:
-                        w = self.load(w, 0)
+                        w = self.load_scalar(w, ty)?
                 case _:
                     break
         return Ok((w, ty))
@@ -762,15 +762,15 @@ impl Cg:
         var shape: list[Same] = []
         for fields in variants:
             var off = WORD
-            var words: list[int] = []
+            var words: list[(int, int)] = []
             var runtime = False
             for ft in fields:
                 let size = self.size(ft)?
                 if self.word_compared(ft):
-                    words.push(off)
+                    words.push((off, min(size, WORD)))
                 elif size > 0:
                     runtime = True
-                off += size
+                off += self.types.room(ft)?
             if runtime:
                 shape.push(Same.Runtime)
             elif words.is_empty():
@@ -833,7 +833,7 @@ impl Cg:
         self.b.brif(same, fields, [], join, [zero])
         self.b.switch_to_block(fields)
         var entries: list[(int, int)] = []
-        var by_words: list[(int, list[int])] = []
+        var by_words: list[(int, list[(int, int)])] = []
         var runtime: int? = None
         for v in range(len(shape)):
             match shape[v]:
@@ -854,9 +854,9 @@ impl Cg:
         for (blk, offs) in by_words:
             self.b.switch_to_block(blk)
             var all: int? = None
-            for off in offs:
-                let wa = self.load(xa, off)
-                let wb = self.load(xb, off)
+            for (off, width) in offs:
+                let wa = self.load_bits(xa, off, width, False)
+                let wb = self.load_bits(xb, off, width, False)
                 let e = self.b.icmp("eq", wa, wb)
                 match all:
                     case Some(x):
@@ -1173,8 +1173,9 @@ impl Cg:
                             val = arg(a, 1)
                     case _:
                         return internal("a table literal of type `{write.ty(dest)}`")
-                let ks = self.size(key)?
-                let vs = self.size(val)?
+                # Each part of an entry takes a word at least (decision 1020).
+                let ks = self.types.room(key)?
+                let vs = self.types.room(val)?
                 let per = if kind == Aggregate.Dict: 2 else: 1
                 let n = len(ops) // per
                 let buf = self.slot((ks + vs) * n)

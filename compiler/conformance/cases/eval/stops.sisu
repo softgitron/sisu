@@ -1,0 +1,11 @@
+# A constant the evaluator cannot finish (decision 1024): its error at its
+# name, status 1, and nothing written, in every form.
+# eval
+# eval --to toml
+
+def halve(n: int) -> int:
+    assert n % 2 == 0, "odd"
+    return n // 2
+
+const SIZE: int = halve(8)
+const BAD: int = halve(7)

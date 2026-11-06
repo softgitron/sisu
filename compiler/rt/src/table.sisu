@@ -83,14 +83,15 @@ pub(package) def length(tb: ptr mut u8) -> int:
 pub(package) def key_type(tb: ptr mut u8) -> int:
     return word(tb, KEY)
 
-## The bytes of a key of the table at `tb`.
+## The bytes a key of the table at `tb` takes in an entry.
 ##
 ## Requires:
 ## - `table`: `tb` is the address of a live table
 pub(package) def key_size(tb: ptr mut u8) -> int:
     return word(tb, KEY_SIZE)
 
-## The bytes of a value of the table at `tb` (0 for a set's).
+## The bytes a value of the table at `tb` takes in an entry (0 for a
+## set's).
 ##
 ## Requires:
 ## - `table`: `tb` is the address of a live table
@@ -134,6 +135,10 @@ pub(package) def value_at(tb: ptr mut u8, i: int) -> ptr mut u8:
     # safety: in_bounds: the value follows the entry's key.
     return unsafe entry(tb, i).offset(8 + word(tb, KEY_SIZE))
 
+## The bytes `size` bytes take as a part of an entry: a word at least.
+pure def room(size: int) -> int:
+    return (size + 7) // 8 * 8
+
 ## A new table, with no entries and no blocks, of keys of type `key` and of
 ## values of type `val` (-1 for a set's).
 ##
@@ -146,8 +151,10 @@ pub(package) def new(ts: Types, key: int, val: int) -> ptr mut u8:
     let tb = unsafe sisu_rt_alloc(HEADER * 8)
     set_word(tb, KEY, key)
     set_word(tb, VALUE, val)
-    set_word(tb, KEY_SIZE, ts.size(key))
-    set_word(tb, VALUE_SIZE, if val < 0: 0 else: ts.size(val))
+    # Each part of an entry takes a word at least, a `u8` too (decision
+    # 1020).
+    set_word(tb, KEY_SIZE, room(ts.size(key)))
+    set_word(tb, VALUE_SIZE, if val < 0: 0 else: room(ts.size(val)))
     set_word(tb, ENTRIES, 0)
     set_word(tb, LEN, 0)
     set_word(tb, CAP, 0)

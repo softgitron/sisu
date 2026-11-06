@@ -317,9 +317,9 @@ into a value passed to it by value; its drop drops none of the copies
 views the list or the `bytes` `as_slice` made it from (decision 823), a
 record of the place the slice was stored in, so only that pointer views
 in place, not its references from `Slice.at`. Natively a slice of a list
-views it in place (decision 940), and a slice of `bytes` is still a copy,
-a word a byte. *Pay*: the interpreter's slice a view of its list's
-values, and then `Copy`, as `str` is; natively the packed layout of
+or of `bytes` views it in place, a byte to a `u8` (decisions 940 and
+1020). *Pay*: the interpreter's slice a view of its list's
+values, and then `Copy`, as `str` is; natively, the narrow fields of
 "Foreign calls" below.
 
 **A method's type is read from its name.** The must-consume rule (a
@@ -766,30 +766,29 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   values and raw memory in the backend in Sisu (each part at its own
   width), when it replaces decision 188's.
 - **A pointer to a place, and a reference from a pointer, of a type whose
-  two layouts differ** (a sized integer narrower than 64 bits, an `f32`, a
-  C struct of them) are `D0103`, since a place holds a value's layout: a
-  C struct a foreign function fills goes in memory of `Global`. *Pay*: the
-  same, one layout.
+  two layouts differ** (a tuple holding a narrow number, an option of a
+  raw pointer, a struct holding one) are `D0103`, since a place holds a
+  value's layout, where a tuple's parts take a word each. A narrow number
+  is its width and a struct its fields at C's offsets in both since
+  decisions 1020 and 1021, so a C struct of them is pointed to in place.
+  *Pay*: a tuple's parts at C's offsets too, and options of raw pointers
+  as nullable words, one layout.
 - **Foreign calls**: a C function's signature is taken from the call's
   operands and result, `@blocking` does not move a call off the task's
   thread, there is no header import (`import c`), and a struct is not
   passed by value; `@export("name")` gives the function the global
   symbol `name` of C's own convention over plain values (decision 785),
   a `@repr(c)` struct by a pointer to it and not by value (`D0103`,
-  decision 824), and a `CString`'s `as_ptr()` is valid across a foreign
+  decision 824); a `CString`'s `as_ptr()` is valid across a foreign
   call in the interpreter, whose slice's pointer views the bytes in
-  place, but not natively, where `mem.slice.as_ptr` of a `u8` is refused
-  because a `Slice[u8]` holds a word for each byte (decision 823).
+  place, and natively, where a slice of `bytes` views them in place, a
+  byte to a `u8` (decisions 823 and 1020).
   `rt.switch` has instructions for x86-64
   and AArch64 Linux only, and nothing makes a context for a new stack yet
   (the stack pool's `Context.start`). *Pay*: 22's `@blocking`, header
   import, a `@repr(c)` struct by value at the boundary (its System V
   classification, an `INTEGER` or `SSE` eightbyte each or memory, in
-  both lowerings byte-identically, and AArch64's), a `Slice[u8]` and a
-  `list[u8]` laid out a byte an element (D-086's layouts per type), so
-  that a slice views `bytes` in place as it views a list since decision
-  940, after which `CString.as_ptr()` is valid natively (decision 823;
-  what is left is decision 941's); the
+  both lowerings byte-identically, and AArch64's); the
   runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
@@ -821,11 +820,13 @@ decisions 207 to 211) leaves:
 
 What round 1 does, and a later round must not copy:
 
-- **Every part of a value is a word** (decision 188): a `u8` takes eight
-  bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
-  release backend, each type its own width and alignment, and options
-  that use a niche; the layout stays in `sisu_rt::abi`, so both sides
-  change together.
+- **Every part of a value is a word** (decision 188), but a narrow
+  number, which is its width, and a struct's fields, at C's offsets
+  (decisions 1020 and 1021): a narrow number takes a word as a part of a
+  tuple, an option or an enum, an option a word for its tag, a `bool` a
+  word. *Pay*: in a release backend, each type its own width and
+  alignment everywhere, and options that use a niche; the layout stays in
+  `sisu_rt::abi`, so both sides change together.
 - **Every temporary has a stack slot of its own**, so a large function's
   frame is the sum of its temporaries, except a release build's scalars
   and references, which are Cranelift variables (decision 246). *Pay*:

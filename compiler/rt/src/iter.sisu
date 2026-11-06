@@ -116,6 +116,11 @@ def get_ptr(it: ptr mut u8, k: int) -> ptr mut u8:
     #   eleven words, by `iterator`.
     return unsafe it.cast[ptr[u8]]().offset(k).read().cast_mut()
 
+## The bytes an item of `size` bytes takes as a part of a pair: a word at
+## least, a `u8`'s too (decision 1020).
+pure def room(size: int) -> int:
+    return (size + 7) // 8 * 8
+
 ## A new iterator's object in the state `state`, of items of `size` bytes,
 ## its other words 0.
 def make(state: int, size: int) -> ptr mut u8:
@@ -257,7 +262,8 @@ pub(package) def next(ts: Types, it: ptr mut u8, out: ptr mut u8, mode: int) -> 
                 return value.OK
             set(it, P + 2, pos + 1)
             some(out)
-            item.cast[int]().write(get_ptr(it, P).offset(pos).read().to_int())
+            # A `u8`, its byte (decision 1020).
+            item.write(get_ptr(it, P).offset(pos).read())
             return value.OK
         if state == S_ENUMERATE:
             # The inner item's option at the index's place: its item lands
@@ -350,7 +356,7 @@ pub(package) def next(ts: Types, it: ptr mut u8, out: ptr mut u8, mode: int) -> 
 ##   has room for a tag word and a pair
 def next_pair(ts: Types, it: ptr mut u8, out: ptr mut u8, mode: int) -> int:
     let (a, b) = (get_ptr(it, P), get_ptr(it, P + 1))
-    let sa = get(a, SIZE)
+    let sa = room(get(a, SIZE))
     # safety: in_bounds, valid, aligned, writable: `out` has room for a tag
     #   word and both items, by `typed`; returns_promptly: the runtime in Rust
     #   raises the panic.
@@ -522,7 +528,9 @@ pub(package) def iterable(ts: Types, p: ptr mut u8, arg: int, item: int) -> ptr 
             set(base, P + 4, e)
         elif ak == DICT or ak == SET:
             let tb = p.cast[ptr[u8]]().read().cast_mut()
-            base = make(S_TABLE_OWN, table.entry_size(tb) - 8)
+            # A dict's pairs, their parts a word at least, or a set's keys
+            # (decision 1020).
+            base = make(S_TABLE_OWN, if ak == SET: ts.size(ts.a(arg)) else: table.entry_size(tb) - 8)
             set(base, P, tb.addr())
         elif ak == ITER:
             base = p.cast[ptr[u8]]().read().cast_mut()
@@ -605,7 +613,7 @@ pub(package) def new_items(ts: Types, xs: ptr mut u8, elem: int) -> ptr mut u8:
 ## The iterator of the characters (`chars`) or the bytes of the `n` bytes
 ## at `b`, a text that outlives it.
 pub(package) def new_text(b: ptr mut u8, n: int, chars: bool) -> ptr mut u8:
-    let it = make(if chars: S_CHARS else: S_BYTES, 8)
+    let it = make(if chars: S_CHARS else: S_BYTES, if chars: 8 else: 1)
     set(it, P, b.addr())
     set(it, P + 1, n)
     return it
@@ -621,7 +629,7 @@ pub(package) def new_owned_bytes(b: ptr[u8], n: int) -> ptr mut u8:
     if n > 0:
         # safety: as above.
         _ = unsafe memmove(block, b, n)
-    let it = make(S_OWNED_BYTES, 8)
+    let it = make(S_OWNED_BYTES, 1)
     set(it, P, block.addr())
     set(it, P + 1, n)
     return it
@@ -632,7 +640,7 @@ pub(package) def new_owned_bytes(b: ptr[u8], n: int) -> ptr mut u8:
 ## Requires:
 ## - `iterator`: `inner` is the address of a live iterator's object
 pub(package) def new_enumerate(inner: ptr mut u8) -> ptr mut u8:
-    let it = make(S_ENUMERATE, 8 + get(inner, SIZE))
+    let it = make(S_ENUMERATE, 8 + room(get(inner, SIZE)))
     set(it, P, inner.addr())
     return it
 
@@ -645,7 +653,7 @@ pub(package) def new_enumerate(inner: ptr mut u8) -> ptr mut u8:
 pub(package) def new_zip(
     a: ptr mut u8, b: ptr mut u8, strict: bool, ta: int, tb: int
 ) -> ptr mut u8:
-    let it = make(S_ZIP, get(a, SIZE) + get(b, SIZE))
+    let it = make(S_ZIP, room(get(a, SIZE)) + room(get(b, SIZE)))
     set(it, P, a.addr())
     set(it, P + 1, b.addr())
     set(it, P + 2, if strict: 1 else: 0)

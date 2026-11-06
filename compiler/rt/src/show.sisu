@@ -183,7 +183,7 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
         if k == UNIT:
             text.put_word(out, W_UNIT, 2)
         elif k == INT or k == SIZED:
-            text.push_int(out, w.read())
+            text.push_int(out, value.int_at(ts, p, t))
         elif k == U64:
             text.push_digits(out, w.read(), 0, 10, False)
         elif k == I128:
@@ -200,7 +200,7 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
         elif k == FLOAT:
             put_float(out, w.read(), SHORTEST)
         elif k == F32:
-            put_float(out, w.read() & 4294967295, SHORTEST32)
+            put_float(out, value.int_at(ts, p, t), SHORTEST32)
         elif k == BOOL:
             if w.read() != 0:
                 text.put_word(out, W_TRUE, 4)

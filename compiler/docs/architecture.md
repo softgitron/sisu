@@ -2078,8 +2078,7 @@ own); memory still held at the end of a run is not reported; a `Slice` is
 a copy in stage 0 (port-debt.md), whose pointer from `as_ptr` views the
 list or the `bytes` that `as_slice` made it from, where they are, so that
 it is valid while they live (decision 823), as natively a slice of a list
-views it (decision 940), where a slice of `bytes` points into a copy and
-dangles with it, and `mem.slice.as_ptr` of a `u8` is refused;
+or of `bytes` views it (decisions 940 and 1020);
 and compile-time evaluation runs on the Rust front end's comptime, which
 does not read std.mem.
 
@@ -3364,29 +3363,39 @@ decisions 281 to 284).
 
 ### Values
 
-Every value is a whole number of 8-byte words, and every part of a value
-starts on a word (decision 188). Each concrete type of the program has a
+A sized integer narrower than 64 bits and an `f32` are their own width,
+read with the sign their type gives and written at that width wherever
+they are, and a declared struct lays its fields out at C's offsets, its
+size a multiple of its widest field's alignment (decisions 1020 and
+1021), so that a list, an array or a slice of `u8`s holds a byte to an
+element and a pointer to a `@repr(c)` struct of narrow fields points to
+what C reads. Every other value is a whole number of 8-byte words, and
+every part of one (an element of a tuple, a payload, a table's key or
+value) starts on a word and takes a word at least, a narrower one's bytes
+first (decision 188). Each concrete type of the program has a
 number and an entry in the type table, whose kinds (`abi::Kind`) say
 where the parts are:
 
 | Type | Words | Layout |
 |---|---:|---|
 | `()`, `Never`, a constant argument | 0 | |
-| `int`, `u8` to `u64`, `i8` to `i32`, `DateTime` | 1 | the value; a sized integer is kept in its range by its operations, a `u64` is unsigned; a `DateTime` is nanoseconds since the epoch, shown as RFC 3339 text in UTC |
+| `u8`, `i8`; `u16`, `i16`; `u32`, `i32` | 1, 2, 4 bytes | the value at its width, extended by its sign when read (decision 1020) |
+| `int`, `u64`, `DateTime` | 1 | the value; a sized integer is kept in its range by its operations, a `u64` is unsigned; a `DateTime` is nanoseconds since the epoch, shown as RFC 3339 text in UTC |
 | `i128`, `u128` | 2 | the low word first |
-| `f64`, `f32` | 1 | the bits; an `f32`'s in the low half |
+| `f64`, `f32` | 1, 4 bytes | the bits |
 | `bool`, `char` | 1 | 0 or 1; the code point |
 | `str` | 2 | the address of the UTF-8 bytes, their length |
 | `String`, `Path`, `bytes` | 3 | a heap buffer, the length and the capacity in bytes (decision 208) |
 | `list[T]`, `Array[T, N]` | 3 | a heap buffer of elements, the length and the capacity in elements |
-| `Slice[T]` | 3 | the address of the first element it views in place, their number, and 0 (decision 940); a slice of `bytes` holds copies of them, a word each, in a buffer of its own, whose capacity is the third word |
+| `Slice[T]` | 3 | the address of the first element it views in place, their number, and 0 (decision 940); a slice of `bytes` views them in place too (decision 1020), and one `mem.slice_from_raw` made holds copies in a buffer of its own, whose capacity is the third word |
 | `ref T`, `ref mut T` | 1 | the address of the value |
 | `dyn Trait` | 2 | the number of the type of the value it holds, and the address of a heap cell holding the value, which the `dyn` owns |
 | `ref dyn Trait` | 2 | the same two words, borrowed: the address is of the value the `dyn` holds |
 | `Box[T]` | 1 | the address of a heap cell holding the value |
 | `T?` | 1 + T | a tag (0 `Some`, 1 `None`), then the payload |
 | `Result[T, E]` | 1 + the larger | a tag (0 `Ok`, 1 `Err`), then the payload |
-| a tuple or a struct | the sum | the parts in order |
+| a tuple | the sum | the parts in order, each a word at least |
+| a struct | C's | the fields at C's offsets, each aligned to its width (a narrow number's, a struct's widest field's, a word for the rest), the size a multiple of the widest (decision 1021) |
 | an enum | 1 + the largest variant | the tag (the variant's index), then the variant's fields |
 | an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
 | a function value | 2 + K | the code's address, then its closure's environment, K words, the largest an `own` closure of the program needs and at least one, or the address of a larger environment of references (decision 224), then the environment's type number plus one when a copy or a drop must reach what it holds, else 0 (decision 248) |
@@ -3860,9 +3869,10 @@ a word whose type table entry names what they point to (`Kind::Ptr`). The
 runtime computes each type's layout in raw memory from the type table when
 the program starts, the interpreter's rule ("The checked memory model"):
 a value whose layout in memory is its layout as a value (most types) is
-read and written as its bytes, another (a sized integer narrower than 64
-bits, an `f32`, an option of a raw pointer, a struct or tuple holding one)
-is converted part by part, each part at its C offset and width.
+read and written as its bytes, a narrow number and a struct of them among
+them since decisions 1020 and 1021; another (an option of a raw pointer, a
+tuple holding a narrow number, a struct holding either) is converted part
+by part, each part at its C offset and width.
 `Global.acquire` is `posix_memalign` with the layout's alignment, counted
 among the program's allocations, and `Global.release` frees it;
 `drop_in_place` converts the value back and drops it by its type, its glue
@@ -3872,15 +3882,19 @@ other sizes with the interpreter's panic; `read_plain` reads from bytes at
 any alignment; `view_plain` gives the bytes in place, or, for a type laid
 out otherwise in a value, a copy as a value that is freed with the bytes it
 views (`views.rs`, decision 214); and `slice_from_raw` copies the values
-into a new slice that owns them, as a slice of `bytes` does; a slice of a
-list views it in place (decision 940).
+into a new slice that owns them; a slice of a list or of `bytes` views it
+in place (decisions 940 and 1020).
 
 A place of the program holds its value as a value is laid out, and a
 reference is read so, so a pointer to a place (`ptr.of`, `ptr.of_mut`, a
 slice's `as_ptr`) and a reference made from a pointer (`as_ref`,
 `as_mut`) are made only to a type that raw memory holds as a value is laid
-out; another is `D0103` when the program is built, naming the operation
-and the type, and the interpreter runs the program. A foreign call
+out, which since decisions 1020 and 1021 are a narrow number and a struct
+of them too (so a `CString`'s `as_ptr()`, `mem.slice.as_ptr` of its bytes'
+slice, compiles, and so does `ptr.of` of a `@repr(c)` struct with `u8`
+and `i32` fields); another, a tuple with a narrow number among its parts
+or an option of a raw pointer, is `D0103` when the program is built,
+naming the operation and the type, and the interpreter runs the program. A foreign call
 (`extern.LIBRARY.NAME`) is a call of the C function `NAME`, imported from
 the C library the executable is linked with, in C's convention: each
 argument loaded from its slot and narrowed to its C type (an integer or

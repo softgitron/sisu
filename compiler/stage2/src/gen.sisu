@@ -645,6 +645,21 @@ impl Cg:
                             for w in range(size // 8):
                                 let x = b.load("i64", value, w * 8)
                                 b.store(x, me, w * 8)
+                            # What is left of a value that is not a whole
+                            # number of words, as `copy_bytes` copies it
+                            # (decisions 1020 and 1021).
+                            var off = size // 8 * 8
+                            for (w, t) in [(4, "i32"), (2, "i16"), (1, "i8")]:
+                                if size - off >= w:
+                                    var x = 0
+                                    if w == 1:
+                                        x = b.uload8(value, off)
+                                    else:
+                                        let y = b.load(t, value, off)
+                                        x = b.convert("uextend", "i64", y)
+                                    let low = b.convert("ireduce", t, x)
+                                    b.store(low, me, off)
+                                    off += w
                     if let Some(t) = count:
                         let tv = b.iconst("i32", t)
                         _ = b.call(abi.SYM_RETAIN, [me, tv], 0)

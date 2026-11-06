@@ -1,0 +1,102 @@
+# Bytes laid out as bytes (decision 1020): a `list[u8]`, a `Slice[u8]` and
+# `bytes` hold a byte to an element natively, and a `u8` is read and
+# written as its byte wherever it is: in a list's buffer, behind a
+# reference, in a box, and as a part of a larger value, whose other parts
+# keep their words. Each operation gives the interpreter's output.
+
+@derive(Eq, Debug)
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    count: i32
+
+@derive(Eq, Debug)
+enum Token:
+    Byte(u8)
+    Pair(u8, int)
+    Nothing
+
+def bump(mut xs: list[u8], i: int):
+    xs[i] = xs[i] +% 1
+
+def total(xs: Slice[u8]) -> int:
+    var n = 0
+    for x in xs.iter():
+        n += x.to_int()
+    return n
+
+def main():
+    var xs: list[u8] = []
+    for i in range(300):
+        xs.push((i % 256).to_u8().unwrap())
+    print("{len(xs)} {xs[0]} {xs[255]} {xs[256]} {xs[^1]}")
+    xs[1] = 200
+    xs[2] += 3
+    bump(mut xs, 3)
+    print(xs[0:6])
+    print("{xs.pop()} {len(xs)}")
+    xs.insert(0, 7)
+    print("{xs.remove(1)} {xs[0:4]}")
+    xs.extend([9, 8, 7])
+    print(xs[^3:])
+    var sum = 0
+    for x in xs:
+        sum += x.to_int()
+    print(sum)
+    var refs = 0
+    for r in xs.iter():
+        refs += r.to_int()
+    print(refs == sum)
+    for (i, x) in xs[0:3].iter().enumerate():
+        print("{i} {x}")
+    var small: list[u8] = [5, 3, 250, 3, 0, 1]
+    small.sort()
+    print("{small} {small.contains(250)} {4.to_u8().unwrap() in small}")
+    small.reverse()
+    print(small)
+    print("{small == [250, 5, 3, 3, 1, 0]} {small < [251]}")
+    var seen: set[u8] = set()
+    var counts: dict[u8, int] = {}
+    for x in small:
+        seen.add(x)
+        counts[x] = (counts.get(x).copied() ?? 0) + 1
+    print("{len(seen)} {counts[3]} {counts[250]}")
+    let s = xs.as_slice()
+    print("{len(s)} {s[3]} {total(s.slice(0, 4))} {s.slice(2, 5).to_list()}")
+    print("{s.slice(0, 3).is_sorted()} {s.contains(200)}")
+    let b = bytes.from_list([104, 101, 106])
+    let bs = b.as_slice()
+    print("{len(bs)} {bs[0]} {bs[2]} {bs.to_list()} {total(bs)}")
+    print("{b.to_list()} {b.get(1)} {b.get(3)}")
+    for x in b.iter():
+        print(x)
+    print("{xs.get(5).copied()} {xs.get(9999).copied()}")
+    let pair = (xs[1], 1000, xs[2])
+    print(pair)
+    let boxed = Box(xs[1])
+    print(boxed)
+    var px = [Pixel(r=1, g=2, b=3, count=-4), Pixel(r=255, g=0, b=128, count=70000)]
+    px[0].g = 99
+    let p = px[1].copy()
+    print("{px[0].r} {px[0].g} {px[0].b} {px[0].count} {p.r} {p.b} {p.count}")
+    print("{px[0]:?} {p == px[1]}")
+    let tokens = [Token.Byte(xs[1]), Token.Pair(xs[2], 5), Token.Nothing]
+    for t in tokens:
+        match t:
+            case Token.Byte(v):
+                print("byte {v}")
+            case Token.Pair(v, n):
+                print("pair {v} {n}")
+            case Token.Nothing:
+                print("nothing")
+    print("{Token.Byte(200) == tokens[0]} {Token.Pair(5, 5) == tokens[1]}")
+    let k = xs[1]
+    print([1, 2, 3].iter().map(it.to_u8().unwrap() +% k).collect())
+    var big: list[u8] = []
+    for i in range(1000000):
+        big.push((i % 251).to_u8().unwrap())
+    var t = 0
+    for x in big:
+        t += x.to_int()
+    print("{len(big)} {t}")

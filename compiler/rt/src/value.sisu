@@ -211,6 +211,28 @@ pure def f32_equal(x: int, y: int) -> bool:
 pure def f32_nan(bits: int) -> bool:
     return (bits & 2139095040) == 2139095040 and (bits & 8388607) != 0
 
+## The word of the number of type `t` at `p`: a narrow one's bytes,
+## extended by its sign when the table says it is a signed integer
+## (decision 1020), another's word.
+##
+## Requires:
+## - `typed`: `p` holds a live number of type `t`
+pub(package) def int_at(ts: Types, p: ptr mut u8, t: int) -> int:
+    let n = ts.size(t)
+    # safety: in_bounds, valid, aligned: by `typed`, the number's bytes, its
+    #   size.
+    unsafe:
+        if n >= 8:
+            return p.cast[int]().read()
+        var v = 0
+        var k = n - 1
+        while k >= 0:
+            v = v * 256 + p.offset(k).read().to_int()
+            k -= 1
+        if n > 0 and ts.kind(t) == SIZED and ts.a(t) == 1 and v >= (1 << (8 * n - 1)):
+            v -= (1 << (8 * n))
+        return v
+
 ## Structural equality of the value at `a` of type `ta` and the value at `b`
 ## of type `tb`, through references and `dyn`s (`==` on values that are not
 ## numbers): texts of any kind with the same bytes are equal.
@@ -246,7 +268,7 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
                 return False
             return n == 0 or memcmp(a.cast[ptr[u8]]().read(), b.cast[ptr[u8]]().read(), n) == 0
         if (k == INT or k == SIZED) and (l == INT or l == SIZED):
-            return aw.read() == bw.read()
+            return int_at(ts, a, ta) == int_at(ts, b, tb)
         if (k == ENUM or k == ERRSET) and (l == ENUM or l == ERRSET):
             return enum_equal(ts, a, concrete(ts, a, ta), b, concrete(ts, b, tb))
         if k != l:
@@ -258,7 +280,7 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
         if k == FLOAT:
             return a.cast[f64]().read() == b.cast[f64]().read()
         if k == F32:
-            return f32_equal(aw.read(), bw.read())
+            return f32_equal(int_at(ts, a, ta), int_at(ts, b, tb))
         if k == UNIT:
             return True
         if k == BYTES:
@@ -471,7 +493,7 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
                 bw.offset(1).read(),
             )
         if (k == INT or k == SIZED) and (l == INT or l == SIZED):
-            return signed_order(aw.read(), bw.read())
+            return signed_order(int_at(ts, a, ta), int_at(ts, b, tb))
         if (k == ENUM or k == ERRSET) and (l == ENUM or l == ERRSET):
             return enum_order(ts, a, concrete(ts, a, ta), b, concrete(ts, b, tb))
         if k != l:
@@ -489,7 +511,7 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
         if k == FLOAT:
             return float_order(a.cast[f64]().read(), b.cast[f64]().read())
         if k == F32:
-            return f32_order(aw.read(), bw.read())
+            return f32_order(int_at(ts, a, ta), int_at(ts, b, tb))
         if k == UNIT:
             return EQUAL
         if k == BYTES:
@@ -637,8 +659,9 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
         let w = p.cast[int]()
         if is_text(k) or k == BYTES:
             return hash_bytes(state, p.cast[ptr[u8]]().read(), w.offset(1).read())
+        if k == SIZED:
+            return (state ^ int_at(ts, p, t)) *% PRIME
         if k == INT
-                or k == SIZED
                 or k == U64
                 or k == BOOL
                 or k == CHAR
@@ -646,7 +669,7 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
                 or k == DATETIME:
             return (state ^ w.read()) *% PRIME
         if k == F32:
-            return (state ^ (w.read() & 4294967295)) *% PRIME
+            return (state ^ int_at(ts, p, t)) *% PRIME
         if k == I128 or k == U128:
             return (((state ^ w.read()) *% PRIME) ^ w.offset(1).read()) *% PRIME
         if k == TUPLE or k == STRUCT:

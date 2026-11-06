@@ -80,6 +80,7 @@ is compared byte for byte.
 | `NAME.watch` | `sisu run --watch NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N`; the program saves new versions of its own file from `NAME.files/` to drive the swaps |
 | `NAME.repl` | `sisu repl NAME.sisu` with `NAME.stdin` as the session's inputs: standard output, then `--- stderr`, standard error, and `--- status N` |
 | `NAME.ws` | `sisu ws NAME.sisu`, the worksheet: standard output, then `--- stderr`, standard error, and `--- status N` |
+| `NAME.eval` | `sisu eval NAME.sisu ARGS` for each line `# eval ARGS` in the case (`# eval --to toml`), or once without arguments when there is none: for each run a line `--- sisu eval NAME.sisu ARGS`, its standard output, then `--- stderr`, standard error, and `--- status N` (decision 1024) |
 | `NAME.unformatted` | not compared: why the case is not in the form `sisu fmt` writes (its layout is what it tests, or it holds a proposal example unchanged); without it the case must be |
 
 A line `# explore N` also runs a case that runs again as `sisu run

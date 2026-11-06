@@ -1,0 +1,50 @@
+--- sisu eval config.sisu
+{
+  "NAME": "sauna",
+  "RATIO": 0.75,
+  "SERVERS": [
+    {
+      "host": "löyly.example",
+      "port": 8080,
+      "tls": true
+    },
+    {
+      "host": "kiuas",
+      "port": 22,
+      "tls": false
+    }
+  ],
+  "LIMITS": {
+    "cpu": 4,
+    "memory": 512
+  },
+  "TAGS": [],
+  "RETRIES": null
+}
+--- stderr
+--- status 0
+--- sisu eval config.sisu --to toml
+NAME = "sauna"
+RATIO = 0.75
+SERVERS = [{ host = "löyly.example", port = 8080, tls = true }, { host = "kiuas", port = 22, tls = false }]
+LIMITS = { cpu = 4, memory = 512 }
+TAGS = []
+--- stderr
+--- status 0
+--- sisu eval config.sisu --to yaml
+NAME: "sauna"
+RATIO: 0.75
+SERVERS:
+  - host: "löyly.example"
+    port: 8080
+    tls: true
+  - host: "kiuas"
+    port: 22
+    tls: false
+LIMITS:
+  cpu: 4
+  memory: 512
+TAGS: []
+RETRIES: null
+--- stderr
+--- status 0

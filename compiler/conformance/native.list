@@ -217,6 +217,7 @@ sir/match_lowering
 sir/straight_line
 sir/try_operator
 std/bit_methods
+std/bytes
 std/decimal_literals
 std/doc_examples
 std/encoding
@@ -228,6 +229,7 @@ std/io
 std/json_decode
 std/log_levels
 std/modules
+std/narrow
 std/num_exact
 std/ord_impls
 std/par
@@ -277,6 +279,7 @@ traits/static_methods
 traits/supertraits
 types/typed_hole
 unsafe/bit_cast_sizes
+unsafe/cstring
 unsafe/export_by_pointer
 unsafe/foreign
 unsafe/free_twice checked
@@ -286,6 +289,7 @@ unsafe/layouts
 unsafe/leaked checked
 unsafe/malloc_bounds checked
 unsafe/misaligned checked
+unsafe/narrow_pointer
 unsafe/mistyped checked
 unsafe/no_memory checked
 unsafe/out_of_bounds checked

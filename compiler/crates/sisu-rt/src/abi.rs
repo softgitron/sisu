@@ -427,21 +427,24 @@ pub const FLOAT_FLOORDIV: u32 = 2;
 /// One concrete type of the program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeEntry {
-    /// Bytes, a multiple of [`WORD`].
+    /// Bytes: a narrow number's width (decision 1020), a struct's at C's
+    /// offsets (decision 1021), a multiple of [`WORD`] for every other type.
     pub size: u32,
     pub kind: Kind,
 }
 
 /// What a type is, and where its parts are. Offsets are in bytes from the
-/// start of the value; every part starts on a word.
+/// start of the value; every part of a tuple, an option, a result or an
+/// enum starts on a word and takes a word at least (a narrow number, its
+/// bytes first), and a struct's fields are at C's offsets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     /// `()` and `Never`: no words.
     Unit,
     /// `int`: one word.
     Int,
-    /// A sized integer kept in an `i64` word (`u8` to `u32`, `i8` to
-    /// `i32`): its name.
+    /// A sized integer narrower than 64 bits (`u8` to `u32`, `i8` to
+    /// `i32`), its width (decision 1020): its name.
     Sized(String),
     /// `u64`: one word, unsigned.
     U64,
@@ -451,7 +454,7 @@ pub enum Kind {
     U128,
     /// `f64`: one word.
     Float,
-    /// `f32`: the low half of one word.
+    /// `f32`: its four bytes (decision 1020).
     F32,
     /// `bool`: one word, 0 or 1.
     Bool,
@@ -478,9 +481,9 @@ pub enum Kind {
     List(u32),
     /// `Slice[T]`: a list's three words, viewing in place (decision 940):
     /// the address of the first element it views, their number, and the
-    /// capacity of a buffer the slice owns, 0 for a view of a list (a
-    /// slice of `bytes` holds copies of them, a word each, in a buffer of
-    /// its own).
+    /// capacity of a buffer the slice owns, 0 for a view of a list or of
+    /// `bytes` (decision 1020; `mem.slice_from_raw` gives a slice of
+    /// copies in a buffer of its own).
     Slice(u32),
     /// `Iter[T]`: one word, a runtime object yielding `T`s.
     Iter(u32),

@@ -1,0 +1,22 @@
+# A configuration module (08, "Configuration files"): `sisu eval` writes
+# its constants as JSON, TOML and YAML from stage 1's compile-time
+# evaluator (decisions 984 and 1024); TOML has no null, so it leaves the
+# `None` out.
+# eval
+# eval --to toml
+# eval --to yaml
+
+struct Server:
+    host: String
+    port: int
+    tls: bool
+
+const NAME: str = "sauna"
+const RATIO: f64 = 0.75
+const SERVERS: list[Server] = [
+    Server(host="löyly.example".to_string(), port=8080, tls=True),
+    Server(host="kiuas".to_string(), port=22, tls=False),
+]
+const LIMITS: dict[str, int] = {"cpu": 4, "memory": 512}
+const TAGS: list[str] = []
+const RETRIES: int? = None

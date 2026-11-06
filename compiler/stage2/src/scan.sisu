@@ -284,8 +284,10 @@ pure def one_word(t: Type) -> bool:
                 return True
             if not a.is_empty():
                 return False
+            # A narrow number is its width, which a slot holds (decision
+            # 1020).
             return match n.to_string():
-                case "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime" | "u64" | "f32": True
+                case "DateTime" | "u64": True
                 case _: False
         case _:
             return False

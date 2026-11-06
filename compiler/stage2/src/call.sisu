@@ -578,8 +578,7 @@ impl Cg:
             word = self.b.convert("sextend", "i64", v)
         elif ct != "i64":
             word = self.b.convert("uextend", "i64", v)
-        self.store_word(word, d, 0)
-        return Ok(())
+        return self.store_scalar(word, d, dest_ty)
 
     ## An argument of a foreign call as its C type: its value loaded from
     ## `addr` and narrowed, an option of a raw pointer as a nullable one.
@@ -762,15 +761,15 @@ impl Cg:
                 v = self.b.sload8(q, 0)
             else:
                 v = self.load(q, 0)
-            let (d, _) = self.place(p, dest, None)?
-            self.store_word(v, d, 0)
+            let (d, dt) = self.place(p, dest, None)?
+            self.store_scalar(v, d, dt)?
             return Ok(Some(Fast.Done))
         if i == abi.I_MEM_PTR_WRITE:
             if len(argv) < 2:
                 return Ok(None)
             let (a1, t1) = argv[1].copy()
-            let (va, _) = self.base_of(a1, t1)
-            let v = self.load(va, 0)
+            let (va, vt) = self.base_of(a1, t1)
+            let v = self.load_scalar(va, vt)?
             let q = self.load(b, 0)
             if width == 1:
                 let byte = self.b.convert("ireduce", "i8", v)
@@ -996,8 +995,9 @@ impl Cg:
             self.b.switch_to_block(fast)
             let data = self.load(b, 0)
             let at = self.b.bin("iadd", data, idx)
-            let byte = self.b.uload8(at, 0)
-            self.store_word(byte, d, 0)
+            let byte = self.load_bits(at, 0, 1, False)
+            let dt = self.place_type(dest)?
+            self.store_scalar(byte, d, dt)?
             self.b.jump(done, [])
             self.b.switch_to_block(slow)
             return Ok(Fast.Slow(done))
@@ -1317,8 +1317,8 @@ impl Cg:
                     let up = self.b.bin("ishl", x, shift)
                     fast = Some(self.b.bin("sshr", up, shift))
         if let Some(r) = fast:
-            let (addr, _) = self.place(p, dest, None)?
-            self.store_word(r, addr, 0)
+            let (addr, ty) = self.place(p, dest, None)?
+            self.store_scalar(r, addr, ty)?
             return Ok(())
         let out = self.slot(16)
         let kv = self.i32const(kind)

@@ -1,0 +1,17 @@
+[-128, -1, 0, 3, 127] -128 127 True
+[-30, -23, -16, -9, -2, 5, 12, 19, 26, 33] Some(-30) True
+-2147483648
+[443, 80, 65535] Some(65535) [443, 80]
+[0.5, -1.25, 3.0, 2.5] -1.25 4.75
+Sample(level=-5, count=60000, total=-100000, weight=0.25)
+Sample(level=7, count=1, total=2000000000, weight=-0.5)
+Sample(level=-5, count=59999, total=3, weight=1.5)
+-5 60000 -99999 0.25 True
+2 59999 None
+shift -300 4000000000
+mark -7
+quiet
+True False
+(-128, 443, -1.25)
+Some(-128) True
+[-30, -60]

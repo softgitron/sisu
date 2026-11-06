@@ -232,6 +232,9 @@ pub(crate) fn set_up(
                 h[B] = u64::from(*y);
             }
             Kind::Const(n) => h[A] = *n as u64,
+            // Whether a sized integer is signed, which the runtime in Sisu
+            // reads to extend a narrow one's bytes (decision 1020).
+            Kind::Sized(n) => h[A] = u64::from(n.starts_with('i')),
             Kind::Tuple(slots) => {
                 h[PARTS] = field_list(&mut out, slots.iter().map(|s| (s.offset, s.ty, false)));
             }

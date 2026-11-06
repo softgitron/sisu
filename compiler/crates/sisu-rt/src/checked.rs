@@ -578,6 +578,9 @@ unsafe fn bits(p: *const u8, t: u32, words: bool, depth: u32) -> Result<(), Bad>
         | Kind::Float
         | Kind::F32
         | Kind::DateTime => Ok(()),
+        // A narrow number is its width, any bits of which are one
+        // (decision 1020).
+        Kind::Sized(_) if words && ty(t).size < 8 => Ok(()),
         Kind::Sized(n) if words => {
             let i = word(0) as i64;
             let (bytes, signed) = match n.as_str() {

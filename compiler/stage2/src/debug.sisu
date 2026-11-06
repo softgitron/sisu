@@ -136,9 +136,22 @@ impl Cg:
     ) -> int:
         var simple = String.new()
         match n:
-            case "u8" | "u16" | "u32" | "u64":
+            # A narrow number is its width (decision 1020).
+            case "u8":
+                simple = "base \"u8\" uchar 1".to_string()
+            case "u16":
+                simple = "base \"u16\" unsigned 2".to_string()
+            case "u32":
+                simple = "base \"u32\" unsigned 4".to_string()
+            case "i8":
+                simple = "base \"i8\" signed 1".to_string()
+            case "i16":
+                simple = "base \"i16\" signed 2".to_string()
+            case "i32":
+                simple = "base \"i32\" signed 4".to_string()
+            case "u64":
                 simple = "base \"u64\" unsigned 8".to_string()
-            case "i8" | "i16" | "i32" | "DateTime":
+            case "DateTime":
                 simple = "base \"i64\" signed 8".to_string()
             case "u128":
                 simple = "base \"u128\" unsigned 16".to_string()

@@ -137,7 +137,8 @@ pub(crate) unsafe fn write(c: &Call<'_>) {
                 Kind::Path => crate::value::write_string(at, path.as_deref().unwrap_or(b"(simulated)")),
                 Kind::String => crate::value::write_string(at, b"a fault the simulation made"),
                 _ => {
-                    for w in 0..ty(f.ty).size / 8 {
+                    // A `u8`'s byte too, at the start of its word.
+                    for w in 0..ty(f.ty).size.div_ceil(8) {
                         mem::set_word(at, 8 * w, 0);
                     }
                 }

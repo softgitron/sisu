@@ -780,6 +780,36 @@ impl Runner<'_> {
             let shown = format!("{}--- stderr\n{}--- status {}\n", out.stdout, out.stderr, out.status);
             self.compare(case, &format!("sisu {cmd}"), Some(ext), &expected, &shown);
         }
+        // `NAME.eval`: `sisu eval NAME.sisu ARGS` for each line `# eval
+        // ARGS` (once without arguments when there is none), the
+        // configuration module's constants (decisions 984 and 1024).
+        if let Some(expected) = case.expected("eval") {
+            let mut runs: Vec<Vec<String>> = source
+                .lines()
+                .filter_map(|l| {
+                    let l = l.trim();
+                    (l == "# eval" || l.starts_with("# eval "))
+                        .then(|| l["# eval".len()..].split_whitespace().map(str::to_string).collect())
+                })
+                .collect();
+            if runs.is_empty() {
+                runs.push(Vec::new());
+            }
+            let mut shown = String::new();
+            for given in runs {
+                let mut a = s(&["eval", &file]);
+                a.extend(given);
+                let out = invoke(self.sisu, &sandbox.dir, &a);
+                shown.push_str(&format!(
+                    "--- sisu {}\n{}--- stderr\n{}--- status {}\n",
+                    a.join(" "),
+                    out.stdout,
+                    out.stderr,
+                    out.status
+                ));
+            }
+            self.compare(case, "sisu eval", Some("eval"), &expected, &shown);
+        }
         // `# explore N`: the run (and the tests) again under N schedule
         // seeds; every seed must give the expected result.
         let explore = source

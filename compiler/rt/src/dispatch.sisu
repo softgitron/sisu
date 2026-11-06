@@ -840,9 +840,9 @@ def sum_call(c: Call) -> int:
         var total = 0
         var i = 0
         while i < n:
-            # safety: in_bounds, valid, aligned: item `i` of the list, an
-            #   integer in its first word.
-            let v = unsafe b.offset(i * size).cast[int]().read()
+            # safety: in_bounds: item `i` of the list, an integer, a `u8`'s
+            #   one byte (decision 1020).
+            let v = value.int_at(ts, unsafe b.offset(i * size), rt)
             if (v > 0 and total > MOST - v) or (v < 0 and total < OPEN - v):
                 # safety: returns_promptly: the runtime in Rust raises the
                 #   panic.
@@ -879,8 +879,16 @@ def pairwise(b: ptr mut u8, size: int, lo: int, n: int) -> f64:
 ## - `items`: as `pairwise`
 def pairwise32(b: ptr mut u8, size: int, lo: int, n: int) -> int:
     if n == 1:
-        # safety: in_bounds, valid, aligned: by `items`.
-        return unsafe b.offset(lo * size).cast[int]().read() & 4294967295
+        # safety: in_bounds: by `items`; an `f32` is its four bytes (decision
+        #   1020).
+        let at = unsafe b.offset(lo * size)
+        var bits = 0
+        var k = 3
+        while k >= 0:
+            # safety: in_bounds, valid: the item's bytes, by `items`.
+            bits = bits * 256 + unsafe at.offset(k).read().to_int()
+            k -= 1
+        return bits
     let half = n // 2
     let (x, y) = (pairwise32(b, size, lo, half), pairwise32(b, size, lo + half, n - half))
     # safety: returns_promptly: the runtime in Rust adds them.

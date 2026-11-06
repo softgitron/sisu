@@ -1077,6 +1077,23 @@ impl<'p> Codegen<'p> {
                                     let w = b.ins().load(types::I64, flags, value, (k * 8) as i32);
                                     b.ins().store(flags, w, s, (k * 8) as i32);
                                 }
+                                // What is left of a value that is not a whole
+                                // number of words, as `copy_bytes` copies it
+                                // (decisions 1020 and 1021).
+                                let mut off = size / 8 * 8;
+                                for (w, t) in [(4, types::I32), (2, types::I16), (1, types::I8)] {
+                                    if size - off >= w {
+                                        let x = if w == 1 {
+                                            b.ins().uload8(types::I64, flags, value, off as i32)
+                                        } else {
+                                            let x = b.ins().load(t, flags, value, off as i32);
+                                            b.ins().uextend(types::I64, x)
+                                        };
+                                        let low = b.ins().ireduce(t, x);
+                                        b.ins().store(flags, low, s, off as i32);
+                                        off += w;
+                                    }
+                                }
                                 s
                             }
                         };

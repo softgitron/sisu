@@ -63,21 +63,22 @@ fn compute(types: &[TypeEntry], memo: &mut [Option<Layout>], t: u32, depth: u32)
     } else {
         match &entry.kind {
             Kind::Unit => Layout { size: 0, align: 1, same: true },
+            // A `u8` is its byte in a value too (decision 1020).
             Kind::Sized(n) => {
                 let w = width(n);
-                Layout { size: w, align: w, same: false }
+                Layout { size: w, align: w, same: entry.size as u64 == w }
             }
-            Kind::F32 => Layout { size: 4, align: 4, same: false },
+            Kind::F32 => Layout { size: 4, align: 4, same: entry.size == 4 },
             Kind::Option(p) if matches!(types.get(*p as usize).map(|e| &e.kind), Some(Kind::Ptr(_))) => {
                 Layout { size: 8, align: 8, same: false }
             }
             Kind::Tuple(slots) => {
-                let parts: Vec<u32> = slots.iter().map(|s| s.ty).collect();
-                c_layout(types, memo, &parts, depth)
+                let parts: Vec<(u32, u32)> = slots.iter().map(|s| (s.ty, s.offset)).collect();
+                c_layout(types, memo, &parts, entry.size, depth)
             }
             Kind::Struct { fields, .. } => {
-                let parts: Vec<u32> = fields.iter().map(|f| f.ty).collect();
-                c_layout(types, memo, &parts, depth)
+                let parts: Vec<(u32, u32)> = fields.iter().map(|f| (f.ty, f.offset)).collect();
+                c_layout(types, memo, &parts, entry.size, depth)
             }
             _ => words,
         }
@@ -88,17 +89,27 @@ fn compute(types: &[TypeEntry], memo: &mut [Option<Layout>], t: u32, depth: u32)
     l
 }
 
-/// Parts in C's order, each at the next offset its alignment allows.
-fn c_layout(types: &[TypeEntry], memo: &mut [Option<Layout>], parts: &[u32], depth: u32) -> Layout {
+/// Parts in C's order, each at the next offset its alignment allows: the
+/// same as the value's when each part is laid out as its value and at its
+/// value's offset, and the sizes agree (a `u8` takes a byte in C's and a
+/// word in a value's, decision 1020).
+fn c_layout(
+    types: &[TypeEntry],
+    memo: &mut [Option<Layout>],
+    parts: &[(u32, u32)],
+    value_size: u32,
+    depth: u32,
+) -> Layout {
     let (mut off, mut align, mut same) = (0, 1, true);
-    for &p in parts {
+    for &(p, voff) in parts {
         let l = compute(types, memo, p, depth + 1);
         off = align_up(off, l.align);
+        same &= l.same && off == u64::from(voff);
         off += l.size;
         align = align.max(l.align);
-        same &= l.same;
     }
-    Layout { size: align_up(off, align), align, same }
+    let size = align_up(off, align);
+    Layout { size, align, same: same && size == u64::from(value_size) }
 }
 
 /// The bytes of a sized integer type narrower than 64 bits.

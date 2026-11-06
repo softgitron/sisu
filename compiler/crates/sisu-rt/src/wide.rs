@@ -84,7 +84,7 @@ pub(crate) unsafe fn num(p: *mut u8, t: u32) -> Option<Num> {
     unsafe {
         let (p, t) = value::target(p, t);
         Some(match ty(t).kind {
-            Kind::Int | Kind::Sized(_) => Num::Signed(i128::from(mem::word(p, 0) as i64)),
+            Kind::Int | Kind::Sized(_) => Num::Signed(i128::from(value::scalar((p, t)) as i64)),
             Kind::U64 => Num::Signed(i128::from(mem::word(p, 0))),
             Kind::I128 => Num::Signed(bits(p) as i128),
             Kind::U128 => Num::Unsigned(bits(p)),

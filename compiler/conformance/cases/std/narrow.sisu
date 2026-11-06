@@ -1,0 +1,74 @@
+# Narrow numbers at their own widths (decisions 1020 and 1021): an `i8`, a
+# `u16`, an `i32` and an `f32` take one, two and four bytes in a list, a
+# struct lays its narrow fields at C's offsets, and each is read with its
+# sign wherever it is, in a list, a field, a payload, a key and a tuple;
+# every operation gives the interpreter's output.
+
+@derive(Eq, Debug)
+struct Sample:
+    level: i8
+    count: u16
+    total: i32
+    weight: f32
+
+@derive(Eq, Debug)
+enum Event:
+    Shift(i16, u32)
+    Mark(i8)
+    Quiet
+
+def lowest(xs: list[i32]) -> i32?:
+    var best: i32? = None
+    for x in xs:
+        if best.is_none() or x < best.unwrap():
+            best = Some(x)
+    return best
+
+def main():
+    var small: list[i8] = [3, -128, 127, -1, 0]
+    small.sort()
+    print("{small} {small[0]} {small[^1]} {(-1).to_i8().unwrap() in small}")
+    var wide: list[i32] = []
+    for i in range(10):
+        wide.push((i * 7 - 30).to_i32().unwrap())
+    print("{wide} {lowest(wide)} {wide.contains(-30)}")
+    wide[3] = wide[3] - 2147483639
+    print(wide[3])
+    var ports: list[u16] = [65535, 80, 443]
+    ports.reverse()
+    print("{ports} {ports.pop()} {ports}")
+    var weights: list[f32] = [0.5, -1.25, 3.0]
+    weights.push(2.5)
+    print("{weights} {weights[1]} {weights.iter().map(it.copy()).sum()}")
+    var samples = [
+        Sample(level=-5, count=60000, total=-100000, weight=0.25),
+        Sample(level=7, count=1, total=2000000000, weight=-0.5),
+        Sample(level=-5, count=59999, total=3, weight=1.5),
+    ]
+    for s in samples:
+        print("{s:?}")
+    samples[0].total += 1
+    let first = samples[0].copy()
+    print("{first.level} {first.count} {first.total} {first.weight} {first == samples[0]}")
+    var seen: set[i16] = set()
+    var by: dict[i32, u16] = {}
+    for s in samples:
+        seen.add(s.level.to_int().to_i16().unwrap())
+        by[s.total] = s.count
+    print("{len(seen)} {by[3]} {by.get(4).copied()}")
+    let events = [Event.Shift(-300, 4000000000), Event.Mark(-7), Event.Quiet]
+    for e in events:
+        match e:
+            case Event.Shift(a, b):
+                print("shift {a} {b}")
+            case Event.Mark(m):
+                print("mark {m}")
+            case Event.Quiet:
+                print("quiet")
+    print("{events[0] == Event.Shift(-300, 4000000000)} {events[1] == Event.Mark(7)}")
+    let pair = (small[0], ports[0], weights[1])
+    print(pair)
+    let o: i8? = Some(small[0])
+    print("{o} {o == Some((-128).to_i8().unwrap())}")
+    let k = wide[0]
+    print([1, 2].iter().map(it.to_i32().unwrap() * k).collect())

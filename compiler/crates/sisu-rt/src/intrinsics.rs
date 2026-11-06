@@ -42,9 +42,12 @@ impl Call<'_> {
         unsafe { target(self.arg(i), self.ty(i)) }
     }
 
+    /// The word of the scalar argument `i` is or refers to: a narrow
+    /// number's bytes, extended as its type says (decision 1020), another's
+    /// word.
     pub(crate) unsafe fn word(&self, i: usize) -> u64 {
         // SAFETY: as `place`.
-        unsafe { mem::word(self.place(i).0, 0) }
+        unsafe { value::scalar(self.place(i)) }
     }
 
     pub(crate) unsafe fn int(&self, i: usize) -> i64 {
@@ -82,9 +85,17 @@ impl Call<'_> {
         unsafe { value::text(self.arg(i), self.ty(i)).unwrap_or(&[]) }
     }
 
+    /// The scalar result: a narrow number at its width (decision 1020),
+    /// another as its word.
     pub(crate) unsafe fn set_word(&self, v: u64) {
-        // SAFETY: the result has room for a word.
-        unsafe { mem::set_word(self.ret, 0, v) }
+        // SAFETY: the result has room for its type's size.
+        unsafe {
+            if ty(self.ret_ty).size < 8 {
+                value::set_scalar(self.ret, self.ret_ty, v);
+            } else {
+                mem::set_word(self.ret, 0, v);
+            }
+        }
     }
 
     pub(crate) unsafe fn set_bool(&self, b: bool) {
@@ -222,10 +233,12 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let (p, t) = c.place(0);
                 match ty(t).kind {
                     Kind::Float => c.set_word(f64::from_bits(mem::word(p, 0)).abs().to_bits()),
-                    _ => match crate::entry::int_op(abi::IntOp::Abs as u32, mem::word(p, 0) as i64, 0) {
-                        Ok(v) => c.set_word(v as u64),
-                        Err(s) => return s,
-                    },
+                    _ => {
+                        match crate::entry::int_op(abi::IntOp::Abs as u32, value::scalar((p, t)) as i64, 0) {
+                            Ok(v) => c.set_word(v as u64),
+                            Err(s) => return s,
+                        }
+                    }
                 }
             }
             I::Min | I::Max => return min_max(c, i == I::Min),

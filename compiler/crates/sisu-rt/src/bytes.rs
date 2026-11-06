@@ -79,7 +79,9 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
                 };
                 let l = mem::at::<List>(p);
                 let size = ty(e).size;
-                let out: Vec<u8> = (0..l.len).map(|k| mem::word(l.at(k, size), 0) as u8).collect();
+                // A `list[u8]` holds a byte to an element (decision 1020).
+                let out: Vec<u8> =
+                    (0..l.len).map(|k| crate::value::scalar((l.at(k, size), e)) as u8).collect();
                 write(c.ret, &out);
             }
             I::BytesAt | I::BytesGet => {
@@ -110,18 +112,21 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
             }
             // The iterator owns a copy: `bytes.iter` borrows nothing.
             I::BytesIter => c.set_word(iter::into_word(iter::owned_bytes(arg(c, 0).to_vec()))),
-            // A `Slice` of bytes holds copies of them, each a `u8` of a word
-            // (decision 225), in a buffer of its own, whose capacity is not 0
-            // (decision 940): the slice of a list views it in place.
-            I::BytesToList | I::BytesAsSlice => {
+            // A `list[u8]` holds a byte to an element, and a `Slice` of
+            // bytes views them in place, as a slice of a list does: its
+            // capacity is 0, which marks a view (decisions 940 and 1020).
+            I::BytesToList => {
                 let b = arg(c, 0);
                 let mut l = List::empty();
-                l.reserve(b.len() as u64, 8);
-                for (k, x) in b.iter().enumerate() {
-                    mem::set_word(l.at(k as u64, 8), 0, u64::from(*x));
-                }
+                l.reserve(b.len() as u64, 1);
+                mem::copy(l.ptr, b.as_ptr(), b.len());
                 l.len = b.len() as u64;
                 (c.ret as *mut List).write(l);
+            }
+            I::BytesAsSlice => {
+                let (p, _) = c.place(0);
+                let t = mem::at::<Text>(p);
+                (c.ret as *mut List).write(List { ptr: t.ptr, len: t.len, cap: 0 });
             }
             I::BytesFind | I::BytesStartsWith | I::BytesEndsWith => {
                 let (b, p) = (arg(c, 0), arg(c, 1));
