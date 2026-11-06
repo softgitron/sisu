@@ -6,8 +6,8 @@ each case of a list, read what a failing assertion shows, and give each
 test the fixtures, fakes and clock it needs. Then you test properties rather
 than examples, check a fast function against a clear one, fake your
 own traits, and keep whole outputs as snapshots and transcripts. Last,
-you replay a failure from its token and time code with benchmarks. You
-need about two hours.
+you replay a failure from its token, time code with benchmarks and
+test your tests with mutants. You need about two hours.
 
 ## Suites, tags and choosing tests
 
@@ -464,8 +464,8 @@ test "tea is not on the menu" ... ok
 
 Each test gets a `Menu` of its own, made by a call of `menu()` before
 its first line and dropped when it ends, so the value's `Drop` is the
-teardown. `scope="module"` is accepted and still makes one for each
-test.
+teardown. With `@fixture(scope="module")`, the tests share one value,
+made before the first and dropped after the last, and run in turn.
 
 **Try it.** Make the second test expect `Some(300)`, and run it.
 
@@ -497,6 +497,76 @@ replay: sisu test --replay 1-f14e765a85b22b4f-0.0.1-t1-s0-r0 menu.sisu
 The fixture is set up before the test and put away after the failed
 `assert`. A `@fixture` that takes a parameter is E0281
 (`type.fixture-signature`).
+
+</details>
+
+<details>
+<summary>The same tests with a fixture of the module</summary>
+
+<!-- file: examples/19-testing/menu_once.sisu -->
+```sisu
+# A fixture of the module: its tests share one value, made once.
+
+## A menu of prices in cents, which says when it is put away.
+struct Menu:
+    prices: dict[String, int]
+
+impl Drop for Menu:
+    def drop(mut self):
+        print("menu put away")
+
+@fixture(scope="module")
+def menu() -> Menu:
+    print("menu set up")
+    return Menu(prices={"coffee".to_string(): 350, "bun".to_string(): 280})
+
+test "a bun costs 280"(menu: Menu):
+    print("looking for a bun")
+    assert menu.prices.get("bun").copied() == Some(280)
+
+test "tea is not on the menu"(menu: Menu):
+    print("looking for tea")
+    assert menu.prices.get("tea").copied() == None
+```
+
+Made to expect `Some(300)`, both fail, and their output shows one menu,
+set up in the first and put away in the last:
+
+<!-- output: examples/19-testing/menu_once_fails.console -->
+```console
+$ sisu test menu_once.sisu
+test "a bun costs 280" ... FAILED
+test "tea is not on the menu" ... FAILED
+
+test "a bun costs 280" ... FAILED
+what the test printed:
+  menu set up
+  looking for a bun
+panic: assertion failed: menu.prices.get("bun").copied() == Some(300)
+    menu.prices.get("bun").copied() == Some(300)
+    │           │          │           │
+    │           Some(280)  Some(280)   Some(300)
+    {"coffee": 350, "bun": 280}
+  at test "a bun costs 280" (menu_once.sisu:18:5)
+replay: sisu test --replay 1-3e8b95517d0c922e-0.0.1-t0-s0-r0 menu_once.sisu
+
+test "tea is not on the menu" ... FAILED
+what the test printed:
+  looking for tea
+  menu put away
+panic: assertion failed: menu.prices.get("tea").copied() == Some(300)
+    menu.prices.get("tea").copied() == Some(300)
+    │           │          │           │
+    │           None       None        Some(300)
+    {"coffee": 350, "bun": 280}
+  at test "tea is not on the menu" (menu_once.sisu:22:5)
+replay: sisu test --replay 1-3e8b95517d0c922e-0.0.1-t1-s0-r0 menu_once.sisu
+
+0 passed, 2 failed, 0 blocked
+```
+
+A shared value must be `Sync`: a `Cell` is E0283
+(`type.module-fixture-sync`).
 
 </details>
 
@@ -1174,11 +1244,48 @@ test "a bun and a coffee" ... ok
 ```
 
 `sisu test --native` runs the same tests compiled, each in a process of
-its own ([G20](../guides/native.md)). A JSON report, coverage
-(`--cover`), mutation testing (`--mutate`) and fuzzing (`--fuzz`) are
-designed in [17](../../proposal/17-testing.md); of mutation testing,
-the compiler already makes the mutants, and the runner that tries the
-tests against them is still to come.
+its own ([G20](../guides/native.md)).
+
+## Testing the tests
+
+Passing tests do not show that they would catch a mistake. `sisu test
+--mutate` checks that: it runs the tests against mutants, copies of the
+program with one small change each, such as `>=` made `>`, and prints
+each mutant that every test passes:
+
+<!-- file: examples/19-testing/ready.sisu -->
+```sisu
+# `sisu test --mutate` changes the code and runs the tests again.
+
+## Whether a sauna at `celsius` degrees is warm enough to bathe in.
+def ready(celsius: int) -> bool:
+    return celsius >= 60
+
+test "a cold sauna is not ready":
+    assert not ready(20)
+
+test "a hot sauna is ready":
+    assert ready(80)
+```
+
+<!-- output: examples/19-testing/ready.console -->
+```console
+$ sisu test --mutate ready.sisu
+test "a cold sauna is not ready" ... ok
+test "a hot sauna is ready" ... ok
+2 passed, 0 failed, 0 blocked
+ready.sisu:5:20: a mutant survived, the boundary changed: `>=` to `>`: every test passes against it, so no test tells the two apart
+mutants: 1 run against the tests, 0 killed and 1 survived
+```
+
+No test is at 60 degrees, so nothing tells `>=` from `>`. A survivor
+is a suggestion, not a failure.
+
+**Try it.** Make the second test check `ready(60)`, and run `sisu test
+--mutate` again: the mutant is killed.
+
+A JSON report, coverage (`--cover`) and fuzzing (`--fuzz`) are
+designed in [17](../../proposal/17-testing.md).
 
 ## Exercise 19.1: predict the test clock
 
@@ -1803,6 +1910,8 @@ When every test passes, compare your answer with
   `sisu test --update` accepts a change after showing its diff.
 - Every failure has a replay token for `sisu test --replay`; `bench`
   and `sisu bench` time code; passing tests are cached.
+- `sisu test --mutate` shows the small changes to the code that no test
+  notices.
 
 Chapter 20 is about concurrency: tasks and scopes, what a task may
 share, channels and `select`, cancellation and deadlines, and testing

@@ -1,0 +1,106 @@
+$ sisu grammar
+-- Declarations (parser/items.sisu)
+file      := item* EOF
+item      := attribute* visibility? item_body
+item_body := fn_def | struct_def | enum_def | error_def | impl_def | trait_def
+             | import | from_import | test_def | suite_def | bench_def
+             | const_def | type_alias | extern_block
+attribute := '@' name ('.' name)* ('(' args? ')')? NEWLINE
+fn_def    := ('pure' | 'comptime')? 'unsafe'? 'def' name generic_params? params
+             ('->' type ('from' name (',' name)*)?)? where_clause? (':' block | NEWLINE)
+struct_def:= 'view'? 'struct' name generic_params? ':' INDENT struct_member+ DEDENT
+struct_member := attribute* visibility? (field | item_body | 'pass' NEWLINE)
+             | contract                      -- `invariant e`
+field     := name ':' type ('=' expr)? NEWLINE
+enum_def  := 'enum' name generic_params? ':' INDENT variant_member+ DEDENT
+error_def := 'error' name generic_params? ':' INDENT variant_member+ DEDENT
+variant_member := attribute* (variant | '..' NEWLINE | 'pass' NEWLINE | item_body)
+variant   := name ('(' variant_field (',' variant_field)* ')')? NEWLINE
+variant_field := (name ':')? type
+impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT member+ DEDENT
+trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
+             INDENT member+ DEDENT
+extern_block := 'extern' string? ':' INDENT member+ DEDENT
+member    := attribute* visibility? ('pass' NEWLINE | item_body | trait_const)
+trait_const := 'const' name (':' type)? ('=' expr)? NEWLINE   -- in a trait's body
+import    := 'import' (path | 'c' string) ('as' name)?
+             ('with' name '=' expr (',' name '=' expr)*)? NEWLINE
+from_import := 'from' path 'import' (import_names | '(' import_names ')') NEWLINE
+import_names := name ('as' name)? (',' name ('as' name)?)*
+test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
+bench_def := 'bench' string ('for' patterns 'in' expr)? params? ':' block
+suite_def := 'suite' string ':' INDENT item+ DEDENT
+const_def := 'const' name (':' type)? '=' expr NEWLINE   -- without its type, E0219
+type_alias:= 'type' name generic_params? ('=' type ('where' expr)?)? NEWLINE
+visibility := 'pub' ('(' 'package' ')')?
+generic_params := '[' generic_param (',' generic_param)* ']'
+generic_param := 'const'? name (':' type ('+' type)*)? ('=' type)?
+params    := '(' (param (',' param)*)? ')'
+param     := ('mut' | 'own')? ('self' (':' type)? | '*' | '/' | '*' name ':' type
+             | name ':' type ('=' expr)?)
+where_clause := 'where' type ':' type ('+' type)* (',' type ':' type ('+' type)*)*
+
+-- Statements and blocks (parser/stmts.sisu)
+block     := NEWLINE INDENT stmt+ DEDENT
+stmt      := let_stmt | return_stmt | 'break' | 'continue' | 'pass' | if_stmt
+             | while_stmt | for_stmt | assert_stmt | expect_stmt | defer_stmt
+             | with_stmt | unsafe_stmt | yield_stmt | select_stmt | comptime_stmt
+             | contract | item | expr_stmt | assign_stmt
+let_stmt  := ('let' | 'var') patterns (':' type)? ('=' exprs let_else?)? NEWLINE
+let_else  := 'else' ('as' name)? ':' (block | expr | return_stmt | 'break' | 'continue')
+if_stmt   := 'if' cond ':' block ('elif' cond ':' block)* ('else' ':' block)?
+cond      := cond_part (',' cond_part)*      cond_part := 'let' pattern '=' expr | expr
+while_stmt:= 'while' cond ':' block
+for_stmt  := 'for' patterns 'in' ('mut' | 'own')? expr ':' block
+assign_stmt := exprs ('=' | '+=' | ...) exprs NEWLINE
+return_stmt := 'return' exprs? NEWLINE
+assert_stmt := ('assert' | 'debug_assert') expr (',' expr)? NEWLINE
+expect_stmt := 'expect' expr (',' expr)? NEWLINE
+defer_stmt := 'defer' (':' block | stmt)
+with_stmt := 'with' expr ('as' name)? ':' block
+unsafe_stmt := 'unsafe' ':' block
+yield_stmt := 'yield' expr? NEWLINE
+select_stmt := 'select' ':' NEWLINE INDENT ('case' pattern '=' expr ':' block)+ DEDENT
+comptime_stmt := 'comptime' stmt
+contract  := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLINE
+
+-- Expressions, by precedence from lowest to highest (02, "Operator precedence") (parser/exprs.sisu)
+expr      := closure | coalesce
+closure   := 'own'? (name | '(' params ')') '->' expr
+coalesce  := or ('??' coalesce)?
+or        := and ('or' and)*            -- mixing with `and` needs parentheses
+and       := not ('and' not)*
+not       := 'not' not | compare
+compare   := bitwise (cmp_op bitwise)*  -- chains point one way
+bitwise   := shift (('&' | '^' | '|') shift)*   -- one operator, no arithmetic
+shift     := additive (('<<' | '>>') additive)*  -- no arithmetic operands
+additive  := mult (('+' | '-' | '+%' | '-%' | '+|' | '-|') mult)*
+mult      := unary (('*' | '/' | '//' | '%' | '*%' | '*|') unary)*
+unary     := ('-' | '~' | 'ref' 'mut'? | '^') unary | power
+power     := postfix ('**' unary)?      -- `-x ** y` needs parentheses
+postfix   := primary (call | index | '.' name | '?.' name | '?' | do_block)*
+primary   := literal | string | name | '(' ... ')' | '[' ... ']' | '{' ... '}'
+             | if_expr | match_expr
+
+-- Patterns (parser/patterns.sisu)
+patterns  := pattern (',' pattern)*          -- a bare tuple in let and for
+pattern   := primary_pattern ('|' primary_pattern)*
+primary_pattern := '_' | lower_name | literal | '-' number
+             | Upper_path ('(' pattern_arg (',' pattern_arg)* ')')?
+             | '(' patterns ')' | '[' patterns? ']' | '*' name | '..'
+pattern_arg := name '=' pattern | pattern | '..'
+
+-- Types (parser/types.sisu)
+type      := '!' error_set? | option ('!' error_set?)?
+error_set := '{' option (',' option)* '}' | option
+option    := ref_type '?'*
+ref_type  := 'ref' 'mut'? primary_type | primary_type
+primary_type := path_type | fn_type | tuple_type | '(' type ')' | 'dyn' primary_type
+             | 'ptr' 'mut' primary_type | 'impl' type ('for' type)?
+             | '{' option (',' option)* '}'
+path_type := (name | 'Self' | 'type') ('.' name)* generic_args?
+fn_type   := 'pure'? '(' (type_element (',' type_element)*)? ')' '->' type
+tuple_type := '(' ')' | '(' type_element ',' ')' | '(' type_element (',' type_element)+ ')'
+type_element := (name ':')? type
+generic_args := '[' generic_arg (',' generic_arg)* ']'
+generic_arg := const_expr | integer | type

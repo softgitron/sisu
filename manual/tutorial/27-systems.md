@@ -851,9 +851,9 @@ compiler yet. Allocators for the
 collections, `list.with_allocator(Region.bump(n))` for memory released
 all at once and `try_push` for allocation that can fail, are designed in
 [04](../../proposal/04-memory-and-ownership.md#allocators) (E0351 and
-E0304 today); `Region` exists, under `RawBuf`. The resource attributes
-`@no_alloc`, `@no_block` and `@stack` compile with the warning W0030
-(`resolve.unchecked-attribute`), since nothing checks them yet. The
+E0304 today); `Region` exists, under `RawBuf`. `@no_block` and
+`@stack` compile with the warning W0030 (`resolve.unchecked-attribute`),
+since nothing checks them yet. The
 manifest's runtime profile is read, but `single` gets the runtime that
 `full` gets and `freestanding` is refused (E1023); the profiles'
 own runtimes, targets and cross compilation (`--target`), and
@@ -1126,23 +1126,11 @@ test "a fade to silence":
 <!-- output: solutions/27-systems/mixer.console -->
 ```console
 $ sisu test mixer.sisu
-warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
-  --> mixer.sisu:15:2
-   |
-15 | @no_alloc
-   |  ^^^^^^^^
-
 warning[W0001]: typed hole `mix` of type `()`
   --> mixer.sisu:17:5
    |
 17 |     todo("mix")
    |     ^^^^^^^^^^^
-
-warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
-  --> mixer.sisu:20:2
-   |
-20 | @no_alloc
-   |  ^^^^^^^^
 
 warning[W0001]: typed hole `fade` of type `()`
   --> mixer.sisu:22:5
@@ -1167,10 +1155,52 @@ what the test printed:
 0 passed, 0 failed, 3 blocked
 ```
 
-`@no_alloc` states that the functions allocate nothing. W0030
-(`resolve.unchecked-attribute`) at each says that nothing checks the
-promise yet, so today it is yours to keep; the warning goes once the
-compiler checks it.
+`@no_alloc` states that the functions allocate nothing, and the
+compiler checks it through every call: making a list, joining text or
+calling a function that does is E0282 (`type.no-alloc`).
+
+<details>
+<summary>What Sisu says about a <code>mix</code> that makes a list</summary>
+
+<!-- file: examples/27-systems/mix_list.sisu -->
+```sisu
+# A mix that makes a list of the scaled samples, which `@no_alloc` refuses.
+
+## Adds `voice`, scaled by `gain`, into `out`.
+@no_alloc
+def mix[const N: int](mut out: Array[f32, N], voice: Array[f32, N], gain: f32):
+    let scaled = [voice[i] * gain for i in range(N)]
+    for i in range(N):
+        out[i] = out[i] + scaled[i]
+
+def main():
+    var out: Array[f32, 2] = Array.filled(0.5f32)
+    mix(mut out, Array.filled(0.25f32), 2.0)
+    print(out[0])
+```
+
+<!-- output: examples/27-systems/mix_list.console -->
+```console
+$ sisu run mix_list.sisu
+error[E0282]: `mix` is `@no_alloc`, but `list.new` may allocate
+  --> mix_list.sisu:6:18
+  |
+6 |     let scaled = [voice[i] * gain for i in range(N)]
+  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0282]: `mix` is `@no_alloc`, but `list.push` may allocate
+  --> mix_list.sisu:6:19
+  |
+6 |     let scaled = [voice[i] * gain for i in range(N)]
+  |                   ^^^^^^^^^^^^^^^
+
+error[D0021]: the program was not run: the ownership checker found errors (2); `--defer-borrow` runs it under the monitor
+```
+
+The comprehension makes a list and grows it, and each is an error;
+D0021's offer of `--defer-borrow` does not help here.
+
+</details>
 
 <details>
 <summary>Hint 1</summary>

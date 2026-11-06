@@ -1,5 +1,4 @@
 # Designed attributes that stage 0 accepts and does not check.
-@no_alloc
 @no_block
 @stack(max=256)
 def levels(gain: int) -> list[int]:

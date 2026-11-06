@@ -1,0 +1,8 @@
+$ sisu test e0283_module_fixture_sync.sisu
+error[E0283]: `guests` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `Cell[int]` is not
+  --> e0283_module_fixture_sync.sisu:4:2
+  |
+4 | @fixture(scope="module")
+  |  ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

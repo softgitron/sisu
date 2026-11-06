@@ -1,0 +1,7 @@
+$ sisu test --mutate d0153_mutant_survived.sisu
+test "open in the evening" ... ok
+test "closed in the morning" ... ok
+2 passed, 0 failed, 0 blocked
+d0153_mutant_survived.sisu:5:17: a mutant survived, the boundary changed: `>=` to `>`: every test passes against it, so no test tells the two apart
+d0153_mutant_survived.sisu:5:32: a mutant survived, the boundary changed: `<` to `<=`: every test passes against it, so no test tells the two apart
+mutants: 3 run against the tests, 1 killed and 2 survived

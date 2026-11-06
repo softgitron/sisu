@@ -112,7 +112,10 @@ borrows live on line 6 of borrow.sisu, in `main`:
 ```
 
 Stage 1 answers the command, from its twenty-second round, and the
-server asks it the same question for the editor. Bind the command to a key,
+server asks it the same question for the editor. The editor marks each
+borrow's start and last use by their first characters; stage 1 gives
+them as whole ranges from its twenty-fifth round, which the server
+asks for from stage 0's next round. Bind the command to a key,
 and use it when a borrow error is hard to read; [Find and fix a borrow error](borrow-errors.md) shows the rest.
 
 ## 4. See a script's values beside its lines

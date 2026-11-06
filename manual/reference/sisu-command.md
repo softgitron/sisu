@@ -93,10 +93,10 @@ Without a file, a command works on the package of the current directory (`sisu.t
 
 commands:
   run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--from-sir FILE` runs a file of serialised SIR, natively with `--native`, and `--native --from-lir FILE` a file of LIR, stage 2's lowering of SIR)
-  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log, `--holes <file>` lists each typed hole of the program with the type its place needs and the bindings in scope that fit it)
-  doc [<path>]           the documentation, a Markdown page per module, printed each after a line naming its file (`--output DIR` writes the pages into DIR instead, `--std [MODULE...]` documents the standard library, or the modules named, as `std.time`)
+  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log, `--holes [<path>]` lists each typed hole of the program, a file's or a package's, with the type its place needs and the bindings in scope that fit it)
+  doc [<path>]           the documentation, a Markdown page per module, printed each after a line naming its file (`--output DIR` writes the pages into DIR instead, `--std [MODULE...]` documents the standard library, or the modules named, as `std.time`, `--digest` writes the API as one plain text instead, each item's declaration with its first paragraph, capabilities, holes and first example, into `DIR/NAME.txt` with `--output DIR`)
   build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR, `--native --from-lir` a file of LIR)
-  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed, `--native` compiles them and runs each natively, `--release` with the release profile)
+  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--mutate` runs them against each mutant of the program and prints the mutants no test kills, `--since REV` only those on lines changed since the revision REV, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed, `--native` compiles them and runs each natively, `--release` with the release profile)
   bench [<file>]         run the benchmarks (`--iterations N`, `--samples K` times each after a run not timed, `--from-sir FILE` those of a file `sisu sir --tests` printed)
   replay <log>           run a recorded program again against its capability log
   fmt [<path>...]        format files in place (`--check` reports what would change)
@@ -108,6 +108,7 @@ commands:
   tokens <file>          print the token stream (`--trivia` includes trivia)
   parse <file>           `--tree` prints the syntax tree, `--ast` the AST built from it, `--print` reprints the source, `--shape` prints what formatting keeps
   explain <code>         describe a diagnostic code
+  grammar                print the grammar of the language from the parser's own comments, from stage 1
   explain-borrow <file>:<line>  show every borrow live on a line
   audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
   audit --caps [<file>...]  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more (without a file, of the package's program)
@@ -118,7 +119,7 @@ commands:
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 
-The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl`, `ws` and `eval`, which only it has; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
+The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl`, `ws`, `eval` and `grammar`, which only it has; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
 ```
 
 </details>
@@ -302,18 +303,22 @@ The front end reads, checks and lowers a program; the rest of `sisu`
 runs, tests and compiles what it produces. Stage 0 has two: stage 1,
 written in Sisu and compiled natively, which is the default for
 `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`,
-`parse` (`--shape` too), `repl` and `ws`, and the only one for `eval`,
-as `sisu help` says, and the Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
-`SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
-lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix` and `sisu check
---holes` are stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from stage 1,
-and from the Rust front end only where stage 1 is not built
+`parse` (`--shape` too), `repl` and `ws`, and the only one for `eval`
+and `grammar`, as `sisu help` says, and the Rust front end, the oracle
+that stage 1 is checked against. `--front-end=rust` among a command's
+options, or `SISU_FRONT_END=rust` in the environment, chooses the Rust
+one. `sisu lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix`, `sisu
+grammar`, `sisu check --holes` and `sisu test --mutate` are stage 1's
+alone, and the Rust front end refuses them; `sisu lsp` answers from
+stage 1, and from the Rust front end only where stage 1 is not built
 ([sisu lsp](#sisu-lsp)). From `sisu1 0.17.0` stage 1 also answers
 `check --diary`, `test --std`, `run --defer-borrow`, `test
---defer-borrow`, `explain-borrow` and every form of `audit`, each the
+--defer-borrow`, `explain-borrow`, every form of `audit`, and `run
+--watch` with a run recorded under it and its `sisu replay`, each the
 default as the sections of each say, with the Rust front end's answer
-under `--front-end=rust`. `run --watch` and the other commands use the
-Rust front end whichever you choose. A program's
+under `--front-end=rust`. What the Rust front end still does by default
+is `sisu test --std --defer-borrow` and building stage 1 itself, the
+first time and after a source of stage 1 changed. A program's
 transcripts run on the front end its tests run on, stage 1 unless you
 choose the Rust one (with a stage 1 older than 0.11.0, on the Rust
 front end, D0128). `sisu
@@ -332,7 +337,7 @@ A value other than `stage1` or `rust` is D0115. When stage 1 is missing
 (D0116), fails to build (D0117) or stops as a compiler may not (D0118),
 the message names `--front-end=rust` as the way on. Stage 1's own
 executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
-0.19.0` after stage 1's twenty-fourth round), which the driver asks
+0.20.0` after stage 1's twenty-fifth round), which the driver asks
 to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
@@ -463,6 +468,19 @@ frame 2: a square
 `--explore`, `--defer-borrow`, `--sir`, `--from-sir` or `--scheduler
 exhaustive` (D0078).
 
+From `sisu1 0.17.0` each save is built by stage 1, as the run's own
+SIR is: the server of stage 1 answers the same request for each save
+([The server of stage 1](#the-server-of-stage-1)), and a save that does
+not check prints stage 1's diagnostics, without the line D0006 that
+ends a run. A run recorded under `--watch` logs the program's files as
+it began, and its replay has stage 1 build each save from them in a
+directory of its own. Stage 1 checks the whole program again at each
+save, where the Rust front end's queries redo only what changed, so a
+save takes longer: 0.132 seconds where the Rust front end took 0.072
+for the conformance suite's `live/swap`, and 0.073 where it took 0.042
+for its `live/tasks`, with a release build of `sisu`. `--front-end=rust` keeps the
+Rust front end's queries.
+
 **Status.** In stage 0. Hot replacement is decided (D-053); its epochs
 lean (D-068).
 
@@ -555,7 +573,12 @@ The SIR that the monitor runs comes from stage 1, from `sisu1 0.17.0`
 form of `--format=ids`, with status 3 when it deferred an error, and
 the driver reads the account's findings from them. An error that is
 not the ownership checker's is not deferred, so the run reports it as
-a plain run does. `--front-end=rust` lowers the program with the Rust
+a plain run does. From `sisu1 0.20.0` stage 1 writes such an error in
+the human form, as a plain build does, where the driver now builds the
+program a second time without the option to get its words, and follows
+each deferred finding with a line naming its function in the SIR; the
+driver reads neither until stage 0's next round, so nothing a run
+prints changes. `--front-end=rust` lowers the program with the Rust
 front end instead.
 
 **Status.** In stage 0, a tool of the experiment (18, Phase 3).
@@ -706,7 +729,12 @@ must not have returned and which a shared borrow made read-only. It
 checks a pointer by its address, where the interpreter knows the borrow
 it came from, so it lets pass a few accesses that the interpreter
 stops; the release build checks none
-([chapter 27](../tutorial/27-systems.md#raw-memory)).
+([chapter 27](../tutorial/27-systems.md#raw-memory)). A plain `sisu
+run` stays the interpreter's until the native runtime has what only the
+interpreter gives: the capability log and its replay, hot replacement,
+`--stats stack-depth` and `--stats shared`, and a cache of built
+executables, without which a small program pays its build at each
+run.
 
 <!-- output: examples/reference-sisu-command/native.console -->
 ```console
@@ -1047,8 +1075,7 @@ W0001, and `sisu test` reports a test that reaches one as blocked.
 **Stage 0 differs.** `sisu check --holes` is stage 1's, from `sisu1
 0.15.0`, and the whole report and `--format=json` from `sisu1 0.16.0`;
 the Rust front end answers it with D0009, and a package's holes are
-reported from `sisu1 0.18.0`. The usage that `sisu help` and D0151
-print still names `--holes <file>`. 10's report also shows the
+reported from `sisu1 0.18.0`. 10's report also shows the
 values each test saw at the hole, which wait for `sisu test` to record
 them, and the bindings' capabilities, which their types show here.
 
@@ -1149,14 +1176,18 @@ of a program that the ownership checker rejects as well; a program with
 other errors gets its diagnostics and D0132, as a build does. `--tests`
 includes the program's tests and benchmarks, and `--contracts` sets the
 contracts the SIR checks. Stage 1's own `sir` takes options more,
-which `sisu test` and `sisu run` send it and `sisu sir` does not take
-(D0009): from `sisu1 0.17.0`, `--std` beside `--tests` lowers the
+most of which `sisu test` and `sisu run` send it, and which `sisu sir`
+does not take (D0009): from `sisu1 0.17.0`, `--std` beside `--tests` lowers the
 standard library's doc examples as tests, and `--defer-borrow` prints
 the SIR of a program whose only errors are the ownership checker's
 ([--defer-borrow](#running-a-rejected-program---defer-borrow)); from
 `sisu1 0.19.0`, `--mutants` beside `--tests` prints each mutant of the
-program, for the `--mutate` that [sisu test](#sisu-test) does not have
-yet.
+program, which `sisu test --mutate` runs the tests against
+([sisu test](#sisu-test)); from `sisu1 0.20.0`, `--cover` beside
+`--tests` prints after the SIR a table of the program's regions, the
+front end's half of a `--cover` that `sisu test` does not have yet,
+and `--module-fixtures` names each test's fixtures on its line and
+lends a module's fixture to its tests, which `sisu test` asks for.
 The [SIR example](#running-serialised-sir---sir---from-sir-and---from-lir)
 shows the SIR of `hello.sisu`.
 
@@ -1411,6 +1442,53 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 - `--defer-borrow` runs the tests of a program that the ownership
   checker rejected, as [`sisu run
   --defer-borrow`](#running-a-rejected-program---defer-borrow) does.
+- `--mutate` runs the tests, then runs the selected tests against each
+  mutant of the program, a copy with one small change, and prints each
+  mutant that every test passed by its place (D0153), then the counts
+  (D0154); `--since REV` keeps the mutants on the lines changed since
+  the git revision `REV` (D0156, and D0158 when git cannot say). The
+  status is the tests' own: the survivors are suggestions
+  ([R15](testing.md#mutation-testing)). Tests that fail on the program
+  stop it before any mutant runs (D0157), `--since` without `--mutate`
+  is D0160, and `--mutate` does not combine with `--native`,
+  `--release`, `--defer-borrow`, `--sim`, `--update`, `--std`,
+  `--replay`, `--explore`, `--from-sir` or `--scheduler` (D0159):
+
+<!-- output: examples/reference-sisu-command/mutate.console -->
+```console
+$ sisu test --mutate tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
+test "doubles a number" ... ok
+test "doubles (-1, -2)" ... ok
+test "doubles (-3, -5)" ... FAILED
+test "halves a number" ... blocked by todo("halve")
+test "large numbers/doubles a large number" ... ok
+
+test "doubles (-3, -5)" ... FAILED
+panic: assertion failed: double(x) == y
+  left:  -6
+  right: -5
+  at test "doubles (-3, -5)" (tests.sisu:12:5)
+replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
+
+test "halves a number" ... blocked by todo("halve")
+what the test printed:
+  in scope at the typed hole `todo("halve")`:
+    x = 42
+
+3 passed, 1 failed, 1 blocked
+error[D0157]: the mutants were not run: the tests fail on the program itself
+$ sisu test --since HEAD tests.sisu
+error[D0160]: `--since REV` names the changed region of `--mutate`; it goes with `--mutate`
+$ sisu test --mutate --native tests.sisu
+error[D0159]: `--mutate` runs the tests against each mutant of the program; it does not combine with `--native`
+```
+
 - The schedule options and the package options are as for `sisu run`.
 
 A snapshot test stores what it saw the first time `--update` accepts it,
@@ -1501,11 +1579,12 @@ error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 
 **Stage 0 differs.** [17](../../proposal/17-testing.md) has `sisu test`
 write a JSON event stream, with TAP and JUnit XML as `--format` options;
-stage 0 prints the human form only, and has none of `--fuzz`, `--cover`
-and `--mutate` ([Commands that are designed](#commands-that-are-designed)).
-For `--mutate`, stage 1 makes the mutants from `sisu1 0.19.0`
-([sisu sir](#sisu-sir)); the runner that keeps those in the changed
-region and runs the tests that cover each is still to come.
+stage 0 prints the human form only, and has neither `--fuzz` nor
+`--cover` ([Commands that are designed](#commands-that-are-designed)).
+`--mutate` runs every selected test against each mutant, where 17 runs
+the tests that cover the mutant's line, which waits for `--cover`; its
+mutants are stage 1's, from `sisu1 0.19.0` ([sisu sir](#sisu-sir)), and
+with an older stage 1 or the Rust front end it is D0009.
 
 **Status.** In stage 0. `--sim`, `--faults` and replay tokens are
 prototypes of the experiment (Q-49, D-070).
@@ -1682,12 +1761,15 @@ pub def save(fs: Fs, celsius: int) -> ! IoError
 def main()
 ```
 
+`--digest` is stage 1's, from `sisu1 0.19.0`, served as the rest of
+`sisu doc` is; with an older stage 1 or the Rust front end it is D0009.
+
 **Stage 0 differs.** [10](../../proposal/10-tooling.md) renders each
 example's expressions with their values and serves the pages with
-`--open`; stage 0 writes the examples as they are. `--digest` is stage
-1's, from `sisu1 0.19.0`, which the driver passes it as it passes the
-rest of `sisu doc`'s words, and `sisu help` does not list it yet; the
-Rust front end answers it with D0009.
+`--open`; stage 0 writes the examples as they are, since a value needs
+each example built and run as a worksheet is, against the fakes of
+the capabilities that most examples take, and `--open` needs a server
+of pages that the driver does not have.
 
 **Status.** In stage 0, with the differences noted.
 
@@ -2250,7 +2332,11 @@ no borrow is live on line 3 of borrows.sisu
 The borrows come from stage 1's ownership checker, from `sisu1 0.17.0`,
 and the editor's `sisu.explainBorrow` asks the same question of it (its
 `query explain FILE LINE`); `--front-end=rust` gives the Rust front
-end's checker, line for line in the same words.
+end's checker, line for line in the same words. From `sisu1 0.20.0`,
+`query explain FILE LINE --ranges` also gives where each borrow starts
+and where it is last used as ranges with their ends, which the editor
+asks for from stage 0's next round; until then it marks each place by
+its first character.
 
 **Status.** In stage 0 (18, Phase 3), and in the language server as
 `sisu.explainBorrow`.
@@ -2441,6 +2527,139 @@ SOURCE_FILE
 **Status.** In stage 0, for implementations of Sisu and for the
 conformance suite's checks of the formatter.
 
+### sisu grammar
+
+- `sisu grammar`
+
+`sisu grammar` prints the grammar of the language as stage 1's parser
+states it in the `##!` comments of its modules, one production for
+each function of the parser that reads a form, in five parts:
+declarations, statements and blocks, expressions by precedence,
+patterns, and types. It takes no file. [R20](grammar.md) agrees with
+this text rule for rule.
+
+<details>
+<summary>What <code>sisu grammar</code> prints</summary>
+
+<!-- output: examples/reference-sisu-command/grammar.console -->
+```console
+$ sisu grammar
+-- Declarations (parser/items.sisu)
+file      := item* EOF
+item      := attribute* visibility? item_body
+item_body := fn_def | struct_def | enum_def | error_def | impl_def | trait_def
+             | import | from_import | test_def | suite_def | bench_def
+             | const_def | type_alias | extern_block
+attribute := '@' name ('.' name)* ('(' args? ')')? NEWLINE
+fn_def    := ('pure' | 'comptime')? 'unsafe'? 'def' name generic_params? params
+             ('->' type ('from' name (',' name)*)?)? where_clause? (':' block | NEWLINE)
+struct_def:= 'view'? 'struct' name generic_params? ':' INDENT struct_member+ DEDENT
+struct_member := attribute* visibility? (field | item_body | 'pass' NEWLINE)
+             | contract                      -- `invariant e`
+field     := name ':' type ('=' expr)? NEWLINE
+enum_def  := 'enum' name generic_params? ':' INDENT variant_member+ DEDENT
+error_def := 'error' name generic_params? ':' INDENT variant_member+ DEDENT
+variant_member := attribute* (variant | '..' NEWLINE | 'pass' NEWLINE | item_body)
+variant   := name ('(' variant_field (',' variant_field)* ')')? NEWLINE
+variant_field := (name ':')? type
+impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT member+ DEDENT
+trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
+             INDENT member+ DEDENT
+extern_block := 'extern' string? ':' INDENT member+ DEDENT
+member    := attribute* visibility? ('pass' NEWLINE | item_body | trait_const)
+trait_const := 'const' name (':' type)? ('=' expr)? NEWLINE   -- in a trait's body
+import    := 'import' (path | 'c' string) ('as' name)?
+             ('with' name '=' expr (',' name '=' expr)*)? NEWLINE
+from_import := 'from' path 'import' (import_names | '(' import_names ')') NEWLINE
+import_names := name ('as' name)? (',' name ('as' name)?)*
+test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
+bench_def := 'bench' string ('for' patterns 'in' expr)? params? ':' block
+suite_def := 'suite' string ':' INDENT item+ DEDENT
+const_def := 'const' name (':' type)? '=' expr NEWLINE   -- without its type, E0219
+type_alias:= 'type' name generic_params? ('=' type ('where' expr)?)? NEWLINE
+visibility := 'pub' ('(' 'package' ')')?
+generic_params := '[' generic_param (',' generic_param)* ']'
+generic_param := 'const'? name (':' type ('+' type)*)? ('=' type)?
+params    := '(' (param (',' param)*)? ')'
+param     := ('mut' | 'own')? ('self' (':' type)? | '*' | '/' | '*' name ':' type
+             | name ':' type ('=' expr)?)
+where_clause := 'where' type ':' type ('+' type)* (',' type ':' type ('+' type)*)*
+
+-- Statements and blocks (parser/stmts.sisu)
+block     := NEWLINE INDENT stmt+ DEDENT
+stmt      := let_stmt | return_stmt | 'break' | 'continue' | 'pass' | if_stmt
+             | while_stmt | for_stmt | assert_stmt | expect_stmt | defer_stmt
+             | with_stmt | unsafe_stmt | yield_stmt | select_stmt | comptime_stmt
+             | contract | item | expr_stmt | assign_stmt
+let_stmt  := ('let' | 'var') patterns (':' type)? ('=' exprs let_else?)? NEWLINE
+let_else  := 'else' ('as' name)? ':' (block | expr | return_stmt | 'break' | 'continue')
+if_stmt   := 'if' cond ':' block ('elif' cond ':' block)* ('else' ':' block)?
+cond      := cond_part (',' cond_part)*      cond_part := 'let' pattern '=' expr | expr
+while_stmt:= 'while' cond ':' block
+for_stmt  := 'for' patterns 'in' ('mut' | 'own')? expr ':' block
+assign_stmt := exprs ('=' | '+=' | ...) exprs NEWLINE
+return_stmt := 'return' exprs? NEWLINE
+assert_stmt := ('assert' | 'debug_assert') expr (',' expr)? NEWLINE
+expect_stmt := 'expect' expr (',' expr)? NEWLINE
+defer_stmt := 'defer' (':' block | stmt)
+with_stmt := 'with' expr ('as' name)? ':' block
+unsafe_stmt := 'unsafe' ':' block
+yield_stmt := 'yield' expr? NEWLINE
+select_stmt := 'select' ':' NEWLINE INDENT ('case' pattern '=' expr ':' block)+ DEDENT
+comptime_stmt := 'comptime' stmt
+contract  := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLINE
+
+-- Expressions, by precedence from lowest to highest (02, "Operator precedence") (parser/exprs.sisu)
+expr      := closure | coalesce
+closure   := 'own'? (name | '(' params ')') '->' expr
+coalesce  := or ('??' coalesce)?
+or        := and ('or' and)*            -- mixing with `and` needs parentheses
+and       := not ('and' not)*
+not       := 'not' not | compare
+compare   := bitwise (cmp_op bitwise)*  -- chains point one way
+bitwise   := shift (('&' | '^' | '|') shift)*   -- one operator, no arithmetic
+shift     := additive (('<<' | '>>') additive)*  -- no arithmetic operands
+additive  := mult (('+' | '-' | '+%' | '-%' | '+|' | '-|') mult)*
+mult      := unary (('*' | '/' | '//' | '%' | '*%' | '*|') unary)*
+unary     := ('-' | '~' | 'ref' 'mut'? | '^') unary | power
+power     := postfix ('**' unary)?      -- `-x ** y` needs parentheses
+postfix   := primary (call | index | '.' name | '?.' name | '?' | do_block)*
+primary   := literal | string | name | '(' ... ')' | '[' ... ']' | '{' ... '}'
+             | if_expr | match_expr
+
+-- Patterns (parser/patterns.sisu)
+patterns  := pattern (',' pattern)*          -- a bare tuple in let and for
+pattern   := primary_pattern ('|' primary_pattern)*
+primary_pattern := '_' | lower_name | literal | '-' number
+             | Upper_path ('(' pattern_arg (',' pattern_arg)* ')')?
+             | '(' patterns ')' | '[' patterns? ']' | '*' name | '..'
+pattern_arg := name '=' pattern | pattern | '..'
+
+-- Types (parser/types.sisu)
+type      := '!' error_set? | option ('!' error_set?)?
+error_set := '{' option (',' option)* '}' | option
+option    := ref_type '?'*
+ref_type  := 'ref' 'mut'? primary_type | primary_type
+primary_type := path_type | fn_type | tuple_type | '(' type ')' | 'dyn' primary_type
+             | 'ptr' 'mut' primary_type | 'impl' type ('for' type)?
+             | '{' option (',' option)* '}'
+path_type := (name | 'Self' | 'type') ('.' name)* generic_args?
+fn_type   := 'pure'? '(' (type_element (',' type_element)*)? ')' '->' type
+tuple_type := '(' ')' | '(' type_element ',' ')' | '(' type_element (',' type_element)+ ')'
+type_element := (name ':')? type
+generic_args := '[' generic_arg (',' generic_arg)* ']'
+generic_arg := const_expr | integer | type
+```
+
+</details>
+
+The text is stage 1's, from `sisu1 0.18.0`, and covers every form the
+parser reads from `sisu1 0.20.0`; with an older stage 1 or the Rust
+front end the command is D0003.
+
+**Status.** In stage 0, for implementations of Sisu; the proposal does
+not name the command.
+
 ## Commands that are designed
 
 The proposal designs these commands and options, and stage 0 does not
@@ -2564,10 +2783,9 @@ and shows the survivors for a person to choose.
 - `sisu run --profile` samples the run with the platform's profiler.
   Designed ([10](../../proposal/10-tooling.md), "Debugging and
   profiling").
-- `sisu test --fuzz`, `--cover` and `--mutate` run coverage-guided
-  fuzzing, report uncovered regions and run mutation testing on the
-  changed region; `--format` writes TAP or JUnit XML. Designed
-  ([17](../../proposal/17-testing.md)).
+- `sisu test --fuzz` and `--cover` run coverage-guided fuzzing and
+  report uncovered regions; `--format` writes TAP or JUnit XML.
+  Designed ([17](../../proposal/17-testing.md)).
 - `sisu build --target TARGET` cross-compiles, and `--explain-size`
   reports what monomorphisation cost, the copies of each package, beside
   the parts of the executable that stage 0's `--explain-size` gives
@@ -2616,6 +2834,7 @@ a command line can produce, by what they report:
 | D0139 to D0147, [D0148](diagnostics.md#d0148) | `sisu build --native --explain-size`. |
 | D0170 to D0174, D0180 to D0187 | The lines of `sisu check --holes` ([sisu check --holes](#sisu-check---holes)). |
 | D0175 to D0179, [D0190](diagnostics.md#d0190) | The lines of `sisu fix` ([sisu fix](#sisu-fix)). |
+| [D0153](diagnostics.md#d0153) to D0160 | `sisu test --mutate` and `--since` ([sisu test](#sisu-test)). |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |

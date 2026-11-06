@@ -1,8 +1,8 @@
 $ sisu run w0030_unchecked_attribute.sisu
-warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
   --> w0030_unchecked_attribute.sisu:2:2
   |
-2 | @no_alloc
+2 | @no_block
   |  ^^^^^^^^
 
 240

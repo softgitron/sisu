@@ -1,0 +1,6 @@
+$ sisu test --mutate ready.sisu
+test "a cold sauna is not ready" ... ok
+test "a hot sauna is ready" ... ok
+2 passed, 0 failed, 0 blocked
+ready.sisu:5:20: a mutant survived, the boundary changed: `>=` to `>`: every test passes against it, so no test tells the two apart
+mutants: 1 run against the tests, 0 killed and 1 survived

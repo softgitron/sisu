@@ -1,0 +1,6 @@
+$ sisu test --mutate d0153_mutant_survived_fixed.sisu
+test "open from the first hour" ... ok
+test "closed from the closing hour" ... ok
+test "closed in the morning" ... ok
+3 passed, 0 failed, 0 blocked
+mutants: 3 run against the tests, 3 killed and 0 survived

@@ -1,0 +1,13 @@
+# Each test makes its own count, so a test's changes stay its own.
+
+## A count of the sauna's guests, which a test may add to.
+@fixture
+def guests() -> Cell[int]:
+    return Cell.new(0)
+
+test "one guest arrives"(guests: Cell[int]):
+    guests.set(guests.get() + 1)
+    assert guests.get() == 1
+
+test "nobody has arrived yet"(guests: Cell[int]):
+    assert guests.get() == 0

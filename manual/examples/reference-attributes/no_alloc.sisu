@@ -1,0 +1,19 @@
+# `@no_alloc` is checked: a path that panics may allocate, a report not.
+
+## The highest of `readings`, which must not be above 120.
+@no_alloc
+def highest(readings: Array[int, 3]) -> int:
+    var top = readings[0]
+    for i in range(3):
+        top = max(top, readings[i])
+    assert top <= 120, "too hot: {top} degrees"
+    return top
+
+## Writes the highest of `readings` to the log.
+@no_alloc
+def report(readings: Array[int, 3]):
+    print("highest: {highest(readings)}")
+
+def main():
+    let readings: Array[int, 3] = Array.filled(80)
+    report(readings)

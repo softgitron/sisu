@@ -1,6 +1,6 @@
 # The promise kept in the function's comment until a check exists.
 
-## The sum of `readings`, which allocates nothing.
+## The sum of `readings`, which never waits.
 def total(readings: Array[int, 3]) -> int:
     var sum = 0
     for i in range(3):

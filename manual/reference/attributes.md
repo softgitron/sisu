@@ -392,7 +392,7 @@ of the standard library and its declarations.
 | `@repr(c)`, `@repr(u8)` | a struct, an enum | fixes the layout ([The layout of a type](#the-layout-of-a-type)) | partly in stage 0 |
 | `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | in stage 0, natively, but for a struct by value and a pointer to an option of a raw pointer |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
-| `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; accepted with W0030 and not checked in stage 0 |
+| `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; `@no_alloc` checked, the others accepted with W0030 and not checked in stage 0 |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
 | `@deprecated("MESSAGE")`, `@fix_inline` | an item, a field, a variant, a method; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` in stage 0 for a body of one `return` |
 | `@preview("NAME")` | not designed yet; in stage 0 a function, a type, a constant | asks for a feature that is not stable; in stage 0 warns at each use of the item ([Preview features](#preview-features)) | leaning; the item's warning in stage 0 |
@@ -842,14 +842,17 @@ once for the scope, here once for the module
 
 A fixture is a free function that takes nothing; a `@fixture` with a
 parameter, or on a method, is E0281 (`type.fixture-signature`,
-[R17](diagnostics.md#e0281)). A test's parameter that names it gets
+[R17](diagnostics.md#e0281)). Without a scope, a test's parameter that names it gets
 what a call of it returns, made before the test and dropped after it
 ([R15](testing.md#fixtures)).
 
-**Stage 0 differs.** `scope="module"` is accepted and makes the value
-for each test that names it, as a fixture without a scope is: a value
-made once for the module waits for the test runner to keep it between
-tests, which it runs in parallel and in any order.
+With `scope="module"` the value is made once, before the first of the
+module's tests that names it, lent to each of them, which run in turn,
+and dropped after the last; what it returns is `Sync`, E0283
+(`type.module-fixture-sync`, [R17](diagnostics.md#e0283)) otherwise.
+
+**Stage 0 differs.** A native test run makes the value for each test
+that names it, as a fixture without a scope is.
 
 **Status.** In stage 0, with the difference noted; whether the
 attribute is needed at all is open
@@ -1208,11 +1211,61 @@ driver needs ([04](../../proposal/04-memory-and-ownership.md#resource-attributes
   version 0.1; until then `sisu audit --panics` lists the places that
   can panic ([R16](sisu-command.md#sisu-audits-other-reports)).
 
-**Stage 0 differs.** Stage 0 accepts the three attributes and checks
-nothing, and says so at each with W0030 (`resolve.unchecked-attribute`,
-[R17](diagnostics.md#w0030)), so that a program that writes one does
-not take the promise for a check; on a declaration other than a
-function each is W0026, as any misplaced attribute is. The call of
+**Stage 0 differs.** `@no_alloc` is checked on the program's SIR,
+through its calls into their bodies, the standard library's included:
+a statement that makes, grows, copies or boxes a value that owns
+memory, or calls a function that may, is E0282 (`type.no-alloc`,
+[R17](diagnostics.md#e0282)) at the statement, with a note that names
+where the callee allocates. The paths that only panic are exempt, so an
+`assert`'s message may be built:
+
+<!-- file: examples/reference-attributes/no_alloc.sisu -->
+```sisu
+# `@no_alloc` is checked: a path that panics may allocate, a report not.
+
+## The highest of `readings`, which must not be above 120.
+@no_alloc
+def highest(readings: Array[int, 3]) -> int:
+    var top = readings[0]
+    for i in range(3):
+        top = max(top, readings[i])
+    assert top <= 120, "too hot: {top} degrees"
+    return top
+
+## Writes the highest of `readings` to the log.
+@no_alloc
+def report(readings: Array[int, 3]):
+    print("highest: {highest(readings)}")
+
+def main():
+    let readings: Array[int, 3] = Array.filled(80)
+    report(readings)
+```
+
+<!-- output: examples/reference-attributes/no_alloc.console -->
+```console
+$ sisu run no_alloc.sisu
+error[E0282]: `report` is `@no_alloc`, but `fmt.new` may allocate
+  --> no_alloc.sisu:15:11
+   |
+15 |     print("highest: {highest(readings)}")
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+The check differs from 04's in three ways: it runs once on a generic
+function, not at each instantiation, so a call of a trait's method on a
+type parameter is the error at the function; a closure that captures by
+value is taken to allocate, since whether its captures fit in its
+value is the backend's to know; and no collection is free of
+allocation by its allocator, since the allocators are missing
+([R7](ownership.md#allocators)). `@no_block` and `@stack` are accepted
+and checked by nothing, and stage 0 says so at each with W0030
+(`resolve.unchecked-attribute`, [R17](diagnostics.md#w0030)), so that a
+program that writes one does not take the promise for a check; on a
+declaration other than a function each attribute is W0026, as any
+misplaced attribute is. The call of
 the deprecated `old_levels` warns (W0023) with the fix that
 `@fix_inline` gives it ([Deprecation and
 migrations](#deprecation-and-migrations)), and `@float(fast)` keeps the
@@ -1221,7 +1274,6 @@ arithmetic strict, which the permission allows:
 <!-- file: examples/reference-attributes/designed.sisu -->
 ```sisu
 # Designed attributes that stage 0 accepts and does not check.
-@no_alloc
 @no_block
 @stack(max=256)
 def levels(gain: int) -> list[int]:
@@ -1243,28 +1295,22 @@ def main():
 <!-- output: examples/reference-attributes/designed.console -->
 ```console
 $ sisu run designed.sisu
-warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
   --> designed.sisu:2:2
   |
-2 | @no_alloc
-  |  ^^^^^^^^
-
-warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
-  --> designed.sisu:3:2
-  |
-3 | @no_block
+2 | @no_block
   |  ^^^^^^^^
 
 warning[W0030]: `@stack` is accepted and checked by nothing yet, so nothing ensures the function's bound on its stack
-  --> designed.sisu:4:2
+  --> designed.sisu:3:2
   |
-4 | @stack(max=256)
+3 | @stack(max=256)
   |  ^^^^^
 
 warning[W0023]: `old_levels` is deprecated: use `levels`
-  --> designed.sisu:18:13
+  --> designed.sisu:17:13
    |
-18 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
+17 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
    |             ^^^^^^^^^^^^^
   = fix: write what `old_levels` returns in the call's place: `levels(3)`
 
@@ -1655,10 +1701,10 @@ idea for later, and `@inline` has no design.
 | [E0266](diagnostics.md#e0266), W0006, E0303 | `resolve.bad-cfg`, `resolve.unknown-feature`, `type.unknown-field` | [Conditional compilation](#conditional-compilation) |
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
-| [E0281](diagnostics.md#e0281), E0702 | `type.fixture-signature`, `type.test-signature` | [Fixtures](#fixtures) |
+| [E0281](diagnostics.md#e0281), [E0283](diagnostics.md#e0283), E0702 | `type.fixture-signature`, `type.module-fixture-sync`, `type.test-signature` | [Fixtures](#fixtures) |
 | [E0989](diagnostics.md#e0989), [E0991](diagnostics.md#e0991), [D0103](diagnostics.md#d0103) | `unsafe.export-signature`, `unsafe.export-not-c`, `native.unsupported` | [Exported functions](#exported-functions) |
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
-| [W0030](diagnostics.md#w0030) | `resolve.unchecked-attribute` | [Resource limits](#resource-limits) |
+| [E0282](diagnostics.md#e0282), [W0030](diagnostics.md#w0030) | `type.no-alloc`, `resolve.unchecked-attribute` | [Resource limits](#resource-limits) |
 | [E0448](diagnostics.md#e0448) | `resolve.float-attribute` | [Fast floating point](#fast-floating-point) |
 | [W0023](diagnostics.md#w0023), [W0025](diagnostics.md#w0025), [W0033](diagnostics.md#w0033) | `type.deprecated`, `type.deprecated-plain`, `type.fix-inline-body` | [Deprecation and migrations](#deprecation-and-migrations) |
 | [W0028](diagnostics.md#w0028), [W0029](diagnostics.md#w0029) | `type.preview`, `type.preview-plain` | [Preview features](#preview-features) |

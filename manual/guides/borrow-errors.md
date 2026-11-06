@@ -196,4 +196,7 @@ explain-borrow` and `--defer-borrow` are tools of the experiment
 may change. Both run on stage 1, from its twenty-second round, and on
 the Rust front end with `--front-end=rust`; so does `sisu test
 --defer-borrow`, which runs a rejected program's tests under the
-monitor.
+monitor. From its twenty-fifth round stage 1 also says in which
+function each deferred error stands, and gives a borrow's start and
+last use as ranges for the editor; the driver uses both from stage 0's
+next round, so nothing this guide shows changes.

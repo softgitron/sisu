@@ -1,0 +1,13 @@
+# A mix that makes a list of the scaled samples, which `@no_alloc` refuses.
+
+## Adds `voice`, scaled by `gain`, into `out`.
+@no_alloc
+def mix[const N: int](mut out: Array[f32, N], voice: Array[f32, N], gain: f32):
+    let scaled = [voice[i] * gain for i in range(N)]
+    for i in range(N):
+        out[i] = out[i] + scaled[i]
+
+def main():
+    var out: Array[f32, 2] = Array.filled(0.5f32)
+    mix(mut out, Array.filled(0.25f32), 2.0)
+    print(out[0])

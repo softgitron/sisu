@@ -1,0 +1,31 @@
+$ sisu test --mutate tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
+test "doubles a number" ... ok
+test "doubles (-1, -2)" ... ok
+test "doubles (-3, -5)" ... FAILED
+test "halves a number" ... blocked by todo("halve")
+test "large numbers/doubles a large number" ... ok
+
+test "doubles (-3, -5)" ... FAILED
+panic: assertion failed: double(x) == y
+  left:  -6
+  right: -5
+  at test "doubles (-3, -5)" (tests.sisu:12:5)
+replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
+
+test "halves a number" ... blocked by todo("halve")
+what the test printed:
+  in scope at the typed hole `todo("halve")`:
+    x = 42
+
+3 passed, 1 failed, 1 blocked
+error[D0157]: the mutants were not run: the tests fail on the program itself
+$ sisu test --since HEAD tests.sisu
+error[D0160]: `--since REV` names the changed region of `--mutate`; it goes with `--mutate`
+$ sisu test --mutate --native tests.sisu
+error[D0159]: `--mutate` runs the tests against each mutant of the program; it does not combine with `--native`

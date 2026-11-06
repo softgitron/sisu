@@ -1,0 +1,17 @@
+# `@no_alloc` is checked through the functions the function calls.
+
+## The samples, made louder by `gain`.
+def louder(samples: list[f32], gain: f32) -> list[f32]:
+    return [s * gain for s in samples]
+
+## Fills `out` with the first samples, made louder by `gain`.
+@no_alloc
+def play(mut out: Array[f32, 4], samples: list[f32], gain: f32):
+    let loud = louder(samples, gain)
+    for i in range(4):
+        out[i] = loud[i]
+
+def main():
+    var out: Array[f32, 4] = Array.filled(0.0f32)
+    play(mut out, [0.5, 0.25, 0.0, -0.25], 2.0)
+    print(out[0])

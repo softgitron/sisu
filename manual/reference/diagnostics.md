@@ -1590,7 +1590,7 @@ Shown in [chapter 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
 
 ## Names and declarations
 
-Codes E0200 to E0281. Name resolution finds what each name means and
+Codes E0200 to E0283. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -4015,9 +4015,9 @@ that takes nothing.
 
 A test's parameter that names a `@fixture` function gets what a call of
 it returns, and the test gives the call no arguments, so a fixture with
-a parameter, or a method marked `@fixture`, could never be called. A
-test that names it is E0702 as well, a parameter the runner cannot
-give:
+a parameter, or a method marked `@fixture`, could never be called. It
+is the one error: a test that names such a fixture is not E0702 as
+well:
 
 <!-- file: examples/reference-diagnostics/e0281_fixture_signature.sisu -->
 ```sisu
@@ -4039,13 +4039,7 @@ error[E0281]: `readings` is a `@fixture`, which a test names as a parameter to r
 2 | @fixture
   |  ^^^^^^^
 
-error[E0702]: a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`)
-  --> e0281_fixture_signature.sisu:6:23
-  |
-6 | test "three readings"(readings: list[int]):
-  |                       ^^^^^^^^^^^^^^^^^^^
-
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)
 ```
 
 Make the value from nothing, with what it needs written in the body, or
@@ -4070,6 +4064,150 @@ test "three readings" ... ok
 ```
 
 Shown in [chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for).
+
+### E0282
+
+`type.no-alloc`: `{name}` is `@no_alloc`, but {what} may allocate.
+
+A function marked `@no_alloc` makes, grows, copies or boxes a value
+that owns memory, or calls a function that may
+([R14](attributes.md#resource-limits)). The check follows each call
+into its body, the standard library's included, and the note
+`type.no-alloc-through` names where the callee allocates. A call
+through a function value, or of a trait's method on a type that only
+the run knows, is the error too, with the note `type.no-alloc-unknown`.
+A path that only panics is exempt:
+
+<!-- file: examples/reference-diagnostics/e0282_no_alloc.sisu -->
+```sisu
+# `@no_alloc` is checked through the functions the function calls.
+
+## The samples, made louder by `gain`.
+def louder(samples: list[f32], gain: f32) -> list[f32]:
+    return [s * gain for s in samples]
+
+## Fills `out` with the first samples, made louder by `gain`.
+@no_alloc
+def play(mut out: Array[f32, 4], samples: list[f32], gain: f32):
+    let loud = louder(samples, gain)
+    for i in range(4):
+        out[i] = loud[i]
+
+def main():
+    var out: Array[f32, 4] = Array.filled(0.0f32)
+    play(mut out, [0.5, 0.25, 0.0, -0.25], 2.0)
+    print(out[0])
+```
+
+<!-- output: examples/reference-diagnostics/e0282_no_alloc.console -->
+```console
+$ sisu run e0282_no_alloc.sisu
+error[E0282]: `play` is `@no_alloc`, but `louder` may allocate
+  --> e0282_no_alloc.sisu:10:16
+   |
+10 |     let loud = louder(samples, gain)
+   |                ^^^^^^^^^^^^^^^^^^^^^
+  = note: `louder` calls `list.new`, at e0282_no_alloc.sisu:5:12
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+The run ends with D0021, as for the ownership checker's errors, and
+its offer does not help here: under `--defer-borrow` the program runs,
+and the account calls the allocation a candidate false positive. Do the
+work in place, in memory the caller gives, or leave the allocation
+where the attribute does not reach:
+
+<!-- file: examples/reference-diagnostics/e0282_no_alloc_fixed.sisu -->
+```sisu
+# Each sample is scaled where it is written, so nothing is allocated.
+
+## Fills `out` with the first samples, made louder by `gain`.
+@no_alloc
+def play(mut out: Array[f32, 4], samples: list[f32], gain: f32):
+    for i in range(4):
+        out[i] = samples[i] * gain
+
+def main():
+    var out: Array[f32, 4] = Array.filled(0.0f32)
+    play(mut out, [0.5, 0.25, 0.0, -0.25], 2.0)
+    print(out[0])
+```
+
+<!-- output: examples/reference-diagnostics/e0282_no_alloc_fixed.out -->
+```text
+1.0
+```
+
+Shown in [R14](attributes.md#resource-limits) and the tutorial's
+[chapter 27](../tutorial/27-systems.md#exercise-273-an-audio-callback-without-allocation).
+
+### E0283
+
+`type.module-fixture-sync`: `{name}` is a fixture of its module, whose
+tests share its value while they run at once, so what it returns must
+be `Sync`, and `{ty}` is not.
+
+A `@fixture(scope="module")` makes one value for the tests of its
+module that name it ([R15](testing.md#fixtures)), so the value must be
+one that tests may share: a `Cell`, which changes behind a shared
+borrow, is not `Sync` ([R9](concurrency.md)). The error stands at the
+attribute:
+
+<!-- file: examples/reference-diagnostics/e0283_module_fixture_sync.sisu -->
+```sisu
+# A module's fixture is shared by its tests, so its value is `Sync`.
+
+## A count of the sauna's guests, which a test may add to.
+@fixture(scope="module")
+def guests() -> Cell[int]:
+    return Cell.new(0)
+
+test "one guest arrives"(guests: Cell[int]):
+    guests.set(guests.get() + 1)
+    assert guests.get() == 1
+```
+
+<!-- output: examples/reference-diagnostics/e0283_module_fixture_sync.console -->
+```console
+$ sisu test e0283_module_fixture_sync.sisu
+error[E0283]: `guests` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `Cell[int]` is not
+  --> e0283_module_fixture_sync.sisu:4:2
+  |
+4 | @fixture(scope="module")
+  |  ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Leave out the scope, so that each test gets a value of its own, or
+return a value that the tests only read:
+
+<!-- file: examples/reference-diagnostics/e0283_module_fixture_sync_fixed.sisu -->
+```sisu
+# Each test makes its own count, so a test's changes stay its own.
+
+## A count of the sauna's guests, which a test may add to.
+@fixture
+def guests() -> Cell[int]:
+    return Cell.new(0)
+
+test "one guest arrives"(guests: Cell[int]):
+    guests.set(guests.get() + 1)
+    assert guests.get() == 1
+
+test "nobody has arrived yet"(guests: Cell[int]):
+    assert guests.get() == 0
+```
+
+<!-- output: examples/reference-diagnostics/e0283_module_fixture_sync_fixed.test -->
+```text
+test "one guest arrives" ... ok
+test "nobody has arrived yet" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+Example: [R15](testing.md#fixtures).
 
 ## Types
 
@@ -11208,15 +11346,16 @@ Shown in [R14](attributes.md#preview-features).
 `resolve.unchecked-attribute`: `@{name}` is accepted and checked by
 nothing yet, so nothing ensures {what}.
 
-`@no_alloc`, `@no_block` and `@stack(...)` on a function promise what
-the compiler is to check ([R14](attributes.md#resource-limits)), and
-no check of them exists yet, so each warns at its name that the promise
-is the program's own to keep.
+`@no_block` and `@stack(...)` on a function promise what the compiler
+is to check ([R14](attributes.md#resource-limits)), and no check of
+them exists yet, so each warns at its name that the promise is the
+program's own to keep. `@no_alloc` is checked, and a function that
+breaks it is [E0282](#e0282).
 
 <!-- file: examples/reference-diagnostics/w0030_unchecked_attribute.sisu -->
 ```sisu
-# A promise that the function allocates nothing, which nothing checks.
-@no_alloc
+# A promise that the function never waits, which nothing checks.
+@no_block
 def total(readings: Array[int, 3]) -> int:
     var sum = 0
     for i in range(3):
@@ -11231,10 +11370,10 @@ def main():
 <!-- output: examples/reference-diagnostics/w0030_unchecked_attribute.console -->
 ```console
 $ sisu run w0030_unchecked_attribute.sisu
-warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
   --> w0030_unchecked_attribute.sisu:2:2
   |
-2 | @no_alloc
+2 | @no_block
   |  ^^^^^^^^
 
 240
@@ -11248,7 +11387,7 @@ comment.
 ```sisu
 # The promise kept in the function's comment until a check exists.
 
-## The sum of `readings`, which allocates nothing.
+## The sum of `readings`, which never waits.
 def total(readings: Array[int, 3]) -> int:
     var sum = 0
     for i in range(3):
@@ -12896,6 +13035,77 @@ and prints `ok`.
 
 Example: [chapter 19](../tutorial/19-testing.md#what-sisu-test-remembers).
 
+### D0153
+
+`cli.mutant-survived`: {at}: a mutant survived, {what}: every test
+passes against it, so no test tells the two apart.
+
+`sisu test --mutate` ran the tests against a copy of the program with
+one small change at `{at}`, a mutant, and every test passed
+([R15](testing.md#mutation-testing)). Each mutant that survives is
+printed, then the count (D0154). It is a suggestion, not an error: the
+status is the tests' own. Here no test is at either end of the hours:
+
+<!-- file: examples/reference-diagnostics/d0153_mutant_survived.sisu -->
+```sisu
+# Tests that pass whether the hours start at 16 or at 17.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    return hour >= 16 and hour < 22
+
+test "open in the evening":
+    assert open_at(18)
+
+test "closed in the morning":
+    assert not open_at(10)
+```
+
+<!-- output: examples/reference-diagnostics/d0153_mutant_survived.console -->
+```console
+$ sisu test --mutate d0153_mutant_survived.sisu
+test "open in the evening" ... ok
+test "closed in the morning" ... ok
+2 passed, 0 failed, 0 blocked
+d0153_mutant_survived.sisu:5:17: a mutant survived, the boundary changed: `>=` to `>`: every test passes against it, so no test tells the two apart
+d0153_mutant_survived.sisu:5:32: a mutant survived, the boundary changed: `<` to `<=`: every test passes against it, so no test tells the two apart
+mutants: 3 run against the tests, 1 killed and 2 survived
+```
+
+Add a test that the change makes fail, here one at each end. A mutant
+that behaves as the program does in every case cannot be killed, and
+is left as it is:
+
+<!-- file: examples/reference-diagnostics/d0153_mutant_survived_fixed.sisu -->
+```sisu
+# Tests at the first hour and at the closing hour kill every mutant.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    return hour >= 16 and hour < 22
+
+test "open from the first hour":
+    assert open_at(16)
+
+test "closed from the closing hour":
+    assert not open_at(22)
+
+test "closed in the morning":
+    assert not open_at(10)
+```
+
+<!-- output: examples/reference-diagnostics/d0153_mutant_survived_fixed.console -->
+```console
+$ sisu test --mutate d0153_mutant_survived_fixed.sisu
+test "open from the first hour" ... ok
+test "closed from the closing hour" ... ok
+test "closed in the morning" ... ok
+3 passed, 0 failed, 0 blocked
+mutants: 3 run against the tests, 3 killed and 0 survived
+```
+
+Shown in [chapter 19](../tutorial/19-testing.md#testing-the-tests).
+
 ### D0190
 
 `cli.fix-errors-left`: `{file}` does not check after the fixes: errors
@@ -13107,6 +13317,8 @@ it. `sisu explain CODE` prints the same line.
 | [E0279](#e0279) | `resolve.plain-padding` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding between `{before}` and `{after}`, at offsets {start} to {end}, and a plain type has none (22) |
 | [E0280](#e0280) | `resolve.plain-padding-end` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding after `{before}`, at offsets {start} to {end}, the end of the struct, and a plain type has none (22) |
 | [E0281](#e0281) | `type.fixture-signature` | `{name}` is a `@fixture`, which a test names as a parameter to receive what it returns, so it is a free function that takes nothing |
+| [E0282](#e0282) | `type.no-alloc` | `{name}` is `@no_alloc`, but {what} may allocate |
+| [E0283](#e0283) | `type.module-fixture-sync` | `{name}` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `{ty}` is not |
 
 ### Types, every code
 
@@ -13291,7 +13503,7 @@ it. `sisu explain CODE` prints the same line.
 |---|---|---|
 | E0700 | `cap.not-shareable` | `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}` |
 | E0701 | `cap.internal` | `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given |
-| E0702 | `type.test-signature` | a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`) |
+| E0702 | `type.test-signature` | a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`), or the values of its module's `@fixture` functions, each named after its fixture (`test "name"(schema: Schema):`) |
 | [E0703](#e0703) | `cap.untrusted` | the package `{package}` is not trusted with {what}; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it |
 
 ### Contracts, every code
@@ -13698,6 +13910,14 @@ it. `sisu explain CODE` prints the same line.
 | [D0150](#d0150) | `cli.token-package-run` | the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it |
 | [D0151](#d0151) | `cli.command-usage` | usage: sisu {form}  {about} |
 | [D0152](#d0152) | `cli.test-cached` | ok (cached) |
+| [D0153](#d0153) | `cli.mutant-survived` | {at}: a mutant survived, {what}: every test passes against it, so no test tells the two apart |
+| D0154 | `cli.mutate-summary` | mutants: {count} run against the tests, {killed} killed and {survived} survived |
+| D0155 | `cli.mutate-stillborn` | mutants that do not check, not run: {count} |
+| D0156 | `cli.mutate-outside` | mutants outside the lines changed since `{since}`, not run: {count} |
+| D0157 | `cli.mutate-tests-fail` | the mutants were not run: the tests fail on the program itself |
+| D0158 | `cli.mutate-no-region` | the lines changed since `{since}` could not be read from git: {reason} |
+| D0159 | `cli.mutate-alone` | `--mutate` runs the tests against each mutant of the program; it does not combine with `{option}` |
+| D0160 | `cli.since-without-mutate` | `--since REV` names the changed region of `--mutate`; it goes with `--mutate` |
 | D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
 | D0171 | `cli.hole-scope` | in scope: {bindings} |
 | D0172 | `cli.hole-scope-none` | nothing is in scope |

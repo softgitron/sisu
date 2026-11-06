@@ -598,18 +598,31 @@ fails, so its `Drop` is the teardown, and what it prints is shown under
 the test's failure ([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
 shows a run). A parameter whose type is not what the fixture returns
 is E0300; a `@fixture` with a parameter, or on a method, is E0281
-(`type.fixture-signature`, [R17](diagnostics.md#e0281)), and a test
-that names it E0702.
+(`type.fixture-signature`, [R17](diagnostics.md#e0281)), the one error
+of such a fixture, which a test's parameter that names it does not make
+E0702 as well.
 
-**Stage 0 differs.** 17's `scope="module"` is accepted and makes the
-value for each test that names it: a value made once for a module's
-tests needs the runner to keep it between tests, which it runs in
-parallel and in any order. Decision 1147 says what that takes: the
-runner makes the value before the first of the module's tests that
-names it, lends it to each as a `ref T`, with `T: Sync` checked, runs
-those tests in turn in one interpreter, and drops the value after the
-last, failed or not; stage 1 keeps its lowering of a value per test
-until the runner reads the fixtures from each test's line of the SIR.
+`@fixture(scope="module")` makes one value for the module's tests that
+name it ([17](../../proposal/17-testing.md#fixtures)). The runner calls
+the fixture before the first of them, lends the value to each as a
+`ref T`, runs those tests in turn, in the order they are declared and
+beside the other tests, which run in parallel, and drops the value
+after the last, failed or not: its `Drop` runs once, and what the
+fixture and the drop print is the output of the first test and of the
+last ([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
+shows a run). A replay token runs its test alone, with the fixture
+called before it. A fixture that panics fails the test that needed it.
+Since the tests share the value, what the fixture returns must be
+`Sync`: E0283 (`type.module-fixture-sync`,
+[R17](diagnostics.md#e0283)) at the attribute otherwise. The runner
+reads which tests share a fixture from the SIR of stage 1's `sir
+--tests --module-fixtures`, from `sisu1 0.20.0`, whose line of each
+test names its fixtures, `fixture menu menu module 0` for a module's
+fixture lent as the test's first parameter.
+
+**Stage 0 differs.** A native test run, and a run with a stage 1 older
+than 0.20.0, make a module's fixture for each test that names it, as a
+fixture without a scope is made.
 17's `Expectation`, an assertion of a
 library's own over the argument expression's tree, waits for
 compile-time expressions, which reflection does not give yet
@@ -1011,28 +1024,98 @@ takes the real `System` is never cached
 a run of each).
 
 **Stage 0 differs.** 17's machine-readable output (JSON, TAP, JUnit XML)
-and the reports of coverage and mutation testing are designed
-([R16](sisu-command.md#options-of-the-existing-commands)). Of `sisu
-test --mutate`, stage 1 does the front end's half from `sisu1 0.19.0`:
-it prints each mutant of the program's own functions and methods, a
-comparison's boundary moved (`<` for `<=`), an operator flipped (`==`
-for `!=`, `+` for `-`, `and` for `or`, `True` for `False`), a negation
-removed, or a one-line call or assignment removed, leaving the calls
-of `print` and of `log` alone, each with the place it changed. The
-runner's half, which keeps the mutants in the changed region, runs
-against each the tests that cover its line, and reports each mutant
-that every test let pass, is not in stage 0 yet, so `--mutate` is
-D0009.
+and the report of coverage are designed
+([R16](sisu-command.md#options-of-the-existing-commands)).
 
 **Status.** In stage 0, except the machine-readable output and the
-reports of coverage and mutation testing.
+report of coverage.
+
+## Mutation testing
+
+`sisu test --mutate` tests the tests. It runs them, then makes mutants
+of the program, copies of it with one small change each, and runs the
+tests against every mutant: a mutant that some test fails on is killed,
+and one that every test passes survived, a change no test can tell from
+the program. Each survivor is printed by its place and its change
+(D0153, [R17](diagnostics.md#d0153)), then the counts (D0154):
+
+<!-- file: examples/reference-testing/turns.sisu -->
+```sisu
+# The mutants that `sisu test --mutate` makes, and the tests they pass.
+
+## The minutes of a sauna turn for `guests`, longer when it is cold.
+def minutes(guests: int, cold: bool) -> int:
+    let base = guests * 5 + 10
+    if cold and base < 30:
+        return base + 5
+    return min(base, 30)
+
+test "a turn for two":
+    assert minutes(2, False) == 20
+
+test "a cold turn for two":
+    assert minutes(2, True) == 25
+```
+
+<!-- output: examples/reference-testing/turns.console -->
+```console
+$ sisu test --mutate turns.sisu
+test "a turn for two" ... ok
+test "a cold turn for two" ... ok
+2 passed, 0 failed, 0 blocked
+turns.sisu:6:22: a mutant survived, the boundary changed: `<` to `<=`: every test passes against it, so no test tells the two apart
+mutants: 4 run against the tests, 3 killed and 1 survived
+```
+
+No test has a cold turn of four guests, whose 30 minutes the change of
+`<` to `<=` would make 35. A mutant is made in the program's own
+functions and methods: a comparison's boundary moved (`<` for `<=`), an
+operator flipped (`==` for `!=`, `+` for `-`, `and` for `or`, `True`
+for `False`), a negation removed, or a one-line call or assignment
+removed, leaving the calls of `print` and of `log` alone; the tests,
+benchmarks, fixtures and compile-time code are not mutated. A mutant
+that does not check is counted and not run (D0155). Each runs in the
+interpreter, quietly, with ten times the steps the tests took and a
+million more, so a mutant that loops is killed.
+
+- `--since REV` keeps the mutants on the lines that `git diff` says
+  changed since the revision `REV`, and counts the others (D0156); a
+  git that cannot answer is D0158, and `--since` without `--mutate`
+  D0160.
+- Tests that fail on the program itself stop the mode before any
+  mutant runs (D0157).
+- The survivors are suggestions, not a gate: the status is the tests'
+  own. A mutant that does what the program does on every input, such as
+  `>=` for `>` where both branches give the same value, cannot be
+  killed.
+- `--mutate` does not combine with `--native`, `--release`,
+  `--defer-borrow`, `--sim`, `--update`, `--std`, `--replay`,
+  `--explore`, `--from-sir` or `--scheduler` (D0159).
+
+The mutants are stage 1's, from `sisu1 0.19.0` (its `sir --tests
+--mutants`), and the runner's from stage 0's twenty-third round; with
+an older stage 1 or the Rust front end, `--mutate` is D0009.
+
+**Stage 0 differs.** 17 runs against each mutant the tests that cover
+its line; stage 0 runs every selected test against each, since the
+runner does not know yet which tests reach a line. Stage 1 gives the
+front end's half of `--cover` from `sisu1 0.20.0`: its `sir --tests
+--cover` prints after the SIR a table of the program's regions, each
+statement and each branch (the body of an `if`'s branch, a loop, an
+arm, a `defer`, a `with` or an `unsafe:`) by its span, with the SIR
+statement that starts it, so that the runner can count the statements
+each test runs and report the regions no test reached. That runner,
+and so `sisu test --cover`, is still to come.
+
+**Status.** In stage 0 (17, "Coverage and mutation"), with the
+differences noted.
 
 ## Diagnostics of this page
 
 | Code | Identifier | Section |
 |---|---|---|
 | E0381, E0702, [E0807](diagnostics.md#e0807), [E0132](diagnostics.md#e0132) | `type.return-in-test`, `type.test-signature`, `contract.not-in-test`, `parse.interpolated-name` | [The forms of a test](#the-forms-of-a-test) |
-| [E0281](diagnostics.md#e0281) | `type.fixture-signature` | [Fixtures](#fixtures) |
+| [E0281](diagnostics.md#e0281), [E0283](diagnostics.md#e0283) | `type.fixture-signature`, `type.module-fixture-sync` | [Fixtures](#fixtures) |
 | [E0255](diagnostics.md#e0255) | `resolve.private-item` | [Black-box tests](#black-box-tests) |
 | [R0006](diagnostics.md#r0006), [R0154](diagnostics.md#r0154), R0155, E0379 | `panic.assert`, `run.expect-failed`, `run.expect-failed-message`, `type.assert-message` | [Assertions](#assertions) |
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |

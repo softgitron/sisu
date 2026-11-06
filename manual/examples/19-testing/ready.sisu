@@ -1,0 +1,11 @@
+# `sisu test --mutate` changes the code and runs the tests again.
+
+## Whether a sauna at `celsius` degrees is warm enough to bathe in.
+def ready(celsius: int) -> bool:
+    return celsius >= 60
+
+test "a cold sauna is not ready":
+    assert not ready(20)
+
+test "a hot sauna is ready":
+    assert ready(80)

@@ -1,0 +1,14 @@
+# The mutants that `sisu test --mutate` makes, and the tests they pass.
+
+## The minutes of a sauna turn for `guests`, longer when it is cold.
+def minutes(guests: int, cold: bool) -> int:
+    let base = guests * 5 + 10
+    if cold and base < 30:
+        return base + 5
+    return min(base, 30)
+
+test "a turn for two":
+    assert minutes(2, False) == 20
+
+test "a cold turn for two":
+    assert minutes(2, True) == 25

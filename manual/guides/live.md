@@ -160,4 +160,9 @@ change, on another machine and without the editor.
 
 **Status.** In stage 0, in the interpreter (D-053, D-068): `--watch`
 does not combine with `--native` (D0109), and an executable built by
-`sisu build --native` runs the code it was built with.
+`sisu build --native` runs the code it was built with. Each save is
+built by stage 1, from `sisu1 0.17.0`, the front end that built the
+run, and its replay too, from the files the log holds; a save takes
+about 0.07 to 0.13 seconds with a release build of `sisu`, where the
+Rust front end, which redoes only what changed, took 0.03 to 0.07
+([R16](../reference/sisu-command.md#watching-for-saves---watch)).

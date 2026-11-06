@@ -1,1 +1,1 @@
-2:2-2:10 W0030 resolve.unchecked-attribute name="no_alloc" what="that the function does not allocate"
+2:2-2:10 W0030 resolve.unchecked-attribute name="no_block" what="that the function does not block"

@@ -1,0 +1,3 @@
+test "a bun costs 280" ... ok
+test "tea is not on the menu" ... ok
+2 passed, 0 failed, 0 blocked

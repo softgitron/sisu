@@ -1,0 +1,9 @@
+$ sisu run e0282_no_alloc.sisu
+error[E0282]: `play` is `@no_alloc`, but `louder` may allocate
+  --> e0282_no_alloc.sisu:10:16
+   |
+10 |     let loud = louder(samples, gain)
+   |                ^^^^^^^^^^^^^^^^^^^^^
+  = note: `louder` calls `list.new`, at e0282_no_alloc.sisu:5:12
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

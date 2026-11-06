@@ -447,7 +447,8 @@ text it writes; the language server applies it.
 ### Fixture
 
 A value that a test needs, made by a function the test calls, or by a
-`@fixture` function that the test names as a parameter.
+`@fixture` function that the test names as a parameter, for each test
+or, with `scope="module"`, once for the module's tests.
 [Chapter 19](../tutorial/19-testing.md); [R15](testing.md#fixtures).
 
 ### Format spec
@@ -709,6 +710,14 @@ A type marked `@must_consume`, each of whose values must end in an
 `own` parameter, usually a method such as `close(own self)`.
 [Chapter 13](../tutorial/13-sharing.md);
 [R7](ownership.md#values-that-must-be-consumed).
+
+### Mutant
+
+A copy of the program with one small change, such as `>=` made `>`,
+that `sisu test --mutate` runs the tests against; one that every test
+passes survived, and shows a change that no test notices.
+[Chapter 19](../tutorial/19-testing.md#testing-the-tests);
+[R15](testing.md#mutation-testing).
 
 ### Mutex
 

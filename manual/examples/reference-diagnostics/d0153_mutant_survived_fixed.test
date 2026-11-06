@@ -1,0 +1,4 @@
+test "open from the first hour" ... ok
+test "closed from the closing hour" ... ok
+test "closed in the morning" ... ok
+3 passed, 0 failed, 0 blocked

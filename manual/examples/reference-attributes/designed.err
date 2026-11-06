@@ -1,25 +1,19 @@
-warning[W0030]: `@no_alloc` is accepted and checked by nothing yet, so nothing ensures that the function does not allocate
+warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
   --> designed.sisu:2:2
   |
-2 | @no_alloc
-  |  ^^^^^^^^
-
-warning[W0030]: `@no_block` is accepted and checked by nothing yet, so nothing ensures that the function does not block
-  --> designed.sisu:3:2
-  |
-3 | @no_block
+2 | @no_block
   |  ^^^^^^^^
 
 warning[W0030]: `@stack` is accepted and checked by nothing yet, so nothing ensures the function's bound on its stack
-  --> designed.sisu:4:2
+  --> designed.sisu:3:2
   |
-4 | @stack(max=256)
+3 | @stack(max=256)
   |  ^^^^^
 
 warning[W0023]: `old_levels` is deprecated: use `levels`
-  --> designed.sisu:18:13
+  --> designed.sisu:17:13
    |
-18 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
+17 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
    |             ^^^^^^^^^^^^^
   = fix: write what `old_levels` returns in the call's place: `levels(3)`
 

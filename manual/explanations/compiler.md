@@ -251,11 +251,13 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
-  against it. Meanwhile the few commands that stage 1 does not serve
-  yet, such as `sisu run --watch`, run the Rust front end, which knows
-  none of the rules added since it was frozen; the language server's
-  worksheets and `sisu test --defer-borrow` and `--std` left that list
-  in stage 0's twenty-second round. A program's
+  against it. Meanwhile what stage 1 does not do yet runs on the Rust
+  front end, which knows none of the rules added since it was frozen:
+  `sisu test --std --defer-borrow` and building stage 1 itself. The
+  language server's worksheets and `sisu test --defer-borrow` and
+  `--std` left that list in stage 0's twenty-second round, and `sisu
+  run --watch`, whose saves stage 1 builds again, in its twenty-third.
+  A program's
   transcripts left that list when stage 1's `sir --tests` came to keep
   the world they run in; until then a transcript of a program that used
   a newer rule failed with the Rust front end's errors (D0128).
@@ -264,7 +266,10 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
   beside stage 1 rather than after it.
 - **The interpreter's tools have no native counterpart yet.** The
   ownership monitor, the counterexample mode, record and replay and hot
-  replacement run on the interpreter only.
+  replacement run on the interpreter only, so a native run is not yet
+  the default of `sisu run`: it waits for the native runtime's
+  capability log and replay and for a cache of built executables,
+  without which a small program pays its build at each run.
 - **Self-hosting freezes early mistakes.** A compiler written in its own
   language must keep compiling through every change of the language,
   which makes early design errors expensive to undo; editions and the

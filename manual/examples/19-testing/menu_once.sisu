@@ -1,0 +1,22 @@
+# A fixture of the module: its tests share one value, made once.
+
+## A menu of prices in cents, which says when it is put away.
+struct Menu:
+    prices: dict[String, int]
+
+impl Drop for Menu:
+    def drop(mut self):
+        print("menu put away")
+
+@fixture(scope="module")
+def menu() -> Menu:
+    print("menu set up")
+    return Menu(prices={"coffee".to_string(): 350, "bun".to_string(): 280})
+
+test "a bun costs 280"(menu: Menu):
+    print("looking for a bun")
+    assert menu.prices.get("bun").copied() == Some(280)
+
+test "tea is not on the menu"(menu: Menu):
+    print("looking for tea")
+    assert menu.prices.get("tea").copied() == None

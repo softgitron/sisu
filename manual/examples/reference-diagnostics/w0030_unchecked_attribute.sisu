@@ -1,5 +1,5 @@
-# A promise that the function allocates nothing, which nothing checks.
-@no_alloc
+# A promise that the function never waits, which nothing checks.
+@no_block
 def total(readings: Array[int, 3]) -> int:
     var sum = 0
     for i in range(3):

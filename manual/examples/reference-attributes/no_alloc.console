@@ -1,0 +1,8 @@
+$ sisu run no_alloc.sisu
+error[E0282]: `report` is `@no_alloc`, but `fmt.new` may allocate
+  --> no_alloc.sisu:15:11
+   |
+15 |     print("highest: {highest(readings)}")
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

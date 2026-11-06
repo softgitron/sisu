@@ -24,13 +24,13 @@ lexer and never fails ([02](../../proposal/02-syntax.md#grammar-notes)).
 Whether this page becomes part of a specification is open (Q-62).
 
 Stage 1's parser keeps a grammar of its own in the `##!` comments of
-its modules, which `sisu1 grammar`, stage 1's command, prints in one
-text from `sisu1 0.18.0`; `sisu` does not offer the command (D0003).
-This page agrees with that text, rule for rule, and says more where
-the parser reads more than the comments name: an attribute's dotted
-name, an error set's generic parameters, the members of an enum or an
-error set beside its variants, the forms of a type, a constant of a
-trait without its value. Each of those was tried against the parser.
+its modules, each production beside the function that reads it, which
+[`sisu grammar`](sisu-command.md#sisu-grammar) prints in one text.
+This page agrees with that text, rule for rule, as `sisu grammar`
+prints it from `sisu1 0.20.0`, and names some rules apart that the text
+writes inline (`cases`, `borrowed`, `bounds`, `module_path`); it was
+checked against the text by hand, since a page's rules are notation
+that no command runs.
 
 ## The notation
 
@@ -240,12 +240,13 @@ impl_def      := 'unsafe'? 'impl' generic_params? type ('for' type)? ':'
                  NEWLINE INDENT member+ DEDENT
 extern_block  := 'extern' string? ':' NEWLINE INDENT member+ DEDENT
 member        := attribute* visibility? ('pass' NEWLINE | item_body | trait_const)
-trait_const   := 'const' name ':' type ('=' expr)? NEWLINE
+trait_const   := 'const' name (':' type)? ('=' expr)? NEWLINE
 ```
 
 A trait's parentheses list its supertraits. Its members are methods,
 with or without a body, `type` declarations of associated types,
-constants with or without a value, and a `comptime def derive`; an impl's are methods and `type NAME = T`
+constants with or without a value (without a type, E0219), and a
+`comptime def derive`; an impl's are methods and `type NAME = T`
 ([R3](declarations.md#traits), [R3](declarations.md#impls)). An
 `extern` block's string names its ABI, as `"C"`, and its members are
 functions without bodies ([R3](declarations.md#foreign-functions)).

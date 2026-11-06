@@ -1,0 +1,12 @@
+# Each sample is scaled where it is written, so nothing is allocated.
+
+## Fills `out` with the first samples, made louder by `gain`.
+@no_alloc
+def play(mut out: Array[f32, 4], samples: list[f32], gain: f32):
+    for i in range(4):
+        out[i] = samples[i] * gain
+
+def main():
+    var out: Array[f32, 4] = Array.filled(0.0f32)
+    play(mut out, [0.5, 0.25, 0.0, -0.25], 2.0)
+    print(out[0])

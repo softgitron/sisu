@@ -5,10 +5,4 @@ error[E0281]: `readings` is a `@fixture`, which a test names as a parameter to r
 2 | @fixture
   |  ^^^^^^^
 
-error[E0702]: a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`)
-  --> e0281_fixture_signature.sisu:6:23
-  |
-6 | test "three readings"(readings: list[int]):
-  |                       ^^^^^^^^^^^^^^^^^^^
-
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,10 @@
+# A module's fixture is shared by its tests, so its value is `Sync`.
+
+## A count of the sauna's guests, which a test may add to.
+@fixture(scope="module")
+def guests() -> Cell[int]:
+    return Cell.new(0)
+
+test "one guest arrives"(guests: Cell[int]):
+    guests.set(guests.get() + 1)
+    assert guests.get() == 1
