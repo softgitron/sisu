@@ -37,7 +37,10 @@ worksheet through stage 1 too, with `SISU_STAGE1_REPL=1`.
 `cargo test` runs the suite so, with stage 1 as the front end.
 `--front-end=stage1` or `--front-end=rust` asks the executable for that
 front end, through `SISU_FRONT_END` in the empty environment the runner
-gives every command; `--front-end=rust` checks the Rust front end, the
+gives every command (which also holds the runner's own
+`SISU_STAGE1_SERVE`, so that `SISU_STAGE1_SERVE=0` runs the suite with a
+process of stage 1 for each command rather than the driver's server of
+it, decision 980); `--front-end=rust` checks the Rust front end, the
 oracle, against the same files, which CI's `stage1` workflow does, allowed
 to fail, since new rules are written in stage 1 only and the Rust front
 end falls behind (decision 268).

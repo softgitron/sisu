@@ -603,8 +603,12 @@ branches of `cli.rs` go with it:
   the process, its queries kept between edits (the memo), or the
   diagnostics and the program as data. (The capability log and replay of
   a plain run are stage 1's, the log holding the SIR that ran, decision
-  303.) *Pay*: stage 1 as a library of the tools, or a server of its
-  queries the tools ask. **The REPL** (`sisu repl`) and **worksheets**
+  303.) From `sisu1 0.14.0` the language server's diagnostics, hover,
+  definition, references, completion and symbols are stage 1's queries
+  (its R164, decision 983); selection ranges, rename, code actions, inlay
+  hints, inline values and `sisu.explainBorrow` stay the Rust front end's.
+  *Pay*: queries of stage 1 for those, and for hot replacement a program
+  kept between edits. **The REPL** (`sisu repl`) and **worksheets**
   (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
   --worksheet` (`sisu1 0.8.0` and later, decisions 563 and 620), and
   `:why` reads the inputs' trees from its `parse --tree` (decision 621);
@@ -676,15 +680,14 @@ What the driver does around stage 1, because of what its commands are:
   run time prints last: the driver takes stage 1's `error: Failed` off its
   standard error, and `error: Exit(status=N)` too, whose N is the status.
   Stage 1 knows the working directory by `PWD`, which the driver sets.
-- **Stage 1 starts from nothing at every command**: the standard library
-  is resolved again each time (its base), so a small program's `check`
-  takes about 0.55 s, where its `tokens` take 0.02 s and the Rust front
-  end's `check` 55 ms, and the conformance suite takes about three times
-  as long through stage 1 (decision 268).
-  *Pay*: what the memo is for the Rust front end ("The memo is not kept
-  between commands" above), for stage 1: its base kept between commands,
-  which stage 1's `sir --repl-serve` serves from 0.13.0 (its R158) and the
-  driver is to keep one server of it for each working directory (decision 942).
+- **Stage 1's base is kept by a server, but not for `sisu run`**: the
+  driver keeps processes of stage 1's `sir --repl-serve` (its R158) in a
+  server of its own (decision 980), so a two-line `check` takes 0.014 s
+  where it took 0.24 s and the conformance suite 139 s where it took
+  224 s; `sisu run`'s SIR comes from `build --for-run`, which the server
+  does not answer (decision 981), so each run still pays the base, as
+  does `sisu build`. *Pay*: a request of stage 1 that answers the SIR the
+  build hands its backend, with the build's diagnostics.
 - **Tests and benchmarks from stage 1's SIR** (decision 357): `sisu test`
   and `sisu bench` ask stage 1 for `sir --tests` and run its SIR, with the
   program's files for its replay tokens, snapshots and test cache; stage 1

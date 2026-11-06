@@ -3034,6 +3034,14 @@ features `assist.rs` writes:
   million statements, so nothing reaches the world and a loop cannot hold
   the server. The result is kept until the document's text changes.
 
+With stage 1 as the front end, built and 0.14.0 or later, the
+diagnostics, hover, go-to-definition, references, completion and document
+symbols are stage 1's `query` answers instead (its R164; `query.rs`,
+decision 983), each document's text written to a file of the server's own
+for `--text` and the query served by the driver's server of stage 1
+(decision 980); the other features, an older stage 1 and `--front-end=rust`
+keep the answers above.
+
 Documents are synchronised whole. Positions are UTF-16 code units unless
 the client offers UTF-8. A request it does not know is answered
 `MethodNotFound` (-32601).
@@ -3213,7 +3221,13 @@ document describes, the oracle; the other commands (`repl`, `ws`, `lsp`,
 --defer-borrow`, the tests of a program with transcripts, and `run
 --watch`, `--record` and `--defer-borrow`, `check --diary` and `parse
 --shape`) run on it whichever is chosen (port-debt.md, "The Rust front
-end's roles still to replace").
+end's roles still to replace"), but for `lsp`'s questions that stage 1's
+queries answer from 0.14.0 (decision 983), as `eval` is stage 1's alone
+(decision 984). A command that stage 1's `sir --repl-serve` serves (from
+0.13.0: `check`, `sir`, `parse`, `fmt`, `lint`, `doc`, `tokens`, and the
+`sir --tests` of `test` and `bench`) is asked of the driver's server of
+stage 1, which keeps the standard library's base between commands
+(`serve.rs`, decision 980; `SISU_STAGE1_SERVE=0` runs a process for each).
 
 `sisu audit --ownership` is the corpus study's count (18, Phase 3; T1.1
 and T1.2): for each file, one line of data, the file's name and then
@@ -11343,3 +11357,135 @@ benchmarks, a native executable's sizes explained, and what was left**
 925. `std.num` has `BigRatio`, an exact fraction of `BigInt`s, and a
      `Decimal`'s `/` gives one, exactly; `Ratio` keeps its `int` parts.
      Stage 1 decides it (RULES.md, R163).
+
+**Stage 0's eighteenth round: the driver's server of stage 1 for every
+command, the language server and `sisu eval` on stage 1, a module's
+replay token, and what was left** (sections "The query layer and the
+driver", "The language server", "The runtime in Sisu"; D-085, D-086; 08,
+10, 17, 22; decisions 720, 823, 864, 900, 904, 941, 942 and 945; stage 1's
+R158, R164 and R165)
+
+980. The driver keeps a server of stage 1 for every command it serves
+     (decision 942's design, stage 1's R158): a process of the driver,
+     `sisu __stage1-serve SOCKET SISU1` (`serve.rs`), that holds processes
+     of `sisu1 sir --repl-serve` and answers over a Unix socket,
+     `target/stage1/serve/HASH.sock`, its name hashed from the driver's
+     and stage 1's paths, so that a debug and a release driver, or a stage
+     1 given by `SISU_STAGE1`, each have their own. The first command that
+     finds none starts it, under a lock beside the socket so that one
+     starts, in its own process group and with none of the command's
+     standard streams, so that nothing that reads what the command prints
+     waits for it. A request is R158's line, the command's words and
+     `--dir` with the command's working directory, and the answer R158's
+     frame, which the driver reads as it reads a process's output
+     (`settle`); since a request names its directory, one server answers
+     every directory, with up to one process of stage 1 for each core,
+     each making the standard library's base once, started when the others
+     are busy. A process of stage 1 that answers `stale` (`sisu1` was
+     built again) is replaced and the request sent again; the server
+     itself ends after 300 seconds without a request
+     (`SISU_STAGE1_SERVE_IDLE` sets the seconds) and when the driver's
+     executable was built again, answering `stale` to a request that finds
+     it so, after which the command starts a new one and sends the request
+     again. Whatever goes wrong, the command runs stage 1 as a process of
+     its own, as every command does under `SISU_STAGE1_SERVE=0` or with a
+     stage 1 older than 0.13.0. Served: `check`, `sir`, `parse`, `fmt`,
+     `lint`, `doc` and `tokens`, `test`'s and `bench`'s `sir --tests` and
+     `check`, and from 0.14.0 `query` and `eval` (983, 984); `sisu1
+     --version` is asked once for each executable, its answer kept beside
+     it (`target/stage1/version`), so that a served command starts no
+     process of stage 1. A two-line `sisu check` takes 0.014 s served where
+     it takes 0.244 s as a process (the release driver, the median of 20,
+     a load of 6 to 9 on four cores), and the conformance suite 138.6 s
+     where it took 224.4 s, 0 failed both ways; the runner passes its own
+     `SISU_STAGE1_SERVE` into the empty environment of each command, so
+     that the suite runs both ways. A process of stage 1 holds 55 to 90 MB.
+     CI sets nothing: a job's server has no stream of its steps and ends
+     300 seconds after its last command, and the runner ends what a job
+     leaves running. The driver's test
+     `the_server_of_stage_1_answers_as_a_process_does` holds twelve
+     commands (errors, a package, `fmt --check`, `doc`, a missing file, a
+     test run) byte for byte both ways. This changes no rule of the
+     language.
+
+981. `sisu run`'s SIR is not served: the driver asks stage 1 for it with
+     `build --native --for-run`, whose backend, the driver run with
+     `SISU_KEEP_SIR`, writes the SIR it is handed (decision 268), and R158
+     answers a `build` as misused, the variable being the server's
+     environment and not the request's. Stage 1's `sir` is not the same
+     command: `build --for-run` stops at the front end's, a `comptime`
+     expression's and the ownership checker's errors with `D0006` and
+     `D0021`, and checks a release build's holes, which a `sir` followed
+     by its `check` would give in another order. A served `sisu run`
+     needs a request that answers what the build hands its backend, on
+     standard output, with the build's diagnostics, which is stage 1's to
+     add. This changes no rule of the language.
+
+982. A byte laid out as a byte (decision 941; D-086's per-type layout of
+     `u8` and the narrow integers) is not this round's: it changes how
+     every read and write through a reference, every element step of a
+     list, a slice, an iterator and a table, and every walk of
+     `value.sisu` and `show.sisu` reads a `u8`, in both lowerings, the
+     runtime in Rust's conversions and the checked model, held byte for
+     byte between the SIR and LIR paths, and this round spent its time on
+     980, 983 and 984; half of it would leave the lowerings disagreeing
+     about a `ref u8`. The round that does it starts with the layout
+     tables (`sisu-codegen`'s `layout.rs` and stage 2's `layout.sisu` and
+     `abi.sisu`, a size and an alignment for each scalar, a struct's
+     fields at their offsets), then the loads and stores through a
+     reference by the referent's size in both lowerings, then a list's
+     element size from the descriptor in the runtime in Sisu
+     (`list.sisu`, `iter.sisu`, `value.sisu`, `show.sisu`) and in Rust,
+     with `std/bytes` and a struct with narrow fields as cases in every
+     native mode before `bytes.as_slice` views in place; `unsafe/cstring`
+     stays out of `native.list` and a pointer to a struct with a narrow
+     field `D0103` (decision 864) until then. This changes no rule of the
+     language.
+
+983. `sisu lsp` answers the diagnostics, hover, go-to-definition,
+     references, completion and document symbols from stage 1's `query`
+     (its R164) when stage 1 is the front end, built and 0.14.0 or later
+     (`query.rs`): each document's text written to a file of the server's
+     own, which `--text` names, the query served by 980's server, its
+     lines of tab-separated fields made the protocol's JSON, a position's
+     column counted in characters turned into the editor's UTF-16 or UTF-8
+     units. A query stage 1 cannot answer, an older stage 1, a stage 1 not
+     built (the language server does not build it under an editor) and
+     `--front-end=rust` keep the Rust front end's answers, which also
+     answer selection ranges, formatting, rename, code actions, inlay
+     hints, worksheets' values and `sisu.explainBorrow`. The tests of each
+     feature (`sisu-driver/tests/lsp.rs`) run on the Rust front end's
+     answers; `stage_1s_queries_answer_as_the_rust_front_end` drives both
+     with a document's diagnostics, a definition, a hover, its symbols, a
+     function's references and the members after a `.`, which agree. The
+     main tree's stage 1 is 0.13.0, so the queries were checked with stage
+     1's nineteenth round's executable given by `SISU_STAGE1`. This
+     changes no rule of the language.
+
+984. `sisu eval FILE [--to json|toml|yaml]` (08, "Configuration files")
+     runs stage 1's `eval` (its R165) when it is the front end and 0.14.0
+     or later, its output and status as they are, served by 980's server;
+     an older stage 1 and `--front-end=rust` keep `D0003`, an unknown
+     command. The option is R165's `--to`, as 08 spells it. The driver's
+     test `eval_writes_a_configurations_constants_with_stage_1` holds JSON
+     and TOML with a stage 1 that has `eval` and `D0003` with one that has
+     not; the usage (`D0002`) names the command when the main tree's stage
+     1 has it. This changes no rule of the language.
+
+985. A replay token of one module's run given to its package's run (or to
+     another module's) is `D0149`, "the token is for the run of the tests
+     of `src/stats.sisu`; `sisu test --replay TOKEN src/stats.sisu`
+     replays it", and one of the package's run given to a module's
+     `D0150`, which names the package's directory to replay it in, where
+     both were `D0033`, "the token is for other code", with the root
+     module's hash (the manual's finding on `D0033`, decision 900): the
+     driver hashes the program again for the package's run and for each
+     of its modules' (`token_of_other_run`), and a token none of them
+     made stays `D0033`. The driver's test
+     `a_token_of_another_run_of_the_package_names_its_run` holds both on
+     `packages/failing_test`. This changes no rule of the language.
+
+986. The formatting, characters', floats', texts' and bytes' families of
+     the intrinsics (decision 945) and tagged-pointer provenance (decision
+     904) are not this round's either: the round spent its time on 980,
+     983, 984 and 985. This changes no rule of the language.
