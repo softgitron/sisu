@@ -527,10 +527,8 @@ a `strlen` of text without its NUL stops the program.
   pointer or a `@repr(c)` type (E0991, `unsafe.export-not-c`). C calls
   it with its own convention, `int32_t sauna_heat(int32_t minutes)`
   for a function of an `i32`, and passes a `@repr(c)` struct by a
-  pointer to it, which a native build compiles when the struct's
-  fields are words, `int`, `f64` or raw pointers, and refuses with
-  D0103 (`native.unsupported`) for a narrower field until the layouts
-  are chosen for each type. A panic cannot unwind into C, so one that
+  pointer to it, whose fields a native build lays out at C's offsets,
+  as `@repr(c)` asks. A panic cannot unwind into C, so one that
   leaves the function prints its report and ends the program with status 134, as
   [R14](../reference/attributes.md#exported-functions) shows.
 - Importing a C header, `import c "zlib.h"`, which would write the
@@ -633,16 +631,15 @@ $ sisu run cstring.sisu
 6
 6
 $ sisu run --native cstring.sisu
-error[D0103]: the native backend does not compile `mem.slice.as_ptr` of a `u8`, which raw memory holds otherwise than a value of it yet (in `ffi.CString.as_ptr`); `sisu run` without `--native` runs the program
+6
+6
 ```
 
 `löyly`, the steam of a sauna, is five letters and six bytes, since
-`ö` takes two. The native backend does not compile `as_ptr` of a
-`CString` yet (D0103): a native slice views its list in place, but
-the bytes of a `CString` are a byte each and a slice's elements a word
-each, so the slice of them is still a copy, where C needs the pointer
-to view the bytes themselves. Such a program runs in the interpreter
-only until a `u8` is laid out as one byte everywhere.
+`ö` takes two. The interpreter and a native build print the same: a
+`u8` takes one byte in memory, a `u16` two and a `u32` four, as C's
+types do, so the bytes of a `CString` lie one after another and
+`as_ptr` points C at them in place.
 
 **Try it.** Give `is_set` a first parameter `env: Env`.
 

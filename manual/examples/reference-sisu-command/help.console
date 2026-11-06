@@ -25,7 +25,8 @@ commands:
   audit --caps [<file>...]  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more (without a file, of the package's program)
   audit --unsafe [--std] [<path>]  every `unsafe` block and function of a program by module, with its `# safety:` reason, and its package's level
   lint [<path>]          the lints beyond the compiler's warnings, with their fixes
+  eval <file>            the constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 
-The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl` and `ws`; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
+The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl`, `ws` and `eval`, which only it has; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.

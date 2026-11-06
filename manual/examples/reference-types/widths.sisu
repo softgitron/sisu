@@ -1,0 +1,6 @@
+# Each sized number takes its own width in memory, as in C.
+from std.mem import size_of
+
+def main():
+    print("{size_of[u8]()} {size_of[i16]()} {size_of[u32]()}")
+    print("{size_of[f32]()} {size_of[int]()} {size_of[f64]()}")

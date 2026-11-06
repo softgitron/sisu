@@ -1,2 +1,3 @@
 $ sisu run --native export_pointer.sisu
 800
+12 bytes, aligned to 4

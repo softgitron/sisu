@@ -1,0 +1,9 @@
+# A raw pointer to a tuple with a part narrower than a word.
+from std.mem import ptr
+
+def main():
+    let pair: (int, u8) = (80, 10)
+    let p = ptr.of(ref pair)
+    # safety: valid, aligned: `pair` lives and nothing changes it while
+    #   the reference lives.
+    print(unsafe p.as_ref().1)

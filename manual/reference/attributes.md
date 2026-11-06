@@ -1016,10 +1016,12 @@ The interpreter calls no foreign function but the six it emulates
 ([R3](declarations.md#foreign-functions)), so this program runs
 natively only.
 
-A struct of words, whose fields are `int`, `f64`, raw pointers and
-structs of them, goes by a pointer natively too: `ptr.of(ref reading)`
-is the address of the place that holds it, laid out as C lays it out,
-so a program hands its own export the `ptr[Reading]` that C passes:
+A `@repr(c)` struct goes by a pointer natively too. A native build lays
+a declared struct's fields out at C's offsets, each at the next offset
+its alignment allows, a `u8` in one byte and an `i32` or an `f32` in
+four, so `ptr.of(ref reading)` is the address of a place laid out as C
+lays it out, and a program hands its own export the `ptr[Reading]` that
+C passes:
 
 <!-- file: examples/reference-attributes/export_pointer.sisu -->
 ```sisu
@@ -1048,7 +1050,12 @@ def main():
 ```console
 $ sisu run --native export_pointer.sisu
 800
+12 bytes, aligned to 4
 ```
+
+`Layout.of[Reading]()` gives the size and the alignment C gives the
+struct: the `i32` at offset 0, the `u8` at 4, three bytes of padding,
+and the `f32` at 8.
 
 **Stage 0 differs.** A `@repr(c)` struct passed by value has no C
 classification yet, so the native build refuses it with D0103
@@ -1080,12 +1087,34 @@ $ sisu build --native export_struct.sisu
 error[D0103]: the native backend does not compile a `Reading` by value (a parameter of the exported function `sauna_load`) yet (in `load`); `sisu run` without `--native` runs the program
 ```
 
-Pass a `ptr[Reading]` instead. A struct with a field narrower than a
-word, as this `Reading`'s `i32`s are, is D0103 by a pointer too
-(`ptr.of`, `ptr.of_mut` and `as_ref` of it), since the native backend
-keeps each field of a place in a word of its own where C packs it at
-its width; it waits for layouts chosen for each type (D-086). Make its
-fields words, or run it in the interpreter.
+Pass a `ptr[Reading]` instead, as the example before it does. A tuple
+keeps a word for each of its parts natively, so a raw pointer to a
+tuple with a part narrower than a word is D0103 too, and so is a
+pointer to an option of a raw pointer; the interpreter runs both:
+
+<!-- file: examples/reference-attributes/export_tuple.files/export_tuple.sisu -->
+```sisu
+# A raw pointer to a tuple with a part narrower than a word.
+from std.mem import ptr
+
+def main():
+    let pair: (int, u8) = (80, 10)
+    let p = ptr.of(ref pair)
+    # safety: valid, aligned: `pair` lives and nothing changes it while
+    #   the reference lives.
+    print(unsafe p.as_ref().1)
+```
+
+<!-- output: examples/reference-attributes/export_tuple.console -->
+```console
+$ sisu run export_tuple.sisu
+10
+$ sisu run --native export_tuple.sisu
+error[D0103]: the native backend does not compile `mem.ptr.of` of a `(int, u8)`, which raw memory holds otherwise than a value of it yet (in `main`); `sisu run` without `--native` runs the program
+```
+
+Hand C a `@repr(c)` struct, whose fields lie at C's offsets, rather
+than a tuple.
 
 **Status.** In stage 0 ([12](../../proposal/12-interop-and-targets.md),
 [22](../../proposal/22-unsafe.md); D-080), with the difference noted.

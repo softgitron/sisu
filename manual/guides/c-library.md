@@ -54,8 +54,10 @@ pub def lookup(env: Env, name: str) -> String?:
     return found
 ```
 
-- The name goes to C with a NUL after it, in a block of raw memory
-  that `Global()` gives and the function releases.
+- `CString.new(name)` copies the name with the NUL after it that C
+  needs, and `c_name.as_ptr()` points to those bytes while `c_name`
+  lives, in the interpreter and natively. `CString.new` gives `None`
+  for a name that holds a NUL of its own, which C would cut short.
 - `getenv` gives an optional pointer, `None` for C's null, and
   `CStr.from_ptr` views the C string it points to until `to_text`
   copies it into a `String`.
@@ -161,9 +163,8 @@ that raises it is refused unless you accept it, as chapter 27 shows.
 and runs instead the six C functions it knows (`strlen`, `memcpy`,
 `malloc`, `free`, `getenv` and `write`) on its model of memory, where
 the obligations are checked as the program runs. The native debug build
-checks them too, on the blocks that `Global` gives out, such as the
-wrapper's buffer for the name, and on the memory those six functions
-give out: `getenv`'s text is read and never written, and `strlen`
+checks them too, on the blocks that `Global` gives out and on the
+memory those six functions give out: `getenv`'s text is read and never written, and `strlen`
 reads no further than the block that holds its argument. The test in `main.sisu`
 runs there too: it hands `lookup` a fake `Env`, which `getenv` does not
 read, so the process's own `PATH` is found and an unset name is not.
@@ -206,19 +207,12 @@ functions that call them, `lookup` taking an `Env`
 
 **Status.** In stage 0 (22). Importing a C header, `import c
 "stdlib.h"`, which would write the `extern` block, is designed (E0900).
-`CString.new(name).as_ptr()`,
-the shorter way to pass text to C, runs in the interpreter, where the
-pointer views the `CString`'s own bytes while it lives
-([chapter 27](../tutorial/27-systems.md#no-authority-without-a-capability)),
-and does not compile natively yet: a native slice of a list views it
-in place, but a slice of bytes is still a copy that holds a word for
-each byte, until a `u8` is laid out as one byte everywhere, so the wrapper builds the C string in raw memory to run both
-ways. The
+The
 other direction, C calling Sisu, is `@export("NAME")`: a native build
 makes the function the global symbol `NAME` of C's own convention,
 whether or not the program calls it, so a C caller declares `int32_t
 sauna_heat(int32_t minutes);` and calls it; E0991 refuses a type C has
-no layout for, a `@repr(c)` struct goes by a pointer to it (by value it
-is D0103, and so it is by a pointer natively when a field is narrower
-than a word, an `i32` or a `u8`), and a panic that leaves the function ends the program with
+no layout for, a `@repr(c)` struct goes by a pointer to it, its fields
+at C's offsets (by value it is D0103, and so is a pointer to a tuple
+with a part narrower than a word natively), and a panic that leaves the function ends the program with
 status 134 ([R14](../reference/attributes.md#exported-functions)).
