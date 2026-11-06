@@ -595,10 +595,18 @@ interpreter from the SIR stage 1 serialised, and `--native`), `fmt`,
 driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 `--front-end=rust` and `SISU_FRONT_END=rust`, and still does these, each a
 role to replace before it can be deleted, when the flag and the Rust
-branches of `cli.rs` go with it:
+branches of `cli.rs` go with it. With a stage 1 of 0.17.0 or later, what
+it has left since decision 1200 is what the second item below lists of
+`sisu test` (a program's transcripts and `sisu test --std
+--defer-borrow`) and building stage 1 itself:
 
-- **Hot replacement** (`sisu run --watch`, and a run under it recorded,
-  whose log replays the saves). The language server is no longer a role
+- (Done: **hot replacement**, `sisu run --watch` and a run under it
+  recorded and replayed, is stage 1's from `sisu1 0.17.0`, each save
+  built again by the served `build --for-run --emit-sir` and a replay's
+  in a directory of the files its log holds, decision 1200; a save
+  takes about 0.07 to 0.13 s where the Rust front end's kept queries take
+  0.03 to 0.07 s. An older stage 1 and `--front-end=rust` keep the Rust
+  front end's queries.) The language server is no longer a role
   of the Rust front end: from `sisu1 0.15.0` its requests are answered by
   stage 1's queries (its R164 and R169, decisions 983 and 1060), from
   `sisu1 0.17.0` `sisu.explainBorrow` too (its `query explain`, R187,
@@ -606,11 +614,10 @@ branches of `cli.rs` go with it:
   (its `query values`, R196, decision 1141), the driver's interpreter
   running stage 1's program of the worksheet where stage 1's evaluator
   stops at the world; the Rust front end answers only an older stage 1
-  and `--front-end=rust`. Hot replacement needs the front end in the
-  process, its queries kept between edits (the memo), or the program as
-  data. (The capability log and replay of a plain run are stage 1's, the
-  log holding the SIR that ran, decision 303.) *Pay*: for hot
-  replacement a program kept between edits; for the language server the
+  and `--front-end=rust`. (The capability log and replay of a plain run
+  are stage 1's, the log holding the SIR that ran, decision 303.) *Pay*:
+  for a save of hot replacement as fast as the Rust front end's, stage
+  1's checks kept between saves (its memo); for the language server the
   ends of `query explain`'s loans, whose ranges are their starts until
   then. **The REPL** (`sisu repl`) and **worksheets**
   (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
@@ -1211,8 +1218,9 @@ Nothing here switches the default.
   (18, principle 5), and stays the interpreter's, as the conformance
   suite's monitored rerun of every case does. *Need*: none: those options
   run the interpreter whatever the default. *Estimate*: none.
-- **Hot replacement** (`--watch`) needs the backend's indirection table
-  (10's debug ABI); it stays the interpreter's. `--stats stack-depth` and
+- **Hot replacement** (`--watch`, stage 1's from decision 1200) needs
+  the backend's indirection table (10's debug ABI); it stays the
+  interpreter's. `--stats stack-depth` and
   `--stats shared` need the native frames' depths from the probe and the
   runtime's counts of `Shared` cells. *Estimate*: one day each.
 - **The suite**: once these are done, the runner's default run of a case
@@ -1230,6 +1238,11 @@ property's budget, `expect`) make every test of the suite outside
 The native checked memory model has its first slices (decisions 543,
 544, 560 and 561), and the rest above is about four weeks, the
 provenance one of them.
+
+Decision 1207 measured these conditions again and left the default as it
+is: the native modes run the 297 cases of `native.list`, but the
+capability log and replay, the two `--stats` kinds and the cache of
+executables are still to do, a round of their own.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

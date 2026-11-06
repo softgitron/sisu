@@ -2577,6 +2577,17 @@ declares, the package compiled as `sisu test` compiles it, which stage 1's
 - **Replay tokens**: every failing test prints `replay: sisu test
   --replay TOKEN FILE` (below), or says it has none when it takes the
   real `System` (`D0031`, and under `--sim` `D0138`, decision 822).
+- **A module's fixtures**: a test's parameter named after an `@fixture`
+  function is its body's `let` of the call (stage 1's R200); from `sisu1
+  0.20.0` one with `scope="module"` is a `ref T` parameter of the test's
+  function that the runner gives, the tests that share it run in one
+  interpreter, in turn, the value made before the first and dropped
+  after the last (`run_group` in `parallel.rs`, decision 1202).
+- **Mutants**: `sisu test --mutate [--since REV]` runs the tests against
+  each of stage 1's mutants of the program (its R208), those on the
+  lines changed since REV with `--since`, and prints the ones every test
+  passes against as suggestions; the status is the tests' own (decision
+  1201).
 
 ## Simulation, schedulers and replay
 
@@ -2892,8 +2903,11 @@ adopted epoch, 0 until the first swap.
 
 The interpreter polls its host for saves at each of those points (the
 host contract's `poll_edits`); the driver compiles the program again
-from the saved files through its queries (`Rebuild`), and the new SIR is
-compared with everything the run has, of every epoch:
+from the saved files (`Rebuild`): from `sisu1 0.17.0` by the served
+`build --for-run --emit-sir` of stage 1, the request the run's own SIR
+came from (decision 1200), and on the Rust front end through its
+queries. The new SIR is compared with everything the run has, of every
+epoch:
 
 - a function whose signature changed (parameters, result, conventions,
   purity or kind), a type whose layout changed, or a changed impl
@@ -2911,8 +2925,10 @@ What a save leaves out (the compiler emits only what a program reaches)
 stays in the run for the frames and values of earlier epochs. The run
 ends when the program does. Under `--record`, each save is an `edit`
 record of the capability log at the poll that saw it, so `sisu replay`
-applies the same saves at the same points and publishes the same epochs.
-`--watch` does not combine with `--sir`, `--defer-borrow`, `--explore` or
+applies the same saves at the same points and publishes the same epochs;
+a run on stage 1 logs the program's files as it began, and its replay
+has stage 1 build each save in a directory of those files (decision
+1200). `--watch` does not combine with `--sir`, `--defer-borrow`, `--explore` or
 the exhaustive scheduler (`D0078`), which run a program more than once
 or not from source. The suite's `.watch` cases save their own next versions from
 `NAME.files/`.
@@ -12364,3 +12380,138 @@ D-085, D-086; 10, 12, 17; decisions 242, 1060, 1062, 1101, 1102, 1106 to
 1166. Stage 1's twenty-fourth round brought no difference from the
       merge: every difference `check.sh` reports is a rule's. Stage 1
       decides it (RULES.md, R210).
+
+**Stage 0's twenty-third round: hot replacement on stage 1, the runner's
+half of `--mutate` and of a module's fixtures, `doc --digest` and
+`grammar` routed, the usage text, and what waits** (sections "Hot
+replacement", "Testing", "The query layer and the driver", "Stage 2: the
+native backend"; D-053, D-068, D-085, D-089; 10, 17; decisions 1101,
+1107, 1108, 1140, 1142, 1147 and 1148; stage 1's R202, R207 to R209 and
+R219)
+
+1200. From `sisu1 0.17.0` `sisu run --watch` is stage 1's: the run's SIR
+      comes from the served `build --for-run --emit-sir`, as a plain run's
+      does (decision 1061), and each save the interpreter polls for is
+      built again by the same request (`Stage1Rebuilder`), the new SIR
+      compared with the run's as before (`R0109`, `R0111`, `R0112`,
+      `R0114`); a save that does not check publishes nothing and prints
+      stage 1's diagnostics without the line a run ends with (`R0110`
+      without `D0006` or `D0021`). The files watched are every file of
+      the program, each named by its path from the working directory. A
+      recorded run's log holds the SIR it started with (decision 303),
+      and, under `--watch`, the program's files as the run began, with a
+      package's manifest and lockfile; `sisu replay` writes them into a
+      directory of its own, writes each `edit` record there at its poll
+      and has stage 1 build it there, so the same epochs are published
+      without the files the run changed. An older stage 1 and
+      `--front-end=rust` keep the Rust front end's queries. The suite's
+      six `.watch` cases, recorded and replayed, pass both ways. Measured
+      with the release driver, the median of 5 under a load of about 7,
+      a save's rebuild takes 0.132 s served where the Rust front end's
+      kept queries take 0.072 s (`live/swap`), 0.073 s where they take
+      0.042 s (`live/tasks`), and in `live/rejected` 0.058 s for the save
+      that does not check and 0.132 s for the one that does, where they
+      take 0.028 s and 0.041 s: stage 1 checks the whole program again
+      and writes its SIR, which the driver reads, where the queries redo
+      the items a save changed. This changes no rule of the language.
+
+1201. `sisu test --mutate [--since REV]` (17, "Coverage and mutation")
+      runs the program's tests, then gets the mutants from stage 1's
+      `sir --tests --mutants` (its R208, `sisu1 0.19.0`), keeps, with
+      `--since REV`, those whose line `git diff --unified=0 REV` says
+      changed (the places named from the package's directory, or the
+      working directory for a file), and runs against each of them the
+      tests the run selects, in the interpreter as `test --from-sir` runs
+      them, quietly, each with ten times the steps the program's own
+      tests took and a million more. A mutant whose tests all pass
+      survived and is printed by its place and what it changed
+      (`D0153`), then the count run, killed and survived (`D0154`), the
+      stillborn ones (`D0155`) and, with `--since`, those outside the
+      region (`D0156`). The survivors are suggestions, not a gate: the
+      status is the tests' own, and tests that fail on the program stop
+      the mode first (`D0157`). Every test runs against each mutant until
+      `--cover` gives each line's tests (stage 1's R216 has the front
+      end's half). `--since` without `--mutate` is `D0160`, a git that
+      cannot answer `D0158`, and `--mutate` with `--native`, `--release`,
+      `--defer-borrow`, `--sim`, `--update`, `--std`, `--replay`,
+      `--explore`, `--from-sir` or `--scheduler` is `D0159`; before
+      `sisu1 0.19.0` and on the Rust front end it is an unknown option
+      (`D0009`). The case `testing/mutants` is R208's program: its test
+      kills 3 of the 7 mutants and the 4 that survive are printed. This
+      changes no rule of the language.
+
+1202. From `sisu1 0.20.0` (its R219) the runner keeps one value of a
+      module's fixture for the tests that name it (decision 1147):
+      `sisu test` asks for `sir --tests --module-fixtures`, the SIR reads
+      each test's `fixture NAME FUNCTION test` and `fixture NAME FUNCTION
+      module K` groups (`Program.test_fixtures`), and the tests that share
+      a module's fixture, joined with every test that shares one of
+      theirs, run in one interpreter, in turn and in declaration order,
+      on one thread beside the tests that run in parallel: the value is
+      made by calling FUNCTION before the first of them, kept in a cell
+      of the heap, given to each as a `ref` at its parameter K, and
+      dropped by its type's glue after the last, failed or not (a fixture
+      that panics fails the test that needed it, a drop that panics the
+      last). Each test keeps its own output; a replay token runs its test
+      alone, the fixture called before it. A native run, whose dispatcher
+      gives a test its capabilities alone, does not ask for the option,
+      and each test makes its own value as R200 lowers it, as with an
+      older stage 1. The interpreter's test
+      `a_modules_fixture_is_made_once_for_its_tests` holds the order of
+      the made value, the reads and the drop. The value of a type without
+      glue that holds values with a `Drop` (a list of them) is dropped
+      without their drops. This changes no rule of the language.
+
+1203. `sisu doc --digest [PATH] [--output DIR]` and `sisu doc --std
+      --digest [MODULE...]` run stage 1's (its R207) from `sisu1 0.19.0`,
+      served as `doc` is; before it, and on the Rust front end, the
+      option is unknown (`D0009`). `--open`, which stage 1 left to the
+      driver, is not this round's: serving the pages needs a server of
+      the driver's that no other command has. This changes no rule of
+      the language.
+
+1204. `sisu grammar` is a command of the driver, stage 1's `grammar` (its
+      R202) from `sisu1 0.18.0`: 10 does not name it, but the manual's
+      grammar and these notes are checked against it, so it is offered
+      where `sisu run -- grammar` of stage 1's own executable was the way;
+      an older stage 1 and the Rust front end have no such command
+      (`D0003`). The usage (`D0002`) lists it. This changes no rule of
+      the language.
+
+1205. `D0002` says `check --holes [<path>]`, a file's or a package's
+      program (decision 1140), where it said `--holes <file>`, and lists
+      `doc --digest`, `test --mutate` with `--since REV`, and `grammar`.
+      No conformance expectation prints the usage; the driver's test
+      `stage_1s_usage_errors_are_shown_as_the_commands_usage` holds the
+      new form. This changes no rule of the language.
+
+1206. An `Option[ptr[T]]` as one nullable word (decisions 1101 and 1142)
+      is not this round's: the round spent its time on 1200 to 1202,
+      which retire the Rust front end's hot replacement and give the
+      runner what stage 1's mutants and module fixtures wait for. It is
+      stage 0's twenty-fourth round's first item, in 1101's order and at
+      1142's count of sites, both lowerings at once and the fixed point
+      after; the manual's `D0103` item stands until then. This changes no
+      rule of the language.
+
+1207. A native run is not the default of `sisu run` this round, nor the
+      next's. Measured against port-debt's conditions (D-089): the six
+      native modes run the 297 cases of `native.list`, 17 of them
+      `unsafe/` refusals in the debug build's checked mode, but a plain
+      `sisu run` still takes from the interpreter what native code lacks:
+      the capability log and its replay (`--record`, `sisu replay`), hot
+      replacement (decision 1200), the monitor and the counterexample
+      mode (which stay the interpreter's whatever the default), `--stats
+      stack-depth` and `--stats shared`, and an executable kept between
+      runs, without which a native run of a small file pays its build
+      (about 1.8 s a case when the suite builds four at a time) where the
+      interpreter starts at once. The switch waits for the runtime's log
+      and replaying host and the cache of executables, a round of their
+      own, as port-debt says; `--explore`, the other schedulers and
+      `--sim`'s tests are native already. This changes no rule of the
+      language.
+
+1208. The intrinsic families of decisions 1107 and 1148 and tagged-pointer
+      provenance (decision 1108) are not this round's, for the reason
+      1206 gives; the formatting family stays the first, with 903's
+      measurement. This changes no rule of the language.

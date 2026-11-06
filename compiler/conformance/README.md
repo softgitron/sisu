@@ -24,11 +24,11 @@ SIR and pages are stage 1's, and
 a program runs from the SIR stage 1 serialised, in the interpreter or
 natively, as its tests and benchmarks do
 ([architecture.md](../docs/architecture.md), decisions 268 and 357). The
-commands stage 1 does not serve yet run on the Rust front end: `test
---std`, `test --defer-borrow`, the tests of a program with transcripts,
-`run --watch`, `run --record`, `replay`, `run --defer-borrow` and
-`explain-borrow` ([port-debt.md](../docs/port-debt.md), "The Rust front
-end's roles"); `repl` and `ws` build their programs with stage 1's `sir
+commands stage 1 does not serve yet run on the Rust front end: the
+transcripts of a program and `test --std --defer-borrow`
+([port-debt.md](../docs/port-debt.md), "The Rust front end's roles";
+`run --watch`, its record and its replay are stage 1's from `sisu1
+0.17.0`, decision 1200); `repl` and `ws` build their programs with stage 1's `sir
 --repl` and `sir --worksheet` once it says it serves them (`sisu1 0.8.0`,
 decisions 563 and 620; from `sisu1 0.9.0` with `--dir` and `--name`, and
 `:why` from `parse --bindings`, decision 640), and `cargo test` runs the
@@ -447,7 +447,9 @@ and the time spent building and running them.
   (`explore_output`), programs whose errors stop `sisu test` before any
   test runs (`refused_program`, `refused_comptime`), a package that
   declares its unsafe code, whose lockfile keeps the level
-  (`unsafe_level`), and `proposal_testing`, which starts with
+  (`unsafe_level`), the mutants its tests leave alive under `sisu test
+  --mutate` (`mutants`, `# select --mutate`, decision 1201), and
+  `proposal_testing`, which starts with
   `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
 - `eval/` is `sisu eval` of configuration modules (decisions 1022 and
