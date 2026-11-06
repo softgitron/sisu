@@ -771,7 +771,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         // 0.16.0` (decision 1064); an older stage 1 and the Rust front end
         // have no such command (`D0003`).
         "fix" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
-            Ok(stage1) if stage1.fixes() => stage1_as_is(cmd, rest, host),
+            Ok(stage1) if stage1.fixes() => fix(rest, host),
             Ok(_) => {
                 host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", cmd.to_string())]));
                 EXIT_USAGE
@@ -1847,7 +1847,11 @@ fn holes(rest: &[String], host: &mut dyn Host) -> i32 {
         ));
         return EXIT_USAGE;
     }
-    if let Some(bad) = rest.iter().find(|a| a.starts_with("--") && *a != "--holes") {
+    // From `sisu1 0.16.0` the report also has a JSON form (its R181).
+    let forms: &[&str] = if stage1.fixes() { &["--format=json", "--format=human"] } else { &[] };
+    if let Some(bad) =
+        rest.iter().find(|a| a.starts_with("--") && *a != "--holes" && !forms.contains(&a.as_str()))
+    {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
             &[("option", bad.clone()), ("command", "check".into())],
@@ -1872,6 +1876,33 @@ fn holes(rest: &[String], host: &mut dyn Host) -> i32 {
             EXIT_USAGE
         }
     }
+}
+
+/// `sisu fix FILE [--dry-run] [--all]` (decision 1064): stage 1's `fix`
+/// (its R176), with the driver's messages for what `check` reports: a file
+/// it cannot read (`D0001`) and another option (`D0009`); none or more
+/// than one path is stage 1's usage error, which is the command's usage.
+fn fix(rest: &[String], host: &mut dyn Host) -> i32 {
+    if let Some(bad) =
+        rest.iter().find(|a| a.starts_with("--") && !matches!(a.as_str(), "--dry-run" | "--all"))
+    {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.clone()), ("command", "fix".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    let cwd = std::env::current_dir().unwrap_or_default();
+    if let [file] = rest.iter().filter(|a| !a.starts_with("--")).collect::<Vec<_>>().as_slice()
+        && let Err(e) = std::fs::read(cwd.join(file))
+    {
+        host.stderr(&plain_error(
+            msg::CLI_CANNOT_READ,
+            &[("path", file.to_string()), ("reason", e.to_string())],
+        ));
+        return exit::ERROR;
+    }
+    stage1_as_is("fix", rest, host)
 }
 
 /// `sisu fmt` and `sisu doc` with stage 1: its command with the same

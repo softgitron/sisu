@@ -701,7 +701,8 @@ impl Stage1 {
         if backend == Backend::Unused
             && (crate::serve::served(args)
                 || (matches!(args.first().map(String::as_str), Some("eval" | "query")) && self.evaluates())
-                || (emits_sir(args) && self.assists()))
+                || (emits_sir(args) && self.assists())
+                || (args.first().is_some_and(|a| a == "fix") && self.fixes()))
             && self.serves_every_command()
             && let Some((stdout, stderr, status)) = crate::serve::ask(&self.compiler, &self.exe, args)
         {

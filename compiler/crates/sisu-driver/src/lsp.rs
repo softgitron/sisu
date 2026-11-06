@@ -146,8 +146,10 @@ pub struct Server {
     pub(crate) sheet: Option<(u64, Json)>,
     /// The stage 1 whose queries answer the diagnostics, hover,
     /// definition, references, completion and symbols (`sisu1 0.14.0` and
-    /// later, its R164; decision 983); none for an older one and under
-    /// `--front-end=rust`, when the Rust front end answers them.
+    /// later, its R164; decision 983), and from 0.15.0 selection ranges,
+    /// rename, code actions, inlay hints and formatting (its R169; decision
+    /// 1060); none for an older one and under `--front-end=rust`, when the
+    /// Rust front end answers them.
     pub(crate) stage1: Option<crate::front::Stage1>,
 }
 

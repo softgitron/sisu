@@ -172,20 +172,20 @@ impl Client {
 /// the Rust front end's too with a stage 1 older than 0.15.0.
 const FRONTS: [&str; 2] = ["rust", "stage1"];
 
-/// Whether the stage 1 the driver runs answers the language server's other
-/// requests (`sisu1 0.15.0` and later, decision 1060).
-fn stage1_assists() -> bool {
+/// Whether the stage 1 the driver runs is `version` or later, as `sisu1
+/// --version` names it.
+fn stage1_at_least(version: &[u32]) -> bool {
     let exe = std::env::var_os("SISU_STAGE1")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/stage1/sisu1"));
     let printed = Command::new(exe).arg("--version").output().map(|o| o.stdout).unwrap_or_default();
-    let version: Vec<u32> = String::from_utf8_lossy(&printed)
+    let found: Vec<u32> = String::from_utf8_lossy(&printed)
         .trim()
         .trim_start_matches("sisu1 ")
         .split('.')
         .filter_map(|p| p.parse().ok())
         .collect();
-    version.as_slice() >= [0, 15, 0].as_slice()
+    found.as_slice() >= version
 }
 
 fn document(name: &str, text: &str) -> (String, PathBuf) {
@@ -479,11 +479,11 @@ fn rename_changes_every_use_on(front: &str) {
         ]),
     );
     let lines: Vec<u64> = edits_of(&r).iter().map(|e| e.0).collect();
-    // Stage 1's `query rename` (its R169) leaves out the keyword of the
-    // construction, `Point(x=1, ...)` on line 11, which the Rust front
-    // end's renames (decision 1060).
-    let expected: &[u64] =
-        if front == "stage1" && stage1_assists() { &[1, 5, 5, 12] } else { &[1, 5, 5, 11, 12] };
+    // Stage 1's `query rename` of 0.15.0 (its R169) leaves out the keyword
+    // of the construction, `Point(x=1, ...)` on line 11, which the Rust
+    // front end's renames, as 0.16.0's does (its R179; decision 1060).
+    let short = front == "stage1" && stage1_at_least(&[0, 15, 0]) && !stage1_at_least(&[0, 16, 0]);
+    let expected: &[u64] = if short { &[1, 5, 5, 12] } else { &[1, 5, 5, 11, 12] };
     assert_eq!(lines, expected, "{front}: {}", r.write());
     // The references of `area`: its definition and its call.
     let r = c.request(

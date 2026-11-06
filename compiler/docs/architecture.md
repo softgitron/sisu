@@ -3169,6 +3169,8 @@ sisu replay LOG              run a recorded program again against its log (`--mo
 sisu check [FILE]            diagnostics; `--format=ids` for the conformance form,
                              `--diary LOG` appends them to the friction log,
                              `--holes FILE` each typed hole and what fits it (decision 1063)
+sisu fix FILE                apply each diagnostic's preferred fix (`--dry-run`, `--all`;
+                             stage 1's, decision 1064)
 sisu doc [PATH]              the documentation, a Markdown page per module, printed;
                              `--output DIR` writes the pages there, `--std [MODULE...]`
                              documents the standard library (decision 258)
@@ -3232,7 +3234,7 @@ stage 1, which keeps the standard library's base between commands
 (`serve.rs`, decision 980; `SISU_STAGE1_SERVE=0` runs a process for each),
 and so, from 0.15.0, is the SIR `run` runs (`build --for-run --emit-sir`,
 decision 1061), `check --holes` (decision 1063) and the rest of `lsp`'s
-questions (decision 1060). A run of stage 1 that ends with stage 1's own
+questions (decision 1060), and from 0.16.0 `fix` (decision 1064). A run of stage 1 that ends with stage 1's own
 usage error is shown the driver's usage of the command (`D0151`, decision
 1065).
 
@@ -11730,3 +11732,134 @@ server"; D-085, D-086; 08, 10, 12, 22; decisions 188, 823, 864, 940, 941,
       `E0278`, with the import of a std module that has it as the fix
       where one does, and completions offer the `pub` names. `Formatter`, `Spec` and `Hasher` stay visible: the traits
       take them. Stage 1 decides it (RULES.md, R175).
+
+**Stage 0's twentieth round: the language server wholly on stage 1, `sisu
+run` served, `check --holes` and `fix` routed, stage 1's usage errors as
+the driver's, and what was left** (sections "The language server", "The
+query layer and the driver"; D-061, D-086; 10, 12; decisions 980, 981, 983,
+1021, 1024 to 1026; stage 1's R169, R170, R174, R176 and R181)
+
+1060. `sisu lsp` answers selection ranges, rename, `prepareRename`, code
+      actions, inlay hints, formatting and range formatting from stage 1's
+      `query selection`, `rename`, `actions`, `inlay` and `format` when stage
+      1 is 0.15.0 or later (its R169; `query.rs`), as decision 983 did for
+      the first six, the order decision 1024 gave: a rename's lines one
+      workspace edit, its `refused` lines `LSP_NOT_A_NAME` and
+      `LSP_CANNOT_RENAME`; `prepareRename` the `references` line at the
+      position, renamed to its own name to ask whether it can be; the
+      actions at the start of the protocol's range, each with the diagnostic
+      as `query diagnostics` published it; the inlay hints kept in the
+      editor's range; `format`'s runs made in the text, one edit of the
+      whole document as before, and for a range the runs it touches and
+      holds, `refused` no edit. A query stage 1 cannot answer, an older
+      stage 1 and `--front-end=rust` keep the Rust front end's answers, and
+      worksheets' inline values and `sisu.explainBorrow` stay the Rust front
+      end's alone (port-debt.md). The tests of the five features
+      (`sisu-driver/tests/lsp.rs`) run on both front ends, stage 1's
+      answering every request they make, and
+      `stage_1s_queries_answer_alike_served_and_as_a_process` holds the new
+      requests the same served and as a process. Stage 1's rename of a
+      field leaves out a construction's keyword (`Point(x=1, ...)`), which
+      the Rust front end's renames; the test holds each its own. This
+      changes no rule of the language.
+
+1061. `sisu run` gets its SIR from stage 1's `build --native --for-run
+      --emit-sir` (its R170) when stage 1 is 0.15.0 or later, answered by
+      decision 980's server, the frame's standard output the SIR, its
+      standard error and status the build's, an empty output a program
+      without `main` (`D0005`, `D0069`); `sisu run --native` of a file
+      compiles that SIR in the driver, which the build would have handed it
+      as its backend, and runs it. `--native` is written in the request,
+      since stage 1 takes `--contracts` and `--release` only with it. A
+      two-line `sisu run` takes 0.039 s served where it takes 0.246 s as a
+      process, and `sisu run --native` 0.121 s where it takes 0.347 s (the
+      release driver, the median of 20, a load of 1); the conformance suite
+      59 s where it takes 207 s with `SISU_STAGE1_SERVE=0` (the debug
+      driver, a load of 1 to 3; decision 980 measured 138.6 s served
+      under a load of 6 to 9, its runs as processes),
+      0 failed both ways. `the_server_of_stage_1_answers_as_a_process_does`
+      holds a run, a run with an error, a package's run and a file's native
+      run the same both ways. This changes no rule of the language.
+
+1062. `sisu build` (with `--native` too) and `sisu run --native` of a
+      package stay a process of stage 1 each: R170 serves the build for a
+      run alone, whose errors end with "the program was not run" (`D0006`)
+      where a build's say it was not compiled, and R158 answers any other
+      `build` as misused; and a package's executable goes where stage 1's
+      build puts it, `build/PROFILE/NAME` beside its lockfile, which the
+      driver would have to find again. Serving them is stage 1's to add (a
+      `build --emit-sir` without `--for-run`, and the executable's path in
+      its answer). This changes no rule of the language.
+
+1063. `sisu check --holes FILE` (10, "Holes"; D-061) runs stage 1's `check
+      --holes` (its R174) when stage 1 is 0.15.0 or later, served, its output
+      and status as they are; an older stage 1 and `--front-end=rust` keep
+      `D0009`. The driver reports what it reports for `check`: a file it
+      cannot read (`D0001`), another option (`D0009`), and none, a directory
+      or more than one path as the command's usage (`D0151`). The usage
+      (`D0002`) names `--holes`. The runner has a case kind for it,
+      `NAME.holes`: the run's standard output, `--- stderr`, its standard
+      error and `--- status N`; `holes/typed_holes` lists a method's hole
+      with two bindings of its type and a function's with none, and
+      `holes/holes_refused` a program with an error, which is `check`'s
+      report and status 1. The Rust front end fails both, as it may
+      (decision 268). Stage 1's 0.16.0 gives each hole more of 10's report
+      (its R181), so the merge of its round blesses the two `.holes` again.
+      This changes no rule of the language.
+
+1064. `sisu fix FILE [--dry-run] [--all]` (10, "Migration") runs stage
+      1's `fix` (its R176) when stage 1 is 0.16.0 or later, served, its
+      lines, the file it writes and its status as they are; an older stage
+      1 and `--front-end=rust` keep `D0003`. The driver reports another
+      option (`D0009`, status 2, as R176 gives it) and a file it cannot read
+      (`D0001`); no path, or more than one, is stage 1's usage error, shown
+      as the command's (decision 1065). The usage (`D0002`) names the
+      command, which the main tree has once stage 1's twenty-first round is
+      merged into it. From 0.16.0 `check --holes` also takes
+      `--format=json` and `--format=human` (its R181). The round ran with
+      the main tree's stage 1 at 0.15.0 and checked the routing with stage
+      1's twenty-first round's executable given by `SISU_STAGE1`, whose
+      messages (`D0175` to `D0187`) the main tree's catalog does not hold
+      yet, so the driver's test `fix_applies_the_preferred_fixes_with_stage_1`
+      holds what does not depend on their text: the positions and edits of
+      `--dry-run` with the file left, more lines with `--all`, the file
+      written without it, `D0009`, `D0001` and the usage, served and as a
+      process; `D0003` with an older stage 1. This changes no rule of the
+      language.
+
+1065. A run of stage 1 that ends with stage 1's own usage error (its
+      `main`'s `error: Usage(text="usage: sisu run -- tokens ...")`, which
+      names stage 1's commands and none of the driver's) is shown as the
+      usage of the driver's command that ran it, `D0151`, "usage: sisu
+      FORM" and what the command does, each as `D0002` lists it, with the
+      usage's status 2 (the manual's nineteenth round: `sisu eval` without
+      a file, or with `--to xml`). It is done where every routed command
+      runs stage 1 (`Stage1::run`), served or as a process, so `fmt`,
+      `doc`, `lint`, `audit --unsafe`, `eval`, `check --holes` and `fix`
+      show it alike. The driver's test
+      `stage_1s_usage_errors_are_shown_as_the_commands_usage` holds `sisu
+      eval`, `sisu eval FILE --to xml` and `sisu check --holes`, and
+      `eval/usage` the first in the suite. This changes no rule of the
+      language.
+
+1066. A tuple's narrow parts at their own width, and an `Option[ptr[T]]` as
+      one nullable word at the C boundary (decision 1021's still open, 12's
+      foreign calls), are not this round's: a tuple's layout is also the
+      runtime's, whose iterators lay a pair out a word to a part and whose
+      tables lay an entry's key and value out so (decision 1020), so a
+      tuple of two narrow parts changes `zip`, `enumerate` and every table
+      walk of the runtime in Sisu and in Rust with both lowerings, and an
+      option without its tag word changes every construction, match and
+      `Debug` of an option of a raw pointer in both lowerings and the
+      checked model; the round spent its time on 1060 to 1065. The round
+      that does it starts with the layout tables (`layout.rs`,
+      `layout.sisu`), then the runtime's pairs read through the type's
+      offsets, with a case of a pointer to a tuple with a `u8` part and a
+      foreign function taking an `Option[ptr[T]]` in every native mode; a
+      pointer to such a tuple, or to an option of a raw pointer, stays
+      `D0103` until then. This changes no rule of the language.
+
+1067. The formatting, characters', floats', texts' and bytes' families of
+      the intrinsics (decisions 945, 986 and 1026) and tagged-pointer
+      provenance (decision 904) are not this round's either: the round spent
+      its time on 1060 to 1065. This changes no rule of the language.

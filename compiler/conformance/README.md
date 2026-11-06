@@ -81,6 +81,7 @@ is compared byte for byte.
 | `NAME.repl` | `sisu repl NAME.sisu` with `NAME.stdin` as the session's inputs: standard output, then `--- stderr`, standard error, and `--- status N` |
 | `NAME.ws` | `sisu ws NAME.sisu`, the worksheet: standard output, then `--- stderr`, standard error, and `--- status N` |
 | `NAME.eval` | `sisu eval NAME.sisu ARGS` for each line `# eval ARGS` in the case (`# eval --to toml`), or once without arguments when there is none: for each run a line `--- sisu eval NAME.sisu ARGS`, its standard output, then `--- stderr`, standard error, and `--- status N` (decision 1022) |
+| `NAME.holes` | `sisu check --holes NAME.sisu`, each typed hole of the program with its type and the bindings that fit it: standard output, then `--- stderr`, standard error, and `--- status N` (decision 1063) |
 | `NAME.unformatted` | not compared: why the case is not in the form `sisu fmt` writes (its layout is what it tests, or it holds a proposal example unchanged); without it the case must be |
 
 A line `# explore N` also runs a case that runs again as `sisu run
@@ -445,6 +446,12 @@ and the time spent building and running them.
   (`unsafe_level`), and `proposal_testing`, which starts with
   `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
+- `eval/` is `sisu eval` of configuration modules (decisions 1022 and
+  1065): JSON, TOML and YAML, a constant whose evaluation stops, and a form
+  it does not write, which is the command's usage.
+- `holes/` is `sisu check --holes` (`.holes`, decision 1063): a method's
+  and a function's typed holes with what is in scope and of their type,
+  and a program with an error.
 - `live/` is 10's tools that run programs: hot replacement under `sisu
   run --watch` (`.watch`: a swap of changed bodies in epochs, a rejected
   save, restarts for a changed signature and a changed layout, tasks

@@ -723,6 +723,68 @@ fn stage_1s_usage_errors_are_shown_as_the_commands_usage() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `sisu fix FILE [--dry-run] [--all]` is stage 1's `fix` (its R176) from
+/// `sisu1 0.16.0` (decision 1064), the same served and as a process: with
+/// `--dry-run` the fixes and their edits, the file left; without it the file
+/// written with the preferred fix of each diagnostic; `--all` the lints'
+/// too; the driver's `D0009` and `D0001`. With an older stage 1 it is an
+/// unknown command (`D0003`).
+#[test]
+fn fix_applies_the_preferred_fixes_with_stage_1() {
+    let dir = std::env::temp_dir().join(format!("sisu-fix-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let text = "from std.json import encode\n\ndef add(mut xs: list[int], x: int):\n    xs.push(x)\n\ndef main():\n    var xs: list[int] = []\n    add(xs, 3)\n    let count = len(xs)\n    print(cuont)\n";
+    let sisu = |args: &[&str], serve: &str| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .env("SISU_STAGE1_SERVE", serve)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    std::fs::write(dir.join("fix.sisu"), text).expect("a file");
+    // The stage 1 the driver runs, built by a first command.
+    let _ = sisu(&["check", "fix.sisu"], "1");
+    if !stage1_at_least(&[0, 16, 0]) {
+        assert_eq!(
+            sisu(&["fix", "fix.sisu"], "1"),
+            (String::new(), "error[D0003]: unknown command `fix`; run `sisu help`\n".into(), Some(2))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
+    for serve in ["1", "0"] {
+        let (out, err, status) = sisu(&["fix", "--dry-run", "fix.sisu"], serve);
+        assert_eq!((err.as_str(), status), ("", Some(0)), "{out}");
+        assert!(out.contains("10:11") && out.contains("\"count\"") && out.contains("\"mut \""), "{out}");
+        assert_eq!(std::fs::read_to_string(dir.join("fix.sisu")).ok().as_deref(), Some(text));
+        let (all, _, _) = sisu(&["fix", "--dry-run", "--all", "fix.sisu"], serve);
+        assert!(all.lines().count() > out.lines().count(), "{all}");
+        assert_eq!(
+            sisu(&["fix", "--bogus", "fix.sisu"], serve),
+            (String::new(), "error[D0009]: unknown option `--bogus` for `sisu fix`\n".into(), Some(2))
+        );
+        assert_eq!(sisu(&["fix", "missing.sisu"], serve).2, Some(1));
+        let (usage, status) = {
+            let (_, e, s) = sisu(&["fix"], serve);
+            (e, s)
+        };
+        assert!(usage.starts_with("usage: sisu fix <file>"), "{usage}");
+        assert_eq!(status, Some(2));
+    }
+    let (_, _, status) = sisu(&["fix", "fix.sisu"], "1");
+    assert_eq!(status, Some(0));
+    let fixed = std::fs::read_to_string(dir.join("fix.sisu")).unwrap_or_default();
+    assert!(fixed.contains("add(mut xs, 3)") && fixed.contains("print(count)"), "{fixed}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Whether the stage 1 the driver runs is `version` or later, as `sisu1
 /// --version` names it.
 fn stage1_at_least(version: &[u32]) -> bool {

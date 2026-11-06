@@ -597,18 +597,21 @@ driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 role to replace before it can be deleted, when the flag and the Rust
 branches of `cli.rs` go with it:
 
-- **The language server** (`sisu lsp`, its worksheets' inline values
-  among them) and **hot replacement** (`sisu run --watch`, and a run under
-  it recorded, whose log replays the saves): each needs the front end in
-  the process, its queries kept between edits (the memo), or the
-  diagnostics and the program as data. (The capability log and replay of
-  a plain run are stage 1's, the log holding the SIR that ran, decision
-  303.) From `sisu1 0.14.0` the language server's diagnostics, hover,
-  definition, references, completion and symbols are stage 1's queries
-  (its R164, decision 983); selection ranges, rename, code actions, inlay
-  hints, inline values and `sisu.explainBorrow` stay the Rust front end's.
-  *Pay*: queries of stage 1 for those, and for hot replacement a program
-  kept between edits. **The REPL** (`sisu repl`) and **worksheets**
+- **The language server's worksheets and `sisu.explainBorrow`**, and
+  **hot replacement** (`sisu run --watch`, and a run under it recorded,
+  whose log replays the saves). From `sisu1 0.15.0` every other request of
+  `sisu lsp` is answered by stage 1's queries (its R164 and R169,
+  decisions 983 and 1060), so the language server is no longer a role of
+  the Rust front end but for two features: a document's inline values
+  (`textDocument/inlineValue`), the worksheet run by stage 0's interpreter
+  from the Rust front end's build of it, and `sisu.explainBorrow`, the
+  loans of the Rust ownership checker (the counterexample mode's, below).
+  Hot replacement needs the front end in the process, its queries kept
+  between edits (the memo), or the program as data. (The capability log
+  and replay of a plain run are stage 1's, the log holding the SIR that
+  ran, decision 303.) *Pay*: the worksheet's inline values from stage 1's
+  `sir --worksheet` (R95), which `sisu ws` already runs; the loans as a
+  query of stage 1; for hot replacement a program kept between edits. **The REPL** (`sisu repl`) and **worksheets**
   (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
   --worksheet` (`sisu1 0.8.0` and later, decisions 563 and 620), and
   `:why` reads the inputs' trees from its `parse --tree` (decision 621);
@@ -659,12 +662,12 @@ What the driver does around stage 1, because of what its commands are:
   where it also reads the catalog and the standard library), so for a
   native build the driver gives it a home of links whose
   `target/release/sisu` is the running `sisu`, which the executable then
-  links its runtime from; and to run a program rather than compile it,
-  stage 1's `build --native` is asked for, with `SISU_KEEP_SIR` in its
-  environment, which makes that backend keep the SIR it is given instead
-  of compiling it. *Pay*: a stage-1 `build --sir OUT` (the build's
-  diagnostics and checks, then the SIR written out), and the backend named
-  by the caller.
+  links its runtime from; and to run a program with a stage 1 older than
+  0.15.0, stage 1's `build --native` is asked for, with `SISU_KEEP_SIR` in
+  its environment, which makes that backend keep the SIR it is given
+  instead of compiling it (from 0.15.0 its `build --for-run --emit-sir`
+  writes the SIR, decision 1061). *Pay*: the backend named by the caller,
+  and `SISU_KEEP_SIR` retired with the older stage 1.
 - **Stage 1's `sir` prints nothing for a program with a front-end error**
   and no warnings at all, where the Rust front end's prints the errors and
   `D0006` (status 1) and its warnings: the driver then runs stage 1's
@@ -680,14 +683,16 @@ What the driver does around stage 1, because of what its commands are:
   run time prints last: the driver takes stage 1's `error: Failed` off its
   standard error, and `error: Exit(status=N)` too, whose N is the status.
   Stage 1 knows the working directory by `PWD`, which the driver sets.
-- **Stage 1's base is kept by a server, but not for `sisu run`**: the
+- **Stage 1's base is kept by a server, but not for `sisu build`**: the
   driver keeps processes of stage 1's `sir --repl-serve` (its R158) in a
   server of its own (decision 980), so a two-line `check` takes 0.014 s
-  where it took 0.24 s and the conformance suite 139 s where it took
-  224 s; `sisu run`'s SIR comes from `build --for-run`, which the server
-  does not answer (decision 981), so each run still pays the base, as
-  does `sisu build`. *Pay*: a request of stage 1 that answers the SIR the
-  build hands its backend, with the build's diagnostics.
+  where it took 0.24 s; from `sisu1 0.15.0` `sisu run`'s SIR comes from
+  the served `build --for-run --emit-sir` (its R170, decision 1061), a
+  two-line run 0.039 s where it took 0.246 s, and a file's `run --native`
+  compiles it in the driver. `sisu build`, `build --native` and a
+  package's `run --native` still pay the base (decision 1062). *Pay*: a
+  served `build --emit-sir` without `--for-run`, and the executable's path
+  in its answer.
 - **Tests and benchmarks from stage 1's SIR** (decision 357): `sisu test`
   and `sisu bench` ask stage 1 for `sir --tests` and run its SIR, with the
   program's files for its replay tokens, snapshots and test cache; stage 1
@@ -1365,7 +1370,9 @@ and profiling", "REPL and scripts"):
 
 - **The language server** has completion, rename and references, the
   catalog's fixes as code actions, inlay hints, "explain this borrow" and
-  worksheets as inline values, but documents are synchronised whole;
+  worksheets as inline values (from `sisu1 0.15.0` stage 1's queries
+  answer all but the last two, decision 1060), but documents are
+  synchronised whole;
   rename finds a type's uses in types by their spelling (a type of
   another module with the same name would be renamed too, since types in
   annotations are not in the typed tree); completion after `.` checks the
