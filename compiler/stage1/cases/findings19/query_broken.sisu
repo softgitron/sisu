@@ -1,0 +1,18 @@
+# The questions of a file an editor is in the middle of writing (RULES.md,
+# R164): a statement left at `p.` and a call left open are syntax errors,
+# and the file still has its declarations, the members of `p` and the
+# hover text of what is whole.
+struct Pair:
+    left: int
+    right: int
+
+    def total(self) -> int:
+        return self.left + self.right
+
+def helper(n: int) -> int:
+    return n + 1
+
+def main():
+    let p = Pair(left=1, right=2)
+    let s = p.
+    let t = helper(

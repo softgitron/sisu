@@ -1,0 +1,29 @@
+# The language server's questions of a program (RULES.md, R164), asked
+# through the server by `query_program.requests`: a file's declarations,
+# the hover text of a function, a local, a field and the standard
+# library's `print`, where each is declared, every use of a function, a
+# field and a type, the names that may be written at a position and a
+# value's members after a `.`.
+
+## A point of the plane.
+struct Point:
+    ## Across.
+    x: int
+    ## Up.
+    y: int
+
+    ## The point moved by `d` across.
+    def moved(self, d: int) -> Point:
+        return Point(x=self.x + d, y=self.y)
+
+## The distance from the origin, squared.
+def norm(p: Point) -> int:
+    let total = p.x * p.x + p.y * p.y
+    return total
+
+def main():
+    let start = Point(x=3, y=4)
+    let far = start.moved(2)
+    print("{norm(start)} {norm(far)}")
+    let across = far.x
+    print(across)

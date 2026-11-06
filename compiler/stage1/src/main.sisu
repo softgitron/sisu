@@ -3127,7 +3127,10 @@ def query_command(
         return Err(Usage(text=usage()))
     let kind = words[0].copy()
     let whole = kind == "diagnostics" or kind == "symbols"
-    let at = kind == "hover" or kind == "definition" or kind == "references" or kind == "completions"
+    let at = kind == "hover"
+        or kind == "definition"
+        or kind == "references"
+        or kind == "completions"
     if not (whole and len(words) == 2) and not (at and len(words) == 4):
         return Err(Usage(text=usage()))
     let file = words[1].copy()
@@ -3215,12 +3218,16 @@ def query_input(
     var dir = package.parent(disk)
     while True:
         if package.is_file(sys.fs, package.join(dir, package.MANIFEST)):
-            for layout in package.load_target(sys.fs, Target.Package(dir.copy()), False, build_request(sys)):
+            for layout in package.load_target(
+                sys.fs, Target.Package(dir.copy()), False, build_request(sys)
+            ):
                 for i in range(len(layout.modules)):
                     if package.canonical(layout.modules[i].disk) == disk:
                         var held: dict[String, String] = {}
                         _ = held.insert(layout.modules[i].disk.copy(), text.to_string())
-                        let input = held_layout_input(sys, home, layout, True, mut env, catalog, held)?
+                        let input = held_layout_input(
+                            sys, home, layout, True, mut env, catalog, held
+                        )?
                         var disks: list[String] = []
                         for m in layout.modules:
                             disks.push(package.canonical(m.disk))
@@ -3290,7 +3297,9 @@ pure def query_diagnostics(r: Report, at: int, catalog: Catalog) -> String:
         let range = lines.span(text, d.start, d.end)
         let message = catalog.render(d.msg.id(), d.params)
         let severity = catalog.severity(d.msg)
-        out.push("{range}\t{catalog.code(d.msg)}\t{d.msg.id()}\t{severity}\t{query.field(message)}\n")
+        out.push(
+            "{range}\t{catalog.code(d.msg)}\t{d.msg.id()}\t{severity}\t{query.field(message)}\n"
+        )
     return out
 
 ## `eval FILE [--to json|toml|yaml]` (08, "Configuration files"; RULES.md,
@@ -3366,7 +3375,9 @@ def eval_with(
             case Err(stop):
                 match stop:
                     case interp.Stop.Panicked(m) | interp.Stop.Hole(m):
-                        d = Some(Diagnostic.new(Msg.ComptimePanicked, start, end).with("message", m))
+                        d = Some(
+                            Diagnostic.new(Msg.ComptimePanicked, start, end).with("message", m)
+                        )
                     case interp.Stop.Refinement(ty, value, predicate):
                         var x = Diagnostic.new(Msg.RefineNotSatisfied, start, end)
                         d = Some(x.with("value", value).with("ty", ty).with("predicate", predicate))

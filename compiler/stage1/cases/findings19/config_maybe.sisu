@@ -1,0 +1,5 @@
+# Nothing in a list (RULES.md, R165): JSON and YAML write it `null`; TOML,
+# which has no null, cannot write it (`E0617`), and leaves out a constant
+# or a field that holds nothing.
+const MAYBE: list[int?] = [None, Some(2)]
+const NONE: int? = None

@@ -107,7 +107,11 @@ pub pure def data_of(prog: Program, v: interp.Value) -> Data ! Unwritable:
                     case interp.Value.Int(i):
                         key = "{i}"
                     case _:
-                        return Err(Holds(what="a dict whose keys are not text or integers".to_string(), at=0))
+                        return Err(
+                            Holds(
+                                what="a dict whose keys are not text or integers".to_string(), at=0
+                            )
+                        )
                 out.push((key, data_of(prog, x)?))
             return Ok(Data.Map(out))
         case interp.Value.Adt(ty, variant, fields):

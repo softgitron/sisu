@@ -25,7 +25,9 @@ def checks[T]() -> list[String]:
 ## The fields with their positions from the end, by `zip` and `reversed`.
 def from_end[T]() -> list[String]:
     var out: list[String] = []
-    comptime for (f, k) in zip(reversed(reflect.fields_of(T)), range(1, len(reflect.fields_of(T)) + 1)):
+    comptime for (f, k) in zip(
+        reversed(reflect.fields_of(T)), range(1, len(reflect.fields_of(T)) + 1)
+    ):
         out.push("{k}: {f.name}")
     return out
 

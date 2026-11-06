@@ -181,6 +181,8 @@ sisu run -- profile FILE                    # the time lexing, parsing and each 
 sisu run -- audit --unsafe [--std] [PATH]   # the program's unsafe code by package and module, with the lints (below, "Unsafe code")
 sisu run -- lint [--format=ids] [PATH]      # `sisu lint`: the program's lints, which `check` does not print (below, "The manual's findings")
 sisu run -- test [OPTIONS] [PATH]           # the tests, built by stage 1 and run by stage 0's runner, with R27's status (below, "The third round")
+sisu run -- query KIND FILE [LINE COL] [--text PATH]  # the language server's questions of a file and a position, as tab-separated lines (RULES.md, R164)
+sisu run -- eval FILE [--to json|toml|yaml] # a configuration module's constants, evaluated at compile time and written as JSON, TOML or YAML (R165)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
@@ -2732,6 +2734,50 @@ compile-time types (R155) and the sharing of instances with
 Stage 1's version is 0.13.0: the driver may rely on the requests of R158.
 The new cases are in `cases/findings18/`.
 
+### The nineteenth round: the language server's questions, `eval`, a template's builtins, the graphemes' gaps
+
+This round took the Rust front end's last role in `sisu lsp`, 08's
+configuration files, a finding of the manual's seventeenth round and
+R162's open item, and the merge's case `std/slices`. RULES.md has the
+rules (R164 to R168, decisions 960 to 964) and their decision texts:
+
+- **The language server's questions** (R164): `query diagnostics`,
+  `symbols`, `hover`, `definition`, `references` and `completions` of a
+  file and a position, answered from stage 1's check of the program that
+  holds the file, a line per item of tab-separated fields, a file with a
+  syntax error answered where its tree allows, `--text` for an editor's
+  buffer; served, a hover takes 0.009 s (above, "Where the time goes").
+  `check.sh`'s new class `served` asks a case's `.requests` through the
+  server against its `.answers`.
+- **`eval`** (R165): a configuration module's `const` items evaluated by
+  the compile-time evaluator and written as JSON, TOML or YAML (`--to`, as
+  08 spells it), a constant whose evaluation stops being that error at
+  its name and one the form cannot write the new `E0617`.
+- **A template's builtins** (R166): `range`, `zip`, `reversed`, `sorted`,
+  `min`, `max`, `sum` and text's `to_lowercase`, `to_uppercase`,
+  `to_string` and `byte_len` in a template's compile-time code, so
+  `comptime for i in range(len(a.args))` unrolls; `E0609`'s reason lists
+  them.
+- **The graphemes' gaps** (R167): decided against for the round; Python's
+  `unicodedata` has no `Grapheme_Cluster_Break`, `Indic_Conjunct_Break` or
+  `Extended_Pictographic`, and RULES.md records what a table from
+  Unicode's own files would add.
+- **The merge's differences** (R168): the conformance suite's
+  `std/slices`, which imports stage 1's `std.mem`.
+
+Decided against: rendering `eval` through each type's `Encode` (R165), and
+UAX #29's rules beyond R162's tables (R167). Open: the driver's routing of
+`sisu lsp`'s requests and of `sisu eval` to stage 1, which is stage 0's;
+the questions the driver keeps (selection ranges, inlay hints, inline
+values); `max` and `min` of the prelude in a constant `eval` evaluates,
+which stage 1's evaluator does not run (an intrinsic it lacks); `W0022`
+for an attribute that a template reads only through `f.attributes`; and
+compile-time types (R155).
+
+Stage 1's version is 0.14.0: the driver may rely on `query` and `eval`
+(R164, R165). The new cases are in `cases/findings19/` and
+`cases/packages/query_modules.pkg`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2782,6 +2828,8 @@ The new cases are in `cases/findings18/`.
 | `mutants` | 204 | a seeded generator and the mutations of stage 0's robustness test; the files laid out otherwise that the formatters are compared on | `sisu-driver/src/tests.rs` |
 | `main` | 3761 | the command line, and the driver: `check` in both forms, the SIR of a whole program (with its tests, `--tests`), `build --native` through stage 0's backend, `fmt`, `doc`, `audit --unsafe`, `lint` (R11), the packages' `unsafe` levels (R6), and the cache of the base beside the native executable | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check`, `sir`, `build`, `fmt` and `doc` |
 | `session` | 188 | the programs of `sisu repl` and `sisu ws` (R79): an input wrapped to be shown, a loaded file's preamble, a worksheet's markers | `sisu-driver/src/repl.rs`'s `Entry`, `split_preamble` and `evaluate_sheet` |
+| `query` | 841 | the language server's questions (R164): what a position names, its hover text, declaration and uses, the completions there, and a file's declarations, as tab-separated lines | `sisu-driver/src/lsp.rs` and `assist.rs` |
+| `config` | 396 | `eval` (R165): a configuration module's constants as data, written as JSON, TOML or YAML | stage 1's own (08) |
 | `naming` | 107 | the case each kind of name is written in, and a name written so (R12) | stage 1's own (02) |
 | `audit` | 420 | `audit --unsafe` (R7): the unsafe code of a program by package and module, with the modules' hashes | stage 1's own (22) |
 | `stage1/std/mem`, `ffi`, `rt` | 1023 | `std.mem`, `std.ffi` and `std.rt` (R4, R8), the standard library's modules only stage 1 reads, and the runtime's first slice in Sisu (R9) | stage 1's own (22) |
@@ -3553,6 +3601,16 @@ program (R147's spread), then the program's check and lowering. The
 driver's use of it, one server per working directory, is stage 0's next
 round.
 
+The nineteenth round's questions of the language server (R164) are
+served the same way and cost what a `check` does: a hover of a 30-line
+program takes 0.22 s of CPU time as a process and 0.009 s served (the
+median of 50, after a first answer of 0.36 s that makes the base), a
+completion 0.013 s and a search of references 0.012 s, measured natively
+at a load of 5 to 8 while `check.sh` ran beside them. A completion after
+a `.` checks the program twice (with the `.` and without it), and a
+search of references parses each module of the program's own packages
+again for its names.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3744,7 +3802,12 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     `BigRatio` (R163); decided against: a closure that captures more than
     constants (R160); left: compile-time types (R155), UAX #29's rules
     beyond the tables (R162) and the sharing of instances with
-    `--explain-size`. The tenth round took a variant's
+    `--explain-size`. The nineteenth round took `range(len(a.args))` and the
+    other builtins in a template's compile-time code (R166); decided
+    against for the round: UAX #29's rules beyond the tables (R167); left:
+    compile-time types (R155), the sharing of instances with
+    `--explain-size`, and `W0022` of an attribute read only through
+    `f.attributes`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

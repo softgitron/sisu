@@ -331,7 +331,9 @@ pure def doc_of(typed: typeck.Typed, files: Files, d: DefId) -> String:
 ## an expression), what the checker knows of it, and its `##` comment,
 ## as one line `RANGE\tSIGNATURE\tNOTES\tDOC`; nothing where the position
 ## names nothing.
-pub pure def hover(typed: typeck.Typed, files: Files, m: ModuleId, text: str, offset: int) -> String:
+pub pure def hover(
+    typed: typeck.Typed, files: Files, m: ModuleId, text: str, offset: int
+) -> String:
     let target = target_at(typed, m, offset) else:
         return String.new()
     let prog = ref typed.prog
@@ -437,7 +439,12 @@ pure def target_name(typed: typeck.Typed, target: Target) -> String?:
 ## and position. A use is a name written as that one where it means it
 ## (stage 0's `occurrences`): what is at the name is the target.
 pub pure def references(
-    typed: typeck.Typed, files: Files, programs: list[ModuleId], m: ModuleId, offset: int, catalog: Catalog
+    typed: typeck.Typed,
+    files: Files,
+    programs: list[ModuleId],
+    m: ModuleId,
+    offset: int,
+    catalog: Catalog,
 ) -> String:
     let target = target_at(typed, m, offset) else:
         return String.new()
@@ -447,7 +454,9 @@ pub pure def references(
     var decl: (ModuleId, TextRange)? = None
     if let Some((at, r)) = declared(typed, target):
         if let Some((path, text)) = files.get(at):
-            out.push("{field(path)}\t{range_of(text, Lines.of(text), r.start, r.end)}\tdeclaration\n")
+            out.push(
+                "{field(path)}\t{range_of(text, Lines.of(text), r.start, r.end)}\tdeclaration\n"
+            )
             decl = Some((at, r))
     var typeish = False
     if let Target.Def(d) = target:
@@ -583,7 +592,9 @@ pure def symbol(tree: Tree, text: str, lines: Lines, n: int, depth: int, mut out
                 let k = tree.tokens[t].kind
                 if is_declaring(k):
                     after_keyword = True
-                elif k == SyntaxKind.Ident and (after_keyword or not has_keyword) and name.is_empty():
+                elif k == SyntaxKind.Ident
+                        and (after_keyword or not has_keyword)
+                        and name.is_empty():
                     name = text.byte_slice(tree.tokens[t].start, tree.tokens[t].end).to_string()
                     sel = TextRange.new(tree.tokens[t].start, tree.tokens[t].end)
     if name.is_empty():
@@ -802,7 +813,11 @@ pub pure def with_prefix(answer: str, prefix: str) -> String:
 ## Whether byte `b` may be part of a name.
 pub pure def is_name_byte(b: u8) -> bool:
     let n = b.to_int()
-    return (n >= 48 and n <= 57) or (n >= 65 and n <= 90) or (n >= 97 and n <= 122) or n == 95 or n >= 128
+    return (n >= 48 and n <= 57)
+        or (n >= 65 and n <= 90)
+        or (n >= 97 and n <= 122)
+        or n == 95
+        or n >= 128
 
 ## Where the name being written at `offset` starts.
 pub pure def word_start(text: str, offset: int) -> int:

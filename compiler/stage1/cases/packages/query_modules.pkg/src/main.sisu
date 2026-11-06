@@ -1,0 +1,13 @@
+##! The root module of `garden`.
+
+from garden.beds import Bed, starting
+
+def total(beds: list[Bed]) -> int:
+    var sum = 0
+    for b in beds:
+        sum += b.area()
+    return sum
+
+def main():
+    let beds = starting()
+    print(total(beds))

@@ -1,0 +1,9 @@
+table ORDERS of 6 bytes
+amount check 1: positive
+amount check 2: small
+customer check 1: named
+1: priority
+2: customer
+3: amount
+AMOUNT CUSTOMER three or more
+213

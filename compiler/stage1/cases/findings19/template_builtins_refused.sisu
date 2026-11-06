@@ -1,0 +1,24 @@
+# What a template's compile-time code still cannot call (RULES.md, R166):
+# a function of the prelude beyond the listed ones, `abs`, is `E0609`,
+# whose words list what can be called; and a listed one given what it does
+# not take says so.
+struct Pair:
+    left: int
+    right: int
+
+def widths[T]() -> list[int]:
+    var out: list[int] = []
+    comptime for f in reflect.fields_of(T):
+        comptime if abs(len(f.name)) > 1:
+            out.push(len(f.name))
+    return out
+
+def counted[T]() -> int:
+    var n = 0
+    comptime for i in range(0, len(reflect.fields_of(T)), 0):
+        n += i
+    return n
+
+def main():
+    print(widths[Pair]())
+    print(counted[Pair]())

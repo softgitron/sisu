@@ -1,0 +1,8 @@
+query	hover	src/main.sisu	12	17	--dir	cases/packages/query_modules.pkg
+query	definition	src/main.sisu	12	17	--dir	cases/packages/query_modules.pkg
+query	definition	src/main.sisu	8	18	--dir	cases/packages/query_modules.pkg
+query	references	src/beds.sisu	4	13	--dir	cases/packages/query_modules.pkg
+query	references	src/main.sisu	8	18	--dir	cases/packages/query_modules.pkg
+query	completions	src/main.sisu	8	22	--dir	cases/packages/query_modules.pkg
+query	symbols	src/beds.sisu	--dir	cases/packages/query_modules.pkg
+query	diagnostics	src/main.sisu	--dir	cases/packages/query_modules.pkg

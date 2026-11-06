@@ -1,0 +1,4 @@
+23:11-23:25 E0609 comptime.instance-failed name="widths[Pair]" reason="only `reflect`, `enumerate`, `len`, `range`, `zip`, `reversed`, `sorted`, `min`, `max`, `sum` and the methods `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of text can be called at compile time here"
+  label 12:21-12:37 comptime.instance-here
+24:11-24:26 E0609 comptime.instance-failed name="counted[Pair]" reason="`range` with a step of 0"
+  label 18:23-18:61 comptime.instance-here

@@ -8307,3 +8307,333 @@ again with the examples of `BigRatio` and `Decimal.to_big_ratio`, and
 925. `std.num` has `BigRatio`, an exact fraction of `BigInt`s, and a
      `Decimal`'s `/` gives one, exactly; `Ratio` keeps its `int` parts.
      Stage 1 decides it (RULES.md, R163).
+
+## R164. `query`: the language server's questions, answered by stage 1 and served (decision 960)
+
+**The rule.** `sisu1 query KIND FILE [LINE COL] [--text PATH]` answers
+the questions the driver's language server (`sisu lsp`, `lsp.rs` and
+`assist.rs`) answers today from the Rust front end, so that the driver can
+answer them from stage 1, and `sir --repl-serve` serves it as it serves
+`check` (R158). What the driver may rely on from 0.14.0:
+
+- **The program.** FILE is checked in the program that holds it, as
+  `check` checks it, with its tests: the package of the nearest
+  `sisu.toml` at or above its directory when FILE is one of that
+  package's modules, else the file alone (with the dependencies its
+  inline metadata names). With `--text PATH`, FILE's text is PATH's (the
+  editor's buffer, which the driver writes to a file), everywhere FILE's
+  would be read; the other modules are read from disk. A query writes no
+  file, a lockfile neither.
+- **A position** is LINE and COL, 1-based, the column counting
+  characters, as `check --format=ids` writes them (a column past its
+  line's last character is past its line break: the next line's start). In an answer a position is `LINE:COL` and
+  a range `LINE:COL-LINE:COL`, in the file the line names. PATH in an
+  answer is absolute.
+- **An answer** is what the command prints on standard output: one line
+  per item, its fields separated by tabs, each line ending in a line
+  break, nothing when there is nothing to say (status 0 either way). A
+  field of text has a backslash, a tab and a line break written `\\`, `\t`
+  and `\n`, so that no field holds a tab or a line break. A file that
+  cannot be read is the run time's I/O error (status 1), and a request
+  that is not one of these (a kind, a missing or extra word, a LINE or COL
+  that is not a number) is a usage error, as any command's.
+- `query diagnostics FILE`: what `check` reports in FILE, in `check`'s
+  order (the ownership checker's and the failed `comptime` expressions'
+  among them, as `check` adds them): `RANGE\tCODE\tID\tSEVERITY\tMESSAGE`,
+  the severity `error`, `warning` or `note`, and the message as the
+  catalog renders it, which the human form prints after the code.
+- `query symbols FILE`: FILE's declarations, from its syntax tree alone,
+  so a file with a syntax error has all its whole items:
+  `KIND\tNAME\tRANGE\tNAME_RANGE\tDEPTH`, in the order written, each
+  member (a method, a field, a variant, an associated constant) after its
+  item with depth 1, the items with depth 0. The kinds are `function`,
+  `method`, `struct`, `enum`, `error`, `trait`, `impl` (named by its
+  header, `impl Display for Point`), `const`, `type`, `test` (named by its
+  string), `field` and `variant`. RANGE ends at the item's last character
+  that is not a blank.
+- `query hover FILE LINE COL`: at most one line,
+  `RANGE\tSIGNATURE\tNOTES\tDOC`: the range of the name or expression
+  there, and its signature: a definition's as it is declared (`def
+  norm(p: Point) -> int`, a method's `def Point.moved(self, d: int) ->
+  Point`, a struct with its fields and an enum with its variants on the
+  lines after its own, `const N: int`, `trait T`, `module m`, `type A =
+  B`), a local's `let x: T` or `var x: T`, a field's `x: T`, or else the
+  expression's type. NOTES is what the checker knows besides (a `T !`
+  function's `error set (inferred): ...`), DOC the `##` comment written
+  above the declaration (its lines without `## `), or a field's.
+- `query definition FILE LINE COL`: at most one line, `PATH\tRANGE`, the
+  declaration of what the position names: a definition of the program or
+  of the standard library (`HOME/std/NAME.sisu`), a field, a local. A
+  position that names no declaration, or one the compiler wrote, has none.
+- `query references FILE LINE COL`: `PATH\tRANGE\tKIND`, KIND
+  `declaration` for the declaration's name, first, then `use` for each
+  name written so that it means the same declaration, by module and
+  position: a local's in its body, a definition's in every module of the
+  program's own packages (a type's name written in a type among them); a
+  name the standard library declares has its declaration only.
+- `query completions FILE LINE COL`: `KIND\tLABEL\tDETAIL\tSNIPPET`,
+  sorted by label, each label once, those that start with the name being
+  written before the position. After a `.`, the members of the value
+  before it (the program checked again without the `.` and the name, so
+  that the value is an expression of its own): its struct's fields
+  (`field`), then its type's methods and those of its trait impls
+  (`method`). Elsewhere the names that may be written there: the locals
+  of the innermost body declared before the position (`variable`), the
+  module's own names and those it imports, the prelude's, the variants of
+  the program's own enums by their bare names (`variant`), and the
+  keywords (`keyword`); a definition's KIND is `function`, `struct`,
+  `enum`, `const`, `module`, `trait` or `type`. DETAIL is the signature
+  hover gives; SNIPPET is the protocol's snippet that writes a call or a
+  construction with a hole per required argument (`norm(${1:p})`,
+  `Point(x=${1:x}, y=${2:y})`), empty for the others.
+- Served, a query is a request like any (R158): `query\tKIND\tFILE\t...`
+  with `--dir DIR` among its words, answered with R112's frame.
+
+```text
+$ sisu1 query hover point.sisu 27 14
+27:13-27:17	def norm(p: Point) -> int		The distance from the origin, squared.
+$ sisu1 query completions point.sisu 28 20
+variable	far	let far: Point	
+```
+
+What the driver keeps: the protocol's JSON, the conversion of positions
+to UTF-16 columns where the editor asks for them, the documents it holds
+(written for `--text`), rename and code actions (from `references` and
+`diagnostics`), and the commands stage 1 does not answer (selection
+ranges, formatting, which `fmt` answers, inlay hints and inline values).
+
+**Measured** (natively, the release build, while `check.sh` ran beside
+it, a load of 5 to 8 on four cores): a hover of the 30-line program of
+`cases/findings19/query_program.sisu` takes 0.22 s of CPU time as a
+process, and 0.009 s served (the median of 50 after the first request,
+which makes the base, 0.36 s); a completion 0.013 s served, a search of
+references 0.012 s.
+
+**Why.** Item 1 of the round: the Rust front end still answers `sisu
+lsp`'s questions (port-debt.md, "The Rust front end's roles still to
+replace"), and stage 1's server answers every other command.
+
+**In stage 1.** `query` (new: `Target`, `target_at`, `expr_at`,
+`hover`, `signature`, `doc_above`, `definition`, `declared`,
+`references`, `in_type`, `symbols`, `members`, `scope`, `receiver_at`,
+`with_prefix`, `field`), and `main` (`query_command`, `query_answer`,
+`query_input`, `query_module`, `query_files`, `query_diagnostics`;
+`query` among the served commands).
+
+**What it changes.** No output of the corpus. The cases are asked through
+the server by `check.sh`'s new class `served`, which sends each
+`cases/*/*.requests` file's lines to one `sir --repl-serve` and compares
+its answers with the `.answers` beside it, the compiler's directory
+written `COMPILER` and each frame's lengths left out:
+`cases/findings19/query_program.requests` (every kind of a program,
+`query_program.sisu`, and of `query_broken.sisu`, a file with a statement
+left at `p.` and a call left open, whose symbols, members and hover text
+are answered; `--text` with `query_buffer.text`; a usage error and a
+missing file) and `cases/findings19/query_modules.requests` (the package
+`cases/packages/query_modules.pkg`, with its `.out`: a name imported from
+another module is declared and used there).
+
+**Decision 960**, for docs/architecture.md:
+
+960. `sisu1 query KIND FILE [LINE COL] [--text PATH]` answers the
+     language server's questions from stage 1's check of the program that
+     holds FILE: `diagnostics`, `symbols`, `hover`, `definition`,
+     `references` and `completions`, one line per item of tab-separated
+     fields, positions as `check --format=ids` writes them; `sir
+     --repl-serve` serves it, a hover in 0.009 s. `sisu1 --version` is
+     0.14.0. Stage 1 decides it (RULES.md, R164).
+
+## R165. `eval`: a configuration module's constants, rendered (decision 961)
+
+**The rule.** `sisu1 eval FILE [--to json|toml|yaml]` (08,
+"Configuration files"; 10's `sisu eval <file>`) checks the module FILE as
+`check` checks a file, without its tests, and evaluates each of its `const`
+items, in the order written, with the compile-time evaluator, as a
+`comptime` expression is evaluated (a budget of 1,000,000 steps, nothing
+reaching the world), then writes them in the form `--to` names, JSON
+without it (08 names the three, and the option `--to`): one JSON object,
+one TOML table of `NAME = value` lines (a struct an inline table) or one
+YAML mapping in block style, by the constants' names. A struct is a
+mapping of its fields, in order; an enum's variant its name, or with
+fields a mapping of its name to them (their mapping, or the one value);
+`Some(x)` is `x` and `None` nothing (`null`, which TOML lacks: a field or
+a constant that holds nothing is left out there, and nothing in a list is
+`E0617`); a list, a set and a tuple a sequence; a dict whose keys are text
+or integers a mapping; text in double quotes, JSON's escapes. The types,
+refinements and invariants the module declares are the schema: a
+constant whose evaluation stops is the evaluation's error at the
+constant's name (`E0602` for a panic, an invariant's among them, `E0603`,
+`E0601`, `E0810`), and one that holds what the form cannot write (a
+function, a reference, an infinite float in JSON) is the new `E0617`,
+`eval.no-form`: "`SQUARE` holds a function, which JSON cannot write".
+Diagnostics are printed as `check` prints them, on standard error; with an
+error nothing is written on standard output and the status is 1. A
+constant whose evaluation needs what stage 1's evaluator does not run is
+beyond the slice, said on standard error, status 1. `sir --repl-serve`
+serves `eval` as any command. What the driver may rely on from 0.14.0:
+the command, its options, its output and its status.
+
+```text
+$ sisu1 eval deploy/prod.sisu --to toml
+SERVICES = [{ name = "web", port = 8080, replicas = 3, tier = "Free" }]
+REGION = "eu-north"
+```
+
+**Decided against**: rendering through each type's `Encode` (08 "through
+`Encode`", leaning, D-063), which would make every type of a
+configuration derive it; the value's own structure is what an `Encode`
+derive writes of it, and `eval` reads it whether or not the type derives
+one. And the brief's `--format`: 08 spells the option `--to`.
+
+**Why.** Item 2 of the round: the driver answers `sisu eval` with
+`D0003` today; its routing of `sisu eval` to stage 1 is stage 0's next
+round.
+
+**In stage 1.** `config` (new: `Form`, `Data`, `Unwritable`, `constants`,
+`data_of`, `render`, `json`, `toml`, `yaml_entry`), `interp`
+(`value_of`, and `variant_info` made public), `main` (`eval_command`,
+`eval_with`, `no_form`, and `report_program`, the part of `report_with`
+that leaves the program checked and evaluated for `eval`), `diag` and the
+catalog (`E0617`, `eval.no-form`, after `E0616`).
+
+**What it changes.** No output of the corpus. The cases, asked through
+the server by `cases/findings19/config.requests` (class `served`):
+`config_services.sisu` (each form, and JSON without `--to`),
+`config_refused.sisu` (a failed invariant and a function) and
+`config_maybe.sisu` (nothing in a list: JSON and YAML write `null`, TOML
+refuses), and `--to xml`, a usage error.
+
+**Decision 961**, for docs/architecture.md:
+
+961. `sisu1 eval FILE [--to json|toml|yaml]` evaluates a module's `const`
+     items with the compile-time evaluator and writes them as JSON (the
+     default), TOML or YAML; a constant whose evaluation stops is that
+     error at its name, and one the form cannot write is `E0617`. Stage 1
+     decides it (RULES.md, R165).
+
+## R166. A template's compile-time code calls `range`, `zip`, `reversed`, `sorted`, `min`, `max`, `sum` and text's methods (decision 962)
+
+**The rule.** In a template's `comptime for` and `comptime if` (and
+wherever its compile-time code is evaluated), besides `reflect`,
+`enumerate` and `len`: `range(stop)`, `range(start, stop)` and
+`range(start, stop, step)` of integers (a step of 0, or more than 100,000
+numbers, stops the instance); `zip(a, b)` of two lists of one length
+(PEP 618, as the prelude's); `reversed(xs)`; `sorted(xs)`, `min` and
+`max` of one list or of two or more values, and `sum(xs)`, of integers or
+of text; and the methods of text the compile-time evaluator has,
+`to_lowercase`, `to_uppercase`, `to_string` and `byte_len`. So `comptime
+for i in range(len(a.args))` unrolls over an attribute's arguments. A call
+of anything else is `E0609` as before, whose reason now lists what can be
+called: "only `reflect`, `enumerate`, `len`, `range`, `zip`, `reversed`,
+`sorted`, `min`, `max`, `sum` and the methods `to_lowercase`,
+`to_uppercase`, `to_string` and `byte_len` of text can be called at
+compile time here".
+
+**Why.** Item 3 of the round, the manual's seventeenth round
+(manual/README.md: "`comptime for i in range(len(a.args))` in a template
+is E0609").
+
+**In stage 1.** `typeck.template` (`is_builtin`, `is_text_method`,
+`builtin`, `text_method`, `RANGE_LIMIT`; `Unfold.is_static` and
+`Unfold.eval` of a call).
+
+**What it changes.** The cases `cases/findings19/template_builtins.sisu`
+(its `.out`: an attribute's arguments numbered by `range(len(a.args))`,
+fields paired by `zip` and `reversed`, names `sorted` and in capitals, a
+`min`, a `max` and a `sum` in conditions, a descending `range`) and
+`cases/findings19/template_builtins_refused.sisu` (its `.diag`: `abs`,
+with `E0609`'s new list, and `range` with a step of 0); stage 1's AST of
+the first has its fields' attributes (R40). And the conformance suite's
+`comptime/derive_user.sisu`, whose SIR differs from stage 0's though not
+what it does: its derive's `names.push(f.name.to_string())` is evaluated
+when the impl is unfolded, `f.name` being known then, so the impl holds
+the text `"x"` where it held `"x".to_string()`.
+
+- Differs: `compiler/stage1/cases/findings19/template_builtins.sisu`: ast, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings19/template_builtins_refused.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/comptime/derive_user.sisu`: sir
+
+**Decision 962**, for docs/architecture.md:
+
+962. A template's compile-time code may call `range`, `zip`, `reversed`,
+     `sorted`, `min`, `max` and `sum` of lists and numbers and the methods
+     `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of text,
+     besides `reflect`, `enumerate` and `len`; `E0609`'s reason lists them.
+     Stage 1 decides it (RULES.md, R166).
+
+## R167. UAX #29's `Prepend`, conjunct and pictograph rules: decided against for the round, with the table they need (decision 963)
+
+**The rule.** R162's graphemes stay as they are. Python's `unicodedata`
+(Unicode 15.1.0, which `tools/unicode_tables.py` reads) has no
+`Grapheme_Cluster_Break`, `Indic_Conjunct_Break` or
+`Extended_Pictographic` property, and what it has does not carry them:
+
+- `Prepend` is fifteen ranges of characters (the Arabic number signs
+  U+0600 to U+0605, U+06DD, U+070F, U+0890 and U+0891, U+08E2, and some
+  Brahmic prefixed vowels and repha forms, U+0D4E, U+110BD, U+110CD, ...)
+  of the general categories `Cf` and `Lo`, beside thousands of characters
+  of the same categories that are not; the East Asian width says nothing
+  of them.
+- GB9c's conjuncts need `Indic_Conjunct_Break`: its `Linker` is six
+  viramas (Bengali, Devanagari, Gujarati, Malayalam, Oriya, Telugu), which
+  a list could name, but its `Consonant` is
+  `Indic_Syllabic_Category=Consonant` of those scripts, which a
+  character's name and category only approximate (an independent vowel is
+  a `Lo` letter of the script too, and a dead consonant is not one).
+- GB11's `Extended_Pictographic` holds unassigned code points reserved for
+  emoji, which have no category to read, beside `So` symbols that are not
+  pictographs.
+- `Other_Grapheme_Extend` (U+200C among them) is `Cf` or `Mc`, beside
+  others of those categories that do not extend.
+
+A table from Unicode's own files would add them: `Prepend` from
+`GraphemeBreakProperty.txt` (15 records), `Indic_Conjunct_Break` from
+`DerivedCoreProperties.txt` (its `Linker` 6 code points, its `Consonant`
+and `Extend` a few dozen records), and `Extended_Pictographic` from
+`emoji-data.txt` (about eighty records): a few kilobytes of text at the
+end of `std/string.sisu`, with the three rules in `breaks_between`.
+
+**Decided against** for the round: the files are not in the repository
+and the tool's one source is `unicodedata`; and the change is to
+`std/string.sisu`'s rules, not an append, while stage 0's agent edits
+`std/`. An approximation from the categories would split or join graphemes
+wrongly for whole scripts.
+
+**Why.** Item 4 of the round, R162's open item.
+
+**In stage 1.** Nothing.
+
+**What it changes.** Nothing.
+
+**Decision 963**, for docs/architecture.md:
+
+963. `graphemes()` keeps R162's rules: UAX #29's `Prepend`, conjunct
+     (GB9c) and pictograph (GB11) rules need Unicode's
+     `GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt` and
+     `emoji-data.txt`, which Python's `unicodedata` does not carry; they
+     wait for those files. Stage 1 decides it (RULES.md, R167).
+
+## R168. The merge's differences: the conformance suite's `std/slices` (decision 964)
+
+**The rule.** Nothing a command prints changes. Stage 0's seventeenth
+round added the conformance case `std/slices.sisu` (decision 940), a
+`Slice` that views its list in place, which imports `as_ptr` from
+`std.mem` to show that two slices of one list point to one place;
+`std.mem` is stage 1's (R5), and the Rust front end answers its import
+with `E0220`, so the case's names, SIR, diagnostics and pages differ from
+stage 0's as those of `unsafe/cstring` do (R149). What it does is what its
+`.out` says, from stage 1's SIR (`behaviour`). Stage 0's decision 942,
+the driver's side of R158's server, asks nothing of stage 1.
+
+**Why.** Item 5 of the round: the merge of stage 0's seventeenth round
+brought the case, and `check.sh` found what it changes.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/std/slices.sisu`: names, sir, ids, human, doc, doc-output
+
+**Decision 964**, for docs/architecture.md:
+
+964. The conformance suite's `std/slices` differs from stage 0's front
+     end, which has no `std.mem`, as `unsafe/cstring` does (R149). Stage 1
+     decides it (RULES.md, R168).
