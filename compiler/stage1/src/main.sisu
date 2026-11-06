@@ -133,7 +133,15 @@ from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage, StdMarks
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program, ROOT_PACKAGE
-from stage1.typeck.std_sources import display_path, documented, importable, std_file, target_for
+from stage1.typeck.std_sources import (
+    allocator_names,
+    display_path,
+    documented,
+    importable,
+    std_file,
+    target_for,
+    with_allocators,
+)
 from stage1.typeck.ty import DefId, TyKey
 
 error UsageError:
@@ -5940,6 +5948,8 @@ def environment(sys: System, home: str) -> Environment ! IoError:
         _ = prelude.items.add(module.to_string())
         _ = std.insert(module.to_string(), names)
     _ = prelude.items.add("target".to_string())
+    for n in allocator_names():
+        _ = prelude.items.add(n.to_string())
     return Ok(Environment(prelude=prelude, std=std, parses=None))
 
 ## The base of a command that checks a program, made with the cache
@@ -6155,6 +6165,11 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
         names.push(name)
     for name in names:
         _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new(std_file(home, name)))?)
+    # The prelude as stage 1 reads it: its collections with their allocator
+    # parameter (RULES.md, R227).
+    if let Some(p) = texts.get("prelude"):
+        let read = with_allocators(p)
+        _ = texts.insert("prelude".to_string(), read)
     # A build for another runtime than the interpreter, or of a package for
     # another runtime profile than `full`, has its `target` (RULES.md, R116
     # and R122).

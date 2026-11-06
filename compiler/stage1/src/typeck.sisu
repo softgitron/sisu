@@ -228,6 +228,10 @@ pure def std_promotions(
         let module_name = prog.modules[m.index].name.copy()
         if not importable().contains(module_name) or m.index >= len(all.sources):
             continue
+        # A module the base's core loads, `std.mem` for the prelude's
+        # allocators (RULES.md, R227), keeps its syntax for lowering alone.
+        if all.sources[m.index].items.is_empty():
+            continue
         let f = prog.fn_info(d) else:
             continue
         if f.template or f.generics.is_empty():

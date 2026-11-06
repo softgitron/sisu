@@ -1169,8 +1169,9 @@ impl Program:
         for t in types.walk(ty):
             if let TyData.Adt(d, args) = types.data(t):
                 if self.collection_name(d).is_some():
-                    for a in args:
-                        if is_ref_item(types, a):
+                    for i in range(len(args)):
+                        let a = args[i]
+                        if is_ref_item(types, a) and not types.is_allocator_arg(d, len(args), i):
                             return Some((t, a))
         return None
 

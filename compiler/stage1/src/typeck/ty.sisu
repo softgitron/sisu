@@ -107,10 +107,16 @@ pub struct Types:
     ## of one (`has_params`), found as it is made: substitution leaves any
     ## other type as it is.
     params: list[bool]
+    ## The builtin collections' allocator parameter (RULES.md, R227): by a
+    ## collection's definition, how many parameters it has and the default
+    ## of its last, `Global`, which a type of the collection leaves out, so
+    ## that `list[T, Global]` is `list[T]`, the type a program that names no
+    ## allocator had before the parameter.
+    interned: dict[int, (int, Ty)]
 
 impl Types:
     pub pure def new() -> Types:
-        var t = Types(data=[], ids={}, params=[])
+        var t = Types(data=[], ids={}, params=[], interned={})
         # The fixed indices of `Ty.int()` to `Ty.error()`.
         _ = t.intern(TyData.Int)
         _ = t.intern(TyData.Float)
@@ -214,7 +220,43 @@ impl Types:
         return ref self.data[t.index]
 
     pub pure def adt(mut self, d: DefId, own args: list[Ty]) -> Ty:
+        if let Some((count, default)) = self.interned.get(d.index):
+            if len(args) == count and args[count - 1] == default:
+                var short = args.copy()
+                _ = short.pop()
+                return self.intern(TyData.Adt(def_=d, args=short))
         return self.intern(TyData.Adt(def_=d, args=args))
+
+    ## Leaves the default of the last of the `count` parameters of the
+    ## collection `d` out of its types (RULES.md, R227).
+    pub pure def intern_default(mut self, d: DefId, count: int, default: Ty):
+        _ = self.interned.insert(d.index, (count, default))
+
+    ## The arguments of a type of `d` with its allocator written out: `args`
+    ## and `Global` for a collection whose type leaves it out (RULES.md,
+    ## R227), `args` for any other.
+    pub pure def written_args(self, d: DefId, args: list[Ty]) -> list[Ty]:
+        var out = args.copy()
+        if let Some((count, default)) = self.interned.get(d.index):
+            if len(args) == count - 1:
+                out.push(default)
+        return out
+
+    ## Whether the argument `i` of a type of `d` with `n` arguments is a
+    ## collection's allocator (RULES.md, R227): what the collection allocates
+    ## from, not a value it holds.
+    pub pure def is_allocator_arg(self, d: DefId, n: int, i: int) -> bool:
+        if let Some((count, _)) = self.interned.get(d.index):
+            return n == count and i == count - 1
+        return False
+
+    ## How many of the collection `d`'s parameters its types leave out: one,
+    ## its allocator at `Global`, for `list`, `dict`, `set` and `String`
+    ## (RULES.md, R227), none for any other type.
+    pub pure def left_out(self, d: DefId) -> int:
+        if self.interned.contains(d.index):
+            return 1
+        return 0
 
     pub pure def tuple(mut self, own elems: list[Ty]) -> Ty:
         return self.intern(TyData.Tuple(elems=elems, labels=[]))

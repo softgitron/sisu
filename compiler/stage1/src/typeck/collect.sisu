@@ -101,6 +101,8 @@ from stage1.typeck.program import (
 )
 from stage1.typeck.safety import doc_above, missing_comment, safety_list
 from stage1.typeck.std_sources import (
+    allocated,
+    allocator_names,
     ambient,
     builtin_impls,
     display_path,
@@ -582,6 +584,15 @@ impl Resolver:
             let d = r.new_def(prelude, name, TextRange.empty(0), Vis.Pub, DefKind.Module(m))
             _ = r.prog.modules[prelude.index].items.insert(name.to_string(), d)
         _ = names.items.add("target".to_string())
+        # `std.mem`'s `Allocator` and `Global`, which the collections' headers
+        # name, are the prelude's too: the module is the one a program that
+        # imports it reads, loaded after the rest of the base so that their
+        # definitions keep their places (RULES.md, R227).
+        let mem_text = text_of(texts, "mem")
+        let allocators = not mem_text.is_empty() and prelude_text.contains("A: Allocator = Global]")
+        if allocators:
+            for n in allocator_names():
+                _ = names.items.add(n.to_string())
         r.environment = Some(Environment(prelude=names, std=ambient_names, parses=None))
         # The build's target, which a native build names (RULES.md, R116).
         let target_text = if texts.contains("target"): text_of(texts, "target") else: target()
@@ -589,6 +600,11 @@ impl Resolver:
         let td = r.new_def(prelude, "target", TextRange.empty(0), Vis.Pub, DefKind.Module(t))
         _ = r.prog.modules[prelude.index].items.insert("target".to_string(), td)
         _ = r.load_std("builtin_impls", builtin_impls(), templates)
+        if allocators:
+            let m = r.load_std("mem", mem_text, templates)
+            for n in allocator_names():
+                if let Some(d) = r.prog.modules[m.index].items.get(n.to_string()):
+                    _ = r.prog.modules[prelude.index].items.insert(n.to_string(), d)
         r.resolve_pending()
         r.build_variant_index(0)
         r.check_traits(0)
@@ -5294,6 +5310,12 @@ impl Resolver:
                 generics.push(
                     Generic(name=g.name.text.copy(), default=default, is_const=g.is_const)
                 )
+            # A builtin collection's allocator at its default is left out of
+            # its types (RULES.md, R227).
+            if allocated(self.prog.defs[i].name) and self.prog.defs[i].module == self.prog.prelude:
+                if let Some(last) = generics.last():
+                    if let Some(t) = last.default:
+                        self.types.intern_default(d, len(generics), t)
             var kind_now = self.prog.defs[i].kind().copy()
             match ref mut kind_now:
                 case DefKind.Struct(s):
@@ -5563,7 +5585,7 @@ impl Resolver:
             let written = self.ast(ctx.module).type_expr(args[i]).copy()
             let TypeKind.Ref(_, inner) = written.kind else:
                 continue
-            if not is_ref_item(self.types, targs[i]):
+            if not is_ref_item(self.types, targs[i]) or self.types.is_allocator_arg(d, len(targs), i):
                 continue
             let inner_start = self.ast(ctx.module).type_expr(inner).range.start
             var owned: list[Ty] = []

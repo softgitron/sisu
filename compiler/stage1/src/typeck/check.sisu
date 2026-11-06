@@ -967,7 +967,7 @@ impl Checker:
             let written = cx.ast.type_expr(args[i])
             let TypeKind.Ref(_, inner) = written.kind else:
                 continue
-            if not is_ref_item(self.types, targs[i]):
+            if not is_ref_item(self.types, targs[i]) or self.types.is_allocator_arg(d, len(targs), i):
                 continue
             let inner_start = cx.ast.type_expr(inner).range.start
             let owned_ty = self.owned_items(cx, t)
@@ -1382,8 +1382,12 @@ impl Checker:
                 self.report_other(self.error(cx, Msg.ResolveNotAType, at).with("name", name))
                 return Ty.error()
         var targs = args.copy()
+        # A collection's allocator, which its types leave out at `Global`
+        # (RULES.md, R227): `String` names none of its parameters, and
+        # `list` in a body annotation infers its element alone.
+        let left_out = self.types.left_out(d)
         # Omitted trailing arguments take their defaults (D-060).
-        if not targs.is_empty() and len(targs) < generics:
+        if (not targs.is_empty() or generics == left_out) and len(targs) < generics:
             let gs = cx.prog.type_generics(d)
             while len(targs) < generics:
                 let default = gs[len(targs)].default else:
@@ -1394,7 +1398,7 @@ impl Checker:
             if targs.is_empty():
                 # `list` in a body annotation: the arguments are inferred.
                 var vars: list[Ty] = []
-                for _ in range(generics):
+                for _ in range(generics - left_out):
                     vars.push(self.infer.fresh(mut self.types))
                 return self.types.adt(d, vars)
             var diag = self.error(cx, Msg.ResolveTypeArgumentCount, at)
