@@ -22,6 +22,7 @@ pub mod package;
 pub mod repl;
 pub mod replay;
 pub mod sim;
+mod size;
 pub mod snap;
 pub mod testcache;
 pub mod toml;

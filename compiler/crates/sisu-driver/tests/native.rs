@@ -1327,3 +1327,59 @@ fn an_exported_function_is_a_global_symbol_that_c_calls() {
     assert!(objects[2] == objects[3], "the two lowerings' objects differ");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `sisu build --native --explain-size` (decision 944): after the `built`
+/// line, the executable's size and its seven parts, which add up to it,
+/// in both profiles; the numbers change with the runtime, so the form is
+/// what is held.
+#[test]
+fn explain_size_gives_the_parts_of_the_executable() {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return;
+    }
+    let dir = scratch("explain-size");
+    std::fs::write(dir.join("hello.sisu"), "def main():\n    print(\"hello\")\n").expect("the program");
+    for profile in [None, Some("--release")] {
+        let mut args = vec!["build", "--native", "--explain-size", "hello.sisu"];
+        if let Some(p) = profile {
+            args.insert(2, p);
+        }
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(&args)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+        let lines: Vec<&str> = stdout.lines().collect();
+        assert_eq!(lines.len(), 9, "{stdout}");
+        assert_eq!(lines[0], "built `hello`");
+        let size = std::fs::metadata(dir.join("hello")).expect("the executable").len();
+        assert_eq!(lines[1], format!("`hello` is {size} bytes:"));
+        let parts = [
+            "the program's own code",
+            "the runtime in Sisu's code",
+            "the runtime in Rust's code",
+            "Rust's standard library's code and the rest of the code",
+            "the debug information",
+            "the symbols",
+            "the data, the unwinding tables and the headers",
+        ];
+        let mut sum = 0;
+        for (line, part) in lines[2..].iter().zip(parts) {
+            let (bytes, rest) = line.trim_start().split_once(" bytes (").expect("a part's line");
+            assert!(rest.ends_with(&format!("%), {part}")), "{line}");
+            let n: u64 = bytes.parse().expect("a number of bytes");
+            assert!(n > 0, "{line}");
+            sum += n;
+        }
+        assert_eq!(sum, size, "{stdout}");
+    }
+    let plain = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+        .args(["build", "--explain-size", "hello.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    assert!(String::from_utf8_lossy(&plain.stderr).starts_with("error[D0148]"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

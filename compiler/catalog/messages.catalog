@@ -1113,3 +1113,17 @@ D0137 cli     cli.test-program            tests of `{program}`:
 # one, which is neither simulated nor replayed (17, "Simulation and
 # replay"; decision 822; the manual's finding X12).
 D0138 cli     cli.replay-no-token-sim     no replay token: the test takes the real `System`, which `--sim` does not simulate and a replay cannot stand in for; a test that names the capabilities it uses gets simulated ones
+# `sisu build --native --explain-size` (10, "Binary size"; decision 944):
+# the parts of the executable, read from the linked file as decision 682
+# measured them, which add up to its size; and the option without
+# `--native`, or with a file the reader does not read.
+D0139 cli     native.size-total           `{output}` is {bytes} bytes:
+D0140 cli     native.size-program         {bytes} bytes ({share}%), the program's own code
+D0141 cli     native.size-rt-sisu         {bytes} bytes ({share}%), the runtime in Sisu's code
+D0142 cli     native.size-rt-rust         {bytes} bytes ({share}%), the runtime in Rust's code
+D0143 cli     native.size-other-code      {bytes} bytes ({share}%), Rust's standard library's code and the rest of the code
+D0144 cli     native.size-debug           {bytes} bytes ({share}%), the debug information
+D0145 cli     native.size-symbols         {bytes} bytes ({share}%), the symbols
+D0146 cli     native.size-rest            {bytes} bytes ({share}%), the data, the unwinding tables and the headers
+D0147 cli     native.size-unread          `--explain-size` reads the parts of a 64-bit ELF executable, which `{output}` is not
+D0148 cli     cli.explain-size-native     `--explain-size` explains the size of a native executable: it goes with `--native`

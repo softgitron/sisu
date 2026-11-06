@@ -616,10 +616,49 @@ pub(crate) fn build_command(code: Code<'_>, output: &Path, profile: Profile, hos
             let shown =
                 std::env::current_dir().map_or_else(|_| output.to_path_buf(), |cwd| relative(output, &cwd));
             host.stdout(&text(msg::NATIVE_BUILT, &[("output", shown.display().to_string())]));
+            if EXPLAIN_SIZE.load(std::sync::atomic::Ordering::Relaxed) {
+                return explain_size(output, &shown.display().to_string(), host);
+            }
             0
         }
         Err(code) => code,
     }
+}
+
+/// `--explain-size` (decision 944): set by the command, read by
+/// [`build_command`].
+pub(crate) static EXPLAIN_SIZE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Prints the sizes of the parts of the executable at `output`, which the
+/// runtime in Sisu's object was linked into (decision 944).
+pub(crate) fn explain_size(output: &Path, shown: &str, host: &mut dyn Host) -> i32 {
+    let exe = std::fs::read(output).unwrap_or_default();
+    let rt = match crate::front::Rt::ready(host) {
+        Ok(rt) => std::fs::read(rt.object).unwrap_or_default(),
+        Err(code) => return code,
+    };
+    let Some(s) = crate::size::sizes(&exe, &rt) else {
+        host.stderr(&text(msg::NATIVE_SIZE_UNREAD, &[("output", shown.to_string())]));
+        return EXIT_ERROR;
+    };
+    host.stdout(&text(
+        msg::NATIVE_SIZE_TOTAL,
+        &[("output", shown.to_string()), ("bytes", s.total.to_string())],
+    ));
+    let total = s.total.max(1);
+    for (m, n) in [
+        (msg::NATIVE_SIZE_PROGRAM, s.program),
+        (msg::NATIVE_SIZE_RT_SISU, s.rt_sisu),
+        (msg::NATIVE_SIZE_RT_RUST, s.rt_rust),
+        (msg::NATIVE_SIZE_OTHER_CODE, s.other_code),
+        (msg::NATIVE_SIZE_DEBUG, s.debug),
+        (msg::NATIVE_SIZE_SYMBOLS, s.symbols),
+        (msg::NATIVE_SIZE_REST, s.rest),
+    ] {
+        let share = format!("{:.1}", n as f64 * 100.0 / total as f64);
+        host.stdout(&format!("  {}", text(m, &[("bytes", format!("{n:>10}")), ("share", share)])));
+    }
+    0
 }
 
 /// `path` as seen from the directory `from`: an absolute path relative to

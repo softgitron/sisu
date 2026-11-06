@@ -592,3 +592,38 @@ fn transcripts_run_from_stage_1s_sir_when_it_keeps_their_world() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `sisu bench src/MODULE.sisu` runs the benchmarks of that module of its
+/// package alone, the package compiled whole so that its imports resolve
+/// (decision 943), as `sisu test` of one does (decision 900); the times
+/// differ from run to run, so only the names and the count are compared.
+#[test]
+fn one_modules_benchmarks_run_with_its_package() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases/packages/test_modules.pkg");
+    let dir = std::env::temp_dir().join(format!("sisu-bench-module-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).expect("a scratch package");
+    std::fs::copy(root.join("sisu.toml"), dir.join("sisu.toml")).expect("the manifest");
+    for (module, bench) in [
+        ("main", ""),
+        ("heat", "\nbench \"a level\":\n    _ = level(70)\n"),
+        ("steam", "\nbench \"ladling\":\n    _ = ladles(3)\n"),
+    ] {
+        let file = format!("src/{module}.sisu");
+        let text = std::fs::read_to_string(root.join(&file)).expect("the module");
+        std::fs::write(dir.join(&file), text + bench).expect("the module copied");
+    }
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+        .args(["bench", "src/heat.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    let names: Vec<&str> = stdout.lines().map(|l| l.split(" ...").next().unwrap_or(l)).collect();
+    assert_eq!(names.first().copied(), Some("bench \"heat/a level\""), "{stdout}");
+    assert_eq!(names.len(), 2, "{stdout}");
+    assert!(stdout.lines().nth(1).is_some_and(|l| l.starts_with("1 benchmarks, 0 failed")), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

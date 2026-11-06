@@ -737,7 +737,14 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--no-default-features",
                     "--accept-unsafe",
                 ],
-                "build" => &["--locked", "--native", "--release", "--no-default-features", "--accept-unsafe"],
+                "build" => &[
+                    "--locked",
+                    "--native",
+                    "--release",
+                    "--no-default-features",
+                    "--accept-unsafe",
+                    "--explain-size",
+                ],
                 "bench" => &["--locked", "--no-default-features", "--accept-unsafe"],
                 // The program built with its tests and benchmarks (decision
                 // 285), for `sisu test --from-sir`.
@@ -968,6 +975,14 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             if release && !p.flags.contains(&"--native") {
                 host.stderr(&plain_error(msg::NATIVE_RELEASE, &[]));
                 return EXIT_USAGE;
+            }
+            // `sisu build --native --explain-size` (decision 944).
+            if p.flags.contains(&"--explain-size") {
+                if !p.flags.contains(&"--native") {
+                    host.stderr(&plain_error(msg::CLI_EXPLAIN_SIZE_NATIVE, &[]));
+                    return EXIT_USAGE;
+                }
+                crate::native::EXPLAIN_SIZE.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             let (target, mut program_args): (Option<&str>, Vec<String>) = match from_sir.or(from_lir) {
                 Some(f) => (Some(f), p.file.map(str::to_string).into_iter().chain(p.rest.clone()).collect()),
@@ -2068,7 +2083,18 @@ fn stage1_command(
             program(&mut words);
             let backend = if native { Backend::Native } else { Backend::Unused };
             match run(host, &words, backend) {
-                Ok(r) => shown(host, &r),
+                Ok(r) => {
+                    let code = shown(host, &r);
+                    // `--explain-size` (decision 944): the executable the
+                    // backend's `built` line names.
+                    let built = r.stdout.lines().find_map(|l| l.strip_prefix("built `")?.strip_suffix('`'));
+                    match built {
+                        Some(path) if code == exit::OK && has("--explain-size") => {
+                            crate::native::explain_size(std::path::Path::new(path), path, host)
+                        }
+                        _ => code,
+                    }
+                }
                 Err(code) => code,
             }
         }

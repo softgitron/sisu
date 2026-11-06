@@ -1,0 +1,44 @@
+# A `Slice` views the list it was made from in place (decision 940): its
+# elements are the list's own, so two slices of one list point to one
+# place, a slice of a slice views the same elements, and dropping a slice
+# drops nothing it views. `bytes` still give a slice of copies.
+
+from std.mem import as_ptr
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+def first_two(s: Slice[str]) -> Slice[str]:
+    return s.slice(0, 2)
+
+def main():
+    let words = ["sauna", "löyly", "vihta", "kiuas"]
+    let s = words.as_slice()
+    print("{len(s)} {s[1]} {s.get(3)} {s.get(4)} {s.is_empty()}")
+    let mid = s.slice(1, 3)
+    print(mid.to_list())
+    print(first_two(mid).to_list())
+    for w in mid.iter():
+        print(w)
+    print("{mid.contains("vihta")} {mid.contains("sauna")}")
+    print(as_ptr(s).addr() == as_ptr(words.as_slice()).addr())
+    let names = ["Aino".to_string(), "Eero".to_string()]
+    let ns = names.as_slice()
+    print("{ns[0]} {ns.slice(1, 2)[0]} {len(ns[1])}")
+    let nums = [3, 1, 2]
+    let t = nums.as_slice()
+    print("{t.is_sorted()} {t.slice(1, 3).is_sorted()} {t[1:].to_list()}")
+    let louds = [Loud(name="a"), Loud(name="b")]
+    var seen = 0
+    for round in range(3):
+        let v = louds.as_slice()
+        seen += len(v.slice(round % 2, 2))
+    print("seen {seen}")
+    let b = b"\x01\x02\x03"
+    let bs = b.as_slice()
+    print("{len(bs)} {bs[2]} {bs.slice(1, 3).to_list()}")
+    print("end")

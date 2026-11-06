@@ -237,6 +237,7 @@ std/pure_iterators
 std/rand
 std/regex
 std/search
+std/slices
 std/sort
 std/sum
 std/text_math

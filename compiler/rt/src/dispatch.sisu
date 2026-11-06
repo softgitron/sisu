@@ -745,7 +745,7 @@ def by_text(c: Call, id: int) -> int:
 ##
 ## Requires:
 ## - `room`: `p` has room for three words
-def view(p: ptr mut u8, at: ptr mut u8, n: int):
+def view_of(p: ptr mut u8, at: ptr mut u8, n: int):
     # safety: in_bounds, aligned, writable: by `room`.
     unsafe:
         let w = p.cast[int]()
@@ -764,7 +764,7 @@ def slice_call(c: Call, id: int) -> int:
     let ts = c.ts
     let (l, lt) = c.place(0)
     if id == LIST_AS_SLICE:
-        view(c.ret, list.buffer(l), list.length(l))
+        view_of(c.ret, list.buffer(l), list.length(l))
         return OK
     if id == SLICE_TO_LIST:
         value.copy_list(ts, c.ret, l, ts.a(lt))
@@ -803,7 +803,7 @@ def slice_call(c: Call, id: int) -> int:
             # safety: returns_promptly: the runtime in Rust raises the panic.
             return unsafe sisu_rt_list_bounds(False, bad, n).to_int()
         # safety: in_bounds: `lo` is at most the number of elements.
-        view(c.ret, unsafe list.buffer(l).offset(lo * size), hi - lo)
+        view_of(c.ret, unsafe list.buffer(l).offset(lo * size), hi - lo)
         return OK
     if id == SLICE_ITER:
         c.set(0, iter.new_list_ref(l, size).addr())
