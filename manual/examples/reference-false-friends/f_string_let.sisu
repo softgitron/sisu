@@ -1,0 +1,5 @@
+# Python's f-string prefix after `=`.
+def main():
+    let n = 3
+    let line = f"n is {n}"
+    print(line)

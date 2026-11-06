@@ -76,7 +76,9 @@ from stage 1, the front end that `sisu check` runs, through the same
 server of it that every command asks
 ([R16](../reference/sisu-command.md#the-server-of-stage-1)), so a hover
 answers in about 9 ms. A field's references and its rename include the
-keyword of each construction, the `turn` of `Sauna(turn=1)`. A file with a syntax error still gets what its
+keyword of each construction, the `turn` of `Sauna(turn=1)`, and the
+field's name in each struct pattern, the `turn` of `case
+Sauna(turn=t)`. A file with a syntax error still gets what its
 tree allows: the symbols of its whole items, and the members after a
 `.` that is not finished yet. Build stage 1 once with any command, such
 as `sisu check`, before you open the editor: the server does not build
@@ -109,8 +111,10 @@ borrows live on line 6 of borrow.sisu, in `main`:
   a `mut` borrow of `turns` from 6:5, held by a temporary, used until 6:16
 ```
 
-Bind the command to a key, and use it when a borrow error is hard to
-read; [Find and fix a borrow error](borrow-errors.md) shows the rest.
+The Rust front end answers the command today. Stage 1 gives the same
+borrows from its twenty-second round, and the server asks it once stage
+0's round in progress routes the command. Bind the command to a key,
+and use it when a borrow error is hard to read; [Find and fix a borrow error](borrow-errors.md) shows the rest.
 
 ## 4. See a script's values beside its lines
 
@@ -147,7 +151,8 @@ changes.
 
 **Status.** In stage 0, with stage 1 answering every request but two:
 a script's values and `sisu.explainBorrow` still come from the Rust
-front end, which also answers everything when stage 1 is not built or
+front end (stage 1 answers the second, and is asked once stage 0's
+round in progress routes it), which also answers everything when stage 1 is not built or
 `--front-end=rust` is given. Stage 1's completion offers only the names
 a program sees, and its references count the names in import lines. The structural editing with a typed palette
 and the stepper of the teaching profile, which

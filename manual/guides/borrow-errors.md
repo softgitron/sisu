@@ -193,4 +193,7 @@ The other fixes, by what they cost:
 **Status.** Everything in this guide is in stage 0. `sisu
 explain-borrow` and `--defer-borrow` are tools of the experiment
 ([18](../../proposal/18-next-steps.md), Phase 3), and what they print
-may change.
+may change. Both run on the Rust front end; stage 1 answers
+`explain-borrow` and lowers a refused program for `--defer-borrow` from
+its twenty-second round, and the driver asks it once stage 0's round in
+progress routes them.

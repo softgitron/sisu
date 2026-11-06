@@ -309,7 +309,11 @@ lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix` and `sisu check
 --holes` are stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from both
 ([sisu lsp](#sisu-lsp)). The other commands, and `run --watch` and
 `--defer-borrow`, `test --std` and `--defer-borrow`, and `check
---diary` use the Rust front end whichever you choose. A program's
+--diary` use the Rust front end whichever you choose. From `sisu1
+0.17.0` stage 1 answers `test --std`, `check --diary`,
+`explain-borrow`, `audit --ownership` and `--caps`, and the SIR of
+`--defer-borrow` itself, as the sections of each say; the driver sends
+them to it once stage 0's round in progress routes them. A program's
 transcripts run on the front end its tests run on, stage 1 unless you
 choose the Rust one (with a stage 1 older than 0.11.0, on the Rust
 front end, D0128). `sisu
@@ -328,7 +332,7 @@ A value other than `stage1` or `rust` is D0115. When stage 1 is missing
 (D0116), fails to build (D0117) or stops as a compiler may not (D0118),
 the message names `--front-end=rust` as the way on. Stage 1's own
 executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
-0.15.0`, its minor number the round of its rules), which the driver asks
+0.17.0` after stage 1's twenty-second round), which the driver asks
 to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
@@ -538,6 +542,13 @@ outcome: conflict reached; the run stopped at a concrete ownership conflict
 
 `sisu test --defer-borrow` runs a rejected program's tests in the same
 way.
+
+The SIR that the monitor runs comes from the Rust front end. From
+`sisu1 0.17.0` stage 1 prints the same SIR for such a program (its
+`sir --defer-borrow`, and the build for a run with `--defer-borrow`),
+with every diagnostic on standard error in the form of `--format=ids`
+and status 3 when it deferred an error; the driver asks stage 1 for it
+once stage 0's round in progress routes the option.
 
 **Status.** In stage 0, a tool of the experiment (18, Phase 3).
 
@@ -915,7 +926,12 @@ diagnostics prints nothing.
   check, one of each diagnostic, and one of each diagnostic of the
   previous check that this one no longer has, with the edit that
   resolved it. It is the experiment's friction log (18, Phase 3); a log
-  that cannot be written is D0013.
+  that cannot be written is D0013. The driver writes it from the Rust
+  front end. Stage 1 writes the same records from `sisu1 0.17.0`, with
+  the text of each file kept by its hash in `LOG.d/` and its own
+  version as the `toolchain`, so a log that either front end wrote
+  reads the same to the other; the driver sends the option to stage 1
+  once stage 0's round in progress routes it.
 - `--holes` reports the typed holes instead, each with what fills it
   ([sisu check --holes](#sisu-check---holes)).
 
@@ -1118,7 +1134,12 @@ every drop placed and every `comptime` value computed. It prints the SIR
 of a program that the ownership checker rejects as well; a program with
 other errors gets its diagnostics and D0132, as a build does. `--tests`
 includes the program's tests and benchmarks, and `--contracts` sets the
-contracts the SIR checks. The [SIR example](#running-serialised-sir---sir---from-sir-and---from-lir)
+contracts the SIR checks. Stage 1's own `sir` takes two options more
+from `sisu1 0.17.0`, which the driver does not send it yet: `--std`
+beside `--tests` lowers the standard library's doc examples as tests,
+and `--defer-borrow` prints the SIR of a program whose only errors are
+the ownership checker's ([--defer-borrow](#running-a-rejected-program---defer-borrow)).
+The [SIR example](#running-serialised-sir---sir---from-sir-and---from-lir)
 shows the SIR of `hello.sisu`.
 
 **Status.** In stage 0, for implementations of Sisu
@@ -1355,8 +1376,12 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   test that takes the real `System` gets the real one, which no fault
   reaches, and its failure has no token (D0138).
 - `--std` runs the standard library's doc examples besides the
-  program's tests; outside a package and without a file, it runs them
-  alone.
+  program's tests, before them; outside a package and without a file,
+  it runs them alone. The Rust front end lowers them still. Stage 1
+  lowers the same examples as tests from `sisu1 0.17.0`, 197 of them
+  with the names the driver gives, each once, where the Rust front end
+  lists `std.net`'s two twice; the driver sends `--std` to it once
+  stage 0's round in progress routes it.
 - `--native` compiles the tests into one executable and runs each in a
   process of its own, and `--release` compiles them with the release
   profile ([R15](testing.md#native-tests)), with the schedulers,
@@ -1854,8 +1879,11 @@ its whole items' symbols. Stage 1's completion offers the prelude's
 references count the names in import lines, where hover and
 go-to-definition answer too; from `sisu1 0.16.0` they count the keyword
 of a field in a struct's construction, `Sauna(turn=1)`, which a rename
-of the field renames. A worksheet's values and `sisu.explainBorrow`
-stay with the Rust front end, which answers every question when stage 1
+of the field renames, and from `sisu1 0.17.0` the name of a field in a
+struct pattern, the `x` of `case Point(x=a, y=b)`. A worksheet's
+values and `sisu.explainBorrow` stay with the Rust front end, though
+stage 1 answers the second from `sisu1 0.17.0` and is asked once stage
+0's round in progress routes it, which answers every question when stage 1
 is not built (the server does not build it under an editor) or
 `--front-end=rust` is given.
 
@@ -2103,6 +2131,12 @@ $ sisu explain-borrow borrows.sisu:3
 no borrow is live on line 3 of borrows.sisu
 ```
 
+The borrows come from the Rust front end's ownership checker. Stage 1
+answers the same command from `sisu1 0.17.0`, line for line in these
+words, and the editor's question as tab-separated lines (its `query
+explain FILE LINE`); the driver and the language server ask stage 1 once
+stage 0's round in progress routes them.
+
 **Status.** In stage 0 (18, Phase 3), and in the language server as
 `sisu.explainBorrow`.
 
@@ -2174,6 +2208,13 @@ std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`
 level, so its `--unsafe` report heads it "no level", a file that may
 hold any unsafe code, and lists what it holds, here nothing, and the
 standard library's level.
+
+`--ownership` and `--caps` run on the Rust front end. Stage 1 prints
+the same lines from `sisu1 0.17.0`, with the same messages and
+statuses: `--ownership` gave the driver's lines for each of 1,112
+files, and its server now serves every form of `audit`. The driver
+sends `--ownership` and `--caps` to it once stage 0's round in progress
+routes them.
 
 **Status.** In stage 0; `--unsafe` is stage
 1's (its decision 425 in the [architecture
