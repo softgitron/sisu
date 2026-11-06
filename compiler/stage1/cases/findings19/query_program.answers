@@ -29,9 +29,11 @@ COMPILER/stage1/cases/findings19/query_program.sisu	27:13-27:17	use
 COMPILER/stage1/cases/findings19/query_program.sisu	27:27-27:31	use
 answer 0
 COMPILER/stage1/cases/findings19/query_program.sisu	11:5-11:6	declaration
+COMPILER/stage1/cases/findings19/query_program.sisu	17:22-17:23	use
 COMPILER/stage1/cases/findings19/query_program.sisu	17:29-17:30	use
 COMPILER/stage1/cases/findings19/query_program.sisu	21:19-21:20	use
 COMPILER/stage1/cases/findings19/query_program.sisu	21:25-21:26	use
+COMPILER/stage1/cases/findings19/query_program.sisu	25:23-25:24	use
 COMPILER/stage1/cases/findings19/query_program.sisu	28:22-28:23	use
 answer 0
 COMPILER/stage1/cases/findings19/query_program.sisu	9:8-9:13	declaration

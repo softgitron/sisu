@@ -9056,3 +9056,430 @@ what it broke in the corpus:
       `E0278`, with the import of a std module that has it as the fix
       where one does, and completions offer the `pub` names. `Formatter`, `Spec` and `Hasher` stay visible: the traits
       take them. Stage 1 decides it (RULES.md, R175).
+
+## R176. `fix`: each diagnostic's preferred fix applied to the file (decision 1040)
+
+**The rule.** `sisu1 fix FILE [--dry-run] [--all]` (10: `sisu fix`
+"apply compiler-suggested migrations") checks the program that holds
+FILE as `query` finds it (R164), with its tests, and applies to FILE's
+text the preferred fix of each diagnostic `check` reports in FILE: the
+first of its fixes, the one `query actions` numbers 0 (R169), when it has
+edits; a diagnostic whose first fix has none is left. With `--all` the
+lints `lint` reports in FILE are fixed too (R11, the unused imports of
+R87 among them). A fix whose edits touch those of a fix taken before it
+in `check`'s order waits for the next round. The text is then checked
+again and fixed again, until no fix applies, a round would bring back a
+text an earlier round had (a fix that undoes another: `D0179`, and that
+round is not applied), or 16 rounds are done. Each fix applied is a line
+on standard output, `FILE:LINE:COL: CODE fixed: FIX` (`D0175`, FIX as the
+human form writes it after `= fix: `), with each of its edits under it,
+`  RANGE "TEXT"`, with `--dry-run`, whose positions are in the text of
+its round; then `fixes applied to `FILE`: N` (`D0177`), the file written
+once at the end, or with `--dry-run` `D0178` and the file left as it is;
+`D0176` when nothing has a fix. Another option is `D0009` with status 2,
+no path or more than one a usage error. `sir --repl-serve` serves it.
+
+```text
+$ sisu1 fix --all fix_assist.sisu
+fix_assist.sisu:11:9: E0339 fixed: write `mut` before the argument: `mut `
+fix_assist.sisu:13:11: E0200 fixed: a similar name is in scope: `count`
+fix_assist.sisu:4:1: W0027 fixed: remove the import
+fixes applied to `fix_assist.sisu`: 3
+```
+
+What the driver may rely on from 0.16.0: the command, its options, its
+lines, the file it writes and its status; its routing of `sisu fix`
+(`D0003` today) is stage 0's next round. 10's `--edition` and `--deps`
+wait for editions and the registry; `--deps` would apply R177's fixes in
+a dependent package.
+
+**Why.** Item 1 of the round: 10 lists `sisu fix`, and R169's `query
+actions` has every fix with its edits.
+
+**In stage 1.** `main` (`fix_command`, `FIX_ROUNDS`, `Chosen`,
+`fixes_to_apply`, `apply_edits`; `fix` among `served_command`'s), the
+catalog (`D0175` to `D0179`), `sisu1` (its status), `check.sh` (the class
+`fix`: a case with a `NAME.fixed` copied into a directory of its own and
+fixed there as a process, what it printed and the file it left against
+the `.fixed`). `sisu1 --version` is 0.16.0.
+
+**What it changes.** No output of the corpus. The cases:
+`cases/findings21/fix.requests` (served: `--dry-run` of `fix_assist.sisu`
+with and without `--all`, of `fix_inline.sisu`, of `fix_none.sisu`, which
+has nothing, an unknown option and no path), and `fix_assist.fixed` and
+`fix_inline.fixed` (as a process, the class `fix`).
+
+`fix_assist.sisu`'s unused import is one R87's formatter removes, which
+stage 0's keeps.
+
+- Differs: `compiler/stage1/cases/findings21/fix_assist.sisu`: fmt, fmt-check
+
+**Decision 1040**, for docs/architecture.md:
+
+1040. `sisu1 fix FILE [--dry-run] [--all]` applies the preferred fix (the
+      first, with edits) of each diagnostic `check` reports in FILE, and
+      with `--all` of each lint, checking the text again until no fix
+      applies or a round would bring back an earlier text, says each fix
+      it applied (`D0175` to `D0179`), and writes the file once, or with
+      `--dry-run` prints the edits and leaves it. `sisu1 --version` is
+      0.16.0. Stage 1 decides it (RULES.md, R176).
+
+## R177. `@fix_inline`: a call rewritten with what the function returns (decision 1041)
+
+**The rule.** 09, 10 and D-067: "a library deprecates an item by
+rewriting its body in terms of the new API and marking it `@fix_inline`,
+and `sisu fix --deps` replaces dependents' calls with that body". A
+function marked `@fix_inline` is deprecated by it: a call of it warns
+`W0023` with its `@deprecated` text, or `W0025` without one, as R30's
+deprecated functions do. Where its body is one `return` of an expression,
+it is a free function and its parameters take no `mut` or `own`, the
+warning has the fix `type.inline-call`, "write what `twice` returns in
+the call's place", whose edit replaces the call with the expression, each
+parameter's uses replaced by the call's argument (in parentheses where
+the argument is more than a name, a literal or a chain of calls, members
+and indexes), the whole in parentheses where it is more than such a
+chain:
+
+```text
+26:11-26:19 W0025 type.deprecated-plain name="twice"
+  fix type.inline-call 26:11-26:19 "scaled(n, 2)"
+```
+
+The fix is given only where the rewrite means what the call meant: an
+argument that is not a name, a member chain of one or a literal is used
+exactly once, the arguments of that kind in their order, and before any
+call of the expression has returned (so `twice(reading())` becomes
+`scaled(reading(), 2)`, and `sum_sq(reading(), 1)` keeps its warning
+without one); a parameter's name bound again inside the expression (a
+closure's parameter, a comprehension's name) gives no fix; in another
+module than the function's, only an expression that names nothing but
+its parameters (and members and keyword names) has one, since its other
+names are the function's module's; a call that leaves out an argument
+with a default has none. A `@fix_inline` function whose body is more, a
+method, or one with a `mut` or `own` parameter, is `W0033`,
+`type.fix-inline-body`, at the attribute, and its calls warn without the
+fix. `sisu fix` (R176) applies the fix.
+
+**Decided against**, for the round: 10's ownership-aware inliner, which
+moves a body of several statements, its borrows, `own` moves and `defer`
+into the caller's scope; methods, whose receiver would take the place of
+`self`; and `--deps`, which needs the registry's dependents.
+
+**Why.** Item 1 of the round: the manual's finding "`@fix_inline`
+compiles without a word and does nothing".
+
+**In stage 1.** `typeck.fix_inline` (`InlineForm`, `form_of`, `inlined`,
+`plain`, `primary`), `typeck.collect` (`inline_form`, `W0033`),
+`typeck.program` (`Program.fix_inline`), `typeck` (`deprecated_uses`,
+`inline_call`), `diag` and the catalog (`type.inline-call`, `W0033`).
+
+**What it changes.** The case `cases/findings21/fix_inline.sisu` (its
+`.out`, its `.diag`, its `.fixed`, and `fix --dry-run` of it in
+`fix.requests`), which stage 0 checks without a word. The manual's
+examples `explanation-evolution/migrate.sisu` and
+`reference-attributes/designed.sisu`, outside `check.sh`, now show the fix
+under their `W0023`.
+
+- Differs: `compiler/stage1/cases/findings21/fix_inline.sisu`: ids, human
+
+**Decision 1041**, for docs/architecture.md:
+
+1041. A function marked `@fix_inline` is deprecated by it, and where its
+      body is one `return` of an expression the warning at each call has
+      the fix that writes the expression in the call's place with the
+      arguments in their parameters' places, when that means what the
+      call meant; another body is `W0033`. Stage 1 decides it (RULES.md,
+      R177).
+
+## R178. A constant is computed at compile time: `check` reports one that fails (decision 1042)
+
+**The rule.** R3 of the manual, and 08: a constant's value is computed at
+compile time. `check` (and every command that checks a program: `build`,
+`run`, `test`, `eval`, `query diagnostics`) evaluates each `const` item of
+the program's own modules (not the standard library's) with the
+compile-time evaluator (`interp`, R165, R173), once the program has no
+other error and its `comptime` expressions ran, within its
+`@comptime_budget` or the default, and reports a failure at the
+constant's name: a panic, a failed invariant or contract among them,
+`E0602`; a refinement its value does not meet, `E0810`; the budget spent,
+`E0603`; the world used, `E0601`. A constant that reaches a typed hole is
+left alone, as a hole is (R27), and so is one whose evaluation needs what
+the evaluator does not run (a `Beyond`), or whose value cannot be kept,
+which the run computes as before. A build stops at such an error, as at a
+failed `comptime` expression (R170's order).
+
+The lowering does not fold the value: the SIR keeps a constant's
+function, which the run calls where the program first reads it. A
+constant's value may own memory (a list, a struct of `String`s), which a
+folded constant would have to build at run time all the same, and
+folding would change the SIR of every program with a constant, which the
+classes `sir` and `behaviour` hold against stage 0's; the check is what
+R3 asks of the compiler.
+
+**Why.** Item 2 of the round, the manual's nineteenth round: a `const`
+whose invariant fails passes `sisu check` and panics under `sisu run`.
+
+**In stage 1.** `main` (`Constant`, `constants_of`, `const_failures`,
+which `report_program` runs after `interp.evaluate`).
+
+**What it changes.** The cases `cases/findings21/const_failures.sisu`
+(its `.diag`: an invariant, an index and a budget) and
+`cases/findings21/const_fine.sisu` (its `.out`); and
+`cases/findings19/config.answers`, blessed again, since `eval` of
+`config_refused.sisu` now stops at `WEB`'s `E0602` from the check, before
+it renders, so its `E0617` for `SQUARE` no longer follows.
+
+The diagnostics of the cases whose constants fail differ from stage 0's,
+which checks them without a word: the conformance suite's `eval/stops`
+(a `.diag` of its own now, `E0602` at `BAD`, whose assertion fails),
+`cases/findings19/config_refused.sisu` and
+`cases/findings20/config_prelude_refused.sisu`, whose constants `eval`
+refused at their names and `check` now refuses there too.
+
+- Differs: `compiler/stage1/cases/findings21/const_failures.sisu`: ids, human
+- Differs: `compiler/conformance/cases/eval/stops.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings19/config_refused.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings20/config_prelude_refused.sisu`: ids, human
+
+**Decision 1042**, for docs/architecture.md:
+
+1042. Every command that checks a program evaluates each `const` of the
+      program's modules at compile time, once the program has no other
+      error, and reports a panic or a failed invariant (`E0602`), a
+      refinement not met (`E0810`) or the budget spent (`E0603`) at the
+      constant's name; the SIR keeps computing the value at run time.
+      Stage 1 decides it (RULES.md, R178).
+
+## R179. A keyword argument's name is a reference of its field (decision 1043)
+
+**The rule.** In a struct's construction, `Bed(rows=2, crop=...)`, the
+name before `=` names the field it gives a value: `query references` lists
+it among the field's uses, `query rename` renames it, and `hover`,
+`definition` and `references` asked at it answer for the field. A
+keyword argument of a function's call is not a field's, and is not
+counted; nor is a name in a struct pattern, which the query reads from
+the expressions only.
+
+**Why.** Item 4 of the round, R169's open item: a rename of a field missed
+its keyword arguments.
+
+**In stage 1.** `query` (`keyword_field`, which `references` and
+`target_of` ask).
+
+**What it changes.** The case `cases/findings21/keyword_refs.sisu` (its
+`.out`), asked by `cases/findings21/queries.requests` (the references of
+`rows` from its declaration and from a keyword, its rename);
+`cases/findings19/query_program.answers` is blessed again (two keyword
+names among a field's references).
+
+**Decision 1043**, for docs/architecture.md:
+
+1043. A keyword argument's name in a struct's construction is a reference
+      of the field, which `query references` lists and `query rename`
+      renames. Stage 1 decides it (RULES.md, R179).
+
+## R180. TOML's tables, and `E0617` at the field (decision 1044)
+
+**The rule.** `eval --to toml` (R165) writes a constant that is a struct,
+a dict or an enum's variant with fields as a table of its own,
+`[LIMITS]`, a field of it of that kind as a table under it,
+`[LIMITS.retry]`, and a list whose every item is such a mapping as an
+array of tables, `[[SERVICES]]`, one table an item, as TOML's own style
+has it; a table that holds only tables is left to their headers
+(`[SERVICES.tier.Paid]`). The values TOML writes on one line come first,
+each `KEY = VALUE`, the constants and a table's fields in the order
+written, then the tables, each after a blank line, since TOML reads every
+line after a table's header as that table's. A list of values and a list
+that mixes mappings with other values stay inline. JSON and YAML are as
+they were. `E0617` names the field or item that holds what the form
+cannot write by its path from the constant, `LIMITS.retry.backoff`,
+`MAYBE[0]`, `TABLE["key"]`, where it named the constant.
+
+**Why.** Item 5 of the round, the manual's nineteenth round: two services
+wrote one line of 150 columns, and `E0617` named `LIMITS`, not
+`timeout`.
+
+**In stage 1.** `config` (`Unwritable.Holds`'s `path`, `data_of`, `json`,
+`toml` with the path; `render`, `is_table`, `is_tables`, `toml_entry`,
+`toml_fields`), `main` (`eval_with`, `no_form`).
+
+**What it changes.** The cases `cases/findings21/config_tables.sisu` and
+`config_unwritable.sisu`, asked in `queries.requests`; blessed again: the
+conformance suite's `eval/config.eval` (its TOML), and
+`cases/findings19/config.answers` (its TOML and `MAYBE[0]`).
+
+**Decision 1044**, for docs/architecture.md:
+
+1044. `eval --to toml` writes a struct or a mapping as a table and a list
+      of them as an array of tables, after the values written inline,
+      and `E0617` names the path of the field that holds what a form
+      cannot write (`LIMITS.timeout`). Stage 1 decides it (RULES.md,
+      R180).
+
+## R181. The whole hole report: fits to depth two, the types, the contract, the tests, JSON (decision 1045)
+
+**The rule.** `check --holes` and `query holes` (R174) give the rest of
+10's report. For each hole:
+
+- **What fits**, to depth two: the bindings of its type, as before, and a
+  field of a binding (`self.hours`), a method of one that takes nothing
+  else (`t.total()`), and a function of the program's own modules, but
+  the hole's, of one argument that a binding is (`doubled(t)`), whose
+  type is the hole's, sorted.
+- **The types it mentions**: each struct and enum of the program's own
+  modules that the hole's type names, through its arguments, references,
+  tuples and functions, with its fields or variants: "`Size` is an enum
+  of `Small`, `Large(hours: int)`" (`D0180` to `D0183`).
+- **The contract in force**: the `requires` of its function as facts,
+  "given: `t.hours >= 0`" (`D0184`), and its `ensures` as obligations,
+  "to keep: `result >= t.hours`" (`D0185`); `result` is not among the
+  bindings in scope.
+- **The tests that reach it**: the tests whose bodies call its function,
+  directly or through others, by name in the tests' order, the property
+  test of its contract among them (`D0186`), or "no test reaches it"
+  (`D0187`).
+- **A JSON form**: `check --holes --format=json FILE`, an array of one
+  object per hole with `at`, `name`, `type`, `function`, `scope`, `fits`,
+  `types` (each `name`, `kind`, `members`), `requires`, `ensures` and
+  `tests`; `--format=human` is the default.
+
+`query holes` appends four fields to R169's six:
+`TYPES\tREQUIRES\tENSURES\tTESTS`, the types as `struct Task {name:
+String, hours: int}`, each list separated by `; `, the tests quoted.
+
+**Decided against**: the values a test sees at the hole, which need the
+tests run, `sisu test`'s work (R27 prints a hole's closure where a run
+reaches it); the bindings' capabilities apart from their types, which
+the types show; and fits through two calls, which would enumerate.
+
+**Why.** Item 3 of the round, R174's decided-against part of 10's report.
+
+**In stage 1.** `query` (`Hole`, `HoleType`, `holes`, `fits_deeper`,
+`mentions`, `hole_type`, `tests_reaching`, `holes_answer`, `type_line`,
+`hole_json`, `json_text`), `main` (`holes_command`) and the catalog.
+
+**What it changes.** No output of the corpus. The case
+`cases/findings21/holes_report.sisu`, asked in `queries.requests` (`check
+--holes`, its JSON, `query holes`); `cases/findings20/query_assist.answers`
+is blessed again (the holes' new lines and fields).
+
+**Decision 1045**, for docs/architecture.md:
+
+1045. `check --holes` and `query holes` also give the expressions that fit
+      to depth two, the definitions of the program's types the hole's
+      type names, its function's `requires` and `ensures`, the tests that
+      reach it (`D0180` to `D0187`), and `--format=json`; the values a
+      test sees wait for `sisu test`. Stage 1 decides it (RULES.md,
+      R181).
+
+## R182. `@derive(Plain)` of a `@repr(c)` struct with padding (decision 1046)
+
+**The rule.** 22 allows no padding in a plain type, whose `as_bytes`
+would read it. Stage 0's nineteenth round lays a declared struct's fields
+out at C's offsets in both lowerings (decision 1021): each at the next
+offset its alignment allows, a narrow number's width, a struct's widest
+field's, a word for any other, the size a multiple of the widest. The type
+checker computes the same offsets for a `@repr(c)` struct that derives
+`Plain` (its fields plain: the integers, the floats and such structs),
+and each gap is an error at the derive: `E0279`, "`Reading` cannot derive
+`Plain`: C's layout leaves 3 bytes of padding between `id: u8` and
+`value: i32`, at offsets 1 to 4", or `E0280` for one at the end, with the
+note that a field `_pad1: Array[u8, 3]` there makes the bytes the
+struct's, or that the fields ordered from the widest leave none. A struct
+of one field, which needs no `@repr(c)`, has no gap. Stage 1 reads the
+offsets from the types, as the lowerings' tables compute them; nothing
+else needs them.
+
+**Why.** Item 6 of the round, the manual's "Types and traits" finding,
+which R108 left until the layouts were lowered.
+
+**In stage 1.** `typeck.instances` (`check_derives`, `plain_gaps`,
+`plain_layout`, `padding_note`), `diag` and the catalog (`E0279`,
+`E0280`, `resolve.plain-padding-fill`).
+
+**What it changes.** The case `cases/findings21/plain_padding.sisu` (its
+`.diag`: `Reading`'s two gaps, `Packed` without one); no case of the
+corpus derives `Plain` with padding.
+
+The case imports `Plain` from `std.mem`, stage 1's (R5), which the Rust
+front end answers with `E0220`.
+
+- Differs: `compiler/stage1/cases/findings21/plain_padding.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1046**, for docs/architecture.md:
+
+1046. `@derive(Plain)` of a `@repr(c)` struct whose fields C's layout
+      (decision 1021) leaves a gap between or after is `E0279` or
+      `E0280`, naming the bytes, their offsets and the fields around
+      them. Stage 1 decides it (RULES.md, R182).
+
+## R183. `std.time.days_in_month`, a home for the prelude's helper (decision 1047)
+
+**The rule.** `std.time` has `pub pure def days_in_month(year, month)`,
+the days of a month of the proleptic Gregorian calendar, with a doc
+example; the prelude keeps its own copy, which the standard library's
+code calls and a program does not see (R175). `E0278` for
+`days_in_month` now has the fix `resolve.import-from-std`, "import it
+from `std.time`", whose edit writes `from std.time import days_in_month`
+before the module's first line of code (`PRELUDE_HELPERS`). The prelude's
+other helpers are its own algorithms (`days_from_civil`,
+`civil_from_days`, the iterators', the property tests') with no place in
+a program's API, and keep none.
+
+**Why.** Item 7 of the round, R175's decided-against item.
+
+**In stage 1.** `resolve` (`PRELUDE_HELPERS`); `compiler/std/time.sisu`
+(appended, so that the stage 0 round's edits of `std/` meet nothing).
+
+**What it changes.** The case `cases/findings21/days_in_month.sisu` (its
+`.out`); blessed again: `cases/findings20/prelude_internal.diag` (the fix)
+and `query_assist.answers` (its human form), and the conformance suite's
+`doc/std_pages.doc` (`std.time`'s page lists the function), which the
+Rust front end, reading the same `std/`, writes alike, and
+`std/doc_examples.select` (its doc example is one test more, 199).
+
+**Decision 1047**, for docs/architecture.md:
+
+1047. `std.time` has a `pub` `days_in_month`, which `E0278`'s fix imports
+      for a program that names the prelude's own copy. Stage 1 decides it
+      (RULES.md, R183).
+
+## R184. The merge's differences: the conformance suite's `std/bytes`, `std/narrow` and `unsafe/narrow_pointer` (decision 1048)
+
+**The rule.** Nothing a command prints changes. Stage 0's nineteenth
+round added five conformance cases (decisions 1020 to 1022), of which
+three differ from the Rust front end where a rule of stage 1's already
+decides otherwise:
+
+- `std/bytes.sisu` takes `xs[^3:]` of a `bytes`, a bound from the end,
+  which R48 gives `bytes` and the Rust front end answers with `E0383`, so
+  its types, SIR, diagnostics and pages differ.
+- `std/narrow.sisu` reads `by[3]` of a `dict[i32, u16]` in an
+  interpolation, which R152 reads into a temporary at the index, so its
+  SIR reads the entry a statement earlier.
+- `unsafe/narrow_pointer.sisu` imports `std.mem` and writes `unsafe` code,
+  stage 1's (R4, R5), which the Rust front end answers with `E0220` and
+  `E0900`, so its AST, names, SIR, diagnostics and pages differ as those
+  of `unsafe/cstring` do (R149).
+
+What each does is what its `.out` says, from stage 1's SIR
+(`behaviour`). `eval/config` and `eval/stops`, of the new case kind
+`NAME.eval`, are run by the suite, not by `check.sh`; `eval/config.eval`
+is blessed again under R180. `unsafe/cstring`'s move into `native.list`
+changes nothing here.
+
+**Why.** Item 8 of the round: the merge of stage 0's nineteenth round
+brought the cases, and `check.sh` found what they change.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/std/bytes.sisu`: types, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/std/narrow.sisu`: sir
+- Differs: `compiler/conformance/cases/unsafe/narrow_pointer.sisu`: ast, names, sir, ids, human, doc, doc-output
+
+**Decision 1048**, for docs/architecture.md:
+
+1048. The conformance suite's `std/bytes`, `std/narrow` and
+      `unsafe/narrow_pointer` differ from stage 0's front end under the
+      rules that already decide their constructs (R48, R152, R4). Stage 1
+      decides it (RULES.md, R184).

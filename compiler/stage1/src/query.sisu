@@ -1526,7 +1526,9 @@ pub pure def holes_answer(typed: typeck.Typed, m: ModuleId, text: str) -> String
         for t in h.tests:
             tests.push(quote(t))
         let more = "{field(defined.join("; "))}\t{field(h.requires.join("; "))}\t{field(h.ensures.join("; "))}\t{field(tests.join(", "))}"
-        out.push("{at}\t{field(h.name)}\t{field(h.ty)}\t{field(h.function)}\t{scope}\t{fits}\t{more}\n")
+        out.push(
+            "{at}\t{field(h.name)}\t{field(h.ty)}\t{field(h.function)}\t{scope}\t{fits}\t{more}\n"
+        )
     return out
 
 ## A type of a hole's report as one line: `struct Task {name: String}`.

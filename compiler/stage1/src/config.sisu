@@ -233,23 +233,31 @@ pure def is_tables(d: Data) -> bool:
 pure def toml_entry(name: str, path: str, d: Data) -> (String, String) ! Unwritable:
     match d:
         case Data.Map(fs):
-            return Ok((String.new(), "\n[{name}]\n{toml_fields(name, path, fs)?}"))
+            let (lines, tables) = toml_fields(name, path, fs)?
+            # A table that holds only tables is made by theirs, as TOML has
+            # it (`[SERVICES.tier.Paid]` makes `SERVICES.tier`).
+            if lines.is_empty() and not tables.is_empty():
+                return Ok((String.new(), tables))
+            return Ok((String.new(), "\n[{name}]\n{lines}{tables}"))
         case Data.List(xs):
             if is_tables(d):
                 var out = String.new()
                 for i in range(len(xs)):
                     let Data.Map(fs) = xs[i].copy() else:
                         continue
-                    out.push("\n[[{name}]]\n{toml_fields(name, "{path}[{i}]", fs)?}")
+                    let (lines, tables) = toml_fields(name, "{path}[{i}]", fs)?
+                    out.push("\n[[{name}]]\n{lines}{tables}")
                 return Ok((String.new(), out))
         case _:
             pass
     return Ok(("{name} = {toml(d, path)?}\n", String.new()))
 
 ## The fields of the table `name` (`path` as a message names it): the
-## values written inline first, then the tables, as TOML has them; a
+## values written inline, and after them the tables, as TOML has them; a
 ## field that holds nothing is left out.
-pure def toml_fields(name: str, path: str, fs: list[(String, Data)]) -> String ! Unwritable:
+pure def toml_fields(
+    name: str, path: str, fs: list[(String, Data)]
+) -> (String, String) ! Unwritable:
     var lines = String.new()
     var tables = String.new()
     for (k, x) in fs:
@@ -260,7 +268,7 @@ pure def toml_fields(name: str, path: str, fs: list[(String, Data)]) -> String !
             tables.push(table)
         else:
             lines.push("{key(k)} = {toml(x, "{path}.{k}")?}\n")
-    return Ok("{lines}{tables}")
+    return Ok((lines, tables))
 
 ## Text in double quotes, as JSON writes it (and YAML and TOML read it).
 pub pure def quoted(s: str) -> String:
@@ -473,12 +481,18 @@ test "the forms write the same constants":
     assert render(Form.Toml, [("XS".to_string(), Data.List([Data.Null]))]).is_err()
 
 test "TOML writes a struct as a table and a list of them as an array of tables":
-    let a = Data.Map([("name".to_string(), Data.Text("web".to_string())), ("port".to_string(), Data.Int(80))])
-    let b = Data.Map([("name".to_string(), Data.Text("db".to_string())), ("port".to_string(), Data.Int(5432))])
-    let limits = Data.Map([
-        ("timeout".to_string(), Data.Int(30)),
-        ("retry".to_string(), Data.Map([("times".to_string(), Data.Int(3))])),
-    ])
+    let a = Data.Map(
+        [("name".to_string(), Data.Text("web".to_string())), ("port".to_string(), Data.Int(80))]
+    )
+    let b = Data.Map(
+        [("name".to_string(), Data.Text("db".to_string())), ("port".to_string(), Data.Int(5432))]
+    )
+    let limits = Data.Map(
+        [
+            ("timeout".to_string(), Data.Int(30)),
+            ("retry".to_string(), Data.Map([("times".to_string(), Data.Int(3))])),
+        ]
+    )
     let entries = [
         ("SERVICES".to_string(), Data.List([a, b])),
         ("LIMITS".to_string(), limits),
@@ -486,7 +500,8 @@ test "TOML writes a struct as a table and a list of them as an array of tables":
     ]
     match render(Form.Toml, entries):
         case Ok(t):
-            assert t == "NAME = \"x\"\n\n[[SERVICES]]\nname = \"web\"\nport = 80\n\n[[SERVICES]]\nname = \"db\"\nport = 5432\n\n[LIMITS]\ntimeout = 30\n\n[LIMITS.retry]\ntimes = 3\n"
+            assert t
+                == "NAME = \"x\"\n\n[[SERVICES]]\nname = \"web\"\nport = 80\n\n[[SERVICES]]\nname = \"db\"\nport = 5432\n\n[LIMITS]\ntimeout = 30\n\n[LIMITS.retry]\ntimes = 3\n"
         case Err(_):
             assert False
     let bad = [("LIMITS".to_string(), Data.Map([("timeout".to_string(), Data.Float(1.0 / 0.0))]))]

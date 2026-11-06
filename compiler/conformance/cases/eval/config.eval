@@ -26,9 +26,21 @@
 --- sisu eval config.sisu --to toml
 NAME = "sauna"
 RATIO = 0.75
-SERVERS = [{ host = "löyly.example", port = 8080, tls = true }, { host = "kiuas", port = 22, tls = false }]
-LIMITS = { cpu = 4, memory = 512 }
 TAGS = []
+
+[[SERVERS]]
+host = "löyly.example"
+port = 8080
+tls = true
+
+[[SERVERS]]
+host = "kiuas"
+port = 22
+tls = false
+
+[LIMITS]
+cpu = 4
+memory = 512
 --- stderr
 --- status 0
 --- sisu eval config.sisu --to yaml

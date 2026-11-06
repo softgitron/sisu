@@ -1,0 +1,10 @@
+check	--holes	holes_report.sisu	--dir	cases/findings21
+check	--holes	--format=json	holes_report.sisu	--dir	cases/findings21
+query	holes	holes_report.sisu	--dir	cases/findings21
+query	references	keyword_refs.sisu	4	5	--dir	cases/findings21
+query	references	keyword_refs.sisu	11	17	--dir	cases/findings21
+query	rename	keyword_refs.sisu	8	16	count	--dir	cases/findings21
+eval	--to	toml	config_tables.sisu	--dir	cases/findings21
+eval	config_tables.sisu	--dir	cases/findings21
+eval	config_unwritable.sisu	--dir	cases/findings21
+eval	--to	toml	config_unwritable.sisu	--dir	cases/findings21

@@ -15,7 +15,7 @@
 #                                                ws` run them (RULES.md, R79, R95)
 #   sisu1 parse --bindings INPUT                 what `:why NAME` reads of a REPL input (R95)
 #   sisu1 sir --repl-serve                       the three above, and `sir`, `check`, `parse`, `fmt`,
-#                                                `lint`, `doc`, `tokens`, `query` and `eval` run in the
+#                                                `lint`, `doc`, `tokens`, `query`, `eval` and `fix` run in the
 #                                                directory a request's `--dir DIR` names, served by one
 #                                                process that keeps the standard library's base: a
 #                                                request a line of tab-separated arguments, an answer
@@ -26,6 +26,12 @@
 #                                                `hover`, `definition`, `references`, `completions`,
 #                                                `selection`, `actions` and `rename ... NEW`, one line
 #                                                per item of tab-separated fields (RULES.md, R164, R169)
+#   sisu1 fix FILE [--dry-run] [--all]           each diagnostic's preferred fix (with `--all` each
+#                                                lint's) applied to FILE, checked again until none
+#                                                applies, with `sisu fix`'s status (RULES.md, R176)
+#   sisu1 check --holes [--format=json] FILE     each typed hole with its type, what fits it, the
+#                                                types it names, its contract and the tests that
+#                                                reach it (RULES.md, R174, R181)
 #   sisu1 eval FILE [--to json|toml|yaml]        a configuration module's `const` items, evaluated at
 #                                                compile time and written as JSON, TOML or YAML (R165)
 #   sisu1 sir --target-runtime native ...        `target.runtime` of a native build (R116)

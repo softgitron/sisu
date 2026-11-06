@@ -1,0 +1,29 @@
+answer 0
+fix_assist.sisu:11:9: E0339 fixed: write `mut` before the argument: `mut `
+  11:9-11:9 "mut "
+fix_assist.sisu:13:11: E0200 fixed: a similar name is in scope: `count`
+  13:11-13:16 "count"
+fixes that would be applied to `fix_assist.sisu`: 2, and `--dry-run` leaves it as it is
+answer 0
+fix_assist.sisu:11:9: E0339 fixed: write `mut` before the argument: `mut `
+  11:9-11:9 "mut "
+fix_assist.sisu:13:11: E0200 fixed: a similar name is in scope: `count`
+  13:11-13:16 "count"
+fix_assist.sisu:4:1: W0027 fixed: remove the import
+  4:1-5:1 ""
+fixes that would be applied to `fix_assist.sisu`: 3, and `--dry-run` leaves it as it is
+answer 0
+fix_inline.sisu:26:11: W0025 fixed: write what `twice` returns in the call's place: `scaled(n, 2)`
+  26:11-26:19 "scaled(n, 2)"
+fix_inline.sisu:27:11: W0025 fixed: write what `twice` returns in the call's place: `scaled(reading(), 2)`
+  27:11-27:27 "scaled(reading(), 2)"
+fix_inline.sisu:28:11: W0023 fixed: write what `sum_sq` returns in the call's place: `(n * n + 1 * 1)`
+  28:11-28:23 "(n * n + 1 * 1)"
+fixes that would be applied to `fix_inline.sisu`: 3, and `--dry-run` leaves it as it is
+answer 0
+nothing in `fix_none.sisu` has a fix to apply
+answer 1
+error[D0009]: unknown option `--every` for `sisu fix`
+error: Exit(status=2)
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")

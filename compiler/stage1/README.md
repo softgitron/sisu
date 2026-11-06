@@ -182,7 +182,8 @@ sisu run -- audit --unsafe [--std] [PATH]   # the program's unsafe code by packa
 sisu run -- lint [--format=ids] [PATH]      # `sisu lint`: the program's lints, which `check` does not print (below, "The manual's findings")
 sisu run -- test [OPTIONS] [PATH]           # the tests, built by stage 1 and run by stage 0's runner, with R27's status (below, "The third round")
 sisu run -- query KIND FILE [LINE COL [NEW]] [--text PATH]  # the language server's questions of a file and a position, as tab-separated lines (RULES.md, R164, R169)
-sisu run -- check --holes FILE              # each typed hole with its type and the bindings in scope that fit it (R174)
+sisu run -- check --holes [--format=json] FILE  # each typed hole with its type, what fits it, its types, its contract and its tests (R174, R181)
+sisu run -- fix FILE [--dry-run] [--all]    # each diagnostic's preferred fix applied to the file, checked again until none applies (R176)
 sisu run -- eval FILE [--to json|toml|yaml] # a configuration module's constants, evaluated at compile time and written as JSON, TOML or YAML (R165)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
@@ -2821,6 +2822,56 @@ Stage 1's version is 0.15.0: the driver may rely on the queries of R169,
 the request of R170 and `check --holes` (R174). The new cases are in
 `cases/findings20/`.
 
+### The twenty-first round: `fix`, constants at compile time, the whole hole report, keyword arguments, TOML's tables, `Plain`'s padding, `days_in_month`
+
+This round took 10's `sisu fix` and `@fix_inline`, the manual's
+nineteenth round's two findings (a constant computed only at run time,
+and TOML's one line of inline tables with `E0617` at the constant),
+R174's and R169's open items, the manual's padded `Plain` struct, and
+R175's decided-against home for `days_in_month`. RULES.md has the rules
+(R176 to R184, decisions 1040 to 1048) and their decision texts:
+
+- **`fix`** (R176): `fix FILE [--dry-run] [--all]` applies each
+  diagnostic's preferred fix, with `--all` each lint's, checks the text
+  again until no fix applies or a round would undo another, says each fix
+  it applied, and writes the file once; `check.sh`'s new class `fix` runs
+  it as a process on a copy of each case with a `.fixed`.
+- **`@fix_inline`** (R177): a call of such a function warns as a
+  deprecated one's, with the fix that writes the expression its one
+  `return` gives in the call's place, where that means what the call
+  meant; any other body is `W0033`.
+- **Constants at compile time** (R178): every command that checks a
+  program evaluates its constants, and a failed invariant, panic,
+  refinement or budget is an error at the constant's name; the SIR still
+  computes the value where the program reads it.
+- **Keyword arguments** (R179): `rows` of `Bed(rows=2)` is a reference of
+  the field, which `references` lists and `rename` renames.
+- **TOML's tables and `E0617`'s field** (R180): a struct or a mapping is a
+  table, a list of them an array of tables, after the inline values; the
+  error names `LIMITS.retry.backoff`.
+- **The whole hole report** (R181): the expressions that fit to depth
+  two, the definitions of the types the hole's type names, the contract
+  in force, the tests that reach it, and `--format=json`.
+- **`Plain`'s padding** (R182): a `@repr(c)` struct whose fields C's
+  layout leaves a gap between or after cannot derive `Plain` (`E0279`,
+  `E0280`).
+- **`days_in_month`** (R183): `std.time` has it as a `pub` function, and
+  `E0278`'s fix imports it.
+- **The merge's differences** (R184): the conformance suite's
+  `std/bytes`, `std/narrow` and `unsafe/narrow_pointer`, which differ from
+  the Rust front end under R48, R152 and R4.
+
+Decided against: 10's ownership-aware inliner of a body of several
+statements, methods and `--deps` (R177); the values a test sees at a hole,
+which need the tests run (R181). Open: the driver's routing of `sisu fix`
+and `sisu check --holes --format=json`, which is stage 0's; `--edition`
+and `--deps`; a name in a struct pattern among a field's references; and
+compile-time types (R155).
+
+Stage 1's version is 0.16.0: the driver may rely on `fix` (R176), the
+holes' JSON form and `query holes`'s four new fields (R181). The new cases
+are in `cases/findings21/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3662,6 +3713,16 @@ cores; a rename is a search of references, which parses each module of
 the program's own packages again and now each import line's module path
 too. `check --holes` as a process takes 0.29 s, a `check`'s cost.
 
+The twenty-first round's commands cost what a `check` does, measured
+natively as processes at a load of about 4: `fix --dry-run --all` of the
+13-line `cases/findings21/fix_assist.sisu`, which checks it twice (the
+round that fixes and the one that finds nothing), 0.36 to 0.45 s, its
+`check` 0.35 to 0.41 s, `check --holes` of `holes_report.sisu` with its
+whole report 0.31 to 0.37 s, and `check` of `const_fine.sisu`, which
+evaluates its four constants, 0.35 to 0.42 s: a constant of a
+configuration costs the evaluator's steps, a few thousand, against the
+check's tens of millions of instructions.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3864,7 +3925,14 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     and the prelude's width (R175); decided against: hiding `Formatter`,
     `Spec` and `Hasher`, which the traits take (R175); left: compile-time
     types (R155), the sharing of instances with `--explain-size`, and 10's
-    report of a hole past its type and bindings (R174). The tenth round took a variant's
+    report of a hole past its type and bindings (R174). The twenty-first
+    round took `@fix_inline` (R177), constants at compile time (R178),
+    TOML's tables and `E0617`'s field (R180), the rest of the hole report
+    (R181), a padded `@repr(c)` struct under `Plain` (R182) and
+    `days_in_month`'s home (R183); decided against: the inliner of a body
+    of several statements (R177) and a test's values at a hole (R181);
+    left: compile-time types (R155) and the sharing of instances with
+    `--explain-size`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

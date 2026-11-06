@@ -1,0 +1,8 @@
+# `std.time.days_in_month` (RULES.md, R183): the prelude's helper, given a
+# `pub` home in the module it belongs to, which `E0278`'s fix imports.
+from std.time import days_in_month
+
+def main():
+    print(days_in_month(2024, 2))
+    print(days_in_month(1900, 2))
+    print(days_in_month(2026, 11))

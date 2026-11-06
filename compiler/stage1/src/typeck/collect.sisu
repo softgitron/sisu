@@ -2785,7 +2785,10 @@ impl Resolver:
                 case None:
                     for a in f.attrs:
                         if a.name == "fix_inline" and not self.is_std(module):
-                            var d = Diagnostic.new(Msg.TypeFixInlineBody, a.range.start, a.range.end)
+                            let at = a.range.start + 1
+                            var d = Diagnostic.new(
+                                Msg.TypeFixInlineBody, at, at + a.name.byte_len()
+                            )
                             self.warn_in(module, d.with("name", f.name.text))
         # A preview warns where it is used, as a deprecated function does
         # (RULES.md, R115).

@@ -62,9 +62,11 @@ pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
             case LParen | LBracket | LBrace:
                 # A `(` after a name, a `)` or a `]` is a call's.
                 let call = kind == SyntaxKind.LParen
-                    and (before == SyntaxKind.Ident
-                        or before == SyntaxKind.RParen
-                        or before == SyntaxKind.RBracket)
+                    and (
+                        before == SyntaxKind.Ident
+                            or before == SyntaxKind.RParen
+                            or before == SyntaxKind.RBracket
+                    )
                 opened.push(call)
                 depth += 1
                 continue
@@ -79,7 +81,8 @@ pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
                 var k = i + 1
                 while k < len(tokens) and tokens[k].0 != SyntaxKind.InKw:
                     let (kk, s, e) = tokens[k]
-                    if kk == SyntaxKind.Ident and params.contains(text.byte_slice(s, e).to_string()):
+                    if kk == SyntaxKind.Ident
+                            and params.contains(text.byte_slice(s, e).to_string()):
                         return None
                     k += 1
                 wrap = wrap or depth == 0
@@ -94,7 +97,8 @@ pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
                         inner += 1
                     elif kk == SyntaxKind.LParen:
                         inner -= 1
-                    elif kk == SyntaxKind.Ident and params.contains(text.byte_slice(s, e).to_string()):
+                    elif kk == SyntaxKind.Ident
+                            and params.contains(text.byte_slice(s, e).to_string()):
                         return None
                     if inner <= 0:
                         break
@@ -212,5 +216,6 @@ test "the form of an expression and a call of it":
     let one = form_of("Temperature(celsius).fahrenheit()", ["celsius".to_string()]) ?? panic("no")
     assert not one.wrap
     assert inlined(one, ["x.c".to_string()]) == Some("Temperature(x.c).fahrenheit()".to_string())
-    assert inlined(one, ["read()".to_string()]) == Some("Temperature(read()).fahrenheit()".to_string())
+    assert inlined(one, ["read()".to_string()])
+        == Some("Temperature(read()).fahrenheit()".to_string())
     assert form_of("[x for x in xs]", ["x".to_string(), "xs".to_string()]).is_none()
