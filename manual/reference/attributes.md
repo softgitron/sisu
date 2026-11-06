@@ -275,6 +275,42 @@ bookings in 4 copies
 `stored` reads the table's name as a `str` and its number of copies as
 an `int`, and `keys` is empty for each argument given by position.
 
+A template may number the arguments with `range(len(a.args))`, and
+read each argument's value and keyword at the same position
+([R12](compile-time.md#templates) lists what else its compile-time
+code may call):
+
+<!-- file: examples/reference-attributes/positions.sisu -->
+```sisu
+# A template numbers an attribute's arguments with `range`.
+@index(hour, name, unique=True)
+struct Booking:
+    name: String
+    hour: int
+
+## Each argument of `T`'s attributes, by its position or its keyword.
+def arguments[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for a in reflect.attributes_of(T):
+        comptime for i in range(len(a.args)):
+            comptime if a.keys[i] == "":
+                out.push("@{a.name} {i}: {a.args[i]}")
+            else:
+                out.push("@{a.name} {a.keys[i]}: {a.args[i]}")
+    return out
+
+def main():
+    for line in arguments[Booking]():
+        print(line)
+```
+
+<!-- output: examples/reference-attributes/positions.out -->
+```text
+@index 0: hour
+@index 1: name
+@index unique: True
+```
+
 A function's attributes are data too: `reflect.functions_of(m)` lists
 the functions of a module `m` that the code imports, and
 `reflect.attributes_of(f)` of each gives its attributes in the same

@@ -1,0 +1,12 @@
+# A service with no replicas, which the configuration's invariant refuses.
+struct Service:
+    name: String
+    replicas: int = 1
+    invariant self.replicas >= 1
+
+## The replicas for a service that takes `share` percent of the traffic.
+pure def replicas_for(share: int) -> int:
+    return (share + 24) // 25
+
+const REGION: String = "eu-north"
+const BATCH: Service = Service(name="batch", replicas=replicas_for(0))

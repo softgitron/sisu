@@ -680,7 +680,11 @@ Stage 0's graphemes leave out three rules of UAX #29: `Prepend`, a
 character kept with what follows it; the Indic conjuncts joined across
 a virama (GB9c); and the condition that U+200D joins only pictographs
 (GB11), so it joins any two characters; the few characters that extend
-a grapheme without being marks, such as U+200C, do not extend one.
+a grapheme without being marks, such as U+200C, do not extend one. The
+three rules need properties that only Unicode's own data files carry
+(`GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt` and
+`emoji-data.txt`), which the tool that writes stage 0's tables does not
+read yet, and they wait for those files.
 
 **Status.** In stage 0 (D-034), with the differences noted.
 

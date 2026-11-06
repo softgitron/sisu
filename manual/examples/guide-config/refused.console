@@ -1,0 +1,11 @@
+$ sisu check refused.sisu
+$ sisu eval refused.sisu
+error[E0602]: the compile-time evaluation of this expression panicked: invariant of `Service` failed: self.replicas >= 1
+    self.replicas >= 1
+    │
+    0
+  --> refused.sisu:12:7
+   |
+12 | const BATCH: Service = Service(name="batch", replicas=replicas_for(0))
+   |       ^^^^^
+

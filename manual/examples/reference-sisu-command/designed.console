@@ -14,8 +14,6 @@ $ sisu fix --edition 2030
 error[D0003]: unknown command `fix`; run `sisu help`
 $ sisu why send hello.sisu:3
 error[D0003]: unknown command `why`; run `sisu help`
-$ sisu eval hello.sisu
-error[D0003]: unknown command `eval`; run `sisu help`
 $ sisu fill hello.sisu
 error[D0003]: unknown command `fill`; run `sisu help`
 $ sisu doc --digest hello.sisu

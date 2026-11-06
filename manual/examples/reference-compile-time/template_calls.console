@@ -1,0 +1,11 @@
+$ sisu run template_calls.sisu
+error[E0609]: making `long_names[Stove]` stopped at compile time: only `reflect`, `enumerate`, `len`, `range`, `zip`, `reversed`, `sorted`, `min`, `max`, `sum` and the methods `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of text can be called at compile time here
+  --> template_calls.sisu:13:11
+   |
+13 |     print(long_names[Stove]())
+   |           ^^^^^^^^^^^^^^^^^^^
+   |
+ 8 |         comptime if abs(len(f.name) - 5) > 2:
+   |                     -------------------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)

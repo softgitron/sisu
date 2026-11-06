@@ -1,0 +1,13 @@
+$ sisu eval settings.sisu
+{
+  "SAUNA": "Kota",
+  "STOVE": {
+    "kilowatts": 9,
+    "wood": true
+  }
+}
+$ sisu eval settings.sisu --to yaml
+SAUNA: "Kota"
+STOVE:
+  kilowatts: 9
+  wood: true

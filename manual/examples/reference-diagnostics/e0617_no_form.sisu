@@ -1,0 +1,6 @@
+# A configuration constant that holds a function, which JSON cannot write.
+pure def doubled(seats: int) -> int:
+    return seats * 2
+
+const SEATS: int = 20
+const GROW: (int) -> int = doubled

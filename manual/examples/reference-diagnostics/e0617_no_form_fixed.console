@@ -1,0 +1,5 @@
+$ sisu eval e0617_no_form_fixed.sisu
+{
+  "SEATS": 20,
+  "GROWN": 40
+}

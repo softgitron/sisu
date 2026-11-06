@@ -71,6 +71,16 @@ and the command line never disagree:
   definition** (into the standard library too), **rename** and
   **references**, and **formatting** as `sisu fmt` writes.
 
+The diagnostics, hover, completion, go to definition, references and
+the document's symbols come from stage 1, the front end that `sisu
+check` runs, through the same server of it that every command asks
+([R16](../reference/sisu-command.md#the-server-of-stage-1)), so a hover
+answers in about 9 ms. A file with a syntax error still gets what its
+tree allows: the symbols of its whole items, and the members after a
+`.` that is not finished yet. Build stage 1 once with any command, such
+as `sisu check`, before you open the editor: the server does not build
+it, and answers from the Rust front end until it is built.
+
 ## 3. Ask about the borrows of a line
 
 The command `sisu.explainBorrow`, run on a line, lists the borrows live
@@ -134,6 +144,11 @@ statements, so typing a loop that never ends cannot hang the editor and
 nothing the script does reaches the world. They are kept until the text
 changes.
 
-**Status.** In stage 0. The structural editing with a typed palette
+**Status.** In stage 0, with stage 1 and the Rust front end sharing
+the answers: rename, code actions, inlay hints, selection ranges,
+formatting, a script's values and `sisu.explainBorrow` still come from
+the Rust front end. Stage 1's completion offers every name of the
+prelude, its internal helpers too, and its references leave out the
+names in import lines. The structural editing with a typed palette
 and the stepper of the teaching profile, which
 [10](../../proposal/10-tooling.md) describes for editors, are designed.

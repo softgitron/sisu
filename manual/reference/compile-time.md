@@ -196,8 +196,9 @@ function asks about its type parameters ([Templates](#templates)).
 
 Compile-time values are types, the descriptors of their fields,
 variants, methods and attributes, lists and pairs of them, integers,
-text and booleans, with `enumerate`, `len`, arithmetic, comparisons,
-`and`, `or`, `not` and interpolation. Code works with them in these
+text and booleans, with `enumerate`, `len`, `range`, `zip`, `sorted`
+and the other builtins that [Templates](#templates) lists, arithmetic,
+comparisons, `and`, `or`, `not` and interpolation. Code works with them in these
 forms:
 
 - `comptime for x in EXPR:` unrolls its body, once for each item;
@@ -530,6 +531,16 @@ instance is checked on its own, for the types really used.
   its text. An `E0300` that
   finds a reference where the instance gives a value on, as to
   `reflect.construct`, adds a note that such a parameter is taken `own`.
+- A template's compile-time code, its `comptime for`, its `comptime
+  if` and the conditions of its `if comptime`, may call `reflect`,
+  `enumerate` and `len`; `range` with one, two or three integers;
+  `zip` of two lists of one length; `reversed` and `sorted` of a list;
+  `min`, `max` and `sum` of a list, or `min` and `max` of two or more
+  values; and the methods `to_lowercase`, `to_uppercase`, `to_string`
+  and `byte_len` of text. A call of anything else there is E0609, whose
+  reason lists what may be called, as does a `range` with a step of 0
+  or of more than 100,000 numbers. The code the template writes for run
+  time may call anything.
 - A typed hole in a derive's template is reported once, at the hole,
   however many types derive it.
 - A syntax error in a template's body, such as a `:` that an
@@ -616,6 +627,71 @@ error[E0609]: making `blank[int]` stopped at compile time: `int` is not a struct
 
 error[D0006]: the program was not run: errors found (1)
 ```
+
+A template sorts its type's field names and writes them in capitals
+while it is made, so the instance holds the finished list:
+
+<!-- file: examples/reference-compile-time/template_builtins.sisu -->
+```sisu
+# A template's compile-time code calls `sorted`, `zip` and text's methods.
+struct Stove:
+    wood: bool
+    kilowatts: int
+    name: String
+
+## The fields of `T` in alphabetical order, in capitals.
+def headings[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for name in sorted([f.name for f in reflect.fields_of(T)]):
+        out.push(name.to_uppercase())
+    return out
+
+def main():
+    print(headings[Stove]())
+```
+
+<!-- output: examples/reference-compile-time/template_builtins.out -->
+```text
+["KILOWATTS", "NAME", "WOOD"]
+```
+
+A call of a function that compile time does not run, `abs` in a
+`comptime if`, stops the instance:
+
+<!-- file: examples/reference-compile-time/template_calls.sisu -->
+```sisu
+# A template's compile-time code calls `abs`, which it cannot.
+struct Stove:
+    kilowatts: int
+
+def long_names[T]() -> int:
+    var count = 0
+    comptime for f in reflect.fields_of(T):
+        comptime if abs(len(f.name) - 5) > 2:
+            count += 1
+    return count
+
+def main():
+    print(long_names[Stove]())
+```
+
+<!-- output: examples/reference-compile-time/template_calls.console -->
+```console
+$ sisu run template_calls.sisu
+error[E0609]: making `long_names[Stove]` stopped at compile time: only `reflect`, `enumerate`, `len`, `range`, `zip`, `reversed`, `sorted`, `min`, `max`, `sum` and the methods `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of text can be called at compile time here
+  --> template_calls.sisu:13:11
+   |
+13 |     print(long_names[Stove]())
+   |           ^^^^^^^^^^^^^^^^^^^
+   |
+ 8 |         comptime if abs(len(f.name) - 5) > 2:
+   |                     -------------------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Compare the lengths without `abs`, as `len(f.name) > 7 or len(f.name) <
+3`, or compute the value in the code the template writes.
 
 A syntax error in a template's body is the template's own:
 
@@ -894,17 +970,42 @@ compiling. A feature is a package's named, additive part
 
 ## Configuration files
 
-`sisu eval FILE --to json|toml|yaml` evaluates a module of `const`
-items and `pure` functions with the compile-time evaluator and renders
-its values through `Encode`, so that Sisu is its own configuration
-language: the module's types, refinements and invariants are the
-schema, and a value outside them fails with a diagnostic at its place.
-The budget of steps applies, since a configuration module is ordinary
-code ([08](../../proposal/08-metaprogramming.md#configuration-files)).
+`sisu eval FILE [--to json|toml|yaml]` checks a module as `sisu check`
+checks a file, without its tests, evaluates each of its `const` items
+with the compile-time evaluator, in the order written, and writes them
+in the form `--to` names, JSON without it: one object, one table of
+`NAME = value` lines, or one mapping in block style, keyed by the
+constants' names. Sisu is so its own configuration language: the
+module's types, refinements and invariants are the schema, and a value
+outside them fails with a diagnostic at the constant's name, as E0602
+for a failed invariant, with nothing written and status 1. The budget
+of steps applies, since a configuration module is ordinary code
+([08](../../proposal/08-metaprogramming.md#configuration-files)).
 
-**Stage 0 differs.** `sisu eval` is D0003 ([R16](sisu-command.md#sisu-eval)).
+- A struct is a mapping of its fields, in order; a variant without
+  fields is its name, and one with fields a mapping of its name to
+  them.
+- `Some(x)` is `x`, and `None` is `null` in JSON and YAML; TOML leaves
+  out a field or a constant that holds nothing.
+- A list, a set and a tuple are sequences, a `dict` keyed by text or
+  integers a mapping, and text is written in double quotes.
+- A value the form cannot write, a function, a reference, an infinite
+  float in JSON or a `None` in a list in TOML, is E0617
+  (`eval.no-form`, [R17](diagnostics.md#e0617)).
 
-**Status.** Leaning (D-063).
+[Chapter 25](../tutorial/25-compile-time.md#configuration-as-constants)
+shows a first module, and [Generate configuration](../guides/config.md)
+each form and each refusal.
+
+**Stage 0 differs.** 08 renders the values through `Encode`; stage 0
+writes a value's own structure, which is what `@derive(Encode)` writes
+of it, whether or not the type derives it. A constant that calls the
+prelude's `max` or `min` is beyond what stage 1's evaluator runs, said
+on standard error with status 1. `sisu eval` is stage 1's, so the Rust
+front end answers it with D0003 ([R16](sisu-command.md#sisu-eval)).
+
+**Status.** In stage 0, with the differences noted; rendering through
+`Encode` leans (D-063).
 
 ## Checked string literals
 

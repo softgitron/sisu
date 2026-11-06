@@ -1,0 +1,13 @@
+# A template's compile-time code calls `abs`, which it cannot.
+struct Stove:
+    kilowatts: int
+
+def long_names[T]() -> int:
+    var count = 0
+    comptime for f in reflect.fields_of(T):
+        comptime if abs(len(f.name) - 5) > 2:
+            count += 1
+    return count
+
+def main():
+    print(long_names[Stove]())

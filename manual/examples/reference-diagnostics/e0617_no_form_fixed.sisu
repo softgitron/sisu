@@ -1,0 +1,6 @@
+# The constant holds what the function gives, which every form writes.
+pure def doubled(seats: int) -> int:
+    return seats * 2
+
+const SEATS: int = 20
+const GROWN: int = doubled(SEATS)

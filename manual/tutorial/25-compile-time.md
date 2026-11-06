@@ -8,7 +8,8 @@ values and check them while the program compiles, give a long
 computation the steps it needs, and ask a type about its fields. Then
 you write a function that depends on the shape of its type, write a
 derive of your own, read attributes as data, make a file part of the
-program, and choose code for a target or for the tests. You need about
+program, choose code for a target or for the tests, and write a
+configuration file from constants. You need about
 two hours.
 
 ## Values computed while compiling
@@ -797,14 +798,66 @@ test "a test has its own greeting" ... ok
   neither is a field, a variant or a method of a type that it leaves
   out, so a use of it is an error of the build that leaves it out.
 
+## Configuration as constants
+
+A module of constants can be a configuration file. `sisu eval FILE`
+evaluates each `const` of the module with the compile-time evaluator
+and writes them out as JSON, or as TOML or YAML with `--to toml` or
+`--to yaml`. The module's types are the schema: here an invariant keeps
+each sauna's heat in range.
+
+<!-- file: examples/25-compile-time/settings.sisu -->
+```sisu
+# The sauna's settings, as constants that `sisu eval` writes out.
+struct Sauna:
+    name: String
+    degrees: int
+    invariant 40 <= self.degrees <= 110
+
+const OPENS_AT: int = 16
+const SAUNAS: list[Sauna] = [
+    Sauna(name="Kota", degrees=80),
+    Sauna(name="Savu", degrees=75),
+]
+```
+
+<!-- output: examples/25-compile-time/settings.console -->
+```console
+$ sisu eval settings.sisu
+{
+  "OPENS_AT": 16,
+  "SAUNAS": [
+    {
+      "name": "Kota",
+      "degrees": 80
+    },
+    {
+      "name": "Savu",
+      "degrees": 75
+    }
+  ]
+}
+$ sisu eval settings.sisu --to toml
+OPENS_AT = 16
+SAUNAS = [{ name = "Kota", degrees = 80 }, { name = "Savu", degrees = 75 }]
+```
+
+A struct becomes a mapping of its fields and a list a sequence. A
+sauna at 130 degrees would stop the evaluation with E0602 at the
+constant's name, and nothing would be written.
+[Generate configuration](../guides/config.md) renders a whole
+deployment this way, with each form and the values a form cannot
+write.
+
+**Try it.** Add `--to yaml`, then set Savu's heat to 130 and run
+`sisu eval` again.
+
 ## What is still to come
 
-Three parts of compile-time code are designed in
+Two parts of compile-time code are designed in
 [08](../../proposal/08-metaprogramming.md) and
 [10](../../proposal/10-tooling.md) and not in the compiler yet.
-`sisu eval` will render a module of `const` items as JSON, TOML or YAML
-for configuration files, checking their refinement types and
-invariants on the way (D-063). `@diagnostic_name` will let a library
+`@diagnostic_name` will let a library
 say how its types are written in diagnostics, once compile-time code
 can make types, whose syntax is the owner's question Q-81; until then
 it is E0900. And a `comptime` function
@@ -1374,6 +1427,8 @@ When every test passes, compare your answer with
   template routes to a method, `s.[m]()`; `embed`
   makes a file part of the program; `target`, `if comptime` and `@cfg`
   choose code for a target, for the tests or for a feature.
+- `sisu eval` writes a module's constants as JSON, TOML or YAML, its
+  types and invariants checking each value.
 
 Chapter 26 is about `pure` functions and what they promise, and about
 running loops in parallel with `std.par` while getting the same result

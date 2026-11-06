@@ -303,8 +303,9 @@ written in Sisu and compiled natively, which is the default for
 `parse` (`--shape` too), `repl` and `ws`, as `sisu help` says, and the
 Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
-lint` and `sisu audit --unsafe` are stage 1's alone, and the Rust front
-end refuses them. The other commands, and `run --watch` and
+lint`, `sisu audit --unsafe` and `sisu eval` are stage 1's alone, and
+the Rust front end refuses them; `sisu lsp` answers from both
+([sisu lsp](#sisu-lsp)). The other commands, and `run --watch` and
 `--defer-borrow`, `test --std` and `--defer-borrow`, and `check
 --diary` use the Rust front end whichever you choose. A program's
 transcripts run on the front end its tests run on, stage 1 unless you
@@ -332,6 +333,33 @@ to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 decision 268 in the [architecture
 notes](../../compiler/docs/architecture.md)); the proposal has one
 front end.
+
+### The server of stage 1
+
+- `SISU_STAGE1_SERVE=0 sisu COMMAND ...`
+
+A command whose front end is stage 1 asks a server of stage 1 rather
+than starting stage 1 for itself. The first command that finds no
+server starts one, a process of `sisu` in the background whose socket
+is under `target/stage1/serve/` beside the driver, and every later
+command of any directory sends it its words and reads its answer as it
+would read a process's output. The server keeps up to one process of
+stage 1 for each core, each with the standard library's base already
+made, and ends 300 seconds after its last request
+(`SISU_STAGE1_SERVE_IDLE` sets the seconds) or when `sisu` is built
+again; a process of stage 1 that was built again is replaced. A two-line `sisu check` takes 0.014 seconds served
+where it takes 0.244 as a process of its own.
+
+Served are `check`, `sir`, `parse`, `fmt`, `lint`, `doc`, `tokens`,
+the builds of `test` and `bench`, `eval`, and the language server's
+questions ([sisu lsp](#sisu-lsp)). `sisu run` and `sisu build` are not
+served yet: their SIR comes from a build that the server does not
+answer. Whatever goes wrong with the server, the command runs stage 1
+as a process of its own, and `SISU_STAGE1_SERVE=0` makes it do so every
+time. What a command prints is the same either way.
+
+**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942 and 980 of
+the [architecture notes](../../compiler/docs/architecture.md)).
 
 ## Running programs
 
@@ -915,12 +943,12 @@ error[E0200]: cannot find `totl` in this scope
 
 **Stage 0 differs.** [10](../../proposal/10-tooling.md) sets a target
 of under 300 ms for `sisu check` after an edit of one function in a
-package of 100,000 lines. Stage 0 checks from nothing each time it is
-started, with stage 1 built in the release profile, every contract
-checked, as the front end of every command, which makes a `sisu check`
-of a two-line program about 12 % cheaper than the debug build did; the
-language server, `--watch` and the REPL keep what they
-checked, and recheck such an edit within the target.
+package of 100,000 lines. Stage 0 checks the program from nothing each
+time, keeping only the standard library's base made in [the server of
+stage 1](#the-server-of-stage-1), so a `sisu check` of a two-line
+program takes 0.014 seconds served and 0.244 as a process of its own;
+the language server, `--watch` and the REPL keep what they checked,
+and recheck such an edit within the target.
 
 **Status.** In stage 0.
 
@@ -1017,6 +1045,56 @@ shows the SIR of `hello.sisu`.
 
 **Status.** In stage 0, for implementations of Sisu
 ([18](../../proposal/18-next-steps.md), "Bootstrapping").
+
+### sisu eval
+
+- `sisu eval [--to json|toml|yaml] FILE`
+
+`sisu eval` evaluates each `const` of the module FILE with the
+compile-time evaluator and writes the constants on standard output as
+JSON, or as TOML or YAML with `--to`, keyed by their names, for a
+configuration file ([R12](compile-time.md#configuration-files) has the
+rules of each form). A constant whose evaluation stops is that error at
+its name, and one that holds a value the form cannot write is E0617;
+either way nothing is written and the status is 1.
+
+<!-- file: examples/reference-sisu-command/settings.sisu -->
+```sisu
+# A configuration: the constants are its keys.
+struct Stove:
+    kilowatts: int
+    wood: bool = True
+
+const SAUNA: String = "Kota"
+const STOVE: Stove = Stove(kilowatts=9)
+```
+
+<!-- output: examples/reference-sisu-command/eval.console -->
+```console
+$ sisu eval settings.sisu
+{
+  "SAUNA": "Kota",
+  "STOVE": {
+    "kilowatts": 9,
+    "wood": true
+  }
+}
+$ sisu eval settings.sisu --to yaml
+SAUNA: "Kota"
+STOVE:
+  kilowatts: 9
+  wood: true
+```
+
+**Stage 0 differs.** `sisu eval` is stage 1's, from `sisu1 0.14.0`,
+and served as `sisu check` is ([The server of stage
+1](#the-server-of-stage-1)); the Rust front end answers it with D0003.
+`sisu help` does not list it yet. 08 renders the values through
+`Encode`, where stage 0 writes each value's own structure.
+
+**Status.** In stage 0, with the differences noted; rendering through
+`Encode` leans (D-063; [08](../../proposal/08-metaprogramming.md#configuration-files)).
+[Generate configuration](../guides/config.md) is the guide.
 
 ## Testing
 
@@ -1174,8 +1252,9 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 - `FILE`, a module under a package's `src/`, runs that module's tests
   only, with the package compiled as `sisu test` compiles it, so the
   module imports the modules beside it; the replay line names the
-  module's file, and a token of the package's run is D0033 for the
-  module's run and the other way round
+  module's file; a token of the module's run given to the package's
+  is D0149, and one of the package's run given to the module's D0150,
+  each naming the run that replays it
   ([R15](testing.md#the-tests-of-one-module)).
 - `--replay TOKEN` runs the failing test that the token names, with the
   same seeds and the same shrunk case, so that it fails in the same
@@ -1674,12 +1753,26 @@ document symbols, selection ranges, formatting, completion, rename and
 references, the fixes of diagnostics as code actions, inlay hints for
 inferred types, error sets and `mut` and `own` at call sites, the
 command `sisu.explainBorrow`, and a worksheet's values inline. An editor
-starts it; the guide G1, Set up your editor, will show how. It takes no
-options (D0009).
+starts it, as [Set up your editor](../guides/editor.md) shows. It takes
+no options (D0009).
 
-**Status.** In stage 0. The proposal's always-on evaluation, structural
-editing and stepper come after 0.1 ([10](../../proposal/10-tooling.md),
-"Language server").
+**Stage 0 differs.** The proposal has one front end. With stage 1 built
+and at `sisu1 0.14.0` or later, stage 1 answers the diagnostics, hover,
+go-to-definition, references, completion and document symbols, each a
+query of its own sent to [the server of
+stage 1](#the-server-of-stage-1), a hover in about 9 ms; a file with a
+syntax error still answers what its tree allows, such as its whole
+items' symbols. The Rust front end answers the rest, selection ranges,
+formatting, rename, code actions, inlay hints, a worksheet's values and
+`sisu.explainBorrow`, and every question when stage 1 is not built (the
+server does not build it under an editor) or `--front-end=rust` is
+given. Stage 1's completion offers every name of the prelude, its
+internal helpers too, and its references leave out the names in import
+lines.
+
+**Status.** In stage 0, with the differences noted. The proposal's
+always-on evaluation, structural editing and stepper come after 0.1
+([10](../../proposal/10-tooling.md), "Language server").
 
 ## Packages
 
@@ -2072,8 +2165,6 @@ $ sisu fix --edition 2030
 error[D0003]: unknown command `fix`; run `sisu help`
 $ sisu why send hello.sisu:3
 error[D0003]: unknown command `why`; run `sisu help`
-$ sisu eval hello.sisu
-error[D0003]: unknown command `eval`; run `sisu help`
 $ sisu fill hello.sisu
 error[D0003]: unknown command `fill`; run `sisu help`
 $ sisu doc --digest hello.sisu
@@ -2173,13 +2264,6 @@ or `Sync`, `pure`, a capability's reach, the choice of an impl, a
 compile-time budget), in a human form and a JSON form.
 
 **Status.** Leaning (D-065).
-
-### sisu eval
-
-`sisu eval FILE` renders a module of `pure` constants as JSON, TOML or
-YAML (`--to yaml`), for configuration.
-
-**Status.** Leaning (D-063; [08](../../proposal/08-metaprogramming.md)).
 
 ### sisu fill
 

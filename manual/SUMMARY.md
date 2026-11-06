@@ -66,7 +66,7 @@
 - [Call a C library](guides/c-library.md)
 - [Build a native executable](guides/native.md)
 - [Write a derive](guides/derive.md)
-- [Generate configuration]()
+- [Generate configuration](guides/config.md)
 - [Publish a package]()
 - [Check what a dependency can do](guides/audit.md)
 - [Move to a new edition]()

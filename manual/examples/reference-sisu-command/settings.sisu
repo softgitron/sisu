@@ -1,0 +1,7 @@
+# A configuration: the constants are its keys.
+struct Stove:
+    kilowatts: int
+    wood: bool = True
+
+const SAUNA: String = "Kota"
+const STOVE: Stove = Stove(kilowatts=9)

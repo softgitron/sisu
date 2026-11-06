@@ -1,0 +1,23 @@
+# A deployment's configuration, as a module of constants.
+type Port = int where 1024 <= self <= 65535
+
+enum Tier:
+    Free
+    Paid(seats: int)
+
+struct Service:
+    name: String
+    port: Port
+    replicas: int = 1
+    tier: Tier = Tier.Free
+    invariant self.replicas >= 1
+
+## The replicas for a service that takes `share` percent of the traffic.
+pure def replicas_for(share: int) -> int:
+    return (share + 24) // 25
+
+const REGION: String = "eu-north"
+const SERVICES: list[Service] = [
+    Service(name="web", port=8080, replicas=replicas_for(60)),
+    Service(name="api", port=9000, tier=Tier.Paid(seats=40)),
+]

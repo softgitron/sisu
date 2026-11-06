@@ -7504,7 +7504,7 @@ Shown in [chapter 14](../tutorial/14-traits.md#types-that-each-impl-chooses).
 
 ## Compile-time evaluation
 
-Codes E0600 to E0616. The compiler runs `comptime` code, templates and
+Codes E0600 to E0617. The compiler runs `comptime` code, templates and
 derives in its interpreter, with a budget of steps and no way to the
 world ([R12](compile-time.md)).
 
@@ -8287,6 +8287,64 @@ def main():
 ```
 
 Shown in [R12](compile-time.md#reflection).
+
+### E0617
+
+`eval.no-form`: `{name}` holds {what}, which {form} cannot write.
+
+`sisu eval` writes a module's constants as JSON, TOML or YAML
+([R12](compile-time.md#configuration-files)), and the constant `{name}`
+holds a value that the form has no way to write: a function or a
+reference in any form, an infinite or not-a-number float in JSON, or a
+`None` inside a list in TOML. The error stands at the constant's name,
+nothing is written, and the status is 1; `sisu check` and `sisu run`
+do not report it, since only a form needs the value written.
+
+<!-- file: examples/reference-diagnostics/e0617_no_form.sisu -->
+```sisu
+# A configuration constant that holds a function, which JSON cannot write.
+pure def doubled(seats: int) -> int:
+    return seats * 2
+
+const SEATS: int = 20
+const GROW: (int) -> int = doubled
+```
+
+<!-- output: examples/reference-diagnostics/e0617_no_form.console -->
+```console
+$ sisu eval e0617_no_form.sisu
+error[E0617]: `GROW` holds a function, which JSON cannot write
+  --> e0617_no_form.sisu:6:7
+  |
+6 | const GROW: (int) -> int = doubled
+  |       ^^^^
+
+```
+
+Give the constant the value it stands for, here what the function
+gives, or choose a form that writes the value, as TOML and YAML write
+an infinite float.
+
+<!-- file: examples/reference-diagnostics/e0617_no_form_fixed.sisu -->
+```sisu
+# The constant holds what the function gives, which every form writes.
+pure def doubled(seats: int) -> int:
+    return seats * 2
+
+const SEATS: int = 20
+const GROWN: int = doubled(SEATS)
+```
+
+<!-- output: examples/reference-diagnostics/e0617_no_form_fixed.console -->
+```console
+$ sisu eval e0617_no_form_fixed.sisu
+{
+  "SEATS": 20,
+  "GROWN": 40
+}
+```
+
+Shown in [Generate configuration](../guides/config.md).
 
 ## Capabilities
 
@@ -11805,7 +11863,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0148. The messages of the `sisu` command itself
+Codes D0001 to D0150. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -11983,7 +12041,9 @@ A replay token names the content hash of the code it was made for, and
 replays a run of exactly that code: the token is a fact about one
 version of the program ([R15](testing.md#replay-tokens)). After any
 change to the file, the hash differs, so the token is refused rather
-than replaying something else.
+than replaying something else. A token that another run of the same package made,
+of one module's tests or of the package's, is [D0149](#d0149) or
+[D0150](#d0150) instead, which names that run.
 
 <!-- file: examples/reference-diagnostics/d0033_other_code.sisu -->
 ```sisu
@@ -12420,6 +12480,39 @@ Add `--native`: `sisu build --native --explain-size FILE`.
 
 Example: [R16](sisu-command.md#sisu-build).
 
+### D0149
+
+`cli.token-module-run`: the token is for the run of the tests of
+`{module}`; `sisu test --replay {token} {module}` replays it.
+
+`sisu test FILE` of a module under a package's `src/` numbers the
+module's tests apart from the package's, so its replay tokens are for
+that run alone ([R15](testing.md#the-tests-of-one-module)). The token
+was given to the run of the whole package, or of another module, and
+the message names the module whose run made it and the command that
+replays it. Nothing runs, and the status is 1.
+
+Run the command the message gives, which names the module's file after
+the token.
+
+Example: [R15](testing.md#the-tests-of-one-module).
+
+### D0150
+
+`cli.token-package-run`: the token is for the run of the package's
+tests, not of `{module}`'s; `sisu test --replay {token} {package}`
+replays it.
+
+The token was made by the run of the package's tests, `sisu test` in
+its directory, and was given to the run of one module's tests, `sisu
+test --replay TOKEN src/MODULE.sisu`. The message names the package's
+directory to replay it in, `.` for the one you are in.
+
+Leave the module's file out, or give the package's directory, as the
+message's command does.
+
+Example: [R15](testing.md#the-tests-of-one-module).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -12742,6 +12835,7 @@ it. `sisu explain CODE` prints the same line.
 | E0614 | `comptime.no-fake` | `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature |
 | E0615 | `comptime.unsafe-written` | code that compile-time evaluation writes holds no `unsafe`, so that every unsafe block stays in a source file, where `sisu audit --unsafe` shows it |
 | [E0616](#e0616) | `comptime.function-failed` | the compile-time code of `{name}` stopped: {reason} |
+| [E0617](#e0617) | `eval.no-form` | `{name}` holds {what}, which {form} cannot write |
 
 ### Capabilities, every code
 
@@ -13151,4 +13245,6 @@ it. `sisu explain CODE` prints the same line.
 | D0146 | `native.size-rest` | {bytes} bytes ({share}%), the data, the unwinding tables and the headers |
 | D0147 | `native.size-unread` | `--explain-size` reads the parts of a 64-bit ELF executable, which `{output}` is not |
 | [D0148](#d0148) | `cli.explain-size-native` | `--explain-size` explains the size of a native executable: it goes with `--native` |
+| [D0149](#d0149) | `cli.token-module-run` | the token is for the run of the tests of `{module}`; `sisu test --replay {token} {module}` replays it |
+| [D0150](#d0150) | `cli.token-package-run` | the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it |
 

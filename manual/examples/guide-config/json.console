@@ -1,0 +1,22 @@
+$ sisu eval services.sisu
+{
+  "REGION": "eu-north",
+  "SERVICES": [
+    {
+      "name": "web",
+      "port": 8080,
+      "replicas": 3,
+      "tier": "Free"
+    },
+    {
+      "name": "api",
+      "port": 9000,
+      "replicas": 1,
+      "tier": {
+        "Paid": {
+          "seats": 40
+        }
+      }
+    }
+  ]
+}

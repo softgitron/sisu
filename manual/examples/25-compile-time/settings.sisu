@@ -1,0 +1,11 @@
+# The sauna's settings, as constants that `sisu eval` writes out.
+struct Sauna:
+    name: String
+    degrees: int
+    invariant 40 <= self.degrees <= 110
+
+const OPENS_AT: int = 16
+const SAUNAS: list[Sauna] = [
+    Sauna(name="Kota", degrees=80),
+    Sauna(name="Savu", degrees=75),
+]

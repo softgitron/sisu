@@ -1,0 +1,7 @@
+# Values that one form writes and another cannot.
+struct Limits:
+    timeout: f64
+    mirror: String?
+
+## No timeout: the infinite float, which JSON has no number for.
+const LIMITS: Limits = Limits(timeout=1.0 / 0.0, mirror=None)

@@ -22,4 +22,19 @@ replay: sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
 
 0 passed, 1 failed, 0 blocked
 $ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0
-error[D0033]: the token is for other code (content hash 9b13ffa97d89b3d8); `src/lib.sisu` has content hash 2110b7779b9271e5
+error[D0149]: the token is for the run of the tests of `src/gauge.sisu`; `sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu` replays it
+$ sisu test
+test "a full tank" ... ok
+test "gauge/half a tank" ... ok
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 .
+
+2 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 src/gauge.sisu
+error[D0150]: the token is for the run of the package's tests, not of `src/gauge.sisu`'s; `sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 .` replays it

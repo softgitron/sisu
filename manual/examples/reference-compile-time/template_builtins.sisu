@@ -1,0 +1,15 @@
+# A template's compile-time code calls `sorted`, `zip` and text's methods.
+struct Stove:
+    wood: bool
+    kilowatts: int
+    name: String
+
+## The fields of `T` in alphabetical order, in capitals.
+def headings[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for name in sorted([f.name for f in reflect.fields_of(T)]):
+        out.push(name.to_uppercase())
+    return out
+
+def main():
+    print(headings[Stove]())

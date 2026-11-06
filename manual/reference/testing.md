@@ -275,7 +275,22 @@ replay: sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu
 
 0 passed, 1 failed, 0 blocked
 $ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0
-error[D0033]: the token is for other code (content hash 9b13ffa97d89b3d8); `src/lib.sisu` has content hash 2110b7779b9271e5
+error[D0149]: the token is for the run of the tests of `src/gauge.sisu`; `sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu` replays it
+$ sisu test
+test "a full tank" ... ok
+test "gauge/half a tank" ... ok
+test "gauge/more used than there was" ... FAILED
+
+test "gauge/more used than there was" ... FAILED
+panic: assertion failed: percent(40, 50) == 0
+  left:  -25
+  right: 0
+  at test "gauge/more used than there was" (src/gauge.sisu:12:5)
+replay: sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 .
+
+2 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 src/gauge.sisu
+error[D0150]: the token is for the run of the package's tests, not of `src/gauge.sisu`'s; `sisu test --replay 1-2110b7779b9271e5-0.0.1-t2-s0-r0 .` replays it
 ```
 
 - Each test keeps the name it has in the package's run, the module's
@@ -286,11 +301,14 @@ error[D0033]: the token is for other code (content hash 9b13ffa97d89b3d8); `src/
 - A token holds the module's path with the package's code, since the
   tests of the module and of the package are numbered apart: a token
   of the module's run given to the package's, `sisu test --replay
-  TOKEN` without the file, is D0033, and so is one of the package's run
-  given to the module's.
+  TOKEN` without the file, is [D0149](diagnostics.md#d0149), which
+  names the module's file and the command that replays it, and one of
+  the package's run given to the module's is
+  [D0150](diagnostics.md#d0150), which names the package's directory,
+  `.` here, as the package's own replay line does.
 
-**Status.** In stage 0 (D-041; decision 900 of the architecture
-notes).
+**Status.** In stage 0 (D-041; decisions 900 and 985 of the
+architecture notes).
 
 ## Outcomes
 
@@ -980,4 +998,5 @@ and the reports of coverage and mutation testing are designed
 | D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |
+| [D0149](diagnostics.md#d0149), [D0150](diagnostics.md#d0150) | `cli.token-module-run`, `cli.token-package-run` | [The tests of one module](#the-tests-of-one-module) |
 | R0105, E0971, [D0138](diagnostics.md#d0138) | `sim.always-failed`, `sim.unmodelled-extern`, `cli.replay-no-token-sim` | [Simulation](#simulation) |

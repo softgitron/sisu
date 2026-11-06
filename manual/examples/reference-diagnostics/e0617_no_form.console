@@ -1,0 +1,7 @@
+$ sisu eval e0617_no_form.sisu
+error[E0617]: `GROW` holds a function, which JSON cannot write
+  --> e0617_no_form.sisu:6:7
+  |
+6 | const GROW: (int) -> int = doubled
+  |       ^^^^
+
