@@ -13,6 +13,7 @@
 ##! to allocate"). The paths that only end in a panic, and the cleanup
 ##! that drops on the way out, are exempt (04: "Panic paths are exempt").
 
+import stage1.sir.write
 from stage1.borrowck.finding import Finding, text
 from stage1.borrowck.types import Types
 from stage1.diag import Msg
@@ -56,59 +57,207 @@ struct Allocation:
 pub pure def check(p: Program, types: Types) -> list[Finding]:
     var out: list[Finding] = []
     var memo: dict[String, Site?] = {}
+    var made: dict[String, list[Instance]]? = None
     for (name, shown) in p.no_alloc:
         let fi = types.function(name) else:
             continue
         let f = ref p.functions[fi]
-        let panics = panic_blocks(f)
-        for b in range(len(f.blocks)):
-            let block = ref f.blocks[b]
-            if block.cleanup or panics.contains(b):
-                continue
-            for si in range(len(block.stmts)):
-                let s = ref block.stmts[si]
-                if let Some(a) = allocation(p, types, f, s):
-                    var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
-                        "what", a.what
-                    ).at(b, si)
-                    if a.unknown:
-                        found = found.note(Msg.TypeNoAllocUnknown, [])
-                    out.push(found)
-                    continue
-                let callee = called(p, types, f, s) else:
-                    continue
-                if callee == f.name:
-                    continue
-                var seen: list[String] = [f.name.copy()]
-                let site = allocates(p, types, callee, mut memo, mut seen) else:
-                    continue
-                var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
-                    "what", "`{shown_fn(callee)}`"
-                ).at(b, si)
-                let at = place_of(p, site.source, site.loc)
-                let params = [
-                    text("callee", shown_fn(site.function)),
-                    text("how", site.how),
-                    text("at", at),
-                ]
-                found = found.note(Msg.TypeNoAllocThrough, params)
-                out.push(found)
+        # What allocates whatever the type arguments are, at the function
+        # itself; what depends on them waits for each instance (RULES.md,
+        # R222).
+        let reported = check_body(p, types, f, shown, [], None, [], mut memo, mut out)
+        if f.type_params.is_empty():
+            continue
+        if made.is_none():
+            made = Some(instances(p, types))
+        let all = made.copy() ?? {}
+        let these = all.get(name.copy()) else:
+            continue
+        for inst in these:
+            var args: list[String] = []
+            for a in inst.args:
+                args.push(write.ty(a))
+            let named = "{shown}[{args.join(", ")}]"
+            _ = check_body(
+                p, types, f, named, inst.args, Some(inst.at.copy()), reported, mut memo, mut out
+            )
     return out
+
+## The `E0282` errors of the body of `f`, a `@no_alloc` function named
+## `shown`, with its type parameters `args` (none for the function as
+## written, where what depends on them is left to its instances), made at
+## `made` (an instance's call), but at the statements `skip` names, which
+## the function as written reported; returns the statements it reported.
+pure def check_body(
+    p: Program,
+    types: Types,
+    f: Function,
+    shown: str,
+    args: list[Type],
+    made: String?,
+    skip: list[(int, int)],
+    mut memo: dict[String, Site?],
+    mut out: list[Finding],
+) -> list[(int, int)]:
+    var reported: list[(int, int)] = []
+    let panics = panic_blocks(f)
+    for b in range(len(f.blocks)):
+        let block = ref f.blocks[b]
+        if block.cleanup or panics.contains(b):
+            continue
+        for si in range(len(block.stmts)):
+            if skip.contains((b, si)):
+                continue
+            let s = ref block.stmts[si]
+            if let Some(a) = allocation(p, types, f, s, args):
+                var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
+                    "what", a.what
+                ).at(b, si)
+                if a.unknown:
+                    found = found.note(Msg.TypeNoAllocUnknown, [])
+                if let Some(at) = made:
+                    found = found.note(Msg.TypeNoAllocInstance, [text("at", at)])
+                out.push(found)
+                reported.push((b, si))
+                continue
+            let (callee, callee_args) = called(p, types, f, s, args) else:
+                continue
+            if callee == f.name:
+                continue
+            var seen: list[String] = [f.name.copy()]
+            let site = allocates(p, types, callee, callee_args, mut memo, mut seen) else:
+                continue
+            var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
+                "what", "`{shown_fn(callee)}`"
+            ).at(b, si)
+            let at = place_of(p, site.source, site.loc)
+            let params = [
+                text("callee", shown_fn(site.function)),
+                text("how", site.how),
+                text("at", at),
+            ]
+            found = found.note(Msg.TypeNoAllocThrough, params)
+            if let Some(made_at) = made:
+                found = found.note(Msg.TypeNoAllocInstance, [text("at", made_at)])
+            out.push(found)
+            reported.push((b, si))
+    return reported
+
+## An instance of a generic function the program makes: its type
+## arguments, and where the first call that makes it is.
+struct Instance:
+    args: list[Type]
+    at: String
+
+## Each instance of a generic function the program makes, by the function's
+## name: the calls with type arguments that name no type parameter, in any
+## function, and those of each instance's body with its arguments put for
+## its parameters, to any depth (a bounded number of them), as
+## monomorphisation would make them (04, "after monomorphisation";
+## RULES.md, R222).
+pure def instances(p: Program, types: Types) -> dict[String, list[Instance]]:
+    var out: dict[String, list[Instance]] = {}
+    var seen: set[String] = set()
+    var work: list[(String, list[Type])] = []
+    for f in p.functions:
+        if not f.type_params.is_empty():
+            continue
+        work.push((f.name.copy(), []))
+    var k = 0
+    while k < len(work) and k < MAX_INSTANCES:
+        let (name, args) = work[k].copy()
+        k += 1
+        let fi = types.function(name) else:
+            continue
+        let f = ref p.functions[fi]
+        for block in f.blocks:
+            for s in block.stmts:
+                let StatementKind.Call(_, callee, _) = s.kind.copy() else:
+                    continue
+                let Callee.Fn(n, tys) = callee else:
+                    continue
+                if tys.is_empty():
+                    continue
+                let given = subst_all(tys, args)
+                if has_param_in(given):
+                    continue
+                var key = n.copy()
+                for t in given:
+                    key.push("|{write.ty(t)}")
+                if seen.contains(key):
+                    continue
+                _ = seen.add(key.copy())
+                let at = place_of(p, f.source, s.loc)
+                var made: list[Instance] = []
+                if let Some(earlier) = out.get(n.copy()):
+                    made = earlier.copy()
+                made.push(Instance(args=given.copy(), at=at))
+                _ = out.insert(n.copy(), made)
+                work.push((n.copy(), given))
+    return out
+
+## How many functions and instances `instances` walks at most.
+const MAX_INSTANCES: int = 4096
+
+## The types with the type arguments `args` put for their parameters.
+pure def subst_all(tys: list[Type], args: list[Type]) -> list[Type]:
+    var out: list[Type] = []
+    for t in tys:
+        out.push(t.subst(args))
+    return out
+
+## Whether one of the types names a type parameter.
+pure def has_param_in(tys: list[Type]) -> bool:
+    for t in tys:
+        if has_param(t):
+            return True
+    return False
+
+## Whether a type names a type parameter, which only an instance tells.
+pure def has_param(t: Type) -> bool:
+    match t:
+        case Type.Param(_):
+            return True
+        case Type.Named(_, a):
+            return has_param_in(a)
+        case Type.Tuple(e):
+            return has_param_in(e)
+        case Type.Fn(ps, r, _):
+            return has_param_in(ps) or has_param_in(r)
+        case Type.Ref(i, _):
+            return has_param_in(i)
+        case Type.Dyn(_, a):
+            return has_param_in(a)
+        case Type.Assoc(t2, _, a, _):
+            return has_param_in(t2) or has_param_in(a)
+        case Type.ConstOp(_, a):
+            return has_param_in(a)
+        case _:
+            return False
 
 ## Where the function `name` or one it calls allocates first, by the order
 ## of their blocks and statements; `None` when none does. A function on
 ## the path being searched (`seen`) is taken to allocate nothing more than
 ## the path finds, so recursion ends.
 pure def allocates(
-    p: Program, types: Types, name: str, mut memo: dict[String, Site?], mut seen: list[String]
+    p: Program,
+    types: Types,
+    name: str,
+    args: list[Type],
+    mut memo: dict[String, Site?],
+    mut seen: list[String],
 ) -> Site?:
-    if let Some(known) = memo.get(name.to_string()):
+    # An instance is its function with its arguments (RULES.md, R222).
+    var key = name.to_string()
+    for t in args:
+        key.push("|{write.ty(t)}")
+    if let Some(known) = memo.get(key.copy()):
         return known.copy()
-    if seen.contains(name.to_string()):
+    if seen.contains(key.copy()):
         return None
     let fi = types.function(name) else:
         return None
-    seen.push(name.to_string())
+    seen.push(key.copy())
     let f = ref p.functions[fi]
     let panics = panic_blocks(f)
     var found: Site? = None
@@ -119,35 +268,45 @@ pure def allocates(
         if block.cleanup or panics.contains(b):
             continue
         for s in block.stmts:
-            if let Some(a) = allocation(p, types, f, s):
+            if let Some(a) = allocation(p, types, f, s, args):
                 found = Some(Site(function=f.name.copy(), how=a.how, source=f.source, loc=s.loc))
                 break
-            let callee = called(p, types, f, s) else:
+            let (callee, callee_args) = called(p, types, f, s, args) else:
                 continue
-            if let Some(site) = allocates(p, types, callee, mut memo, mut seen):
+            if let Some(site) = allocates(p, types, callee, callee_args, mut memo, mut seen):
                 found = Some(site)
                 break
     _ = seen.pop()
-    _ = memo.insert(name.to_string(), found.copy())
+    _ = memo.insert(key, found.copy())
     return found
 
 ## The function a statement calls whose body the check walks: a function
 ## of the program, or a trait's method whose impl the types name.
-pure def called(p: Program, types: Types, f: Function, s: Statement) -> String?:
+pure def called(
+    p: Program, types: Types, f: Function, s: Statement, args: list[Type]
+) -> (String, list[Type])?:
     let StatementKind.Call(_, callee, _) = s.kind.copy() else:
         return None
     match callee:
-        case Callee.Fn(n, _):
-            return Some(n.copy())
+        case Callee.Fn(n, tys):
+            let given = subst_all(tys, args)
+            # A call whose type arguments only an instance tells waits for
+            # it (RULES.md, R222).
+            if has_param_in(given) and not args.is_empty():
+                return None
+            return Some((n.copy(), given))
         case Callee.Trait(n, tys):
-            if let Some((target, _)) = types.trait_target(p, n, tys):
-                return Some(target)
+            let given = subst_all(tys, args)
+            if let Some((target, targs)) = types.trait_target(p, n, given):
+                return Some((target, targs))
             return None
         case _:
             return None
 
 ## What a statement does that allocates, if anything.
-pure def allocation(p: Program, types: Types, f: Function, s: Statement) -> Allocation?:
+pure def allocation(
+    p: Program, types: Types, f: Function, s: Statement, args: list[Type]
+) -> Allocation?:
     match s.kind:
         case StatementKind.Assign(_, value):
             match value:
@@ -168,8 +327,13 @@ pure def allocation(p: Program, types: Types, f: Function, s: Statement) -> Allo
                         return Some(made("the text `+` joins", "joins two texts"))
                     return None
                 case Rvalue.CopyOf(place):
-                    let t = types.place_ty(f, place) else:
+                    let written = types.place_ty(f, place) else:
                         return Some(made("the copy `.copy()` makes", "copies a value"))
+                    let t = written.subst(args)
+                    # A copy of a type parameter's value waits for an
+                    # instance (RULES.md, R222).
+                    if has_param(t):
+                        return None
                     if owns_memory(types, t, 0):
                         return Some(
                             made("the copy `.copy()` makes", "copies a value that owns memory")
@@ -195,7 +359,10 @@ pure def allocation(p: Program, types: Types, f: Function, s: Statement) -> Allo
                         return None
                     if not dest.proj.is_empty():
                         return None
-                    let t = types.place_ty(f, dest) else:
+                    let written = types.place_ty(f, dest) else:
+                        return None
+                    let t = written.subst(args)
+                    if has_param(t):
                         return None
                     if owns_memory(types, t, 0):
                         return Some(made("`{n}`", "calls `{n}`"))
@@ -209,7 +376,12 @@ pure def allocation(p: Program, types: Types, f: Function, s: Statement) -> Allo
                         )
                     )
                 case Callee.Trait(n, tys):
-                    if types.trait_target(p, n, tys).is_some():
+                    let given = subst_all(tys, args)
+                    if types.trait_target(p, n, given).is_some():
+                        return None
+                    # A method of a type parameter: each instance tells
+                    # which impl it calls (RULES.md, R222).
+                    if has_param_in(given):
                         return None
                     return Some(
                         Allocation(

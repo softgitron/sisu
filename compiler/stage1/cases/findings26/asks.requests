@@ -1,0 +1,8 @@
+query	diagnostics	memo.sisu	--dir	cases/findings26
+build	--for-run	--emit-sir	memo.sisu	--dir	cases/findings26
+query	diagnostics	memo.sisu	--text	memo_changed.txt	--dir	cases/findings26
+query	diagnostics	memo.sisu	--dir	cases/findings26
+build	--for-run	--emit-sir	memo.sisu	--dir	cases/findings26
+check	no_alloc_instances.sisu	--dir	cases/findings26
+sir	--tests	--transcripts	world.sisu	--dir	cases/findings26
+sir	--tests	world.sisu	--dir	cases/findings26

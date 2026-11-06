@@ -1,0 +1,24 @@
+# `@no_alloc` at each instance (RULES.md, R222): a generic function whose
+# every instance the program makes allocates nothing checks, where the
+# function as written, which calls a trait's method on its type parameter,
+# was `E0282` before (R215).
+trait Scaled:
+    def scaled(self, k: int) -> int
+
+struct Gain:
+    g: int
+
+impl Scaled for Gain:
+    def scaled(self, k: int) -> int:
+        return self.g * k
+
+@no_alloc
+def apply_all[T: Scaled](xs: list[T], mut out: list[int]):
+    for i in range(len(xs)):
+        out[i] = xs[i].scaled(i + 1)
+
+def main():
+    let gains = [Gain(g=2), Gain(g=3)]
+    var out = [0, 0]
+    apply_all(gains, mut out)
+    print("{out[0]} {out[1]}")

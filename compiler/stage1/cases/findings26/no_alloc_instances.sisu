@@ -1,0 +1,45 @@
+# `@no_alloc` at each instance (RULES.md, R222; 04, "Resource attributes":
+# checked "after monomorphisation"): a generic function's call of a
+# trait's method on its type parameter is checked at each instance the
+# program makes, where the impl is known. `total[Small]` allocates
+# nothing and checks; `total[Big]` calls `Big.weight`, which pushes onto
+# a list, and is `E0282` at the call, naming the instance and where the
+# program makes it. What allocates whatever the arguments are, a list
+# literal, is the error at the function itself, once.
+trait Weighed:
+    def weight(mut self) -> int
+
+struct Small:
+    w: int
+
+impl Weighed for Small:
+    def weight(mut self) -> int:
+        return self.w
+
+struct Big:
+    parts: list[int]
+
+impl Weighed for Big:
+    def weight(mut self) -> int:
+        self.parts.push(1)
+        return len(self.parts)
+
+@no_alloc
+def total[T: Weighed](mut xs: list[T]) -> int:
+    var sum = 0
+    for i in range(len(xs)):
+        sum += xs[i].weight()
+    return sum
+
+@no_alloc
+def pair[T: Weighed](mut a: T) -> int:
+    let both = [1, 2]
+    return a.weight() + both[0]
+
+def main():
+    var small = [Small(w=1), Small(w=2)]
+    var big = [Big(parts=[])]
+    print(total(mut small))
+    print(total(mut big))
+    var one = Small(w=3)
+    print(pair(mut one))

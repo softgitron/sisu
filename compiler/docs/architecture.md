@@ -12799,3 +12799,50 @@ R211, R214, R216 and R219)
       tagged-pointer provenance (decision 1108) are not this round's either,
       for the reason 1247 gives; the formatting family stays the first, with
       903's measurement. This changes no rule of the language.
+
+**Stage 1's twenty-sixth round** (stage 1's RULES.md, R220 to R226; a memo between the server's requests, `sir --tests --std` and `test --std` with no path, `@no_alloc` at each instance of a generic function, `sir --tests --transcripts`, the std examples' modules made once per check, D-060's allocators planned in five steps, the merge's differences; `sisu1 --version` 0.21.0)
+
+1220. A served request reads the std modules a program may import from
+      the server's base, which parses each once, and each module's parse
+      from a memo of the server's while its text is unchanged; the
+      standard library's bodies as a request typed, lowered and placed
+      them are kept for the next, and `build` takes its SIR from the
+      check that made its report. A save of `live/swap` takes
+      0.022 to 0.029 s served where it took 0.104 to 0.107 s, each answer
+      a fresh request's bytes. Stage 1 decides it (RULES.md, R220).
+
+1221. `sisu1 sir --tests --std` and `test --std` that name no path,
+      outside a package, lower and run the standard library's doc
+      examples alone, as the tests of an empty program `examples.sisu`
+      that is not read, so that the driver's empty program written aside
+      retires. `sisu1 --version` is 0.21.0. Stage 1 decides it
+      (RULES.md, R221).
+
+1222. A generic `@no_alloc` function is checked as written for what
+      allocates whatever its type arguments are, and at each instance
+      the program makes for what depends on them, through the impls the
+      arguments name; an instance that allocates is `E0282` named by its
+      arguments, `total[Big]`, with a note where the program makes it.
+      Stage 1 decides it (RULES.md, R222).
+
+1223. `sisu1 sir --tests --transcripts` keeps the world of transcripts
+      whatever is beside the program, so that the driver, which finds the
+      transcripts, runs them from stage 1's SIR without its own build of
+      the program. Stage 1 decides it (RULES.md, R223).
+
+1224. `sir --tests --std` makes the module of each std module's doc
+      examples once for a check, where each round of its resolution made
+      them again. Stage 1 decides it (RULES.md, R224).
+
+1225. D-060's allocators come in five steps: the defaulted parameter on
+      `list`, `dict`, `set` and `String`, interned away at `Global` so
+      that today's SIR stays; allocation through the collection's
+      allocator value in the runtime in Sisu; `with_allocator` and
+      `try_push`; `@no_alloc` counting a region's growth as none; and
+      `freestanding`'s explicit allocator. The first waits for a round
+      that changes the shared prelude with the checker. Stage 1 decides
+      it (RULES.md, R225).
+
+1226. Stage 1's twenty-sixth round brought no difference from the merge:
+      the conformance suite's `testing/mutants` differs from stage 0's
+      front end in nothing. Stage 1 decides it (RULES.md, R226).
