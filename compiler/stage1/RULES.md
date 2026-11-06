@@ -10372,3 +10372,445 @@ found the one difference.
       front end in its SIR under R27 (a hole's closure, printed where a
       run reaches it); `holes/holes_refused` and `eval/usage` do not
       differ. Stage 1 decides it (RULES.md, R203).
+
+## R204. `@derive(Decode)` through a field type's own impl (decision 1160)
+
+**The rule.** The manual's finding (G7, R17): `E0608`'s note says that an
+enum decodes with an `impl Decode` of its own, and such an impl does
+decode the enum alone (`json.decode[Mood]`), yet R193 refused a struct
+that derives `Decode` with a field of that enum, so the struct's decoder
+had to be written by hand too. `json.from_json[T]` calls `T.decode_json`
+first wherever `T` implements `Decode`, derived or written (R36), so the
+derived decoder of the struct already reaches the enum's own impl. Now
+the derive asks for `E0608` only where the enum the field holds (itself,
+or as a list's or an option's element) has no `impl Decode` in its
+module: `@derive(Decode) struct Day: mood: Mood, later: list[Mood],
+maybe: Mood?` decodes each through `impl Decode for Mood`, and a text
+that impl refuses is its `Mismatch` at the field's path (`$.mood`).
+
+`@derive(Encode)` had no such gap: `json.encode[T]` calls
+`T.encode_json` first wherever `T` implements `Encode`, so a field of an
+enum with an `impl Encode` of its own is written in that form, and one
+without it in the form `encode` gives every enum.
+
+**Why.** Item 1 of the round, the manual's finding.
+
+**In stage 1.** `typeck.instances` (`declare_derived`: R193's check asks
+`has_impl` of the enum).
+
+**What it changes.** The case `cases/findings24/decode_own_impl.sisu`
+(its `.out`: a struct of three such fields decoded, encoded again, and a
+mood the impl refuses). `cases/findings22/decode_enum_field.sisu`, whose
+enum has no impl, keeps its `E0608`. The Rust front end's `std.json`
+decodes no enum (R32's copy is stage 1's), so its check of the case
+reports the instance's failure, and it has no `Decode` or `Encode` to
+import (`E0204`).
+
+- Differs: `compiler/stage1/cases/findings24/decode_own_impl.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1160**, for docs/architecture.md:
+
+1160. `@derive(Decode)` of a struct with a field that holds an enum is
+      `E0608` only when the enum has no `impl Decode` of its own; with one,
+      the derived decoder calls it, as `json.from_json` does for any type
+      that implements `Decode`. `@derive(Encode)` already writes such a
+      field with the enum's own `impl Encode`. Stage 1 decides it
+      (RULES.md, R204).
+
+## R205. Unicode's own data files: every rule of UAX #29, and D-048's lints from `Scripts.txt` and `confusables.txt` (decision 1161)
+
+**The rule.** R167 left three rules of UAX #29 out of `graphemes()`, and
+R136 read a letter's script from its character name and the confusables
+from a table of the usual look-alikes, because the generator's one source
+was Python's `unicodedata`, which carries none of the properties. The
+generator, `tools/unicode_tables.py`, now reads Unicode 15.1.0's own
+files as well, fetched once from their pinned URLs
+(`https://www.unicode.org/Public/15.1.0/ucd/`, and `confusables.txt`
+from `https://www.unicode.org/Public/security/15.1.0/`, where Unicode
+publishes the security data of UTS #39) into
+`compiler/target/unicode/15.1.0/`, and checked to be the version's by
+their headers: `GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt`
+(its `InCB` and `XID_Continue`), `emoji-data.txt`
+(`Extended_Pictographic`), `Scripts.txt` and `confusables.txt`. The
+repository holds the tables, not the files (2.3 MB), and a run of the
+script writes the tables byte for byte again (`--check`, which
+`check.sh` runs).
+
+- **Graphemes.** `std.string`'s `graphemes()` follows every rule of UAX
+  #29's extended grapheme clusters, GB3 to GB999 in their order:
+  `Prepend` keeps what follows it (GB9b), a spacing mark stays with its
+  base (GB9a), an Indic conjunct joins across its virama (GB9c,
+  `InCB=Consonant`, then `Extend` and `Linker`, at least one `Linker`,
+  then a `Consonant`), U+200D joins only a pictograph with its extenders
+  to the next pictograph (GB11), and regional indicators pair from the
+  start of their run, a break between two pairs not resetting the count
+  (GB12, GB13). So `"a\u{200d}b"` is two graphemes, `a\u{200d}` and `b`,
+  and `"\u{915}\u{94d}\u{937}"` (क्ष) one. The three rules that look back
+  past one character keep what they need in a small state
+  (`BreakState`: the regional indicators in a row, whether a pictograph
+  and then a joiner end the text so far, whether a consonant and then a
+  virama do). The properties are one table, `grapheme_table()`, of 733
+  records `LLLLLL-HHHHHH-PP` (12 KB), each run of code points with the
+  same `Grapheme_Cluster_Break`, `Extended_Pictographic` and
+  `Indic_Conjunct_Break`, but for the Hangul syllables, whose `LV` and
+  `LVT` alternate and are computed; it replaces R162's table of marks,
+  which only the old rules read. Checked against `GraphemeBreakTest.txt`
+  whole: **1,187 of its 1,187 lines** split as the file says (a program
+  of every line, run from stage 1's SIR, natively and by the
+  interpreter).
+- **Scripts.** `W0031`'s scripts are `Scripts.txt`'s for every letter
+  and mark beyond ASCII (its `Common`, `Inherited` and `Unknown` are no
+  script's; Han, Hiragana, Katakana, Hangul and Bopomofo are still one,
+  `CJK`), 373 ranges of 156 scripts, where the names gave 639 ranges.
+  The names were wrong for 11,924 letters: 6,145 Tangut ideographs and
+  170 Latin letters (the modifier letters, `ʰ`, `ʲ`, ...) had no script,
+  and a script of two words was its first (`Old Italic` and `Old Turkic`
+  were one script `OLD`, `Linear A` and `Linear B` one `LINEAR`, the
+  Egyptian hieroglyphs `EGYPTIAN`). So `αʰ` now mixes Greek and Latin.
+- **Confusables.** `W0032`'s skeleton is UTS #39's: a name's canonical
+  decomposition with each character written as what `confusables.txt`
+  maps it to, decomposed again. Every record of the file whose source
+  can stand in a name (`XID_Continue`) is in the table, 5,147 of its
+  6,311, mapped to 7,133 code points, where R136's table held 863 letters
+  that read as one ASCII letter or digit. A mapping may be several
+  characters (`m` reads as `rn`) and ASCII is mapped too (`1` and `I`
+  read as `l`), so an ASCII name in scope is compared by its skeleton as
+  well, still only when one of the two names is beyond ASCII. So `гun`
+  with a Cyrillic `г` reads as `run`, and `rnоdern` as `modern`.
+
+The tables are text of fixed-width records, searched as before;
+`src/unicode_tables.sisu` is 196 KB, where it was 83 KB (the confusables
+and their pool 120 KB of it), and `std/string.sisu`'s generated part
+grows by 10 KB.
+
+**Why the table is not a module of its own.** The brief asks a generated
+table to stand in a module of its own. `std/string.sisu` keeps the
+graphemes' table in the generated part R162 made at its end, below the
+line `STD_MARK`, which only the script writes: the Rust front end, which
+still reads `std/` and is frozen, knows a fixed list of std modules, so
+`std.string` importing a new module would be an error in every program
+that imports `std.string`, there and in its tests. The rules themselves
+are `graphemes()`'s and `breaks_between`'s, rewritten in place, with the
+helpers only they read (`is_control`, `is_regional`, `extends`, `jamo`)
+gone.
+
+**Why.** Item 2 of the round, R167's and R136's items left for Unicode's
+own files.
+
+**In stage 1.** `tools/unicode_tables.py` (`FILES`, `data`,
+`properties`, `grapheme_records`, the scripts and confusables of
+`tables`), `unicode_tables` (generated; `confusable_pool`), `text.names`
+(`prototype_into`, `skeleton`, `decomposed`, with the test "a name's
+scripts and skeleton"), `resolve` (`confusable`), and `std/string.sisu`
+(`Graphemes`, `BreakState`, `breaks_between`, `grapheme_property`, the
+constants `GCB_*` and `INCB_*`, and the generated `grapheme_table`).
+
+**What it changes.** The cases `cases/findings24/graphemes_rules.sisu`
+(its `.out`: the manual's two texts, a family, a pictograph with a mark,
+a conjunct across a joiner, a virama before a Latin letter, a prepended
+number sign, a spacing mark, five regional indicators and `\r\n` before
+a mark) and `cases/findings24/confusables_whole.sisu` (its `.diag` and
+`.out`). `cases/findings15/confusable_names.diag` is as it was.
+`std.string`'s doc example of `Graphemes` asserts the manual's two
+texts, and its doc comment no longer lists rules it leaves out; the
+conformance suite's `doc/std_pages.doc` is blessed again for it. The
+manual's two findings ("Syntax and names": the lints' tables;
+"Types and traits": the three rules of UAX #29) are settled: the
+scripts are `Scripts.txt`'s, the confusables `confusables.txt`'s that a
+name can hold, and `GraphemeBreakTest.txt` passes whole.
+
+The Rust front end has neither lint, and its formatter removes `from
+std.string import Graphemes` as unused, as for R162's cases.
+
+- Differs: `compiler/stage1/cases/findings24/confusables_whole.sisu`: names, ids, human
+- Differs: `compiler/stage1/cases/findings24/graphemes_rules.sisu`: fmt, fmt-check
+
+**Decision 1161**, for docs/architecture.md:
+
+1161. `graphemes()` follows every rule of UAX #29 (GB9b's `Prepend`,
+      GB9c's conjuncts, GB11's pictographs, GB12 and GB13 by the run),
+      and `W0031` and `W0032` read `Scripts.txt` and UTS #39's
+      `confusables.txt` and skeleton, from tables `tools/unicode_tables.py`
+      writes from Unicode 15.1.0's own files, fetched by pinned URLs;
+      `GraphemeBreakTest.txt` passes whole (1,187 lines). Stage 1
+      decides it (RULES.md, R205).
+
+## R206. The tz database: each zone's history in `std.time` (decision 1162)
+
+**The rule.** The manual's finding (G9, chapter 21): `Zone.named` knew
+its 52 zones by today's rules alone (decision 627), which it gave an
+earlier year too, so Helsinki in July 1950, when Finland kept no summer
+time, was `EEST`, and New York's 2006 March was daylight time by the
+rule of 2007. A new generator, `tools/tzdata.py`, reads the system's
+compiled tz database, the TZif files under `/usr/share/zoneinfo` (RFC
+8536, version 2 or later, their 64-bit data), whose version `tzdata.zi`
+names (`2026c` here), and writes each zone's history at the end of
+`std/time.sisu`, below the line `MARK`, as `zone_history()`: a line per
+zone, `NAME|ABBR/OFFSET ...|AT/K ...`, its local time types and its
+changes, up to the first change from which the zone's POSIX rule gives
+every later one. The rule of each zone must be the one its TZif file
+ends with, which the script checks for every zone of `ZONES`, and they
+are. `Zone.named` reads the zone's line into its history (`Shift`s, the
+first the zone's time before its first change), and `offset_at`,
+`abbreviation_at`, `local` and `format` take the change in force at a
+time before the last one kept, and the rules from then on:
+
+```text
+Europe/Helsinki 1900-01-01T12:00:00Z: 1900-01-01T13:39:49+01:39 HMT 5989
+Europe/Helsinki 1950-07-01T12:00:00Z: 1950-07-01T14:00:00+02:00 EET 7200
+America/New_York 1974-01-15T12:00:00Z: 1974-01-15T08:00:00-04:00 EDT -14400
+Europe/Moscow 2012-01-15T12:00:00Z: 2012-01-15T16:00:00+04:00 MSK 14400
+```
+
+Each line of the case is what Python's `zoneinfo` gives for the same
+time, but the offset of `format`, which RFC 3339 writes to the minute.
+
+**The size, and what is left out.** The 52 zones' history is 50 lines
+(`UTC` and `Etc/UTC` have none) of 3,545 changes, 50 KB of `std/time.sisu`,
+which every program that imports `std.time` parses. The whole database
+is 447 zones of 18,732 changes, 278 KB in this form, more than the
+normalisation tables, for zones `Zone.named` does not name; it is left
+out, and the zones are `ZONES`'s, which 11's table of zones still
+bounds. A change after 2037, which a TZif file leaves to its rule, is
+the rule's.
+
+**Decided against**, for the round: `std.x.tzdata` as 11 has it, a
+blessed package versioned apart from the compiler that updates the data
+`std.time` embeds. `std.x` packages wait for 09's registry, and a
+module of its own inside `std/` would be what the Rust front end, frozen
+with a fixed list of std modules, cannot import from `std.time` (R205's
+reason); so the data is `std.time`'s, embedded as 11's table says ("time
+zones (data embedded, updatable via `std.x.tzdata`)"), and written by the
+script. `check.sh` runs `tools/tzdata.py --check`, which compares only
+on a system whose tz database is the table's version, since another
+version's history is another text, and says so.
+
+**Why.** Item 3 of the round, the manual's finding.
+
+**In stage 1.** `tools/tzdata.py`, `std/time.sisu` (`Zone.past`,
+`past_at`, `Shift`, `FAR_PAST`, `history`, the generated
+`zone_history`; `Zone.named`, `fixed`, `seconds_at` and
+`abbreviation_at`), `check.sh` (the stale check).
+
+**What it changes.** The case `cases/findings24/tz_history.sisu` (its
+`.out`: dates before a rule changed in eleven zones, and after). `Zone`'s
+doc example asserts Helsinki's offset of 1950, and its doc comment says
+the history is the database's; the conformance suite's
+`doc/std_pages.doc` is blessed again for it. The conformance cases of
+`std.time` (`std/time_zones`, `std/zone_debug`, `capabilities/datetime`)
+ask for times under today's rules and print what they printed.
+
+**Decision 1162**, for docs/architecture.md:
+
+1162. `Zone.named` gives each of its zones' history from the tz database
+      (the system's TZif files, written into `std.time` by
+      `tools/tzdata.py` with the database's version), and today's rules
+      from the change after which they give every later one; the
+      whole database and `std.x.tzdata` are left out. Stage 1 decides it
+      (RULES.md, R206).
+
+## R207. `sisu doc --digest`: a program's or the standard library's API as one plain text (decision 1163)
+
+**The rule.** 10, "AI-assisted development": "`sisu doc --digest` writes
+one plain-text file per package with each `pub` signature, its inferred
+error set, capability parameters, contracts and first doc example ... so
+that a model can hold a package's API in its context window" (N-50).
+`doc --digest [PATH] [--output DIR]` and `doc --std --digest
+[MODULE...]` make the pages `doc` makes and write them as one text,
+printed, or with `--output` written as `DIR/NAME.txt` (`NAME` the file's
+stem, the package's directory, or `std`):
+
+```text
+# digest: the API as `sisu doc --digest` writes it
+
+# module `digest`
+##! `sisu doc --digest` (RULES.md, R207; ...): each item's declaration ...
+
+## Checks the heat.
+pub def measure(heat: int) -> int ! StoveError  # inferred
+    requires heat >= 0
+
+## The log of the stove, written to `fs`.
+## Capabilities: `fs` (`Fs`).
+pub def save(fs: Fs, s: Stove) -> ! IoError
+```
+
+Each module is a line `# module PATH`, the first paragraph of its `##!`
+lines and its re-exports as `##!` lines, then each item the page shows:
+its declaration as the page writes it (attributes, header with the
+inferred error set, contracts, a struct's fields, an enum's variants, the
+headers of the type's impls), the fields' and impls' own doc comments
+left out, with `##` lines before it as a doc comment is written: the
+first paragraph of its doc, its capabilities (`Capabilities: ...`) and
+holes (`Unfinished: ...`), and its first example between fences. A
+type's methods are indented under it, as they are written. A package's
+digest shows what another package may name, as its pages do; the
+standard library's shows what is written `pub` (its pages show
+everything, decision 147), so that a model sees what a program may call.
+A program with an error has the pages' `D0114`. The standard library's
+digest is 147 KB, about 37,000 tokens at four bytes a token, inside 10's
+"about 50k for `std`"; its pages are 438 KB.
+
+**Decided against**: `--open` (10: "`--open` serves it locally"), which
+is a server for the pages and a browser to show them, the host's and the
+driver's, not the front end's; stage 1 writes the pages and the digest,
+and the driver may serve what `--output` wrote.
+
+What the driver may rely on from 0.19.0: `doc --digest` and `doc --std
+--digest` with their output and `--output DIR`'s one file, served.
+
+**Why.** Item 4 of the round.
+
+**In stage 1.** `doc` (`digest`, `digest_page`, `digest_code`,
+`unlinked`, with the test "a digest's links are their texts"), `main`
+(`DocArgs.digest`, `doc_with`, `digest_name`; `std_pages` and
+`doc_program` take `public`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings24/digest.requests` asks the digest of
+`cases/findings24/digest.sisu` (a struct with a method and its example,
+an inferred set, a contract, a capability, a hole), of `std.time` and of
+the package `cases/packages/doc_pages.pkg`'s `shop`, whose re-exports are
+plain names. `digest.sisu`'s own pages are stage 0's.
+
+**Decision 1163**, for docs/architecture.md:
+
+1163. `sisu1 doc --digest` and `doc --std --digest` write a program's or
+      the standard library's API as one plain text, each item's
+      declaration with its inferred set and contracts after `##` lines
+      of its first paragraph, capabilities, holes and first example;
+      `--open` is the driver's. Stage 1 decides it (RULES.md, R207).
+
+## R208. `sir --tests --mutants`: the mutants of `sisu test --mutate` (decision 1164)
+
+**The rule.** 17, "Coverage and mutation": "`sisu test --mutate` runs
+mutation testing on the changed region only, rerunning the tests that
+cover each mutated line and suppressing arid nodes such as logging".
+This is the front end's half. `sir --tests --mutants [PATH]` prints, for
+each mutant of the root package's modules in the order of their places,
+a line `# mutant K: FILE:LINE:COL: WHAT`, then the SIR `sir --tests`
+prints of the program with that one change; `sir --tests --mutant=K`
+prints the `K`th alone. The mutants are:
+
+- a comparison's boundary moved: `<` and `<=`, `>` and `>=` (`the
+  boundary changed`);
+- an operator flipped: `==` and `!=`, `+` and `-`, `and` and `or`,
+  `True` and `False` (`the operator flipped`);
+- a negation removed: `not x` is `x` (`the negation removed`);
+- a statement of one line that calls a function or assigns removed: it
+  is `pass` (`the statement removed`).
+
+Only code a run executes is mutated: the bodies of the program's
+functions and methods, not its tests, suites, benchmarks, fixtures,
+`comptime` functions, `@cfg` functions or declarations. The arid nodes
+are left alone: a call of `print` or `eprint` or of a function of `log`,
+and everything inside it, whose mutants no test is meant to kill. A
+mutant that does not check (`+` of two texts flipped to `-`) has its
+line with ` (it does not check)` after it and no SIR, so that the
+numbers stay the places'. The line is a comment of the SIR, which its
+reader passes by, so the runner splits the output at those lines or
+asks for one mutant. A program with an error has `sir --tests`'s
+refusal (R46), and its warnings are printed once, on standard error.
+
+```text
+# mutant 6: mutants.sisu:17:9: the statement removed: `sum += x`
+sir 0
+...
+```
+
+Each mutant's SIR runs as `sisu test --from-sir` runs any: of the case's
+seven, the tests kill three (the negation, `False` to `True`, the
+removed `sum += x`) and four survive (the boundaries of `n > high` and
+`degrees >= 60`, `n + 0`, and the `and`), which a report would suggest
+as tests to write.
+
+**What stage 0 must do.** The runner's half: `sisu test --mutate` asks
+stage 1 for `sir --tests --mutants` (or for each `--mutant=K`), keeps the
+mutants whose place is in the changed region (the lines a diff against
+the base revision touches), runs against each one the tests that cover
+its line (`--cover`'s map) with `sisu test --from-sir`, and reports each
+mutant whose tests all passed, by its line, as a suggestion. A mutant
+whose tests fail, or stop it by a panic or a timeout, is killed.
+
+What the driver may rely on from 0.19.0: `sir --tests --mutants` and
+`--mutant=K`, the line `# mutant K: FILE:LINE:COL: WHAT` before each
+mutant's SIR (with ` (it does not check)` and no SIR for a stillborn one),
+in the order of the modules and their places, served.
+
+**Why.** Item 5 of the round.
+
+**In stage 1.** The new module `mutation` (`Site`, `sites`, `mutated`,
+`place`, `fn_sites`, `is_arid`, `expr_sites`, `stmt_sites`, with the
+test "a module's mutants, and the arid calls left alone"), `main`
+(`sir`'s `--mutants` and `--mutant=K`, `mutant_sirs`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings24/mutants.sisu` (its `.out`), whose mutants
+`cases/findings24/digest.requests` asks for, all and the seventh alone.
+
+**Decision 1164**, for docs/architecture.md:
+
+1164. `sisu1 sir --tests --mutants` prints each mutant of the program's
+      own code (a boundary moved, an operator flipped, a negation or a
+      statement removed; calls that only report left alone) as a line
+      `# mutant K: FILE:LINE:COL: WHAT` and its SIR, and `--mutant=K`
+      one; running the tests against each, in the changed region, is
+      the runner's. Stage 1 decides it (RULES.md, R208).
+
+## R209. `@fixture(scope="module")`: the per-test lowering kept, and what the runner must do (decision 1165)
+
+**The rule.** R200 lowered every fixture as a `let` at the start of each
+test that names it. A module's fixture made once, by the first test that
+names it, and dropped after the last, needs a value that outlives one
+test and a place where the module's tests end, and the SIR has neither:
+its functions keep their values in their locals, with no state of a
+module that a run writes, and which tests run, in which order and how
+many at once is the runner's (17, "Isolation and parallelism":
+parallel, in random order with the seed printed, filtered by name or
+module). A cell written by the first test would be shared by tests that
+run at once, which 06 rules out without a lock, and only the runner
+knows which test of a module is the last it runs. So the lowering is
+R200's, with `scope="module"` taken, and the rule's note says so.
+
+**Decided against**: a module-level cell with a drop at the tests' end,
+which the SIR cannot carry without the runner's help.
+
+**What stage 0 must do.** For each module whose tests name a fixture
+with `scope="module"`, the runner calls the fixture once, before the
+first of those tests it runs, keeps the value for the module's tests
+(a test receives it as `ref T`, read only, so tests that run at once
+share it, which asks `T: Sync`), and drops it after the last of them
+ends, failed or not. Stage 1 would then lower such a parameter as a
+`ref T` parameter of the test's function, naming the fixture on the
+test's line of the SIR, in place of the body's `let`, once the runner
+reads that line; until then each test makes its own value, which a test
+cannot tell from the shared one but by its cost.
+
+**Why.** Item 6 of the round, R200's open item.
+
+**What it changes.** Nothing.
+
+**Decision 1165**, for docs/architecture.md:
+
+1165. `@fixture(scope="module")` keeps R200's lowering, a value per
+      test: the SIR has no module-level state and only the runner knows
+      the first and last of a module's tests it runs, so a value shared
+      by them is the runner's to keep. Stage 1 decides it (RULES.md,
+      R209).
+
+## R210. The merge's differences: none (decision 1166)
+
+**The rule.** Nothing a command prints changes. The worktree is at stage
+1's own head, so the merge brought no case of stage 0's this round, and
+`check.sh` reports no difference that a rule of the round's items does
+not list.
+
+**Why.** Item 7 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 1166**, for docs/architecture.md:
+
+1166. Stage 1's twenty-fourth round brought no difference from the
+      merge: every difference `check.sh` reports is a rule's. Stage 1
+      decides it (RULES.md, R210).

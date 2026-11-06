@@ -15,12 +15,10 @@ from stage1.diag import Catalog
 from stage1.lexer import lex
 from stage1.parser import parse
 from stage1.syntax.ast import (
-    ArmBody,
     Ast,
     BinOp,
     Block,
     CmpOp,
-    ElseBody,
     ExprId,
     ExprKind,
     FnDef,

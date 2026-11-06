@@ -192,6 +192,8 @@ sisu run -- sir --defer-borrow [--tests] [PATH]  # the SIR of a program whose on
 sisu run -- build --emit-sir [--release] [--contracts=LEVEL] [--output OUT] [PATH]  # each program's SIR the native build hands its backend, after `# executable PATH` (R195)
 sisu run -- query values FILE               # a worksheet's values and output by line, from stage 1's evaluator (R196)
 sisu run -- grammar                         # the parser's grammar, from its `##!` comments (R202)
+sisu run -- doc [--std] --digest [PATH] [--output DIR]  # the API as one plain text, each item's declaration and its doc's first paragraph (R207)
+sisu run -- sir --tests (--mutants | --mutant=K) [PATH]  # each mutant of `sisu test --mutate` after a line `# mutant K: FILE:LINE:COL: WHAT` (R208)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
 
@@ -345,12 +347,13 @@ thirteen on a quiet machine, and the formatter's classes add about five
 
 ## Results
 
-The twenty-third round's run (`SISU_LOWER=rust`, at a load of 7 to 13 on
-four cores) ended `total: 15867 files checked, 14011 identical, 1856
-differing (1856 listed in RULES.md or DISCREPANCIES.md, 0 not)`, with
-`served` 10 request files and `fix` 4 files as expected, `expected` 192
-files, `behaviour` 366 programs (365 as expected, 346 natively too, 1
-refused as listed) and `fixed-sir` identical. The run below is an earlier
+The twenty-fourth round's run (`SISU_FRONT_END=rust SISU_LOWER=rust`, at
+a load of about 4 on four cores, 12 minutes) ended `total: 15947 files
+checked, 14079 identical, 1868 differing (1868 listed in RULES.md or
+DISCREPANCIES.md, 0 not)`, with `served` 11 request files and `fix` 4
+files as expected, `expected` 193 files, `behaviour` 371 programs (370 as
+expected, 351 natively too, 1 refused as listed) and `fixed-sir`
+identical. The run below is an earlier
 round's, kept for its breakdown of the classes.
 
 `./check.sh --native --names --types --sir` (`--native` implies `--self` and
@@ -2987,6 +2990,56 @@ SIR, `query values`, `fix`'s status 1, and `check --holes` of a package,
 each served. The new cases are in `cases/findings23/`, with
 `cases/packages/served_build.pkg` and `cases/repl/values.ws.sisu`.
 
+### The twenty-fourth round: `Decode` through a field's own impl, Unicode's own data files, the tz database, `sisu doc --digest`, mutants, module fixtures
+
+This round took the manual's findings of `Decode` (G7), of the lints'
+tables and the grapheme rules, and of `Zone.named` (G9), 10's digest,
+17's mutants and R200's `scope="module"`. RULES.md has the rules (R204 to
+R210, decisions 1160 to 1166) and their decision texts:
+
+- **`@derive(Decode)` through a field type's own impl** (R204): a field
+  of an enum with an `impl Decode` of its own decodes with it, `E0608`
+  only where the enum has none; `Encode` had no such gap.
+- **Unicode's own data files** (R205): `tools/unicode_tables.py` reads
+  Unicode 15.1.0's `GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt`,
+  `emoji-data.txt`, `Scripts.txt` and `confusables.txt`, fetched by
+  pinned URLs into `compiler/target/unicode/`. `graphemes()` follows
+  every rule of UAX #29 and passes `GraphemeBreakTest.txt` whole, 1,187
+  lines, so `"a\u{200d}b"` is two graphemes and `"\u{915}\u{94d}\u{937}"`
+  one; `W0031` reads `Scripts.txt` and `W0032` UTS #39's skeleton over
+  the 5,147 confusables a name can hold.
+- **The tz database** (R206): `tools/tzdata.py` writes the history of
+  `Zone.named`'s zones from the system's TZif files (tz 2026c), 50 zones
+  and 3,545 changes in 50 KB of `std/time.sisu`, so a past date has the
+  offset its zone's clocks showed; the whole database (447 zones, 278 KB)
+  and `std.x.tzdata` are left out.
+- **`sisu doc --digest`** (R207): the pages as one plain text, each
+  item's declaration with `##` lines of its first paragraph,
+  capabilities, holes and first example; the standard library's is 147
+  KB, about 37,000 tokens. `--open` is the driver's.
+- **Mutants** (R208): `sir --tests --mutants` prints each mutant of the
+  program's own code, a boundary moved, an operator flipped, a negation
+  or a statement removed, as a line `# mutant K: FILE:LINE:COL: WHAT` and
+  its SIR, with `print`, `eprint` and `log` left alone; `--mutant=K` one.
+  The runner's half is stage 0's.
+- **`@fixture(scope="module")`** (R209) keeps R200's lowering: the SIR has
+  no state of a module and only the runner knows a module's first and
+  last test; what the runner must do is in the rule.
+- **The merge's differences** (R210): none: the worktree is at stage 1's own head, and every difference `check.sh` reports is a rule's.
+
+Decided against: a module-level cell for a module's fixture (R209),
+`std.x.tzdata` and the whole tz database (R206), and `--open` (R207).
+Open: the runner's half of `--mutate` and of `scope="module"`, and the
+driver's routing of `doc --digest`, which are stage 0's; compile-time
+types (R155). Found on the way and left: a program's own function named
+`check` with a contract is what the contract's generated test calls in
+place of the prelude's `check` (`E0305` in `<arbitrary>/main.sisu`).
+
+Stage 1's version is 0.19.0. The driver may rely on `doc --digest` and
+`doc --std --digest`, with `--output DIR`'s one file, and on `sir --tests
+--mutants` and `--mutant=K` with their lines, each served. The new cases
+are in `cases/findings24/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3036,6 +3089,7 @@ each served. The new cases are in `cases/findings23/`, with
 | `doc` | 1171 | `sisu doc`: a Markdown page per module of a program or of the standard library, from the modules' syntax, the resolved names and the inferred error sets, and its tests | `sisu-driver/src/doc.rs` |
 | `diff` | 278 | line diffs: the hunks `fmt --check` prints and the change `--locked` prints, from the longest common subsequence's table kept as rows of bits | `sisu-interp/src/diff.rs` |
 | `mutants` | 204 | a seeded generator and the mutations of stage 0's robustness test; the files laid out otherwise that the formatters are compared on | `sisu-driver/src/tests.rs` |
+| `mutation` | 309 | the mutants of `sisu test --mutate`: a boundary moved, an operator flipped, a negation or a statement removed, the arid calls left alone (RULES.md, R208) | (none) |
 | `main` | 3761 | the command line, and the driver: `check` in both forms, the SIR of a whole program (with its tests, `--tests`), `build --native` through stage 0's backend, `fmt`, `doc`, `audit --unsafe`, `lint` (R11), the packages' `unsafe` levels (R6), and the cache of the base beside the native executable | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check`, `sir`, `build`, `fmt` and `doc` |
 | `session` | 188 | the programs of `sisu repl` and `sisu ws` (R79): an input wrapped to be shown, a loaded file's preamble, a worksheet's markers | `sisu-driver/src/repl.rs`'s `Entry`, `split_preamble` and `evaluate_sheet` |
 | `query` | 1333 | the language server's questions (R164, R169): what a position names (an import line's names among them), its hover text, declaration and uses, the completions there, a file's declarations, a rename's edits, the inlay hints, the selection ranges, the formatter's edits, and the typed holes (R174), as tab-separated lines | `sisu-driver/src/lsp.rs` and `assist.rs` |
@@ -3860,6 +3914,18 @@ evaluates its four constants, 0.35 to 0.42 s: a constant of a
 configuration costs the evaluator's steps, a few thousand, against the
 check's tens of millions of instructions.
 
+The twenty-fourth round's commands cost what a check does, natively as
+processes at a load of about 3 on four cores: `doc --std --digest` 0.82
+to 0.91 s, as `doc --std`'s pages (0.86 to 0.89 s), since the digest is
+made from them; `sir --tests --mutants` of `cases/findings24/mutants.sisu`
+0.35 to 0.40 s for its seven mutants, against `sir --tests`'s 0.29 to
+0.33 s, each mutant a check and a lowering of the program from the base;
+`check` of `confusables_whole.sisu` 0.28 to 0.29 s, as R136's case's,
+the skeleton a binary search a character over the 5,147 records. A
+program of all 1,187 lines of `GraphemeBreakTest.txt`, built natively,
+runs in 0.017 s, and `Zone.named` reads its zone's line of the history
+once per call.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3899,8 +3965,9 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
 (above, "Documentation"); what remains is beyond it, or is speed.
 
 1. **`sisu doc`'s parts that need evaluation**: 10's rendering of an
-   example with its values, `--open` and `--digest` (decision 258 leaves
-   them out, port-debt.md), which stage 0 does not have either.
+   example with its values (decision 258 leaves it out, port-debt.md),
+   which stage 0 does not have either; `--digest` is R207's, and `--open`
+   the driver's (R207).
 2. **Running SIR**: the rest of the interpreter (tasks, capabilities, the
    host), of which `interp` has what compile-time code needs, where stage
    1 becomes the oracle; the backend and the runtime stay stage 0's, as
@@ -4082,7 +4149,15 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     which waits for reflected expressions (R200), and the sharing of
     instances with `--explain-size`, which waits for the SIR to name the
     packages that request them (R201); left: compile-time types (R155) and
-    a fixture's `scope="module"`, the runner's. The tenth round took a variant's
+    a fixture's `scope="module"`, the runner's. The twenty-fourth round
+    took `Decode` through a field type's own impl (R204), UAX #29's every
+    rule and D-048's lints from Unicode's own data files (R205), the tz
+    database's history of `Zone.named`'s zones (R206), `sisu doc
+    --digest` (R207) and the mutants of `--mutate` (R208); decided
+    against: `std.x.tzdata` and the whole database (R206), `--open`
+    (R207), and a module's fixture kept in the SIR (R209); left:
+    compile-time types (R155), and the runner's halves of `--mutate` and
+    of `scope="module"`, stage 0's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of
