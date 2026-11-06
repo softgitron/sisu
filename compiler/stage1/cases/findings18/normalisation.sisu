@@ -1,0 +1,31 @@
+# The four normalisation forms of `std.string` (RULES.md, R162; 11):
+# canonical decomposition and composition, the marks in canonical order,
+# Hangul computed, and the compatibility forms.
+from std.string import Normalize
+
+def codes(s: str) -> String:
+    var out: list[String] = []
+    for c in s.chars():
+        out.push("{c.code():x}")
+    return out.join(" ")
+
+def main():
+    let samples = [
+        "\u{e9}t\u{e9}",
+        "e\u{301}",
+        "\u{1e69}",
+        "s\u{323}\u{307}",
+        "s\u{307}\u{323}",
+        "\u{fb01}",
+        "x\u{b2}",
+        "\u{212b}",
+        "\u{d55c}",
+        "\u{1112}\u{1161}\u{11ab}",
+        "\u{2126}",
+        "\u{fdfa}",
+    ]
+    for s in samples:
+        print(
+            "{codes(s)}: nfd {codes(s.nfd())} | nfc {codes(s.nfc())} | nfkd {codes(s.nfkd())} | nfkc {codes(s.nfkc())}"
+        )
+    print("e\u{301}".nfc() == "\u{e9}".nfc())

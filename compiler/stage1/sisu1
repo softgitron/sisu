@@ -14,10 +14,12 @@
 #                                                NAME]` a worksheet's, as `sisu repl` and `sisu
 #                                                ws` run them (RULES.md, R79, R95)
 #   sisu1 parse --bindings INPUT                 what `:why NAME` reads of a REPL input (R95)
-#   sisu1 sir --repl-serve                       the three above served by one process that keeps
-#                                                the standard library's base: a request a line of
-#                                                tab-separated arguments, an answer on standard
-#                                                error (RULES.md, R112)
+#   sisu1 sir --repl-serve                       the three above, and `sir`, `check`, `parse`, `fmt`,
+#                                                `lint`, `doc` and `tokens` run in the directory a
+#                                                request's `--dir DIR` names, served by one process
+#                                                that keeps the standard library's base: a request a
+#                                                line of tab-separated arguments, an answer on
+#                                                standard error (RULES.md, R112, R158)
 #   sisu1 sir --target-runtime native ...        `target.runtime` of a native build (R116)
 #   sisu1 build [--release] [--contracts=LEVEL] [PATH] [--output OUT]
 #                                                an executable, where `sisu build --native` puts

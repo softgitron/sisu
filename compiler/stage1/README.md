@@ -2686,6 +2686,52 @@ the missing key at `4:5` (R152).
 Stage 1's version stays 0.12.0: the driver relies on no new form. The new
 cases are in `cases/findings17/` and `cases/packages/routed_comptime.pkg`.
 
+### The eighteenth round: a server for every command, an instance's syntax error, closures at compile time, members' attributes, the normalisation forms, `BigRatio`
+
+This round took the base's cost of every command but the REPL's (R112's
+server), two findings of the manual's sixteenth round, R151's open item
+of closures, the narrowed framework finding of members' attributes, and
+the "missing beside 03" item's normalisation forms, graphemes and
+`Decimal`'s `/`. RULES.md has the rules (R158 to R163, decisions 920 to
+925) and their decision texts:
+
+- **A server for every command** (R158): `sir --repl-serve` answers any
+  `sir`, `check`, `parse`, `fmt`, `lint`, `doc` or `tokens` request, run
+  in the directory its `--dir DIR` names, with R112's frame; the base is
+  made again when a std text, the catalog or the request's runtime
+  changed, and a server whose executable was built again answers `stale`
+  and ends. A `check` of a two-line program takes 0.009 s served where it
+  takes 0.22 s as a process (below, "Where the time goes"). Stage 1's
+  version is 0.13.0.
+- **An instance's syntax error and `E0609`'s words** (R159): a syntax
+  error in a template's body is reported once, in the template's file, not
+  again for each unrolled copy; compile-time code of a function without
+  type parameters that stops is `E0616`, "the compile-time code of `main`
+  stopped", where it was `E0609`'s "making `main`".
+- **Closures at compile time** (R160): a closure in a `comptime` result
+  that captures nothing or only constants is kept; one that captures more
+  is `E0604` with a note on what a result keeps.
+- **Members' attributes** (R161): `f.attributes` of a field and a variant,
+  `reflect.attributes_of(m)` of a method, and `x.[m]` of a method, so a
+  template routes by a method's `@route`.
+- **The normalisation forms and graphemes** (R162): `std.string`'s
+  `Normalize` (`nfc`, `nfd`, `nfkc`, `nfkd`) and `Graphemes`
+  (`graphemes()`) for `str`, from tables `tools/unicode_tables.py`
+  writes; the forms agree with Python's for 18,464 texts.
+- **`BigRatio`** (R163): an exact fraction of `BigInt`s in `std.num`, and
+  `Decimal`'s `/`, which gives one.
+
+Decided against: keeping a closure that captures a tuple, a struct or a
+list (R160). Open: the driver's side of the server (one server per
+working directory, its lifetime, reading `stale`), which is stage 0's;
+UAX #29's `Prepend`, conjunct and pictograph rules (R162); one `Ratio`
+of any size in place of `Ratio` and `BigRatio`, the owner's (R163); and
+compile-time types (R155) and the sharing of instances with
+`--explain-size`.
+
+Stage 1's version is 0.13.0: the driver may rely on the requests of R158.
+The new cases are in `cases/findings18/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3492,6 +3538,21 @@ in `Def.set_kind`, so what would cut it is a base whose resolved
 declarations are kept rather than made again, the cache R125 decided
 against.
 
+The eighteenth round took the other way out of the base's cost: a
+process that keeps it. `sir --repl-serve`, which served the REPL's
+commands since R112, serves every command that checks a program
+(`sir`, `check`, `parse`, `fmt`, `lint`, `doc`, `tokens`), each run in the
+directory its request names (R158). Measured natively on a machine at a
+load of 10 to 12 on four cores, a `check` of a two-line file takes 0.22 s
+of CPU time as a process (the least of ten) and 0.009 s served (the
+median of 50, after a first answer of 0.44 s that makes the base); under
+callgrind 1.95 G instructions as a process, and 0.095 G for each request
+served after the base's 1.75 G. What a served request still pays is its
+own: `base.environment()` and the copy of the base's resolver for the
+program (R147's spread), then the program's check and lowering. The
+driver's use of it, one server per working directory, is stage 0's next
+round.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3676,7 +3737,14 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     `try_collect` after the other adapters (R154) and `Decimal`'s `/`
     giving a `Ratio` (R156); left: compile-time types (R155, planned),
     `graphemes` and the normalisation forms, and the sharing of instances
-    with `--explain-size`. The tenth round took a variant's
+    with `--explain-size`. The eighteenth round took an instance's syntax
+    error once and `E0616` for a plain function's compile-time code (R159), closures
+    in a `comptime` result (R160), members' attributes (R161), the
+    normalisation forms and `graphemes()` (R162) and `Decimal`'s `/` with
+    `BigRatio` (R163); decided against: a closure that captures more than
+    constants (R160); left: compile-time types (R155), UAX #29's rules
+    beyond the tables (R162) and the sharing of instances with
+    `--explain-size`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

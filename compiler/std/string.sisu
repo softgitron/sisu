@@ -86,7 +86,6 @@ pub struct Builder:
 ## such forms.
 ##
 ## ```
-## from std.string import Normalize
 ## let composed = "\u{e9}t\u{e9}"
 ## let decomposed = "e\u{301}te\u{301}"
 ## assert decomposed.nfc() == composed and composed.nfd() == decomposed
@@ -125,7 +124,6 @@ impl Normalize for str:
 ## virama, and join after U+200D only between pictographs.
 ##
 ## ```
-## from std.string import Graphemes
 ## var gs: list[str] = []
 ## for g in "e\u{301}a\r\n\u{1112}\u{1161}\u{11ab}\u{1f1eb}\u{1f1ee}".graphemes():
 ##     gs.push(g)
@@ -169,16 +167,16 @@ pure def breaks_between(p: char, c: char, flags: int) -> bool:
         return False
     if is_control(a) or is_control(b):
         return True
-    let (pl, pv, pt) = jamo(a)
-    let (_, cv, ct) = jamo(b)
-    # A syllable's jamo: a leading consonant before a vowel, a consonant or
+    # A syllable's jamo: a leading consonant before a consonant, a vowel or
     # a syllable; a vowel or an open syllable before a vowel or a final; a
     # final or a closed syllable before a final.
-    if pl and (jamo_l(b) or cv or is_hangul_syllable(b)):
+    let x = jamo(a)
+    let y = jamo(b)
+    if x == JAMO_L and y != JAMO_NONE:
         return False
-    if pv and (cv or ct):
+    if (x == JAMO_V or x == JAMO_LV) and (y == JAMO_V or y == JAMO_T):
         return False
-    if pt and ct:
+    if (x == JAMO_T or x == JAMO_LVT) and y == JAMO_T:
         return False
     if b == 0x200D or a == 0x200D or extends(b):
         return False
@@ -204,19 +202,25 @@ pure def extends(n: int) -> bool:
 pure def jamo_l(n: int) -> bool:
     return (0x1100 <= n and n <= 0x115F) or (0xA960 <= n and n <= 0xA97C)
 
-## Whether `n` is a leading jamo (or one that takes a vowel), a vowel jamo
-## or an open syllable, and a final jamo or a closed syllable.
-pure def jamo(n: int) -> (bool, bool, bool):
+## What `n` is of Hangul: a leading, a vowel or a final jamo, an open or
+## a closed syllable, or none.
+pure def jamo(n: int) -> int:
     if jamo_l(n):
-        return (True, False, False)
+        return JAMO_L
     if (0x1160 <= n and n <= 0x11A7) or (0xD7B0 <= n and n <= 0xD7C6):
-        return (False, True, False)
+        return JAMO_V
     if (0x11A8 <= n and n <= 0x11FF) or (0xD7CB <= n and n <= 0xD7FB):
-        return (False, False, True)
+        return JAMO_T
     if is_hangul_syllable(n):
-        let open = (n - HANGUL_BASE) % HANGUL_FINALS == 0
-        return (False, open, not open)
-    return (False, False, False)
+        return if (n - HANGUL_BASE) % HANGUL_FINALS == 0: JAMO_LV else: JAMO_LVT
+    return JAMO_NONE
+
+const JAMO_NONE: int = 0
+const JAMO_L: int = 1
+const JAMO_V: int = 2
+const JAMO_T: int = 3
+const JAMO_LV: int = 4
+const JAMO_LVT: int = 5
 
 const HANGUL_BASE: int = 0xAC00
 const HANGUL_L: int = 0x1100
@@ -386,7 +390,7 @@ pure def record_range(table: str, size: int, n: int) -> int?:
 pure def hex_at(text: str, at: int, width: int) -> int:
     var n = 0
     for i in range(width):
-        let b = text.byte_at(at + i)
+        let b = text.byte_at(at + i).to_int()
         var d = 0
         if 48 <= b and b <= 57:
             d = b - 48

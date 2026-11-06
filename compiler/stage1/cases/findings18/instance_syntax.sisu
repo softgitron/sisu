@@ -1,0 +1,16 @@
+# A syntax error inside a template's body is reported once, at its line in
+# the template's own file (RULES.md, R159): the unrolled copies of
+# `show[Point]` hold the same error and are not reported again in a file
+# the program does not have.
+struct Point:
+    x: int
+    y: int
+
+def show[T](v: T) -> String:
+    var out = String.new()
+    comptime for f in reflect.fields_of(T):
+        out.push("{if f.index > 0: ", " else: ""}{f.name}")
+    return out
+
+def main():
+    print(show(Point(x=1, y=2)))

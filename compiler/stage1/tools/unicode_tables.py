@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Writes stage 1's `src/unicode_tables.sisu`: the tables that NFC names and
-D-048's lints read (RULES.md, R136), from Python's `unicodedata`.
+D-048's lints read (RULES.md, R136), from Python's `unicodedata`; and the
+tables at the end of `std/string.sisu`, below its line `STD_MARK`, which
+its normalisation forms and graphemes read (RULES.md, R162).
 
     python3 tools/unicode_tables.py            # rewrites src/unicode_tables.sisu
     python3 tools/unicode_tables.py --check    # exits 1 when the file is stale

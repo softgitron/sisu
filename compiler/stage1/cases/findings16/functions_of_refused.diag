@@ -1,2 +1,2 @@
-8:5-8:9 E0609 comptime.instance-failed name="main" reason="`reflect.functions_of` takes a module the code imports, and `Point` is a type"
-  label 9:23-9:50 comptime.instance-here
+8:5-8:9 E0616 comptime.function-failed name="main" reason="`reflect.functions_of` takes a module the code imports, and `Point` is a type"
+  label 9:23-9:50 comptime.function-here

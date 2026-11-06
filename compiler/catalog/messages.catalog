@@ -590,10 +590,6 @@ E0609 error   comptime.instance-failed    making `{name}` stopped at compile tim
 -     label   comptime.instance-here      the template, where it stopped
 # Stage 1's (RULES.md, R34; 08): a `for` over what compile time knows.
 -     fix     comptime.write-comptime-for  unroll the loop at compile time with `comptime for`
-# Stage 1's (RULES.md, R159): a function that takes no type parameters is
-# made once and is no instance, so its words are a plain function's.
-E0609 error   comptime.function-failed    the compile-time code of `{name}` stopped: {reason}
--     label   comptime.function-here      the compile-time code, where it stopped
 E0610 error   comptime.instances-unbounded  `{name}` needs more than {count} instances: its instances call it with ever more types
 E0611 error   comptime.template-value     `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value
 E0612 error   comptime.embed-failed       cannot embed `{path}`: {reason}
@@ -602,6 +598,11 @@ E0614 error   comptime.no-fake            `cap.Fake[{name}]` needs a trait of th
 # Stage 1's (proposal/22-unsafe.md, D-085): code that compile-time
 # evaluation writes holds no `unsafe`.
 E0615 error   comptime.unsafe-written     code that compile-time evaluation writes holds no `unsafe`, so that every unsafe block stays in a source file, where `sisu audit --unsafe` shows it
+# Stage 1's (RULES.md, R159): `E0609` of a function that takes no type
+# parameters, which is made once and is no instance, in a plain function's
+# words.
+E0616 error   comptime.function-failed    the compile-time code of `{name}` stopped: {reason}
+-     label   comptime.function-here      the compile-time code, where it stopped
 
 # ---------------------------------------------------------------- capabilities
 E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`

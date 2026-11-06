@@ -7972,3 +7972,338 @@ stage 1's SIR (`behaviour`).
 887. The conformance suite's `unsafe/export_by_pointer` differs from stage
      0's front end as the other cases of `unsafe/` do (R4). Stage 1
      decides it (RULES.md, R157).
+
+## R158. `sir --repl-serve` serves every command that checks a program, in its request's working directory (decision 920)
+
+**The rule.** The server of R112 answers, besides `sir --repl`, `sir
+--worksheet` and `parse --bindings`, a request that is any `sir`,
+`check`, `parse`, `fmt`, `lint`, `doc` or `tokens` command with its
+arguments, so that a command pays its own check and not the standard
+library's base. What the driver may rely on from 0.13.0:
+
+- **A request** is one line of standard input, the command's arguments
+  separated by tabs, as they would follow `sisu1` on a command line
+  (without `--home` and `--catalog`, which make the request misused),
+  with `--dir DIR` anywhere among them: the working directory the
+  command runs in, absolute or relative to the server's. Without `--dir`
+  it runs in the server's own. `--target-runtime` is the request's, as a
+  command line's. `sir --repl` and `sir --worksheet` keep `--dir` as R95
+  has it (where their program stands) and run in the server's directory,
+  as before.
+- **An answer** is R112's frame on standard error: `answer STATUS OUT
+  ERR`, then exactly `OUT` bytes of what the command alone prints on
+  standard output and `ERR` bytes of what it prints on standard error.
+  `STATUS` is the status the executable `target/stage1/sisu1` gives when
+  run alone, 0 or 1, and a failed command's standard error ends with the
+  run time's last line: `error: Failed`, `error: Usage(...)`, `error:
+  Exit(status=N)` (`fmt`, `doc`: the status `sisu1` exits with is `N`,
+  as the script reads it) or `error: ` and an I/O error's form, without
+  the lines of the source the run time adds after one. A command the
+  server does not serve (`build`, `run`, `test`, `audit`, a batch,
+  `sir --repl-serve` itself) is answered as misused.
+- **The base** is made once and made again before a request whose key
+  differs from the one it was made with: each std text's size and time,
+  the catalog's, and the runtime and runtime profile the request builds
+  for (R116, R122). A request never gets a base of other texts.
+- **A stale server**: before each request the server compares its
+  running executable's size and time, and those of
+  `HOME/target/stage1/sisu1` when it was that build at its start, with
+  what they were; when either changed (the driver built stage 1 again), it
+  writes the line `stale` on standard error, answers nothing more and
+  ends with status 0. The driver starts a new server and sends the
+  request again.
+- Files are read and written as the command alone reads and writes them,
+  relative to `--dir`: a command's lockfile, `fmt`'s files and `doc
+  --output`'s pages are written as when it runs alone.
+
+`sisu1 --version` is 0.13.0: the driver may rely on these requests. One
+server per working directory, and its lifetime, are the driver's to
+choose (stage 0's next round); since a request names its directory, one
+server serves many.
+
+```text
+$ printf 'check\ttwo.sisu\t--dir\t/work\n' | sisu1 sir --repl-serve
+answer 0 0 0
+```
+
+**Measured** (a `check` of a two-line program, natively, the release
+build, a load of 10 to 12 on four cores): 0.22 s of CPU time as a process
+(the least of ten), 0.009 s per request served (the median of 50 after
+the first, which makes the base, 0.44 s). Under callgrind a process takes
+1.95 G instructions, and the server 1.75 G for the base once and 0.095 G
+for each request after it (eleven requests, 3.02 G in all).
+
+**Why.** Item 1 of the round: every command but the REPL's paid the base,
+about 3.2 G instructions, where an input served cost 0.04 s (R112).
+
+**In stage 1.** `main` (`run_command`, which `main` runs with an `Out`
+that prints at once and the server with one that holds what the command
+prints; `Served`, the base a command uses when it is given one;
+`sir_with`, `check_with`, `lint_with`, `doc_with`, the commands after
+their base; `repl_serve`, `serve_one`, `served_key`, `remade`,
+`ServerStamp`, `request_system`, `InDir`, `held_frame`, `command_words`,
+`served_command`), and `std/cap.sisu`'s appended `system_with` (a
+`System` with another file system and environment, which only the
+standard library may assemble), which `request_system` uses for an
+environment whose arguments are the request's and whose `PWD` is its
+directory.
+
+**What it changes.** No output of the corpus; `main`'s unit tests of the
+held frame, the request's words and the directory's paths. Each of 24
+requests (`check`, `sir`, `tokens`, `parse`, `fmt`, `lint`, `doc` and `doc
+--std`, of files and packages, with errors, a missing file, an unknown
+command and option, `--target-runtime native`) was answered byte for byte
+as the process printed it, and a server whose std text, catalog or
+executable changed between requests made its base again or answered
+`stale`.
+
+**Decision 920**, for docs/architecture.md:
+
+920. `sisu1 sir --repl-serve` serves any `sir`, `check`, `parse`, `fmt`,
+     `lint`, `doc` or `tokens` request, run in the working directory its
+     `--dir DIR` names, with R112's frame and the status the command gives
+     alone; the base is made again when a std text, the catalog or the
+     request's runtime changed, and a server whose executable was built
+     again answers `stale` and ends. A `check` of a two-line program takes
+     0.009 s served where it takes 0.22 s as a process. `sisu1 --version`
+     is 0.13.0. Stage 1 decides it (RULES.md, R158).
+
+## R159. An instance's syntax error is the template's, once; E0609 of a function without type parameters (decision 921)
+
+**The rule.**
+
+- A syntax error (a `lex.` or `parse.` diagnostic) in the instance of a
+  program's own template is reported once, by the template's file: when
+  the template's text has a syntax error itself (its header or body is
+  broken), the instances' copies of it are that error and are not
+  reported again; otherwise the error stands at the template's statement
+  that wrote the instance's line (R131's origins), in the template's
+  file, with its message and parameters. It was reported again for each
+  unrolled copy, in `<show[Point]>/main.sisu`, a file the program does
+  not have.
+- Compile-time code of a function that takes no type parameters, which is
+  made once and is no instance (`main`, with `reflect.name_of(degrees)`),
+  that stops is the new `E0616`, `comptime.function-failed`: "the
+  compile-time code of `main` stopped: ...", with the label
+  `comptime.function-here` ("the compile-time code, where it stopped"),
+  where it was `E0609`, "making `main`" and "the template", the words of
+  an instance of a generic function, which stay `E0609`'s for those (the
+  catalog gives each code one message, so the plain function's words have
+  a code of their own).
+
+**Why.** Two findings of the manual's sixteenth round (R12, R17).
+
+**In stage 1.** `typeck` (the copies of a syntax error placed at the
+template, `copied`), `typeck.collect` (`Resolver.broken_instances`),
+`typeck.instances` (the instance's template broken, and the words of a
+plain function), `diag` and the catalog (`E0616`,
+`comptime.function-failed`, and `comptime.function-here`, after
+`E0615`).
+
+**What it changes.** The cases `cases/findings18/instance_syntax.sisu` and
+`cases/findings18/plain_function_reflect.sisu` (their `.diag`), and the
+conformance suite's `reflect/methods_rejected.diag`, blessed again: its
+`count` and `unknown`, functions without type parameters, are `E0616`;
+and the `.diag` files of `cases/findings16/functions_of_refused.sisu` and
+`cases/findings16/reflect_unknown.sisu`, blessed again for the same.
+
+- Differs: `compiler/stage1/cases/findings18/instance_syntax.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings18/plain_function_reflect.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/reflect/methods_rejected.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/expression_mistakes.sisu`: ids, human, doc, doc-output
+
+**Decision 921**, for docs/architecture.md:
+
+921. A syntax error in an instance of the program's template is reported
+     once, in the template's file, and compile-time code of a function
+     without type parameters that stops is `E0616`, in a plain function's
+     words, where it was `E0609`'s instance words. Stage 1 decides it
+     (RULES.md, R159).
+
+## R160. A closure in a `comptime` result is kept when what it captures is constants (decision 922)
+
+**The rule.** A closure in the result of a `comptime` expression is kept
+as the closure of its function, as R151 keeps a function value as the
+constant that names it, when it captures nothing or only numbers, text,
+booleans and characters (an `own` closure's copies): `comptime [("add",
+(x: int) -> x + 1)]` and `comptime scaled(3)` of a function that returns
+`own (x: int) -> x * k` are evaluated by the compiler, their SIR the
+closure written with its constant captures (`closure
+scaled#closure0(const 3)`). A closure that captures more is `E0604`
+naming what (`a closure that captures a tuple`, `... a binding` for a
+reference into the compile-time code's frame), with the new note
+`comptime.kept-functions`, which says what a result keeps of functions;
+it was `E0604` "a function made at compile time cannot be kept", which
+R151 had made untrue of a named function.
+
+**Decided against**: keeping a closure that captures a tuple, a struct or
+a list: the closure's captures are built at run time from constants only
+where their types are written, which the evaluator's value does not
+carry; a capture of a binding is a reference into a frame that is gone.
+
+**Why.** Item 3 of the round, R151's open item.
+
+**In stage 1.** `interp` (`Baker.build` of `Value.Closure`,
+`captured_kind`), `main` (the note), `diag` and the catalog
+(`comptime.kept-functions`, in `E0604`'s block).
+
+**What it changes.** The cases `cases/findings18/kept_closures.sisu` (its
+`.out`) and `cases/findings18/closure_captures_tuple.sisu` (its `.diag`),
+and the conformance suite's `comptime/evaluation_errors.diag`, blessed
+again: its `ADD`, `comptime adder()` of a closure that captures nothing,
+is kept, and its `E0604` is gone.
+
+- Differs: `compiler/stage1/cases/findings18/kept_closures.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings18/closure_captures_tuple.sisu`: ids, human
+- Differs: `compiler/conformance/cases/comptime/evaluation_errors.sisu`: sir, ids, human
+
+**Decision 922**, for docs/architecture.md:
+
+922. A `comptime` result keeps a closure that captures nothing or only
+     constants, as the closure of its function; one that captures more is
+     `E0604` with a note on what a result keeps of functions. Stage 1
+     decides it (RULES.md, R160).
+
+## R161. The attributes of fields, variants and methods in reflection (decision 923)
+
+**The rule.** A field's and a variant's attributes are `f.attributes` and
+`v.attributes`, a list of attributes as `reflect.attributes_of(T)` gives a
+type's (each with `name`, `args` and `keys`, R151), for a type's fields
+(`reflect.fields_of`), a derive's target's fields and variants, and
+`reflect.variants_of`; a method's are `reflect.attributes_of(m)` (and
+`m.attributes`) for `reflect.methods_of(T)`, as a module's function's
+are (R145); and `x.[m]` of a method is `x`'s method, so that `s.[m]()`
+calls the method a template routes to. A variant's field has none (the
+parser takes no attribute there). The standard library's declarations
+give none, as its types' do.
+
+```sisu
+def route[T](s: T, path: str) -> String:
+    comptime for m in reflect.methods_of(T):
+        comptime for a in reflect.attributes_of(m):
+            comptime if a.name == "route":
+                if path == a.args[0]:
+                    return s.[m]()
+    return "no route for {path}"
+```
+
+**Why.** Item 4 of the round, the manual's narrowed framework finding
+(R14, R12, chapter 25).
+
+**In stage 1.** `typeck.program` (`FieldInfo.attrs`, `VariantInfo.attrs`),
+`typeck.collect` (`attr_data`, `fn_attrs`), `typeck.instances` (the
+shapes' attributes, `method_shape`), `typeck.template` (`FieldShape`,
+`VariantShape`, `Target.field_attrs` and `variant_attrs`, the values'
+`attrs`, `attr_values`, `member_attrs`, `x.[m]`).
+
+**What it changes.** The case `cases/findings18/member_attributes.sisu`
+(its `.out`), columns named by a field's `@column`, variants labelled by
+`@label` and handlers routed by a method's `@route`; and the conformance
+suite's `comptime/derive_errors.diag`, blessed again, whose reason says
+"`x.[f]` needs a field or a method". Stage 1's AST has carried a field's
+attributes since R40, which the Rust front end's does not.
+
+- Differs: `compiler/stage1/cases/findings18/member_attributes.sisu`: ast, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/comptime/derive_errors.sisu`: ids, human, doc, doc-output
+
+**Decision 923**, for docs/architecture.md:
+
+923. Reflection gives a field's and a variant's attributes as
+     `f.attributes`, a method's as `reflect.attributes_of(m)`, and `x.[m]`
+     names a method, so a template routes by a method's attribute. Stage 1
+     decides it (RULES.md, R161).
+
+## R162. The normalisation forms and graphemes in `std.string` (decision 924)
+
+**The rule.** `std.string` (11: "Unicode scalar and grapheme iteration,
+case mapping, normalisation forms") has, appended:
+
+- the trait `Normalize`, implemented for `str`, with `nfc`, `nfd`, `nfkc`
+  and `nfkd` (Unicode's UAX #15): the full canonical decomposition (the
+  Hangul syllables computed), the compatibility one for `nfkd` and
+  `nfkc`, the marks put in canonical order, and the canonical composition
+  for `nfc` and `nfkc`, with the composition exclusions;
+- the trait `Graphemes`, implemented for `str`, with `graphemes()` (03:
+  "`s.graphemes()`" is an iterator), by the rules the tables carry: a base
+  with the marks after it (`Mn`, `Mc`, `Me`) and the variation selectors,
+  emoji modifiers and tag characters, `\r\n`, a syllable written in jamo,
+  a pair of regional indicators, and a sequence joined by U+200D are each
+  one grapheme, and a control character is one of its own. The full rules
+  of UAX #29 would add `Prepend` (a character kept with what follows it),
+  the Indic conjuncts joined across a virama (GB9c), a join after U+200D
+  only between pictographs (`Extended_Pictographic`, GB11) and the few
+  characters that extend a grapheme without being marks
+  (`Other_Grapheme_Extend`, such as U+200C).
+
+A method of `str` from `std.string` is called after `from std.string
+import Normalize` (or `Graphemes`), as the trait's methods are; the
+prelude is unchanged, so no program that does not import them parses the
+tables. The tables (the canonical decompositions, the compositions, the
+compatibility decompositions and their code points, the combining classes
+and the marks, 170 KB of text) are written at the end of
+`std/string.sisu` by `tools/unicode_tables.py` from Unicode 15.1.0, below
+the line it rewrites, and `check.sh` fails when they are stale, as it does
+for R136's. R136's tables, which hold only the decompositions of letters
+and marks that a name needs, are the names' still.
+
+**Why.** Item 5 of the round, the manual's "missing beside 03" item.
+
+**In stage 1.** `std/string.sisu` (appended), `tools/unicode_tables.py`
+(`std_tables`, `std_text`).
+
+**What it changes.** The cases `cases/findings18/normalisation.sisu` and
+`cases/findings18/graphemes.sisu` (their `.out`); the conformance suite's
+`doc/std_pages.doc`, blessed again with `std.string`'s new items, and
+`std/doc_examples.select`, with the examples of `Normalize` and
+`Graphemes` (198 examples with R163's, where there were 194). Stage 0's
+formatter removes `from std.string import Normalize` as unused, since no
+name of it is written, where the methods need it; stage 1's resolves the
+methods and keeps it, so the two cases differ in what `fmt` leaves.
+
+- Differs: `compiler/stage1/cases/findings18/normalisation.sisu`: fmt, fmt-check
+- Differs: `compiler/stage1/cases/findings18/graphemes.sisu`: fmt, fmt-check The four forms of
+18,464 texts (every code point with a decomposition or a combining
+class, every 97th Hangul syllable and 400 bases with marks in random
+order) are Python's `unicodedata.normalize`'s, code point for code point.
+
+**Decision 924**, for docs/architecture.md:
+
+924. `std.string` has the normalisation forms `nfc`, `nfd`, `nfkc` and
+     `nfkd` (`Normalize`) and `graphemes()` (`Graphemes`) for `str`, from
+     generated Unicode tables; the graphemes keep a base's marks, `\r\n`,
+     Hangul syllables, flags and joined sequences, short of UAX #29's
+     `Prepend`, conjunct and pictograph rules. Stage 1 decides it
+     (RULES.md, R162).
+
+## R163. `BigRatio`, and `Decimal`'s `/` (decision 925)
+
+**The rule.** 03 has `Ratio` as "exact fractions" and says that a
+`Decimal`'s "division yields a `Ratio`"; `std.num`'s `Ratio` holds
+`int`s, so a fraction of large parts overflows. Appended to `std.num`:
+`BigRatio`, an exact fraction of `BigInt`s in lowest terms with a positive
+denominator (`of`, `whole`, `of_ratio`, `is_whole`, `floor`, `to_ratio`,
+`to_f64`, the operators `+`, `-`, `*`, `/` and unary `-`, the order,
+`Display` and `Debug`), `Decimal.to_big_ratio`, and `impl Div for
+Decimal` with `Output = BigRatio`: `a / b` of `Decimal`s is their exact
+quotient at any size (`1.5 / 0.4` is `15/4`), and `a.div(b, places,
+mode)` still rounds it to a `Decimal`. `Ratio` keeps its `int` parts,
+since changing them would not be additive; the quotient is a `BigRatio`
+rather than a `Ratio`, which the owner may merge (a `Ratio` of any size
+would be one type). R156's `E0310` with the note `type.decimal-quotient`
+no longer arises.
+
+**Why.** Item 6 of the round, R156's open item.
+
+**In stage 1.** `std/num.sisu` (appended).
+
+**What it changes.** The case `cases/findings18/big_ratio.sisu` (its
+`.out`), the conformance suite's `std/doc_examples.select`, blessed
+again with the examples of `BigRatio` and `Decimal.to_big_ratio`, and
+`cases/numbers/refusals.diag`, blessed again: its `Decimal` quotient is no
+`E0310`.
+
+**Decision 925**, for docs/architecture.md:
+
+925. `std.num` has `BigRatio`, an exact fraction of `BigInt`s, and a
+     `Decimal`'s `/` gives one, exactly; `Ratio` keeps its `int` parts.
+     Stage 1 decides it (RULES.md, R163).
