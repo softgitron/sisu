@@ -9794,6 +9794,9 @@ for a `str` one.
 fixes). The Rust front end refuses the first case's `str` closure (`E0300`) and gives no fix
 for the second case's `str` function.
 
+- Differs: `compiler/stage1/cases/findings22/filter_named.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings22/filter_named_errors.sisu`: ids, human, doc, doc-output
+
 **Decision 1085**, for docs/architecture.md:
 
 1085. A function named where an adapter expects a function of references
@@ -9825,9 +9828,17 @@ comment), `borrowck.purity` (`adapted`).
 
 **What it changes.** The cases `cases/findings22/f_string_trailing.sisu`,
 `diagnostic_words.sisu` and `pure_chain.sisu` (their `.diag`s);
-`cases/findings10/f_string_let.diag` is blessed again (the parameter).
+`cases/findings10/f_string_let.diag` (the parameter) and
+`cases/findings10/pure_adapter.diag` (its `sum()` after `map`, no second
+`E0333`) are blessed again. In `diagnostic_words.sisu` the Rust front end
+does not know a trait's constant (R37), so its tree and AST differ too.
 The manual's transcripts that show `E0117` for a kind of token or any
 `E0241` are made again by the manual's writers.
+
+- Differs: `compiler/stage1/cases/findings10/pure_adapter.sisu`: ids
+- Differs: `compiler/stage1/cases/findings22/f_string_trailing.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings22/diagnostic_words.sisu`: tree, ast, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings22/pure_chain.sisu`: ids, human
 
 **Decision 1086**, for docs/architecture.md:
 
@@ -9891,6 +9902,8 @@ without the derive.
 
 **What it changes.** The case `cases/findings22/decode_enum_field.sisu`
 (its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings22/decode_enum_field.sisu`: ids, human, fmt, fmt-check, doc, doc-output
 
 **Decision 1088**, for docs/architecture.md:
 

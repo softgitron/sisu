@@ -1,7 +1,7 @@
 # `@derive(Decode)` of a struct with a field of an enum (RULES.md, R193):
 # the derive stops (E0608), where the run stopped at an invalid SIR (E0501).
 import std.json
-from std.json import Decode, Encode
+from std.json import Decode
 
 enum Mood:
     Happy
