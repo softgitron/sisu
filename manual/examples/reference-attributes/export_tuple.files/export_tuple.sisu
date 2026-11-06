@@ -1,4 +1,4 @@
-# A raw pointer to a tuple with a part narrower than a word.
+# A raw pointer to a tuple of narrow parts, laid out as C lays it.
 from std.mem import ptr
 
 def main():

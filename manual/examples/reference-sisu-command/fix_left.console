@@ -1,0 +1,5 @@
+$ sisu fix --dry-run fix_left.sisu
+fix_left.sisu:7:18: E0200 fixed: a similar name is in scope: `start`
+  7:18-7:23 "start"
+fixes that would be applied to `fix_left.sisu`: 1, and `--dry-run` leaves it as it is
+error[D0190]: `fix_left.sisu` does not check after the fixes: errors that no fix applies to are left (1), which `sisu check` shows

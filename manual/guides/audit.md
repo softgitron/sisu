@@ -141,9 +141,8 @@ a function whose parameters hold no capability touches nothing, and one
 that takes `sys: System` takes everything.
 
 **Status.** `sisu audit --caps` and the manifest's `unsafe` levels are
-in stage 0. The audit runs on the Rust front end; stage 1 prints the
-same lines from its twenty-second round, and the driver asks it once
-stage 0's round in progress routes `--caps` and `--ownership`. A file that `sisu audit --caps FILE` names is read as a
+in stage 0. The audit is stage 1's, from its twenty-second round, and
+prints the same lines on the Rust front end with `--front-end=rust`. A file that `sisu audit --caps FILE` names is read as a
 program of its own, so a module that imports a dependency or another
 module of its package is audited through the package instead. The
 capability summary that the registry shows for each published version,

@@ -1,9 +1,9 @@
 # 19. Testing in depth
 
-Chapter 1 showed a `test` block, and every chapter since has used them.
+Every chapter since the first has used `test` blocks.
 In this chapter you organise tests into suites, run a test once for
 each case of a list, read what a failing assertion shows, and give each
-test the fakes and the clock it needs. Then you test properties rather
+test the fixtures, fakes and clock it needs. Then you test properties rather
 than examples, check a fast function against a clear one, fake your
 own traits, and keep whole outputs as snapshots and transcripts. Last,
 you replay a failure from its token and time code with benchmarks. You
@@ -340,8 +340,7 @@ suite stays quiet ([R15](../reference/testing.md#what-a-test-prints)).
 
 ## Fixtures are values
 
-A test often needs something set up first: a file system with files
-in it, a list of records, a clock at a given time. In Sisu that setup
+A test often needs something set up first, such as a file system with files in it. In Sisu that setup
 is a fixture, and a fixture is a value: a function makes it, the test
 takes it, and it is dropped when the test ends. Capability fakes are
 the commonest fixtures:
@@ -417,14 +416,86 @@ error[D0006]: the program was not run: errors found (1)
 
 </details>
 
-Each test runs in an interpreter of its own, with its own fakes, and
-the tests run side by side, on up to 8 threads (`--jobs N`). Their
-output is still written in the order of the file. A test that declares
-`sys: System` receives the real one instead: it runs alone, after the
-others, and cannot be repeated exactly, since the world it touched may
-have changed. A fixture shared by many
-tests through a parameter, `@fixture`, is designed in
-[17](../../proposal/17-testing.md#fixtures) and not in the compiler.
+Each test runs in an interpreter of its own, and the tests run side
+by side, on up to 8 threads (`--jobs N`), their output written in the
+order of the file. A test that declares `sys: System` receives the real
+one instead: it runs alone, after the others, and cannot be repeated
+exactly.
+
+## Fixtures that tests ask for
+
+Mark a function that takes nothing `@fixture`, and a test with a
+parameter of its name receives what it returns, made for that test:
+
+<!-- file: examples/19-testing/menu.sisu -->
+```sisu
+# A `@fixture` makes a value for each test that names it.
+
+## A menu of prices in cents, which says when it is put away.
+struct Menu:
+    prices: dict[String, int]
+
+impl Drop for Menu:
+    def drop(mut self):
+        print("menu put away")
+
+@fixture
+def menu() -> Menu:
+    print("menu set up")
+    return Menu(prices={"coffee".to_string(): 350, "bun".to_string(): 280})
+
+test "a bun costs 280"(menu: Menu):
+    assert menu.prices.get("bun").copied() == Some(280)
+
+test "tea is not on the menu"(menu: Menu):
+    print("looking for tea")
+    assert menu.prices.get("tea").copied() == None
+```
+
+<!-- output: examples/19-testing/menu.test -->
+```text
+test "a bun costs 280" ... ok
+test "tea is not on the menu" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+Each test gets a `Menu` of its own, made by a call of `menu()` before
+its first line and dropped when it ends, so the value's `Drop` is the
+teardown. `scope="module"` is accepted and still makes one for each
+test.
+
+**Try it.** Make the second test expect `Some(300)`, and run it.
+
+<details>
+<summary>What Sisu says</summary>
+
+<!-- output: examples/19-testing/menu_tea.console -->
+```console
+$ sisu test menu.sisu
+test "a bun costs 280" ... ok
+test "tea is not on the menu" ... FAILED
+
+test "tea is not on the menu" ... FAILED
+what the test printed:
+  menu set up
+  looking for tea
+  menu put away
+panic: assertion failed: menu.prices.get("tea").copied() == Some(300)
+    menu.prices.get("tea").copied() == Some(300)
+    │           │          │           │
+    │           None       None        Some(300)
+    {"coffee": 350, "bun": 280}
+  at test "tea is not on the menu" (menu.sisu:21:5)
+replay: sisu test --replay 1-f14e765a85b22b4f-0.0.1-t1-s0-r0 menu.sisu
+
+1 passed, 1 failed, 0 blocked
+```
+
+The fixture is set up before the test and put away after the failed
+`assert`. A `@fixture` that takes a parameter is E0281
+(`type.fixture-signature`).
+
+</details>
 
 ## A clock that moves when every task waits
 
@@ -471,8 +542,7 @@ the clock moves four minutes in all: when both wait, it jumps to three
 minutes, the tea task finishes, and when the coffee task is the only
 one left waiting, it jumps to four. The second test brews one pot after
 the other, and the clock moves seven minutes. Neither test takes any
-real time: the waits of several tasks overlap on the test clock as on a
-real one.
+real time.
 
 ## Properties instead of examples
 
@@ -538,9 +608,8 @@ replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sort
 - The first test passes: whatever the bug, the numbers that come out
   are in order.
 - The second fails, and `check` shrinks the case that failed, removing
-  and lowering what it can while the property still fails: the case it
-  reports, `[0, 0]`, is the smallest list that shows the bug, two equal
-  numbers, the third case tried, shrunk in ten steps.
+  and lowering what it can while the property still fails: it reports
+  `[0, 0]`, the smallest list that shows the bug, two equal numbers.
 
 `arbitrary` makes cases of the program's own types too: the compiler
 writes the generator from the type's fields and variants, and draws a
@@ -604,8 +673,7 @@ test "every number is kept" ... ok
 ```
 
 D0033 (`cli.token-other-code`) names the content hash the token was made for and the file's
-own, so a replay can never run a different program by mistake; a
-token from another toolchain is refused in the same way. A test that
+own, so a replay can never run a different program by mistake, nor one of another toolchain. A test that
 takes the real `System` gets it even under `--sim`, and has no token.
 
 ## Every small case
@@ -654,9 +722,7 @@ test "two toggles at the end change nothing" ... ok
 ```
 
 Each of the 121 cases is a list of up to four presses: one empty list,
-3 lists of one press, 9 of two, 27 of three and 81 of four. The test
-counts them to show it, since the closure can change `cases` as the
-closures of chapter 16 change what they borrow. The compiler writes the
+3 lists of one press, 9 of two, 27 of three and 81 of four. The test counts them to show it. The compiler writes the
 generator of `Press` from its variants, as it does for any enum.
 
 ## A clear function as the specification
@@ -728,8 +794,7 @@ test "word_count refines word_count_ref" ... ok
 The two functions now agree on every case tried. A case that takes the
 reference too long is left out rather than failed, since a clear
 function is often slow. For functions that return an `f64`,
-`@refines(reference, tolerance=Ulps(2))` lets the results differ in the
-last two places, for a fast version that adds numbers in another order.
+`@refines(reference, tolerance=Ulps(2))` lets the results differ in the last two places.
 
 </details>
 
@@ -888,9 +953,7 @@ replay: sisu test --replay 1-0c3a2103f89cb8aa-0.0.1-t0-s0-r0 receipt_changed.sis
 
 The report is a diff: the lines starting `-` are the stored snapshot,
 and those starting `+` what the program gives now. If the change is
-what you meant, `sisu test --update` accepts it; read the diff first,
-since accepting every change without reading it turns the test into
-nothing.
+what you meant, `sisu test --update` accepts it; read the diff first.
 
 </details>
 
@@ -1686,7 +1749,8 @@ When every test passes, compare your answer with
 - A failing `assert` shows both sides of a comparison, the values of
   the parts that only read, and its message. `expect` records its
   failure and lets the test go on.
-- A fixture is a value a function makes. A test that names
+- A fixture is a value a function makes, or a `@fixture` that a test
+  names. A test that names
   capabilities as parameters gets fresh fakes of them; one that takes
   `sys: System` gets the real one, runs alone and has no token.
 - The test clock moves only when told to or when every task waits, so

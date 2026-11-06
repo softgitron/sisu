@@ -20,5 +20,6 @@ struct Padded:
 def main():
     print("{size_of[Reading]()} bytes, aligned to {align_of[Reading]()}")
     print("{size_of[Padded]()} bytes, aligned to {align_of[Padded]()}")
+    print("{size_of[(u8, i32)]()} bytes for a `(u8, i32)`")
     let data = b"\x2d\x00\x00\x00\x1e\x03\x02\x00"
     print("{read_plain[Reading](data, 0):?}")

@@ -1,0 +1,9 @@
+# A raw pointer to an optional raw pointer, one word in C.
+from std.mem import ptr
+
+def main():
+    let maybe: ptr[u8]? = None
+    let p = ptr.of(ref maybe)
+    # safety: valid, aligned: `maybe` lives and nothing changes it while
+    #   the reference lives.
+    print(unsafe p.as_ref().is_none())

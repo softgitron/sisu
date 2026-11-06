@@ -205,6 +205,6 @@ makes the function the global symbol `NAME` of C's own convention,
 whether or not the program calls it, so a C caller declares `int32_t
 sauna_heat(int32_t minutes);` and calls it; E0991 refuses a type C has
 no layout for, a `@repr(c)` struct goes by a pointer to it, its fields
-at C's offsets (by value it is D0103, and so is a pointer to a tuple
-with a part narrower than a word natively), and a panic that leaves the function ends the program with
+at C's offsets (by value it is D0103, and so is a pointer to an option
+of a raw pointer natively; a tuple's parts lie at C's offsets too), and a panic that leaves the function ends the program with
 status 134 ([R14](../reference/attributes.md#exported-functions)).

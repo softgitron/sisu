@@ -111,9 +111,8 @@ borrows live on line 6 of borrow.sisu, in `main`:
   a `mut` borrow of `turns` from 6:5, held by a temporary, used until 6:16
 ```
 
-The Rust front end answers the command today. Stage 1 gives the same
-borrows from its twenty-second round, and the server asks it once stage
-0's round in progress routes the command. Bind the command to a key,
+Stage 1 answers the command, from its twenty-second round, and the
+server asks it the same question for the editor. Bind the command to a key,
 and use it when a borrow error is hard to read; [Find and fix a borrow error](borrow-errors.md) shows the rest.
 
 ## 4. See a script's values beside its lines
@@ -149,10 +148,12 @@ statements, so typing a loop that never ends cannot hang the editor and
 nothing the script does reaches the world. They are kept until the text
 changes.
 
-**Status.** In stage 0, with stage 1 answering every request but two:
-a script's values and `sisu.explainBorrow` still come from the Rust
-front end (stage 1 answers the second, and is asked once stage 0's
-round in progress routes it), which also answers everything when stage 1 is not built or
+**Status.** In stage 0, with stage 1 answering every request but one:
+a script's values still come from the Rust front end. Stage 1 answers
+them too from its twenty-third round, run by its own evaluator, which
+stops at the first line that reaches the world, and the server asks it
+once stage 0's round in progress routes the query. The Rust front end
+also answers everything when stage 1 is not built or
 `--front-end=rust` is given. Stage 1's completion offers only the names
 a program sees, and its references count the names in import lines. The structural editing with a typed palette
 and the stepper of the teaching profile, which

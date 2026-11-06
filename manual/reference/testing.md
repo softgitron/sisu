@@ -32,10 +32,11 @@ module, beside the code it tests ([R3](declarations.md#tests-suites-and-benchmar
 | `test "NAME" for A, B in CASES:` | a test for each element of `CASES`, named with the element |
 | `test "NAME"(clock: TestClock, fs: Fs):` | a test that receives a fresh fake of each capability it names |
 | `test "NAME"(sys: System):` | a test that receives the real `System` and runs alone |
+| `test "NAME"(menu: Menu):` | a test that receives what the `@fixture` function `menu` returns ([Fixtures](#fixtures)) |
 | `suite "NAME":` | a group of tests one level deep, whose tests are named `SUITE/NAME` |
 | `@tag("slow")` before a test or a suite | a tag that `--tag` and `--skip-tag` select by, which a suite gives each of its tests |
 
-A test returns nothing (E0381), takes nothing but capabilities (E0702)
+A test returns nothing (E0381), takes nothing but capabilities and fixtures (E0702, [Fixtures](#fixtures))
 and has no contract (E0807). The name of a test, a suite or a benchmark
 is fixed text, since runs report, select and replay by it: `{` starts no
 interpolation there (E0132, [R17](diagnostics.md#e0132)), and a brace is
@@ -583,10 +584,29 @@ A fixture is a value that a function makes: a test calls the function,
 and since each test runs apart, each gets its own. A fixture that needs
 cleaning up is a value with a `Drop`.
 
-**Stage 0 differs.** `@fixture`, the attribute of 17 for a fixture
-shared by the tests that name it, and `Expectation` are designed.
+A test can also ask for one by name. A function of the test's module
+marked `@fixture` that takes nothing is a fixture, and a test's
+parameter of its name, `test "a bun costs 280"(menu: Menu):`, receives
+what a call of it returns, beside the capabilities the test names. The
+call is made before the test's first line, in the order of the
+parameters, and the value is dropped when the test ends, also when it
+fails, so its `Drop` is the teardown, and what it prints is shown under
+the test's failure ([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
+shows a run). A parameter whose type is not what the fixture returns
+is E0300; a `@fixture` with a parameter, or on a method, is E0281
+(`type.fixture-signature`, [R17](diagnostics.md#e0281)), and a test
+that names it E0702.
 
-**Status.** In stage 0 for fixtures as values; `@fixture` designed.
+**Stage 0 differs.** 17's `scope="module"` is accepted and makes the
+value for each test that names it: a value made once for a module's
+tests needs the runner to keep it between tests, which it runs in
+parallel and in any order. 17's `Expectation`, an assertion of a
+library's own over the argument expression's tree, waits for
+compile-time expressions, which reflection does not give yet
+(decision 1125 of the [architecture
+notes](../../compiler/docs/architecture.md)).
+
+**Status.** In stage 0, with the differences noted.
 
 ## Property tests
 
@@ -986,6 +1006,7 @@ and the reports of coverage and mutation testing are designed
 | Code | Identifier | Section |
 |---|---|---|
 | E0381, E0702, [E0807](diagnostics.md#e0807), [E0132](diagnostics.md#e0132) | `type.return-in-test`, `type.test-signature`, `contract.not-in-test`, `parse.interpolated-name` | [The forms of a test](#the-forms-of-a-test) |
+| [E0281](diagnostics.md#e0281) | `type.fixture-signature` | [Fixtures](#fixtures) |
 | [E0255](diagnostics.md#e0255) | `resolve.private-item` | [Black-box tests](#black-box-tests) |
 | [R0006](diagnostics.md#r0006), [R0154](diagnostics.md#r0154), R0155, E0379 | `panic.assert`, `run.expect-failed`, `run.expect-failed-message`, `type.assert-message` | [Assertions](#assertions) |
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |

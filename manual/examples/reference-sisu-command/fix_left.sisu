@@ -1,0 +1,8 @@
+# A misspelt name, which `sisu fix` mends, and a call it cannot.
+def heated(celsius: int) -> int:
+    return celsius + 10
+
+def main():
+    let start = 70
+    print(heated(strat))
+    print(heated(start, 2))

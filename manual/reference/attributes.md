@@ -388,9 +388,9 @@ of the standard library and its declarations.
 | `@comptime_budget(steps=N)` | a function, a constant | raises its compile-time budget ([Compile-time budgets](#compile-time-budgets)) | in stage 0 |
 | `@tag("NAME", ...)` | a test | names it for `--tag` and `--skip-tag` ([Tags on tests](#tags-on-tests)) | in stage 0 |
 | `@refines(REFERENCE)` | a function | tests it against a reference ([Refinement tests](#refinement-tests)) | in stage 0; leaning |
-| `@fixture(scope="...")` | a function | makes a value for the tests that name it ([Fixtures](#fixtures)) | designed |
+| `@fixture`, `@fixture(scope="...")` | a function | makes a value for the tests that name it ([Fixtures](#fixtures)) | in stage 0, made for each test |
 | `@repr(c)`, `@repr(u8)` | a struct, an enum | fixes the layout ([The layout of a type](#the-layout-of-a-type)) | partly in stage 0 |
-| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | in stage 0, natively, but for a struct by value and one of narrow fields by a pointer |
+| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | in stage 0, natively, but for a struct by value and a pointer to an option of a raw pointer |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; accepted with W0030 and not checked in stage 0 |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
@@ -840,12 +840,19 @@ a test with a parameter of the function's name receives the value, made
 once for the scope, here once for the module
 ([17](../../proposal/17-testing.md#fixtures)).
 
-**Stage 0 differs.** `@fixture` is accepted and does nothing, and a test
-with a parameter that is not a capability is E0702
-(`type.test-signature`); a fixture is a value that a function makes and
-each test calls ([R15](testing.md#fixtures)).
+A fixture is a free function that takes nothing; a `@fixture` with a
+parameter, or on a method, is E0281 (`type.fixture-signature`,
+[R17](diagnostics.md#e0281)). A test's parameter that names it gets
+what a call of it returns, made before the test and dropped after it
+([R15](testing.md#fixtures)).
 
-**Status.** Designed; whether it is needed at all is open
+**Stage 0 differs.** `scope="module"` is accepted and makes the value
+for each test that names it, as a fixture without a scope is: a value
+made once for the module waits for the test runner to keep it between
+tests, which it runs in parallel and in any order.
+
+**Status.** In stage 0, with the difference noted; whether the
+attribute is needed at all is open
 ([17](../../proposal/17-testing.md#open-questions)).
 
 ## The layout of a type
@@ -1071,13 +1078,13 @@ error[D0103]: the native backend does not compile a `Reading` by value (a parame
 ```
 
 Pass a `ptr[Reading]` instead, as the example before it does. A tuple
-keeps a word for each of its parts natively, so a raw pointer to a
-tuple with a part narrower than a word is D0103 too, and so is a
-pointer to an option of a raw pointer; the interpreter runs both:
+lays its parts out at C's offsets natively too, each at the next offset
+its alignment allows, so a raw pointer to a tuple with a part narrower
+than a word compiles and reads as C would:
 
 <!-- file: examples/reference-attributes/export_tuple.files/export_tuple.sisu -->
 ```sisu
-# A raw pointer to a tuple with a part narrower than a word.
+# A raw pointer to a tuple of narrow parts, laid out as C lays it.
 from std.mem import ptr
 
 def main():
@@ -1093,11 +1100,37 @@ def main():
 $ sisu run export_tuple.sisu
 10
 $ sisu run --native export_tuple.sisu
-error[D0103]: the native backend does not compile `mem.ptr.of` of a `(int, u8)`, which raw memory holds otherwise than a value of it yet (in `main`); `sisu run` without `--native` runs the program
+10
 ```
 
-Hand C a `@repr(c)` struct, whose fields lie at C's offsets, rather
-than a tuple.
+A pointer to an option of a raw pointer is still D0103 natively, since
+the native backend gives such an option a tag word where C has one
+nullable word; the interpreter runs it:
+
+<!-- file: examples/reference-attributes/export_option.files/export_option.sisu -->
+```sisu
+# A raw pointer to an optional raw pointer, one word in C.
+from std.mem import ptr
+
+def main():
+    let maybe: ptr[u8]? = None
+    let p = ptr.of(ref maybe)
+    # safety: valid, aligned: `maybe` lives and nothing changes it while
+    #   the reference lives.
+    print(unsafe p.as_ref().is_none())
+```
+
+<!-- output: examples/reference-attributes/export_option.console -->
+```console
+$ sisu run export_option.sisu
+True
+$ sisu run --native export_option.sisu
+error[D0103]: the native backend does not compile `mem.ptr.of` of a `Option[ptr[u8]]`, which raw memory holds otherwise than a value of it yet (in `main`); `sisu run` without `--native` runs the program
+```
+
+A foreign call's own parameter or result of type `ptr[T]?` is one
+nullable word already, so hand C an optional pointer that way (decision
+1101 of the [architecture notes](../../compiler/docs/architecture.md)).
 
 **Status.** In stage 0 ([12](../../proposal/12-interop-and-targets.md),
 [22](../../proposal/22-unsafe.md); D-080), with the difference noted.
@@ -1379,9 +1412,12 @@ warning[W0023]: `Panel.width` is deprecated: use `width_cm`
 
 `@fix_inline` on a deprecated function makes each call's warning carry
 a fix, `type.inline-call`, that writes what the function returns in the
-call's place, each parameter replaced by the call's argument, in
-parentheses where the argument is more than a name, a literal or a
-chain of calls and members. The body must be one `return` of an
+call's place, each parameter replaced by the call's argument. An
+argument, and the whole expression, are written in parentheses only
+where precedence needs them: `twice(turns + 1)` becomes `scaled(turns +
+1, 2)`, since the argument fills a place of the call whole, and
+`warmer(sauna) * 2.0` of a body `sauna + 4.0` would become `(sauna +
+4.0) * 2.0`. The body must be one `return` of an
 expression, of a free function whose parameters take no `mut` or `own`;
 another is W0033 (`type.fix-inline-body`, [R17](diagnostics.md#w0033))
 at the attribute, and its calls warn without the fix. A call gets no
@@ -1441,13 +1477,13 @@ warning[W0023]: `twice` is deprecated: use `scaled`
    |
 18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
    |                                            ^^^^^^^^^^^^^^^^
-  = fix: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+  = fix: write what `twice` returns in the call's place: `scaled(turns + 1, 2)`
 
 $ sisu fix --dry-run inline_body.sisu
 inline_body.sisu:18:13: W0023 fixed: write what `twice` returns in the call's place: `scaled(turns, 2)`
   18:13-18:25 "scaled(turns, 2)"
-inline_body.sisu:18:44: W0023 fixed: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
-  18:44-18:60 "scaled((turns + 1), 2)"
+inline_body.sisu:18:44: W0023 fixed: write what `twice` returns in the call's place: `scaled(turns + 1, 2)`
+  18:44-18:60 "scaled(turns + 1, 2)"
 fixes that would be applied to `inline_body.sisu`: 2, and `--dry-run` leaves it as it is
 ```
 
@@ -1619,7 +1655,7 @@ idea for later, and `@inline` has no design.
 | [E0266](diagnostics.md#e0266), W0006, E0303 | `resolve.bad-cfg`, `resolve.unknown-feature`, `type.unknown-field` | [Conditional compilation](#conditional-compilation) |
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
-| E0702 | `type.test-signature` | [Fixtures](#fixtures) |
+| [E0281](diagnostics.md#e0281), E0702 | `type.fixture-signature`, `type.test-signature` | [Fixtures](#fixtures) |
 | [E0989](diagnostics.md#e0989), [E0991](diagnostics.md#e0991), [D0103](diagnostics.md#d0103) | `unsafe.export-signature`, `unsafe.export-not-c`, `native.unsupported` | [Exported functions](#exported-functions) |
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
 | [W0030](diagnostics.md#w0030) | `resolve.unchecked-attribute` | [Resource limits](#resource-limits) |

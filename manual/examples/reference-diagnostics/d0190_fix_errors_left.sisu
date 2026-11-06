@@ -1,0 +1,8 @@
+# One mistake with a fix, and one that no fix can mend.
+def heated(celsius: int) -> int:
+    return celsius + 10
+
+def main():
+    let start = 70
+    print(heated(strat))
+    print(heated(start, 2))

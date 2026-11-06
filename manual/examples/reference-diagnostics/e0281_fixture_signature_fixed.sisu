@@ -1,0 +1,7 @@
+# The fixture makes its value from nothing; a test names it to get one.
+@fixture
+def readings() -> list[int]:
+    return [70 + i for i in range(3)]
+
+test "three readings"(readings: list[int]):
+    assert len(readings) == 3

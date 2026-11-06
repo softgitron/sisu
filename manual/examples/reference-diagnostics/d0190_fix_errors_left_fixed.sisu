@@ -1,0 +1,8 @@
+# The call with too many arguments mended by hand, and the name fixed.
+def heated(celsius: int) -> int:
+    return celsius + 10
+
+def main():
+    let start = 70
+    print(heated(start))
+    print(heated(start) + 2)

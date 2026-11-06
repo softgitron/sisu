@@ -22,5 +22,5 @@ warning[W0023]: `twice` is deprecated: use `scaled`
    |
 18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
    |                                            ^^^^^^^^^^^^^^^^
-  = fix: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+  = fix: write what `twice` returns in the call's place: `scaled(turns + 1, 2)`
 

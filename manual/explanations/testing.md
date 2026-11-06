@@ -231,5 +231,7 @@ Two questions of the testing design stay open in
 [17](../../proposal/17-testing.md#open-questions): whether a `@fixture`
 form is needed at all once capabilities and drops cover setup and
 teardown, and how a test declares the capabilities it needs without a
-signature for each. Both are settled by writing the corpus's tests
-without them first.
+signature for each. Stage 0 has `@fixture` now, a function that a test
+names as a parameter, set up by a call and torn down by its drop, so
+the first question is one of use: whether the corpus's tests reach for
+it once they can.

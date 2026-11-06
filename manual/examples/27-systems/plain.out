@@ -1,3 +1,4 @@
 8 bytes, aligned to 4
 16 bytes, aligned to 8
+8 bytes for a `(u8, i32)`
 Reading(minute=45, tenths=798, sensor=2, flags=0)

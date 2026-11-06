@@ -392,9 +392,10 @@ rewrite the calls in the packages that depend on a library (D-067),
 which waits for the registry.
 
 **Try it.** Add a call `to_celsius(sauna + 4.0)` to `main` and run
-`sisu fix --dry-run inlined.sisu`. The fix writes the argument in
-parentheses of its own, `celsius_of((sauna + 4.0))`, so that it keeps
-its meaning whatever the expression around it.
+`sisu fix --dry-run inlined.sisu`. The fix writes `celsius_of(sauna +
+4.0)`, since the argument fills a place of the call whole: the fix
+adds parentheses only where precedence needs them, so that the code
+keeps its meaning.
 
 ## Marking what may still change
 

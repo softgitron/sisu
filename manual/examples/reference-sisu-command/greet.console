@@ -11,4 +11,4 @@ test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 test "std.time/days_in_month (doc example)" ... ok
 5 passed, 0 failed, 0 blocked
-195 not selected
+193 not selected

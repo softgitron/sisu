@@ -427,6 +427,7 @@ struct Padded:
 def main():
     print("{size_of[Reading]()} bytes, aligned to {align_of[Reading]()}")
     print("{size_of[Padded]()} bytes, aligned to {align_of[Padded]()}")
+    print("{size_of[(u8, i32)]()} bytes for a `(u8, i32)`")
     let data = b"\x2d\x00\x00\x00\x1e\x03\x02\x00"
     print("{read_plain[Reading](data, 0):?}")
 ```
@@ -435,12 +436,17 @@ def main():
 ```text
 8 bytes, aligned to 4
 16 bytes, aligned to 8
+8 bytes for a `(u8, i32)`
 Reading(minute=45, tenths=798, sensor=2, flags=0)
 ```
 
 - `Reading` has a `u32`, an `i16` and two `u8`s, eight bytes with no
   padding. `Padded` has a byte and then an `int`, which must start at a
   multiple of 8, so seven bytes of padding follow the byte.
+- A tuple's parts lie the same way, without an attribute: a `(u8, i32)`
+  is a byte, three bytes of padding and the `i32`, eight bytes in all,
+  in the interpreter and natively, so a raw pointer to a tuple reads as
+  C would read it.
 - `read_plain[Reading](data, 0)` copies eight bytes into a `Reading`, in
   the byte order of the machine, the least significant byte first here:
   `2d 00 00 00` is the minute 45, and `1e 03` the temperature, 79.8
@@ -474,27 +480,27 @@ def main():
 <!-- output: examples/27-systems/plain_gap.console -->
 ```console
 $ sisu check plain_gap.sisu
-error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 4, and a plain type has none (22)
+error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 3, and a plain type has none (22)
   --> plain_gap.sisu:6:9
   |
 6 | @derive(Plain, Copy)
   |         ^^^^^
-  = note: a field of its own there, `_pad1: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+  = note: fields of their own there, `_pad1: u8, _pad2: u16`, make those bytes the struct's, or the fields ordered from the widest leave none
 
-error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `flags: u8`, at offsets 9 to 12, the end of the struct, and a plain type has none (22)
+error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `flags: u8`, at offsets 9 to 11, the end of the struct, and a plain type has none (22)
   --> plain_gap.sisu:6:9
   |
 6 | @derive(Plain, Copy)
   |         ^^^^^
-  = note: a field of its own there, `_pad9: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+  = note: fields of their own there, `_pad9: u8, _pad10: u16`, make those bytes the struct's, or the fields ordered from the widest leave none
 
 ```
 
-Each names the bytes and their offsets, from the first byte of the gap
-to the first after it. Order the fields from the widest, as `Reading`
-does, or give the bytes fields of their own; the note's `Array` is not
-`Copy`, which `Plain` needs, so write them as `u8` and `u16` fields
-([R17](../reference/diagnostics.md#e0280)).
+Each names the bytes and their offsets, the gap's first byte and its
+last. Order the fields from the widest, as `Reading` does, or give the
+bytes fields of their own, as the note names them: a `u8` at offset 1
+and a `u16` at offset 2 fill the gap at C's offsets, and both are
+`Copy`, which `Plain` needs ([R17](../reference/diagnostics.md#e0280)).
 
 > **From Python.** This is `struct.unpack` or `ctypes.Structure`, with
 > the layout checked by the compiler: a `@derive(Plain)` that does not

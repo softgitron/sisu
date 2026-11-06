@@ -1,1 +1,1 @@
-5:9-5:14 E0279 resolve.plain-padding ty="Sample" bytes="3" start="1" end="4" before="sensor: u8" after="value: i32"
+5:9-5:14 E0279 resolve.plain-padding ty="Sample" bytes="3" start="1" end="3" before="sensor: u8" after="value: i32"

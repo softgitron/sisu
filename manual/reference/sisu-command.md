@@ -307,13 +307,13 @@ as `sisu help` says, and the Rust front end, the oracle that stage 1 is checked 
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
 lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix` and `sisu check
 --holes` are stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from both
-([sisu lsp](#sisu-lsp)). The other commands, and `run --watch` and
-`--defer-borrow`, `test --std` and `--defer-borrow`, and `check
---diary` use the Rust front end whichever you choose. From `sisu1
-0.17.0` stage 1 answers `test --std`, `check --diary`,
-`explain-borrow`, `audit --ownership` and `--caps`, and the SIR of
-`--defer-borrow` itself, as the sections of each say; the driver sends
-them to it once stage 0's round in progress routes them. A program's
+([sisu lsp](#sisu-lsp)). From `sisu1 0.17.0` stage 1 also answers
+`check --diary`, `test --std` of a file or a package, `run
+--defer-borrow`, `explain-borrow` and every form of `audit`, each the
+default as the sections of each say, with the Rust front end's answer
+under `--front-end=rust`. `run --watch`, `test --defer-borrow`, `test
+--std` without a file or a package, and the other commands use the Rust
+front end whichever you choose. A program's
 transcripts run on the front end its tests run on, stage 1 unless you
 choose the Rust one (with a stage 1 older than 0.11.0, on the Rust
 front end, D0128). `sisu
@@ -365,7 +365,11 @@ where it takes 0.246 as a process, and `sisu run --native` 0.121 where
 it takes 0.347 (with a release build of `sisu`). `sisu build`, with
 `--native` too, and `sisu run --native` of a package still start stage
 1 as a process of their own, since stage 1 serves only the build for a
-run. Whatever goes wrong with the server, the command runs stage 1
+run. From `sisu1 0.18.0` stage 1 serves those builds too: its `build
+--emit-sir` answers a line `# executable PATH` and the SIR for each
+program the build makes, for the driver to compile into the executable
+the line names, and stage 0's round in progress makes the driver ask it.
+Whatever goes wrong with the server, the command runs stage 1
 as a process of its own, and `SISU_STAGE1_SERVE=0` makes it do so every
 time. What a command prints is the same either way.
 
@@ -543,12 +547,13 @@ outcome: conflict reached; the run stopped at a concrete ownership conflict
 `sisu test --defer-borrow` runs a rejected program's tests in the same
 way.
 
-The SIR that the monitor runs comes from the Rust front end. From
-`sisu1 0.17.0` stage 1 prints the same SIR for such a program (its
-`sir --defer-borrow`, and the build for a run with `--defer-borrow`),
-with every diagnostic on standard error in the form of `--format=ids`
-and status 3 when it deferred an error; the driver asks stage 1 for it
-once stage 0's round in progress routes the option.
+The SIR that the monitor runs comes from stage 1, from `sisu1 0.17.0`
+(its build for a run with `--defer-borrow`): it writes every diagnostic on standard error in the
+form of `--format=ids`, with status 3 when it deferred an error, and
+the driver reads the account's findings from them. An error that is
+not the ownership checker's is not deferred, so the run reports it as
+a plain run does. `sisu test --defer-borrow` still lowers the program
+with the Rust front end, and so does `--front-end=rust`.
 
 **Status.** In stage 0, a tool of the experiment (18, Phase 3).
 
@@ -926,12 +931,11 @@ diagnostics prints nothing.
   check, one of each diagnostic, and one of each diagnostic of the
   previous check that this one no longer has, with the edit that
   resolved it. It is the experiment's friction log (18, Phase 3); a log
-  that cannot be written is D0013. The driver writes it from the Rust
-  front end. Stage 1 writes the same records from `sisu1 0.17.0`, with
-  the text of each file kept by its hash in `LOG.d/` and its own
-  version as the `toolchain`, so a log that either front end wrote
-  reads the same to the other; the driver sends the option to stage 1
-  once stage 0's round in progress routes it.
+  that cannot be written is D0013. Stage 1 writes it from `sisu1
+  0.17.0`, with the text of each file kept by its hash in `LOG.d/` and
+  its own version as the `toolchain`; the records are the ones the Rust
+  front end writes under `--front-end=rust`, so a log that either front
+  end wrote reads the same to the other.
 - `--holes` reports the typed holes instead, each with what fills it
   ([sisu check --holes](#sisu-check---holes)).
 
@@ -1037,7 +1041,10 @@ W0001, and `sisu test` reports a test that reaches one as blocked.
 
 **Stage 0 differs.** `sisu check --holes` is stage 1's, from `sisu1
 0.15.0`, and the whole report and `--format=json` from `sisu1 0.16.0`;
-the Rust front end answers it with D0009. 10's report also shows the
+the Rust front end answers it with D0009. From `sisu1 0.18.0` stage 1
+also reports the holes of a package, by its directory or with no path
+for the working directory's, each named by its module's file, where the
+driver still takes one file and prints the usage without it (D0151). 10's report also shows the
 values each test saw at the hole, which wait for `sisu test` to record
 them, and the bindings' capabilities, which their types show here.
 
@@ -1377,11 +1384,11 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   reaches, and its failure has no token (D0138).
 - `--std` runs the standard library's doc examples besides the
   program's tests, before them; outside a package and without a file,
-  it runs them alone. The Rust front end lowers them still. Stage 1
-  lowers the same examples as tests from `sisu1 0.17.0`, 197 of them
-  with the names the driver gives, each once, where the Rust front end
-  lists `std.net`'s two twice; the driver sends `--std` to it once
-  stage 0's round in progress routes it.
+  it runs them alone. Stage 1 lowers them as tests from `sisu1
+  0.17.0`, 197 of them, each once, when there is a program to run them
+  with, a file or the package of the working directory; alone, and
+  under `--front-end=rust`, the Rust front end lowers them, and lists
+  `std.net`'s two twice.
 - `--native` compiles the tests into one executable and runs each in a
   process of its own, and `--release` compiles them with the release
   profile ([R15](testing.md#native-tests)), with the schedulers,
@@ -1598,7 +1605,7 @@ test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 test "std.time/days_in_month (doc example)" ... ok
 5 passed, 0 failed, 0 blocked
-195 not selected
+193 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -1867,7 +1874,8 @@ starts it, as [Set up your editor](../guides/editor.md) shows. It takes
 no options (D0009).
 
 **Stage 0 differs.** The proposal has one front end. With stage 1 built
-and at `sisu1 0.15.0` or later, stage 1 answers every request but two,
+and at `sisu1 0.15.0` or later, stage 1 answers every request but a
+worksheet's values and, before `sisu1 0.17.0`, `sisu.explainBorrow`,
 each a query of its own sent to [the server of
 stage 1](#the-server-of-stage-1), a hover in about 9 ms: the
 diagnostics, hover, go-to-definition, references, completion, document
@@ -1880,12 +1888,15 @@ references count the names in import lines, where hover and
 go-to-definition answer too; from `sisu1 0.16.0` they count the keyword
 of a field in a struct's construction, `Sauna(turn=1)`, which a rename
 of the field renames, and from `sisu1 0.17.0` the name of a field in a
-struct pattern, the `x` of `case Point(x=a, y=b)`. A worksheet's
-values and `sisu.explainBorrow` stay with the Rust front end, though
-stage 1 answers the second from `sisu1 0.17.0` and is asked once stage
-0's round in progress routes it, which answers every question when stage 1
-is not built (the server does not build it under an editor) or
-`--front-end=rust` is given.
+struct pattern, the `x` of `case Point(x=a, y=b)`. Stage 1's
+`sisu.explainBorrow` comes from its `query explain`: a loan a line,
+each range from where the borrow starts to where it is last used. A
+worksheet's values stay with the Rust front end. Stage 1 answers a worksheet's values from `sisu1 0.18.0`
+(its `query values`, run by its own evaluator, which stops at the first
+use of the world), and the server asks it once stage 0's round in
+progress routes the query. The Rust front end answers every question
+when stage 1 is not built (the server does not build it under an
+editor) or `--front-end=rust` is given.
 
 **Status.** In stage 0, with the differences noted. The proposal's
 always-on evaluation, structural editing and stepper come after 0.1
@@ -2049,9 +2060,9 @@ fix applies. Each fix it applies is a line, D0175, with the code it
 fixed and what the fix does; then the count (D0177), and the file is
 written once. `--dry-run` prints each fix's edit under its line, the
 range it replaces and the text, and leaves the file as it is (D0178);
-`--all` fixes the lints of [sisu lint](#sisu-lint) too. The status is 0
-whether or not something was fixed, so read the dry run first: the
-preferred fix is the cheapest to write, not always the one you want.
+`--all` fixes the lints of [sisu lint](#sisu-lint) too. Read the dry
+run first: the preferred fix is the cheapest to write, not always the
+one you want.
 
 <!-- file: examples/reference-sisu-command/tally.sisu -->
 ```sisu
@@ -2090,12 +2101,42 @@ The first fix copies `name` where `own name: String` would move it
 in, the second fix E0300 offers; the dry run is where you choose. A
 file with nothing to fix is D0176. A diagnostic whose first fix has no
 edit is left as it is, and a fix that would undo an earlier round's is
-D0179, which stops the rounds. An option `sisu fix` does not take,
+D0179, which stops the rounds.
+
+The status is 0 when the file checks after the fixes, or had nothing to
+fix and checks. When errors that no fix applies to are left, `sisu fix`
+still writes what it fixed, then says so, D0190, and ends with status 1,
+with `--dry-run` too, so a script can tell a program it mended from one
+that still does not compile; warnings left do not count:
+
+<!-- file: examples/reference-sisu-command/fix_left.sisu -->
+```sisu
+# A misspelt name, which `sisu fix` mends, and a call it cannot.
+def heated(celsius: int) -> int:
+    return celsius + 10
+
+def main():
+    let start = 70
+    print(heated(strat))
+    print(heated(start, 2))
+```
+
+<!-- output: examples/reference-sisu-command/fix_left.console -->
+```console
+$ sisu fix --dry-run fix_left.sisu
+fix_left.sisu:7:18: E0200 fixed: a similar name is in scope: `start`
+  7:18-7:23 "start"
+fixes that would be applied to `fix_left.sisu`: 1, and `--dry-run` leaves it as it is
+error[D0190]: `fix_left.sisu` does not check after the fixes: errors that no fix applies to are left (1), which `sisu check` shows
+```
+
+An option `sisu fix` does not take,
 `--edition` and `--deps` among them, is D0009 with status 2, and no
 file, or more than one, prints the command's usage (D0151).
 
-**Status.** In stage 0, stage 1's alone, from `sisu1 0.16.0` (its
-decisions 1040 and 1064 in the [architecture
+**Status.** In stage 0, stage 1's alone, from `sisu1 0.16.0`, and its
+status 1 with D0190 from `sisu1 0.18.0` (its decisions 1040, 1064 and
+1124 in the [architecture
 notes](../../compiler/docs/architecture.md)); the Rust front end
 answers it with D0003. 10's `--edition` and `--deps` are designed
 ([sisu fix --edition and --deps](#sisu-fix---edition-and---deps)).
@@ -2131,11 +2172,10 @@ $ sisu explain-borrow borrows.sisu:3
 no borrow is live on line 3 of borrows.sisu
 ```
 
-The borrows come from the Rust front end's ownership checker. Stage 1
-answers the same command from `sisu1 0.17.0`, line for line in these
-words, and the editor's question as tab-separated lines (its `query
-explain FILE LINE`); the driver and the language server ask stage 1 once
-stage 0's round in progress routes them.
+The borrows come from stage 1's ownership checker, from `sisu1 0.17.0`,
+and the editor's `sisu.explainBorrow` asks the same question of it (its
+`query explain FILE LINE`); `--front-end=rust` gives the Rust front
+end's checker, line for line in the same words.
 
 **Status.** In stage 0 (18, Phase 3), and in the language server as
 `sisu.explainBorrow`.
@@ -2209,16 +2249,14 @@ level, so its `--unsafe` report heads it "no level", a file that may
 hold any unsafe code, and lists what it holds, here nothing, and the
 standard library's level.
 
-`--ownership` and `--caps` run on the Rust front end. Stage 1 prints
-the same lines from `sisu1 0.17.0`, with the same messages and
-statuses: `--ownership` gave the driver's lines for each of 1,112
-files, and its server now serves every form of `audit`. The driver
-sends `--ownership` and `--caps` to it once stage 0's round in progress
-routes them.
+Every form of `audit` is stage 1's from `sisu1 0.17.0`, served, with
+the messages and statuses the Rust front end gives `--ownership` and
+`--caps` under `--front-end=rust`; `--ownership` gave the same lines
+on both front ends for each of 1,112 files.
 
-**Status.** In stage 0; `--unsafe` is stage
-1's (its decision 425 in the [architecture
-notes](../../compiler/docs/architecture.md)). The proposal's `sisu
+**Status.** In stage 0, stage 1's: `--unsafe` alone (its decision
+425 in the [architecture notes](../../compiler/docs/architecture.md)),
+`--ownership` and `--caps` from `sisu1 0.17.0` (decision 1105). The proposal's `sisu
 audit`, which lists the capability summary, holes and advisories as
 well, is [designed](#sisu-audits-other-reports).
 
@@ -2481,7 +2519,7 @@ open as Q-63.
 
 ## Diagnostics of the command line
 
-The driver's messages have codes D0001 to D0187. These are the ones that
+The driver's messages have codes D0001 to D0190. These are the ones that
 a command line can produce, by what they report:
 
 | Codes | Report |
@@ -2505,7 +2543,7 @@ a command line can produce, by what they report:
 | D0070 to [D0073](diagnostics.md#d0073) | `sisu build` and `sisu new`. |
 | D0139 to D0147, [D0148](diagnostics.md#d0148) | `sisu build --native --explain-size`. |
 | D0170 to D0174, D0180 to D0187 | The lines of `sisu check --holes` ([sisu check --holes](#sisu-check---holes)). |
-| D0175 to D0179 | The lines of `sisu fix` ([sisu fix](#sisu-fix)). |
+| D0175 to D0179, [D0190](diagnostics.md#d0190) | The lines of `sisu fix` ([sisu fix](#sisu-fix)). |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |

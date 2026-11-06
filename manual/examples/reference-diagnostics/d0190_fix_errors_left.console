@@ -1,0 +1,11 @@
+$ sisu fix d0190_fix_errors_left.sisu
+d0190_fix_errors_left.sisu:7:18: E0200 fixed: a similar name is in scope: `start`
+fixes applied to `d0190_fix_errors_left.sisu`: 1
+error[D0190]: `d0190_fix_errors_left.sisu` does not check after the fixes: errors that no fix applies to are left (1), which `sisu check` shows
+$ sisu check d0190_fix_errors_left.sisu
+error[E0305]: wrong number of arguments to `heated`: expected 1, found 2
+  --> d0190_fix_errors_left.sisu:8:11
+  |
+8 |     print(heated(start, 2))
+  |           ^^^^^^^^^^^^^^^^
+

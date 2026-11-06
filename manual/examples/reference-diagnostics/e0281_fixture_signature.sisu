@@ -1,0 +1,7 @@
+# A fixture takes nothing, so no test could give it a parameter.
+@fixture
+def readings(count: int) -> list[int]:
+    return [70 + i for i in range(count)]
+
+test "three readings"(readings: list[int]):
+    assert len(readings) == 3

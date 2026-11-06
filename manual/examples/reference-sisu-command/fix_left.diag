@@ -1,0 +1,3 @@
+7:18-7:23 E0200 resolve.undefined-name name="strat"
+  fix resolve.similar-name 7:18-7:23 "start"
+8:11-8:27 E0305 type.argument-count name="heated" expected="1" found="2"

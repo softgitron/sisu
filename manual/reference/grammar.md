@@ -23,6 +23,15 @@ semicolons (D-020, D-027), and a parser that decides layout in the
 lexer and never fails ([02](../../proposal/02-syntax.md#grammar-notes)).
 Whether this page becomes part of a specification is open (Q-62).
 
+Stage 1's parser keeps a grammar of its own in the `##!` comments of
+its modules, which `sisu1 grammar`, stage 1's command, prints in one
+text from `sisu1 0.18.0`; `sisu` does not offer the command (D0003).
+This page agrees with that text, rule for rule, and says more where
+the parser reads more than the comments name: an attribute's dotted
+name, an error set's generic parameters, the members of an enum or an
+error set beside its variants, the forms of a type, a constant of a
+trait without its value. Each of those was tried against the parser.
+
 ## The notation
 
 - `rule := ...` defines a rule.
@@ -230,12 +239,13 @@ supertraits   := '(' type (',' type)* ')'
 impl_def      := 'unsafe'? 'impl' generic_params? type ('for' type)? ':'
                  NEWLINE INDENT member+ DEDENT
 extern_block  := 'extern' string? ':' NEWLINE INDENT member+ DEDENT
-member        := attribute* visibility? ('pass' NEWLINE | item_body)
+member        := attribute* visibility? ('pass' NEWLINE | item_body | trait_const)
+trait_const   := 'const' name ':' type ('=' expr)? NEWLINE
 ```
 
 A trait's parentheses list its supertraits. Its members are methods,
-with or without a body, `type` declarations of associated types, and a
-`comptime def derive`; an impl's are methods and `type NAME = T`
+with or without a body, `type` declarations of associated types,
+constants with or without a value, and a `comptime def derive`; an impl's are methods and `type NAME = T`
 ([R3](declarations.md#traits), [R3](declarations.md#impls)). An
 `extern` block's string names its ABI, as `"C"`, and its members are
 functions without bodies ([R3](declarations.md#foreign-functions)).
@@ -387,7 +397,7 @@ error[D0006]: the program was not run: errors found (1)
 <!-- unchecked: grammar notation, which no command runs -->
 ```text
 assert_stmt   := 'assert' expr (',' expr)? NEWLINE
-expect_stmt   := 'expect' expr NEWLINE
+expect_stmt   := 'expect' expr (',' expr)? NEWLINE
 debug_assert_stmt := 'debug_assert' expr (',' expr)? NEWLINE
 defer_stmt    := 'defer' (':' block | stmt)
 with_stmt     := 'with' expr ('as' name)? ':' block

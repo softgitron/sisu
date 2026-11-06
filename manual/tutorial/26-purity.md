@@ -71,7 +71,10 @@ error[D0021]: the program was not run: the ownership checker found errors (1); `
 ```
 
 E0333 (`type.impure-call`) names the call that is not pure, and its
-label points at the `pure` that promised otherwise. The note belongs in
+label points at the `pure` that promised otherwise. The D0021 after it
+offers `--defer-borrow`, which runs a program past the ownership
+checker's own errors only: under it the run stops at E0333 again, so
+fix the call instead. The note belongs in
 the code that calls `feel`. A `pure` function that takes a capability,
 such as `clock: Clock`, is E0334 (`type.impure-capability`).
 

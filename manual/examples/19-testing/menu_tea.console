@@ -1,0 +1,18 @@
+$ sisu test menu.sisu
+test "a bun costs 280" ... ok
+test "tea is not on the menu" ... FAILED
+
+test "tea is not on the menu" ... FAILED
+what the test printed:
+  menu set up
+  looking for tea
+  menu put away
+panic: assertion failed: menu.prices.get("tea").copied() == Some(300)
+    menu.prices.get("tea").copied() == Some(300)
+    │           │          │           │
+    │           None       None        Some(300)
+    {"coffee": 350, "bun": 280}
+  at test "tea is not on the menu" (menu.sisu:21:5)
+replay: sisu test --replay 1-f14e765a85b22b4f-0.0.1-t1-s0-r0 menu.sisu
+
+1 passed, 1 failed, 0 blocked

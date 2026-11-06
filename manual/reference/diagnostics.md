@@ -1590,7 +1590,7 @@ Shown in [chapter 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
 
 ## Names and declarations
 
-Codes E0200 to E0280. Name resolution finds what each name means and
+Codes E0200 to E0281. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -3875,8 +3875,9 @@ A plain type's bytes are all its value's, so `as_bytes` and
 `read_plain` read no byte that a field does not own. C's layout, which
 `@repr(c)` gives a struct ([R14](attributes.md#the-layout-of-a-type)),
 puts each field at the next offset its alignment allows, and a narrow
-field before a wider one leaves a gap. The offsets name the gap from
-its first byte to the first byte after it:
+field before a wider one leaves a gap. The offsets name the gap's
+first byte and its last, and the note names fields of numbers that
+would fill it at C's offsets, each the widest that its offset allows:
 
 <!-- file: examples/reference-diagnostics/e0279_plain_padding.sisu -->
 ```sisu
@@ -3896,12 +3897,12 @@ def main():
 <!-- output: examples/reference-diagnostics/e0279_plain_padding.console -->
 ```console
 $ sisu run e0279_plain_padding.sisu
-error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 4, and a plain type has none (22)
+error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 3, and a plain type has none (22)
   --> e0279_plain_padding.sisu:5:9
   |
 5 | @derive(Plain, Copy)
   |         ^^^^^
-  = note: a field of its own there, `_pad1: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+  = note: fields of their own there, `_pad1: u8, _pad2: u16`, make those bytes the struct's, or the fields ordered from the widest leave none
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -3965,20 +3966,19 @@ def main():
 <!-- output: examples/reference-diagnostics/e0280_plain_padding_end.console -->
 ```console
 $ sisu run e0280_plain_padding_end.sisu
-error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `sensor: u8`, at offsets 5 to 8, the end of the struct, and a plain type has none (22)
+error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `sensor: u8`, at offsets 5 to 7, the end of the struct, and a plain type has none (22)
   --> e0280_plain_padding_end.sisu:5:9
   |
 5 | @derive(Plain, Copy)
   |         ^^^^^
-  = note: a field of its own there, `_pad5: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+  = note: fields of their own there, `_pad5: u8, _pad6: u16`, make those bytes the struct's, or the fields ordered from the widest leave none
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Give the bytes fields of their own, so that they are the struct's and
-`as_bytes` writes them. The note's `Array[u8, 3]` is not `Copy`, which
-`Plain` needs (E0244), so name the bytes with numbers, here a `u8` and a
-`u16`:
+Give the bytes fields of their own, as the note names them, so that
+they are the struct's and `as_bytes` writes them. A `u8` and a `u16` are
+`Copy`, which `Plain` needs (E0244), where an `Array[u8, 3]` is not:
 
 <!-- file: examples/reference-diagnostics/e0280_plain_padding_end_fixed.sisu -->
 ```sisu
@@ -4006,6 +4006,70 @@ def main():
 ```
 
 Shown in [chapter 27](../tutorial/27-systems.md#data-laid-out-as-c-lays-it-out).
+
+### E0281
+
+`type.fixture-signature`: `{name}` is a `@fixture`, which a test names
+as a parameter to receive what it returns, so it is a free function
+that takes nothing.
+
+A test's parameter that names a `@fixture` function gets what a call of
+it returns, and the test gives the call no arguments, so a fixture with
+a parameter, or a method marked `@fixture`, could never be called. A
+test that names it is E0702 as well, a parameter the runner cannot
+give:
+
+<!-- file: examples/reference-diagnostics/e0281_fixture_signature.sisu -->
+```sisu
+# A fixture takes nothing, so no test could give it a parameter.
+@fixture
+def readings(count: int) -> list[int]:
+    return [70 + i for i in range(count)]
+
+test "three readings"(readings: list[int]):
+    assert len(readings) == 3
+```
+
+<!-- output: examples/reference-diagnostics/e0281_fixture_signature.console -->
+```console
+$ sisu test e0281_fixture_signature.sisu
+error[E0281]: `readings` is a `@fixture`, which a test names as a parameter to receive what it returns, so it is a free function that takes nothing
+  --> e0281_fixture_signature.sisu:2:2
+  |
+2 | @fixture
+  |  ^^^^^^^
+
+error[E0702]: a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`)
+  --> e0281_fixture_signature.sisu:6:23
+  |
+6 | test "three readings"(readings: list[int]):
+  |                       ^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+Make the value from nothing, with what it needs written in the body, or
+as a constant of the module; a test that needs another value calls a
+plain function itself:
+
+<!-- file: examples/reference-diagnostics/e0281_fixture_signature_fixed.sisu -->
+```sisu
+# The fixture makes its value from nothing; a test names it to get one.
+@fixture
+def readings() -> list[int]:
+    return [70 + i for i in range(3)]
+
+test "three readings"(readings: list[int]):
+    assert len(readings) == 3
+```
+
+<!-- output: examples/reference-diagnostics/e0281_fixture_signature_fixed.test -->
+```text
+test "three readings" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+Shown in [chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for).
 
 ## Types
 
@@ -12155,7 +12219,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0187. The messages of the `sisu` command itself
+Codes D0001 to D0190. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -12460,17 +12524,17 @@ The program is valid, and the interpreter runs it, but the native
 backend has no lowering yet for a part of it, which the message names,
 with the function it is in: a `@repr(c)` struct passed by value to an
 exported function, "a `Reading` by value (a parameter of the exported
-function `sauna_load`)", or a raw pointer to a tuple with a part
-narrower than a word, "`mem.ptr.of` of a `(int, u8)`", or to an option
-of a raw pointer. A native build lays a declared struct's fields out at
-C's offsets and a number at its width, but keeps each part of a tuple
-in a word of its own, as the runtime's iterators lay their pairs out,
-so a pointer to such a tuple would not see what C sees (D-086).
+function `sauna_load`)", or a raw pointer to an option of a raw
+pointer, "`mem.ptr.of` of a `Option[ptr[u8]]`". A native build lays a
+declared struct's fields and a tuple's parts out at C's offsets and a
+number at its width, but gives an option of a raw pointer a tag word of
+its own where C has one nullable word, so a pointer to such an option
+would not see what C sees (D-086).
 
 Run the program without `--native`, or change it to what the backend
 compiles: pass a struct to an exported function by a pointer, and hand
-C a `@repr(c)` struct rather than a tuple, as
-[R14](attributes.md#exported-functions) shows.
+C an optional pointer through a foreign call's own `ptr[T]?` parameter,
+as [R14](attributes.md#exported-functions) shows.
 
 Example: [R14](attributes.md#exported-functions).
 
@@ -12818,6 +12882,67 @@ Give the command what its usage line names: `sisu eval FILE`.
 
 Example: [R16](sisu-command.md#sisu-eval).
 
+### D0190
+
+`cli.fix-errors-left`: `{file}` does not check after the fixes: errors
+that no fix applies to are left ({count}), which `sisu check` shows.
+
+`sisu fix` applied every fix it could, wrote the file, and checked it
+again, and errors without a fix are left. The status is 1, as for
+`sisu check` at an error, so a script that runs `sisu fix` can tell a
+program it mended from one that still does not compile; warnings left
+do not count:
+
+<!-- file: examples/reference-diagnostics/d0190_fix_errors_left.sisu -->
+```sisu
+# One mistake with a fix, and one that no fix can mend.
+def heated(celsius: int) -> int:
+    return celsius + 10
+
+def main():
+    let start = 70
+    print(heated(strat))
+    print(heated(start, 2))
+```
+
+<!-- output: examples/reference-diagnostics/d0190_fix_errors_left.console -->
+```console
+$ sisu fix d0190_fix_errors_left.sisu
+d0190_fix_errors_left.sisu:7:18: E0200 fixed: a similar name is in scope: `start`
+fixes applied to `d0190_fix_errors_left.sisu`: 1
+error[D0190]: `d0190_fix_errors_left.sisu` does not check after the fixes: errors that no fix applies to are left (1), which `sisu check` shows
+$ sisu check d0190_fix_errors_left.sisu
+error[E0305]: wrong number of arguments to `heated`: expected 1, found 2
+  --> d0190_fix_errors_left.sisu:8:11
+  |
+8 |     print(heated(start, 2))
+  |           ^^^^^^^^^^^^^^^^
+
+```
+
+Mend what is left by hand, from what `sisu check` shows; here the call
+with one argument too many:
+
+<!-- file: examples/reference-diagnostics/d0190_fix_errors_left_fixed.sisu -->
+```sisu
+# The call with too many arguments mended by hand, and the name fixed.
+def heated(celsius: int) -> int:
+    return celsius + 10
+
+def main():
+    let start = 70
+    print(heated(start))
+    print(heated(start) + 2)
+```
+
+<!-- output: examples/reference-diagnostics/d0190_fix_errors_left_fixed.out -->
+```text
+80
+82
+```
+
+Example: [R16](sisu-command.md#sisu-fix).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -12967,6 +13092,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0278](#e0278) | `resolve.prelude-internal` | `{name}` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09) |
 | [E0279](#e0279) | `resolve.plain-padding` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding between `{before}` and `{after}`, at offsets {start} to {end}, and a plain type has none (22) |
 | [E0280](#e0280) | `resolve.plain-padding-end` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding after `{before}`, at offsets {start} to {end}, the end of the struct, and a plain type has none (22) |
+| [E0281](#e0281) | `type.fixture-signature` | `{name}` is a `@fixture`, which a test names as a parameter to receive what it returns, so it is a free function that takes nothing |
 
 ### Types, every code
 
@@ -13575,4 +13701,5 @@ it. `sisu explain CODE` prints the same line.
 | D0185 | `cli.hole-ensures` | to keep: `{clause}` |
 | D0186 | `cli.hole-tests` | reached by the tests {tests} |
 | D0187 | `cli.hole-tests-none` | no test reaches it |
+| [D0190](#d0190) | `cli.fix-errors-left` | `{file}` does not check after the fixes: errors that no fix applies to are left ({count}), which `sisu check` shows |
 

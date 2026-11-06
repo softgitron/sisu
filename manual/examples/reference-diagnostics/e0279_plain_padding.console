@@ -1,9 +1,9 @@
 $ sisu run e0279_plain_padding.sisu
-error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 4, and a plain type has none (22)
+error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 3, and a plain type has none (22)
   --> e0279_plain_padding.sisu:5:9
   |
 5 | @derive(Plain, Copy)
   |         ^^^^^
-  = note: a field of its own there, `_pad1: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+  = note: fields of their own there, `_pad1: u8, _pad2: u16`, make those bytes the struct's, or the fields ordered from the widest leave none
 
 error[D0006]: the program was not run: errors found (1)

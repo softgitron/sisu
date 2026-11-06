@@ -311,15 +311,21 @@ a `bool` a byte, a `char` a 32-bit code, a raw pointer an address, and
 a `@repr(c)` struct by a pointer to it, its fields at C's offsets. A
 number takes its width in memory too, a `u8` one byte and an `i32` four
 ([R2](types.md#integers)), so a `list[u8]` or a `bytes` hands C its
-bytes in place. A panic that leaves an exported
+bytes in place. A tuple's parts lie at C's offsets as a struct's fields
+do, and so do a `dict`'s entries, each the key's hash and then the key
+and the value as the tuple of the two lays them out: an entry of a
+`dict[i32, i32]` takes 16 bytes and one of a `dict[int, int]` 24, so natively a
+million entries of the first peak at about 35 MB where the second take
+43 MB (decision 1100 of the [architecture
+notes](../../compiler/docs/architecture.md)). A panic that leaves an exported
 function ends the program with status 134, since C cannot unwind
 ([R14](attributes.md#exported-functions)).
 
 **Stage 0 differs.** A `@repr(c)` struct passed by value is D0103 in a
-native build ([R17](diagnostics.md#d0103)). A tuple keeps a word for
-each of its parts natively, so a pointer to a tuple with a part
-narrower than a word is D0103 too, and so is a pointer to an option of
-a raw pointer ([R14](attributes.md#exported-functions)).
+native build ([R17](diagnostics.md#d0103)), and so is a pointer to an
+option of a raw pointer, which a native build gives a tag word where C
+has one nullable word; a tuple lays its parts out at C's offsets, as a
+struct does ([R14](attributes.md#exported-functions)).
 
 **Status.** Decided (D-039, Q-31), with the difference noted.
 

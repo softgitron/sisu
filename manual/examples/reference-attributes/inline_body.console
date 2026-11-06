@@ -23,11 +23,11 @@ warning[W0023]: `twice` is deprecated: use `scaled`
    |
 18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
    |                                            ^^^^^^^^^^^^^^^^
-  = fix: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+  = fix: write what `twice` returns in the call's place: `scaled(turns + 1, 2)`
 
 $ sisu fix --dry-run inline_body.sisu
 inline_body.sisu:18:13: W0023 fixed: write what `twice` returns in the call's place: `scaled(turns, 2)`
   18:13-18:25 "scaled(turns, 2)"
-inline_body.sisu:18:44: W0023 fixed: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
-  18:44-18:60 "scaled((turns + 1), 2)"
+inline_body.sisu:18:44: W0023 fixed: write what `twice` returns in the call's place: `scaled(turns + 1, 2)`
+  18:44-18:60 "scaled(turns + 1, 2)"
 fixes that would be applied to `inline_body.sisu`: 2, and `--dry-run` leaves it as it is

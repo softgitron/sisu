@@ -446,7 +446,8 @@ text it writes; the language server applies it.
 
 ### Fixture
 
-A value that a test needs, made by a function the test calls.
+A value that a test needs, made by a function the test calls, or by a
+`@fixture` function that the test names as a parameter.
 [Chapter 19](../tutorial/19-testing.md); [R15](testing.md#fixtures).
 
 ### Format spec
