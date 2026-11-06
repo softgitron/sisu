@@ -787,7 +787,7 @@ pure def attribute_places(name: str) -> (list[SyntaxKind], str)?:
 ## `W0030` names it (D-059; RULES.md, R121); `None` for any other.
 pure def unchecked_promise(name: str) -> str?:
     return match name:
-        case "no_alloc": Some("that the function does not allocate")
+        # `@no_alloc` is checked since RULES.md, R215.
         case "no_block": Some("that the function does not block")
         case "stack": Some("the function's bound on its stack")
         case _: None

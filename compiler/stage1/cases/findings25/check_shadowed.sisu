@@ -1,0 +1,12 @@
+# A program's own `check` (RULES.md, R213): a function of the name with a
+# contract has its generated test, `contract of check`, which calls the
+# prelude's `check` on its cases by a name the program cannot shadow, and
+# calls the program's `check` as the function under test.
+def check(level: int) -> bool:
+    requires 0 <= level <= 10
+    ensures result == (level > 5)
+    return level > 5
+
+def main():
+    print(check(7))
+    print(check(2))

@@ -86,6 +86,7 @@ fn main(0) source 0 @3:5-3:9 {
     return
 }
 6:5-6:15 E0405 borrow.mut-while-borrowed name="xs" line="5" end="7"
+  function main
   label 5:17-5:26 borrow.borrowed-by borrower="first"
   label 7:5-7:17 borrow.later-used
 error: Exit(status=3)
@@ -259,6 +260,7 @@ fn main(0) source 0 @3:5-3:9 {
     return
 }
 6:5-6:15 E0405 borrow.mut-while-borrowed name="xs" line="5" end="7"
+  function main
   label 5:17-5:26 borrow.borrowed-by borrower="first"
   label 7:5-7:17 borrow.later-used
 error: Exit(status=3)

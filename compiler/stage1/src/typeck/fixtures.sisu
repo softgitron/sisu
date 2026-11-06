@@ -7,9 +7,17 @@
 ##! the test and torn down after it by the local's drop at the end of the
 ##! body, and the runner sees a test that takes nothing, or the
 ##! capabilities it names, as before.
+##!
+##! For a runner that keeps a module's fixture (`sir --tests
+##! --module-fixtures`, RULES.md, R219), a fixture with `scope="module"`
+##! stays a parameter of the test, `schema: ref Schema`, which the runner
+##! gives from the value it made once for the module's tests, and each
+##! test records the fixtures it names (`TestDef.fixtures`) for its line
+##! of the SIR.
 
 from stage1.syntax.ast import (
     Arg,
+    Ast,
     Block,
     Expr,
     ExprKind,
@@ -24,43 +32,52 @@ from stage1.syntax.ast import (
     Stmt,
     StmtId,
     StmtKind,
+    StrPart,
     TestDef,
+    TestFixture,
+    TypeExpr,
+    TypeKind,
 )
 
 ## The module with each test's fixture parameters lowered into its body: a
 ## parameter named after a `@fixture` function of the module that takes
 ## nothing, without a default, becomes the first statements of the test's
-## body, in the parameters' order. `None` when no test names a fixture.
-pub pure def lower(m: Module) -> Module?:
+## body, in the parameters' order. With `shared` (RULES.md, R219) one of a
+## fixture with `scope="module"` stays a parameter, of type `ref T`, and
+## each test records its fixtures. `None` when no test names a fixture.
+pub pure def lower(m: Module, shared: bool) -> Module?:
     let names = fixture_names(m, m.items)
     if names.is_empty():
         return None
     var out = m.copy()
     var changed = False
     for id in m.items:
-        if lower_item(mut out, id, names):
+        if lower_item(mut out, id, names, shared):
             changed = True
     if not changed:
         return None
     return Some(out)
 
-## The names of the module's functions marked `@fixture` that take nothing,
-## at its top level and in its suites.
-pure def fixture_names(m: Module, items: list[ItemId]) -> list[String]:
-    var out: list[String] = []
+## The module's functions marked `@fixture` that take nothing, at its top
+## level and in its suites, each with whether its scope is the module's.
+pure def fixture_names(m: Module, items: list[ItemId]) -> list[(String, bool)]:
+    var out: list[(String, bool)] = []
     for id in items:
         let item = ref m.ast.items[id.index]
         match item.kind:
             case ItemKind.Fn(f):
                 var marked = False
+                var module_scope = False
                 for a in item.attrs:
                     if a.name == "fixture":
                         marked = True
+                        module_scope = module_scope or scoped_to_module(m.ast, a.args)
                 for a in f.attrs:
                     if a.name == "fixture":
                         marked = True
+                        module_scope = module_scope or scoped_to_module(m.ast, a.args)
                 if marked and f.params.is_empty() and f.body.is_some():
-                    out.push(f.name.text.copy())
+                    out.push((f.name.text.copy(), module_scope))
             case ItemKind.Suite(s):
                 for n in fixture_names(m, s.items):
                     out.push(n.copy())
@@ -68,19 +85,41 @@ pure def fixture_names(m: Module, items: list[ItemId]) -> list[String]:
                 pass
     return out
 
+## Whether a `@fixture`'s arguments are `scope="module"`.
+pub pure def scoped_to_module(ast: Ast, args: list[Arg]) -> bool:
+    for a in args:
+        let Some(n) = ref a.name else:
+            continue
+        if n.text != "scope":
+            continue
+        if let ExprKind.Str(parts) = ast.expr(a.value).kind:
+            var text = String.new()
+            for part in parts:
+                if let StrPart.Text(t) = part:
+                    text.push(t)
+            return text == "module"
+    return False
+
+## Whether `name` is a fixture of `names`, and its scope the module's.
+pure def fixture_scope(names: list[(String, bool)], name: str) -> bool?:
+    for (n, module_scope) in names:
+        if n == name:
+            return Some(module_scope)
+    return None
+
 ## Lowers the fixture parameters of the test `id` (or of each test of the
 ## suite `id`) into its body; whether it changed one.
-pure def lower_item(mut m: Module, id: ItemId, names: list[String]) -> bool:
+pure def lower_item(mut m: Module, id: ItemId, names: list[(String, bool)], shared: bool) -> bool:
     match m.ast.items[id.index].kind.copy():
         case ItemKind.Test(t):
-            let lowered = lower_test(mut m, t, names) else:
+            let lowered = lower_test(mut m, t, names, shared) else:
                 return False
             m.ast.items[id.index].kind = ItemKind.Test(lowered)
             return True
         case ItemKind.Suite(s):
             var changed = False
             for inner in s.items:
-                if lower_item(mut m, inner, names):
+                if lower_item(mut m, inner, names, shared):
                     changed = True
             return changed
         case _:
@@ -88,14 +127,32 @@ pure def lower_item(mut m: Module, id: ItemId, names: list[String]) -> bool:
 
 ## The test `t` without its fixture parameters, whose body starts by
 ## binding each to its fixture's value; `None` when it names no fixture.
-pure def lower_test(mut m: Module, t: TestDef, names: list[String]) -> TestDef?:
+pure def lower_test(
+    mut m: Module, t: TestDef, names: list[(String, bool)], shared: bool
+) -> TestDef?:
     let body = t.body.copy() else:
         return None
     var kept: list[Param] = []
     var lets: list[StmtId] = []
+    var named: list[TestFixture] = []
     for p in t.params:
         if let ParamKind.Named(name, ty, default) = p.kind:
-            if default.is_none() and names.contains(name.text):
+            let scope = fixture_scope(names, name.text)
+            if default.is_none() and shared and scope == Some(True):
+                # A module's fixture, which the runner keeps: the test takes
+                # it read only, `NAME: ref TYPE` (RULES.md, R219).
+                let r = m.ast.type_expr(ty).range
+                let by_ref = m.ast.add_type(
+                    TypeExpr(node=p.node, range=r, kind=TypeKind.Ref(mutable=False, inner=ty))
+                )
+                var q = p.copy()
+                q.kind = ParamKind.Named(name=name.copy(), ty=by_ref, default=None)
+                named.push(TestFixture(name=name.text.copy(), module_scope=True, param=len(kept)))
+                kept.push(q)
+                continue
+            if default.is_none() and scope.is_some():
+                if shared:
+                    named.push(TestFixture(name=name.text.copy(), module_scope=False, param=-1))
                 # `let NAME: TYPE = NAME()`, at the parameter: the call's
                 # callee is the fixture, since the binding is not yet in
                 # scope where its value is computed.
@@ -114,7 +171,7 @@ pure def lower_test(mut m: Module, t: TestDef, names: list[String]) -> TestDef?:
                 lets.push(m.ast.add_stmt(Stmt(node=p.node, range=p.range, kind=kind)))
                 continue
         kept.push(p.copy())
-    if lets.is_empty():
+    if lets.is_empty() and named.is_empty():
         return None
     var stmts = lets
     for s in body.stmts:
@@ -122,4 +179,5 @@ pure def lower_test(mut m: Module, t: TestDef, names: list[String]) -> TestDef?:
     var lowered = t.copy()
     lowered.params = kept
     lowered.body = Some(Block(node=body.node, range=body.range, stmts=stmts))
+    lowered.fixtures = named
     return Some(lowered)

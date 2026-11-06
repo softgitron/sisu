@@ -1,0 +1,15 @@
+# `--defer-borrow` names the function of each deferred finding (RULES.md,
+# R211): a line `  function NAME` after the diagnostic, the SIR function
+# whose statement it is at, so the driver need not find it by the
+# statement's position.
+def grow(mut xs: list[int]):
+    let first = ref xs[0]
+    xs.push(4)
+    print(first)
+
+def main():
+    var ys = [1, 2, 3]
+    let held = ref ys[1]
+    ys.push(5)
+    print(held)
+    grow(mut ys)

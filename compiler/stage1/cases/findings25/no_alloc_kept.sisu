@@ -1,0 +1,31 @@
+# `@no_alloc` checked (RULES.md, R215): a function that reads, writes in
+# place and computes allocates nothing, and nor do the functions it calls;
+# the message a failed `assert` formats is on a path that only panics,
+# which is exempt (04: "Panic paths are exempt").
+struct Voice:
+    level: f64
+    gain: f64
+
+impl Voice:
+    def sample(self) -> f64:
+        return self.level * self.gain
+
+## Adds each voice's sample into `out`, kept between -1.0 and 1.0.
+@no_alloc
+def mix(mut out: list[f64], voices: list[Voice]):
+    assert len(voices) <= len(out), "{len(voices)} voices for {len(out)} samples"
+    for i in range(len(voices)):
+        let v = out[i] + voices[i].sample()
+        out[i] = clamp(v)
+
+def clamp(x: f64) -> f64:
+    if x > 1.0:
+        return 1.0
+    if x < -1.0:
+        return -1.0
+    return x
+
+def main():
+    var out = [0.5, -0.5, 0.0]
+    mix(mut out, [Voice(level=0.5, gain=2.0), Voice(level=-1.0, gain=1.0)])
+    print(out)

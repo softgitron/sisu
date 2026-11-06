@@ -887,7 +887,9 @@ impl B:
         var body: Block? = None
         if let Some(b) = self.child(n, SyntaxKind.Block):
             body = Some(self.block(b))
-        return TestDef(name=name, name_range=name_range, cases=cases, params=params, body=body)
+        return TestDef(
+            name=name, name_range=name_range, cases=cases, params=params, body=body, fixtures=[]
+        )
 
     pure def suite_def(mut self, n: int) -> SuiteDef:
         var name = String.new()

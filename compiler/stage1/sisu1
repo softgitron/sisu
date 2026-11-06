@@ -52,12 +52,14 @@
 #   sisu1 check --diary PATH [PATH...]           also appends the check's records to the diary PATH,
 #                                                as `sisu check --diary` does (RULES.md, R186)
 #   sisu1 explain-borrow FILE:LINE               every borrow live on the line (RULES.md, R187), and
-#                                                `query explain FILE LINE` its loans as an answer
+#                                                `query explain FILE LINE [--ranges]` its loans as an
+#                                                answer, with `--ranges` each loan's ranges (R211)
 #   sisu1 audit (--ownership FILE... | --caps [FILE...])
 #                                                the escape hatches of each file, or a program's
 #                                                capabilities, as `sisu audit` prints them (R188)
 #   sisu1 sir --defer-borrow [--tests] [PATH]    the SIR of a program whose only errors are the
-#                                                ownership rules', status 3 when it defers one (R189)
+#                                                ownership rules', status 3 when it defers one (R189),
+#                                                each finding's function on a line after it (R211)
 #   sisu1 sir --tests --std [PATH]               with the standard library's doc examples as tests,
 #                                                and `test --std` runs them (RULES.md, R185)
 #   sisu1 build --emit-sir [--release] [--contracts=LEVEL] [--output OUT] [PATH]
@@ -73,6 +75,10 @@
 #   sisu1 sir --tests (--mutants | --mutant=K) [PATH]
 #                                                each mutant's SIR after a line `# mutant K:
 #                                                FILE:LINE:COL: WHAT`, for `sisu test --mutate` (R208)
+#   sisu1 sir --tests --cover [PATH]             the SIR and the table of the program's regions, for
+#                                                `sisu test --cover` (RULES.md, R216)
+#   sisu1 sir --tests --module-fixtures [PATH]   each test's fixtures on its line, a module's fixture
+#                                                a `ref T` parameter the runner gives (RULES.md, R219)
 #   sisu1 --version                              stage 1's version, `sisu1 VERSION` (RULES.md, R56)
 #   sisu1 test [OPTIONS] [PATH]                  the tests, built by stage 1 and run by stage 0's
 #                                                runner (`sisu test --from-sir`), exiting 1 when

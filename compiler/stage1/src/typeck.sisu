@@ -53,6 +53,7 @@ from stage1.typeck.generic_asserts import Assert, ConstCall, failures
 from stage1.typeck.instances import DeriveOrigin
 from stage1.typeck.program import (
     Answer,
+    Auto,
     DefKind,
     Embedded,
     FnInfo,
@@ -524,6 +525,7 @@ pub pure def check_file(
         True,
         features,
         False,
+        False,
     )
 
 ## The declarations of a program of one file, the root module, resolved
@@ -570,6 +572,7 @@ pub pure def check_program(
     tests: bool,
     features: list[Features],
     std_tests: bool,
+    module_fixtures: bool,
 ) -> Checked:
     var syntaxes: list[list[Diagnostic]] = []
     var parsed: list[Module] = []
@@ -586,7 +589,7 @@ pub pure def check_program(
             built = filtered
         # A test's fixtures, lowered into its body (17; RULES.md, R200).
         if tests:
-            if let Some(lowered) = fixtures.lower(built):
+            if let Some(lowered) = fixtures.lower(built, module_fixtures):
                 built = lowered
         parsed.push(built)
     # The instances of templates the program needs (08, "Reflection"):
@@ -985,7 +988,21 @@ pure def check_round(
         let real = len(f.params) == 1 and is_system(prog, types, f.params[0].ty)
         var named: list[String] = []
         var bad: TextRange? = None
-        for p in f.params:
+        # A module's fixture the runner gives (RULES.md, R219).
+        var given: list[int] = []
+        if let Some(fs) = prog.test_fixtures.get(t):
+            for x in fs:
+                if x.module_scope:
+                    given.push(x.param)
+        for k in range(len(f.params)):
+            let p = ref f.params[k]
+            if given.contains(k):
+                continue
+            # A `@fixture` that takes something is `E0281` alone (RULES.md,
+            # R212).
+            if let Some(d) = prog.lookup_in(m, p.name):
+                if prog.refused_fixtures.contains(d):
+                    continue
             var fake: String? = None
             if let TyData.Adt(d, a) = types.data(p.ty):
                 if a.is_empty():
@@ -1006,6 +1023,22 @@ pure def check_round(
                 main.diags.push(d)
             elif let Some(at) = at_module.get(m):
                 files[at].diags.push(d.copy())
+    # A module's fixture is shared by its tests, which run at once, so what
+    # it returns is `Sync` (17, "Fixtures"; 06; RULES.md, R219).
+    for (d, named) in prog.module_fixtures:
+        let m = prog.defs[d.index].module
+        if not prog.user_modules.contains(m):
+            continue
+        let f = prog.fn_info(d) else:
+            continue
+        if prog.auto_trait(mut types, f.ret, Auto.Sync, []):
+            continue
+        var d0 = Diagnostic.new(Msg.TypeModuleFixtureSync, named.start, named.end)
+        d0 = d0.with("name", prog.defs[d.index].name).with("ty", prog.display(types, f.ret))
+        if m == root_id:
+            main.diags.push(d0)
+        elif let Some(at) = at_module.get(m):
+            files[at].diags.push(d0.copy())
     # Each `E0335` names the operation responsible for the impurity of the
     # function it is about (RULES.md, R90).
     main.diags = responsible(prog, main.diags, impure_of)

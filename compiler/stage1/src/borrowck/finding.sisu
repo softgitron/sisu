@@ -78,6 +78,7 @@ impl Finding:
     pub pure def is_ownership(self) -> bool:
         return match self.msg:
             case Msg.TypeImpureCall | Msg.TypeImpureValueCall | Msg.TypeImpureDrop | Msg.TypeReassignLet: False
+            case Msg.TypeNoAlloc: False
             case _: True
 
     pub pure def with(own self, name: str, value: str) -> Finding:

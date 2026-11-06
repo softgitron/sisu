@@ -33,6 +33,7 @@ from stage1.sir import (
     Const,
     Entry,
     FieldDecl,
+    FixtureUse,
     Function,
     ImplDecl,
     ImplTarget,
@@ -347,6 +348,7 @@ pub pure def lower(
             )
     var tests: list[(String, String)] = []
     var test_tags: list[list[String]] = []
+    var test_fixtures: list[list[FixtureUse]] = []
     var any_system = False
     for d in prog.tests:
         let f = prog.fn_info(d) else:
@@ -359,11 +361,37 @@ pub pure def lower(
             if let Some(found) = prog.test_tags.get(d):
                 tags = found.copy()
             test_tags.push(tags)
+            # Its fixtures, each with the function that makes it (RULES.md,
+            # R219).
+            var uses: list[FixtureUse] = []
+            if let Some(found) = prog.test_fixtures.get(d):
+                let m = prog.defs[d.index].module
+                for x in found:
+                    var function = x.name.copy()
+                    if let Some(fd) = prog.lookup(m, x.name):
+                        function = ctx.fn_name(prog, types, fd)
+                    uses.push(
+                        FixtureUse(
+                            name=x.name.copy(),
+                            function=function,
+                            module_scope=x.module_scope,
+                            param=x.param,
+                        )
+                    )
+            test_fixtures.push(uses)
     # Each test's `@tag`s and the benchmarks, which `sisu test --from-sir`
     # and `sisu bench --from-sir` select and run (decision 285); the tags
     # end at the last tagged test.
     while not test_tags.is_empty() and test_tags[len(test_tags) - 1].is_empty():
         _ = test_tags.pop()
+    while not test_fixtures.is_empty() and test_fixtures[len(test_fixtures) - 1].is_empty():
+        _ = test_fixtures.pop()
+    # The functions marked `@no_alloc` (RULES.md, R215), with the names the
+    # program gives them, which the ownership checker's pass checks.
+    var no_alloc: list[(String, String)] = []
+    for (d, _) in prog.no_alloc:
+        if prog.fn_info(d).is_some():
+            no_alloc.push((ctx.fn_name(prog, types, d), prog.qualified_name(d)))
     var benches: list[(String, String)] = []
     for d in prog.benches:
         if let Some(f) = prog.fn_info(d):
@@ -479,6 +507,8 @@ pub pure def lower(
         functions=functions,
         tests=tests,
         test_tags=test_tags,
+        test_fixtures=test_fixtures,
+        no_alloc=no_alloc,
         benches=benches,
         trait_methods=trait_methods,
         impls=impls,

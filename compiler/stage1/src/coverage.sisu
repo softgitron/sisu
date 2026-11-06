@@ -1,0 +1,261 @@
+##! The regions of `sisu test --cover` (17, "Coverage and mutation": the
+##! uncovered regions "from the compiler's own instrumentation"; RULES.md,
+##! R216), the front end's half: each statement of the program's own
+##! functions and methods, and each branch, the body of an `if`'s branch or
+##! its `else`, of a loop, of a `match`'s arm, of a `defer`, `with` or
+##! `unsafe:`, as a span of its module's text, and the SIR statement that
+##! starts it, the first of the function's statements whose position lies
+##! inside the span. The runner counts the statements a test run executes
+##! and reports the regions whose first statement no test reached. The
+##! code a run does not execute as the program's is left out, as it is from
+##! the mutants: tests, benchmarks, fixtures, compile-time and `@cfg` code.
+
+from stage1.diag import Lines
+from stage1.syntax.ast import (
+    ArmBody,
+    Ast,
+    Block,
+    ExprId,
+    ExprKind,
+    FnDef,
+    ItemId,
+    ItemKind,
+    Module,
+    StmtId,
+    StmtKind,
+)
+
+## A region: the bytes `start..end` of its module's text, and whether it is
+## a statement or a branch.
+@derive(Eq, Debug)
+pub struct Region:
+    pub start: int
+    pub end: int
+    pub branch: bool
+
+## A statement of SIR as its text gives it: its function, block and place
+## in the block (the terminator after the statements), and where it is.
+@derive(Eq, Debug)
+pub struct SirPlace:
+    pub function: String
+    pub source: int
+    pub block: int
+    pub index: int
+    pub line: int
+    pub col: int
+
+## The regions of a module, in the order of their places.
+pub pure def regions(module: Module) -> list[Region]:
+    var out: list[Region] = []
+    for it in module.items:
+        item_regions(module.ast, it, mut out)
+    out.sort_by((a, b) -> if a.start != b.start: a.start.cmp(b.start) else: b.end.cmp(a.end))
+    return out
+
+pure def item_regions(ast: Ast, it: ItemId, mut out: list[Region]):
+    match ast.item(it).kind:
+        case ItemKind.Fn(f):
+            fn_regions(ast, f, mut out)
+        case ItemKind.Struct(s):
+            for m in s.methods:
+                fn_regions(ast, m, mut out)
+        case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+            for m in e.methods:
+                fn_regions(ast, m, mut out)
+        case ItemKind.Impl(i):
+            for m in i.methods:
+                fn_regions(ast, m, mut out)
+        case ItemKind.Trait(t):
+            for m in t.methods:
+                fn_regions(ast, m, mut out)
+        case _:
+            pass
+
+pure def fn_regions(ast: Ast, f: FnDef, mut out: list[Region]):
+    if f.is_comptime:
+        return
+    for a in f.attrs:
+        if a.name == "fixture" or a.name == "cfg":
+            return
+    let Some(body) = ref f.body else:
+        return
+    block_regions(ast, body, mut out)
+
+pure def block_regions(ast: Ast, b: Block, mut out: list[Region]):
+    for s in b.stmts:
+        stmt_regions(ast, s, mut out)
+
+pure def branch(ast: Ast, b: Block, mut out: list[Region]):
+    # From its first statement, not the line break before it.
+    var start = b.range.start
+    if let Some(first) = b.stmts.first():
+        start = ast.stmt(first).range.start
+    out.push(Region(start=start, end=b.range.end, branch=True))
+    block_regions(ast, b, mut out)
+
+pure def stmt_regions(ast: Ast, s: StmtId, mut out: list[Region]):
+    let node = ast.stmt(s)
+    match node.kind:
+        case StmtKind.Item(_) | StmtKind.Comptime(_) | StmtKind.Contract(_) | StmtKind.Error:
+            return
+        case _:
+            pass
+    out.push(Region(start=node.range.start, end=node.range.end, branch=False))
+    match node.kind:
+        case StmtKind.If(branches, else_block):
+            for (_, body) in branches:
+                branch(ast, body, mut out)
+            if let Some(e) = else_block:
+                branch(ast, e, mut out)
+        case StmtKind.While(_, body):
+            branch(ast, body, mut out)
+        case StmtKind.For(_, _, _, body):
+            branch(ast, body, mut out)
+        case StmtKind.Defer(body) | StmtKind.Unsafe(body):
+            branch(ast, body, mut out)
+        case StmtKind.With(_, _, body):
+            branch(ast, body, mut out)
+        case StmtKind.Expr(e):
+            match_arms(ast, e, mut out)
+        case _:
+            pass
+
+## The arms of a `match` that stands as a statement, each a branch.
+pure def match_arms(ast: Ast, e: ExprId, mut out: list[Region]):
+    let ExprKind.Match(_, arms) = ast.expr(e).kind.copy() else:
+        return
+    for a in arms:
+        if a.generated.is_some():
+            continue
+        match a.body:
+            case ArmBody.Block(b):
+                branch(ast, b, mut out)
+            case ArmBody.Expr(x):
+                let r = ast.expr(x).range
+                out.push(Region(start=r.start, end=r.end, branch=True))
+
+## The sources of a program's SIR text (`source K "NAME"`) and its
+## statements with a position, in the order written.
+pub pure def sir_places(sir: str) -> (list[String], list[SirPlace]):
+    var sources: list[String] = []
+    var places: list[SirPlace] = []
+    var function = String.new()
+    var source = -1
+    var block = -1
+    var index = 0
+    for line in sir.split("\n"):
+        if line.starts_with("source "):
+            if let Some(q) = line.find("\""):
+                let name = line.byte_slice(q + 1, line.byte_len())
+                sources.push(name.strip_suffix("\"").to_string())
+            continue
+        if line.starts_with("fn "):
+            let rest = line.byte_slice(3, line.byte_len())
+            var cut = rest.byte_len()
+            if let Some(k) = rest.find("("):
+                cut = k
+            function = rest.byte_slice(0, cut).to_string()
+            source = -1
+            if let Some(k) = line.find(" source "):
+                let after = line.byte_slice(k + 8, line.byte_len())
+                var end = after.byte_len()
+                if let Some(sp) = after.find(" "):
+                    end = sp
+                source = after.byte_slice(0, end).parse_int() ?? -1
+            block = -1
+            continue
+        if line == "}}":
+            function = String.new()
+            continue
+        if function.is_empty():
+            continue
+        if line.starts_with("  bb"):
+            let rest = line.byte_slice(4, line.byte_len())
+            var end = 0
+            while end < rest.byte_len() and rest.byte_at(end) >= 48 and rest.byte_at(end) <= 57:
+                end += 1
+            block = rest.byte_slice(0, end).parse_int() ?? -1
+            index = 0
+            continue
+        if block < 0 or not line.starts_with("    "):
+            continue
+        if let Some(at) = last_at(line):
+            let span = line.byte_slice(at + 2, line.byte_len())
+            var start = span.to_string()
+            if let Some(dash) = span.find("-"):
+                start = span.byte_slice(0, dash).to_string()
+            let parts = start.split(":").collect()
+            if len(parts) == 2:
+                if let Some(l) = parts[0].parse_int():
+                    if let Some(c) = parts[1].parse_int():
+                        places.push(
+                            SirPlace(
+                                function=function.copy(),
+                                source=source,
+                                block=block,
+                                index=index,
+                                line=l,
+                                col=c,
+                            )
+                        )
+        index += 1
+    return (sources, places)
+
+## The table of a module's regions against the SIR's statements: a line
+## `# region FILE:LINE:COL-LINE:COL KIND FUNCTION bbB:S` for each, KIND
+## `statement` or `branch`, and the first statement of SIR inside it, its
+## function, block and place (the block's terminator after its
+## statements); `none` for a region that lowering wrote no statement of.
+pub pure def table(
+    text: str, module: Module, shown: str, source: int, places: list[SirPlace]
+) -> String:
+    let lines = Lines.of(text)
+    var out = String.new()
+    for r in regions(module):
+        # Without the line breaks and spaces it ends with.
+        var end = min(r.end, text.byte_len())
+        while end > r.start and is_space(text.byte_at(end - 1)):
+            end -= 1
+        let (sl, sc) = lines.line_col(text, r.start)
+        let (el, ec) = lines.line_col(text, end)
+        var first: SirPlace? = None
+        for p in places:
+            if p.source != source:
+                continue
+            if (p.line, p.col) < (sl, sc) or (p.line, p.col) >= (el, ec):
+                continue
+            if let Some(f) = ref first:
+                if (p.line, p.col) >= (f.line, f.col):
+                    continue
+            first = Some(p.copy())
+        # The block's first statement inside it, before the one that is
+        # written first: `return x` runs after the `x` it returns.
+        if let Some(f) = first.copy():
+            for p in places:
+                if p.function == f.function and p.block == f.block and p.index < f.index:
+                    if (p.line, p.col) >= (sl, sc) and (p.line, p.col) < (el, ec):
+                        if let Some(g) = ref first:
+                            if p.index < g.index:
+                                first = Some(p.copy())
+        var kind = "statement"
+        if r.branch:
+            kind = "branch"
+        out.push("# region {shown}:{lines.span(text, r.start, end)} {kind}")
+        match first:
+            case Some(p):
+                out.push(" {p.function} bb{p.block}:{p.index}\n")
+            case None:
+                out.push(" none\n")
+    return out
+
+## Where the last ` @` of a line of SIR is, which starts its position.
+pure def last_at(line: str) -> int?:
+    var k = line.byte_len() - 2
+    while k >= 0:
+        if line.byte_at(k) == 32 and line.byte_at(k + 1) == 64:
+            return Some(k)
+        k -= 1
+    return None
+
+pure def is_space(b: u8) -> bool:
+    return b == 32 or b == 10 or b == 13 or b == 9

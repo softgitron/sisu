@@ -5,8 +5,13 @@
 ##! error_set := '{' option (',' option)* '}' | option
 ##! option    := ref_type '?'*
 ##! ref_type  := 'ref' 'mut'? primary_type | primary_type
-##! primary_type := path generic_args? | 'Self' | 'pure'? '(' types? ')' ('->' type)?
-##!              | 'dyn' path | '{' option (',' option)* '}'
+##! primary_type := path_type | fn_type | tuple_type | '(' type ')' | 'dyn' primary_type
+##!              | 'ptr' 'mut' primary_type | 'impl' type ('for' type)?
+##!              | '{' option (',' option)* '}'
+##! path_type := (name | 'Self' | 'type') ('.' name)* generic_args?
+##! fn_type   := 'pure'? '(' (type_element (',' type_element)*)? ')' '->' type
+##! tuple_type := '(' ')' | '(' type_element ',' ')' | '(' type_element (',' type_element)+ ')'
+##! type_element := (name ':')? type
 ##! generic_args := '[' generic_arg (',' generic_arg)* ']'
 ##! generic_arg := const_expr | integer | type
 ##! ```

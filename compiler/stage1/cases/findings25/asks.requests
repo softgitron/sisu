@@ -1,0 +1,13 @@
+sir	--defer-borrow	defer_functions.sisu	--dir	cases/findings25
+build	--for-run	--emit-sir	--defer-borrow	defer_functions.sisu	--dir	cases/findings25
+build	--for-run	--emit-sir	--defer-borrow	defer_other.sisu	--dir	cases/findings22
+query	explain	explain_borrow.sisu	21	--ranges	--dir	cases/findings22
+query	explain	explain_borrow.sisu	14	--ranges	--dir	cases/findings22
+query	explain	explain_borrow.sisu	21	--dir	cases/findings22
+query	explain	explain_borrow.sisu	21	--rangez	--dir	cases/findings22
+check	test_params.sisu	--dir	cases/findings25
+check	no_alloc.sisu	--dir	cases/findings25
+check	fixture_sync.sisu	--dir	cases/findings25
+sir	--tests	--module-fixtures	module_fixtures.sisu	--dir	cases/findings25
+sir	--tests	--cover	cover.sisu	--dir	cases/findings25
+sir	--tests	module_fixtures.sisu	--dir	cases/findings25

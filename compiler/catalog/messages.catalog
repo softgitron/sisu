@@ -245,6 +245,15 @@ E0280 error   resolve.plain-padding-end   `{ty}` cannot derive `Plain`: C's layo
 # Stage 1's (RULES.md, R200; 17, "Fixtures"): a test names a fixture as a
 # parameter and receives what it returns.
 E0281 error   type.fixture-signature      `{name}` is a `@fixture`, which a test names as a parameter to receive what it returns, so it is a free function that takes nothing
+# Stage 1's (RULES.md, R215; 04, "Resource attributes"; D-059): a function
+# that says it allocates nothing does nothing that allocates, nor does any
+# function it calls, through the call graph of the program's SIR.
+E0282 error   type.no-alloc               `{name}` is `@no_alloc`, but {what} may allocate
+-     note    type.no-alloc-through       `{callee}` {how}, at {at}
+-     note    type.no-alloc-unknown       which function it calls is known only when it runs, so it may be one that allocates
+# Stage 1's (RULES.md, R219; 17, "Fixtures"): a module's fixture is made once
+# and shared by the module's tests, which run at once.
+E0283 error   type.module-fixture-sync    `{name}` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `{ty}` is not
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -323,7 +332,8 @@ E0376 error   type.positional-after-keyword  a positional argument cannot follow
 # E0377 is retired: a call that leaves out a parameter without a default
 # is E0308, with the fix that passes a hole.
 E0378 error   type.main-signature         `main` must take nothing or one `System` parameter, and return nothing or `! E`
-E0702 error   type.test-signature         a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`)
+# A test may also name its module's fixtures (stage 1's RULES.md, R212).
+E0702 error   type.test-signature         a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`), or the values of its module's `@fixture` functions, each named after its fixture (`test "name"(schema: Schema):`)
 E0379 error   type.assert-message         the message of `assert` must be a string
 E0380 error   type.no-display             `{ty}` has no text rendering for `{spec}`
 E0381 error   type.return-in-test         a test returns nothing
