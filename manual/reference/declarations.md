@@ -296,12 +296,24 @@ A constant that fails stops the program at the check, before it runs:
 
 <!-- file: examples/reference-declarations/const_checked.sisu -->
 ```sisu
-PLACEHOLDER
+# A constant is computed when the program is checked, so one that
+# fails stops `sisu check`.
+const BENCHES: list[int] = [4, 9, 2]
+const TOP: int = BENCHES[3]
+
+def main():
+    print("{len(BENCHES)} benches, the top one {TOP}")
 ```
 
 <!-- output: examples/reference-declarations/const_checked.console -->
 ```console
-PLACEHOLDER
+$ sisu check const_checked.sisu
+error[E0602]: the compile-time evaluation of this expression panicked: index out of bounds: the length is 3 but the index is 3
+  --> const_checked.sisu:4:7
+  |
+4 | const TOP: int = BENCHES[3]
+  |       ^^^
+
 ```
 
 **Stage 0 differs.** Stage 0 computes each constant twice: once at the

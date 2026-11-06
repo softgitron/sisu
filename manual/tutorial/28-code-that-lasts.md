@@ -337,12 +337,48 @@ writes the file:
 
 <!-- file: examples/28-code-that-lasts/inlined.sisu -->
 ```sisu
-PLACEHOLDER
+# A deprecated name whose calls `sisu fix` can rewrite.
+
+## Degrees Celsius of `fahrenheit` degrees.
+pub def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`, which each call can be rewritten to.
+@deprecated("use `celsius_of`, which this calls")
+@fix_inline
+pub def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    let sauna = 176.0
+    print(to_celsius(212.0))
+    print(to_celsius(sauna))
 ```
 
 <!-- output: examples/28-code-that-lasts/inlined.console -->
 ```console
-PLACEHOLDER
+$ sisu check inlined.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> inlined.sisu:15:11
+   |
+15 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+  = fix: write what `to_celsius` returns in the call's place: `celsius_of(212.0)`
+
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> inlined.sisu:16:11
+   |
+16 |     print(to_celsius(sauna))
+   |           ^^^^^^^^^^^^^^^^^
+  = fix: write what `to_celsius` returns in the call's place: `celsius_of(sauna)`
+
+$ sisu fix inlined.sisu
+inlined.sisu:15:11: W0023 fixed: write what `to_celsius` returns in the call's place: `celsius_of(212.0)`
+inlined.sisu:16:11: W0023 fixed: write what `to_celsius` returns in the call's place: `celsius_of(sauna)`
+fixes applied to `inlined.sisu`: 2
+$ sisu run inlined.sisu
+100.0
+80.0
 ```
 
 `sisu fix FILE` applies the first fix of each diagnostic of the file,
@@ -570,7 +606,17 @@ of the types it names, and the tests that reach it:
 
 <!-- output: examples/28-code-that-lasts/holes.console -->
 ```console
-PLACEHOLDER
+$ sisu check --holes plan.sisu
+plan.sisu:16:12: the typed hole `todo("parse a slot")` of type `Slot?`, in `parse_slot`
+  in scope: `line: str`
+  nothing in scope is of its type
+  `Slot` is a struct of `name: String`, `start: int`, `minutes: int`
+  reached by the tests "a slot from text"
+plan.sisu:20:12: the typed hole `todo("keep the slots that fit")` of type `list[Slot]`, in `free_slots`
+  in scope: `text: str`
+  nothing in scope is of its type
+  `Slot` is a struct of `name: String`, `start: int`, `minutes: int`
+  reached by the tests "the slots that fit"
 ```
 
 Where a function has a contract, the report also gives its `requires`

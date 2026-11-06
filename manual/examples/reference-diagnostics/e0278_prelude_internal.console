@@ -4,5 +4,6 @@ error[E0278]: `days_in_month` is the prelude's own, for the standard library's c
   |
 3 |     print(days_in_month(2028, 2))
   |           ^^^^^^^^^^^^^
+  = fix: import it from `std.time`: `from std.time import days_in_month`
 
 error[D0006]: the program was not run: errors found (1)

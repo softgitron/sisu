@@ -565,7 +565,11 @@ it:
 
 <!-- output: examples/03-functions/holes.console -->
 ```console
-PLACEHOLDER
+$ sisu check --holes shipping.sisu
+shipping.sisu:5:12: the typed hole `todo("the price of a heavy parcel")` of type `f64`, in `shipping`
+  in scope: `weight_kg: f64`
+  of its type: `weight_kg`
+  no test reaches it
 ```
 
 ## Exercise 3.1: predict the calls

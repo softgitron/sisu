@@ -103,7 +103,20 @@ forms:
 ```console
 $ sisu eval services.sisu --to toml
 REGION = "eu-north"
-SERVICES = [{ name = "web", port = 8080, replicas = 3, tier = "Free" }, { name = "api", port = 9000, replicas = 1, tier = { Paid = { seats = 40 } } }]
+
+[[SERVICES]]
+name = "web"
+port = 8080
+replicas = 3
+tier = "Free"
+
+[[SERVICES]]
+name = "api"
+port = 9000
+replicas = 1
+
+[SERVICES.tier.Paid]
+seats = 40
 $ sisu eval services.sisu --to yaml
 REGION: "eu-north"
 SERVICES:
@@ -153,6 +166,15 @@ const BATCH: Service = Service(name="batch", replicas=replicas_for(0))
 <!-- output: examples/guide-config/refused.console -->
 ```console
 $ sisu check refused.sisu
+error[E0602]: the compile-time evaluation of this expression panicked: invariant of `Service` failed: self.replicas >= 1
+    self.replicas >= 1
+    │
+    0
+  --> refused.sisu:12:7
+   |
+12 | const BATCH: Service = Service(name="batch", replicas=replicas_for(0))
+   |       ^^^^^
+
 $ sisu eval refused.sisu
 error[E0602]: the compile-time evaluation of this expression panicked: invariant of `Service` failed: self.replicas >= 1
     self.replicas >= 1
@@ -191,14 +213,15 @@ const LIMITS: Limits = Limits(timeout=1.0 / 0.0, mirror=None)
 <!-- output: examples/guide-config/forms.console -->
 ```console
 $ sisu eval forms.sisu
-error[E0617]: `LIMITS` holds an infinite or not-a-number float, which JSON cannot write
+error[E0617]: `LIMITS.timeout` holds an infinite or not-a-number float, which JSON cannot write
   --> forms.sisu:7:7
   |
 7 | const LIMITS: Limits = Limits(timeout=1.0 / 0.0, mirror=None)
   |       ^^^^^^
 
 $ sisu eval forms.sisu --to toml
-LIMITS = { timeout = inf }
+[LIMITS]
+timeout = inf
 $ sisu eval forms.sisu --to yaml
 LIMITS:
   timeout: .inf

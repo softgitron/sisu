@@ -93,7 +93,7 @@ Without a file, a command works on the package of the current directory (`sisu.t
 
 commands:
   run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--from-sir FILE` runs a file of serialised SIR, natively with `--native`, and `--native --from-lir FILE` a file of LIR, stage 2's lowering of SIR)
-  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log)
+  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log, `--holes <file>` lists each typed hole of the program with the type its place needs and the bindings in scope that fit it)
   doc [<path>]           the documentation, a Markdown page per module, printed each after a line naming its file (`--output DIR` writes the pages into DIR instead, `--std [MODULE...]` documents the standard library, or the modules named, as `std.time`)
   build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR, `--native --from-lir` a file of LIR)
   test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed, `--native` compiles them and runs each natively, `--release` with the release profile)
@@ -113,6 +113,7 @@ commands:
   audit --caps [<file>...]  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more (without a file, of the package's program)
   audit --unsafe [--std] [<path>]  every `unsafe` block and function of a program by module, with its `# safety:` reason, and its package's level
   lint [<path>]          the lints beyond the compiler's warnings, with their fixes
+  fix <file>             apply the preferred fix of each diagnostic of the file, checking it again until none applies (`--dry-run` prints the edits and leaves the file, `--all` fixes the lints too), from stage 1
   eval <file>            the constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
@@ -980,12 +981,37 @@ report when the program has an error.
 
 <!-- file: examples/reference-sisu-command/holes.sisu -->
 ```sisu
-PLACEHOLDER
+# A hole with a contract around it, for `sisu check --holes`.
+struct Chore:
+    name: String
+    hours: int
+
+    def doubled(self) -> int:
+        return self.hours * 2
+
+## The hours to plan for `chore`, with a margin.
+def planned(chore: Chore) -> int:
+    requires chore.hours >= 0
+    ensures result >= chore.hours
+    return todo("add a margin")
+
+test "a margin is never negative":
+    assert planned(Chore("sauna", 2)) >= 2
 ```
 
 <!-- output: examples/reference-sisu-command/holes.console -->
 ```console
-PLACEHOLDER
+$ sisu check --holes holes.sisu
+holes.sisu:13:12: the typed hole `todo("add a margin")` of type `int`, in `planned`
+  in scope: `chore: ref Chore`
+  of its type: `chore.doubled()`, `chore.hours`
+  given: `chore.hours >= 0`
+  to keep: `result >= chore.hours`
+  reached by the tests "a margin is never negative", "contract of planned"
+$ sisu check --holes --format=json holes.sisu
+[
+  {"at": "holes.sisu:13:12", "name": "add a margin", "type": "int", "function": "planned", "scope": ["chore: ref Chore"], "fits": ["chore.doubled()", "chore.hours"], "types": [], "requires": ["chore.hours >= 0"], "ensures": ["result >= chore.hours"], "tests": ["a margin is never negative", "contract of planned"]}
+]
 ```
 
 A file that cannot be read is D0001, another option D0009, and no
@@ -1138,6 +1164,10 @@ SAUNA: "Kota"
 STOVE:
   kilowatts: 9
   wood: true
+$ sisu eval
+usage: sisu eval <file>
+
+the constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator
 ```
 
 **Stage 0 differs.** `sisu eval` is stage 1's, from `sisu1 0.14.0`,
@@ -1541,7 +1571,8 @@ test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
-4 passed, 0 failed, 0 blocked
+test "std.time/days_in_month (doc example)" ... ok
+5 passed, 0 failed, 0 blocked
 195 not selected
 ```
 
@@ -1996,12 +2027,35 @@ preferred fix is the cheapest to write, not always the one you want.
 
 <!-- file: examples/reference-sisu-command/tally.sisu -->
 ```sisu
-PLACEHOLDER
+# Three mistakes, each with a fix that `sisu fix` can apply.
+def add_turn(mut turns: list[String], name: String):
+    turns.push(name)
+
+def main():
+    var turns: list[String] = []
+    add_turn(turns, "Aino")
+    print("{len(turn)} in the sauna")
 ```
 
 <!-- output: examples/reference-sisu-command/fix.console -->
 ```console
-PLACEHOLDER
+$ sisu fix --dry-run tally.sisu
+tally.sisu:3:16: E0300 fixed: copy it: `.copy()`
+  3:20-3:20 ".copy()"
+tally.sisu:7:14: E0339 fixed: write `mut` before the argument: `mut `
+  7:14-7:14 "mut "
+tally.sisu:8:17: E0200 fixed: a similar name is in scope: `turns`
+  8:17-8:21 "turns"
+fixes that would be applied to `tally.sisu`: 3, and `--dry-run` leaves it as it is
+$ sisu fix tally.sisu
+tally.sisu:3:16: E0300 fixed: copy it: `.copy()`
+tally.sisu:7:14: E0339 fixed: write `mut` before the argument: `mut `
+tally.sisu:8:17: E0200 fixed: a similar name is in scope: `turns`
+fixes applied to `tally.sisu`: 3
+$ sisu run tally.sisu
+1 in the sauna
+$ sisu fix tally.sisu
+nothing in `tally.sisu` has a fix to apply
 ```
 
 The first fix copies `name` where `own name: String` would move it
@@ -2241,8 +2295,6 @@ shows; when one lands, the session changes, and so does this section.
 
 <!-- output: examples/reference-sisu-command/designed.console -->
 ```console
-$ sisu check --holes hello.sisu
-error[D0009]: unknown option `--holes` for `sisu check`
 $ sisu add json
 error[D0003]: unknown command `add`; run `sisu help`
 $ sisu remove json
@@ -2253,8 +2305,8 @@ $ sisu publish
 error[D0003]: unknown command `publish`; run `sisu help`
 $ sisu review main..HEAD
 error[D0003]: unknown command `review`; run `sisu help`
-$ sisu fix --edition 2030
-error[D0003]: unknown command `fix`; run `sisu help`
+$ sisu fix --edition 2030 hello.sisu
+error[D0009]: unknown option `--edition` for `sisu fix`
 $ sisu why send hello.sisu:3
 error[D0003]: unknown command `why`; run `sisu help`
 $ sisu fill hello.sisu

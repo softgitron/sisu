@@ -1233,6 +1233,7 @@ warning[W0023]: `old_levels` is deprecated: use `levels`
    |
 18 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
    |             ^^^^^^^^^^^^^
+  = fix: write what `old_levels` returns in the call's place: `levels(3)`
 
 [3, 6] 1.5
 ```
@@ -1393,12 +1394,61 @@ fixes:
 
 <!-- file: examples/reference-attributes/inline_body.sisu -->
 ```sisu
-PLACEHOLDER
+# `@fix_inline` rewrites the calls of a function whose body is a return.
+def scaled(n: int, by: int) -> int:
+    return n * by
+
+@deprecated("use `scaled`")
+@fix_inline
+def twice(n: int) -> int:
+    return scaled(n, 2)
+
+@deprecated("use `scaled`")
+@fix_inline
+def thrice(n: int) -> int:
+    let by = 3
+    return scaled(n, by)
+
+def main():
+    let turns = 4
+    print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
 ```
 
 <!-- output: examples/reference-attributes/inline_body.console -->
 ```console
-PLACEHOLDER
+$ sisu check inline_body.sisu
+warning[W0033]: `@fix_inline` rewrites a call of `thrice` with the expression it returns, so its body is one `return`, and its parameters take no `mut` or `own`: its calls warn without the rewrite
+  --> inline_body.sisu:11:2
+   |
+11 | @fix_inline
+   |  ^^^^^^^^^^
+
+warning[W0023]: `twice` is deprecated: use `scaled`
+  --> inline_body.sisu:18:13
+   |
+18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
+   |             ^^^^^^^^^^^^
+  = fix: write what `twice` returns in the call's place: `scaled(turns, 2)`
+
+warning[W0023]: `thrice` is deprecated: use `scaled`
+  --> inline_body.sisu:18:28
+   |
+18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
+   |                            ^^^^^^^^^^^^^
+
+warning[W0023]: `twice` is deprecated: use `scaled`
+  --> inline_body.sisu:18:44
+   |
+18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
+   |                                            ^^^^^^^^^^^^^^^^
+  = fix: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+
+$ sisu fix --dry-run inline_body.sisu
+inline_body.sisu:18:13: W0023 fixed: write what `twice` returns in the call's place: `scaled(turns, 2)`
+  18:13-18:25 "scaled(turns, 2)"
+inline_body.sisu:18:44: W0023 fixed: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+  18:44-18:60 "scaled((turns + 1), 2)"
+fixes that would be applied to `inline_body.sisu`: 2, and `--dry-run` leaves it as it is
 ```
 
 **Stage 0 differs.** D-067's `@fix_inline` moves a body of several

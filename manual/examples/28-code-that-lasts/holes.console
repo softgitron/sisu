@@ -1,1 +1,11 @@
 $ sisu check --holes plan.sisu
+plan.sisu:16:12: the typed hole `todo("parse a slot")` of type `Slot?`, in `parse_slot`
+  in scope: `line: str`
+  nothing in scope is of its type
+  `Slot` is a struct of `name: String`, `start: int`, `minutes: int`
+  reached by the tests "a slot from text"
+plan.sisu:20:12: the typed hole `todo("keep the slots that fit")` of type `list[Slot]`, in `free_slots`
+  in scope: `text: str`
+  nothing in scope is of its type
+  `Slot` is a struct of `name: String`, `start: int`, `minutes: int`
+  reached by the tests "the slots that fit"

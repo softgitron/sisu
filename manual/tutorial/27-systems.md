@@ -456,12 +456,38 @@ gap: E0279 (`resolve.plain-padding`) between two fields, and E0280
 
 <!-- file: examples/27-systems/plain_gap.sisu -->
 ```sisu
-PLACEHOLDER
+# A plain struct may not have padding, which C's layout would put in.
+from std.mem import Plain, size_of
+
+## A sensor's number, its reading and its flags, in that order.
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    sensor: u8
+    value: i32
+    flags: u8
+
+def main():
+    print("{size_of[Sample]()} bytes")
 ```
 
 <!-- output: examples/27-systems/plain_gap.console -->
 ```console
-PLACEHOLDER
+$ sisu check plain_gap.sisu
+error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 4, and a plain type has none (22)
+  --> plain_gap.sisu:6:9
+  |
+6 | @derive(Plain, Copy)
+  |         ^^^^^
+  = note: a field of its own there, `_pad1: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+
+error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `flags: u8`, at offsets 9 to 12, the end of the struct, and a plain type has none (22)
+  --> plain_gap.sisu:6:9
+  |
+6 | @derive(Plain, Copy)
+  |         ^^^^^
+  = note: a field of its own there, `_pad9: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+
 ```
 
 Each names the bytes and their offsets, from the first byte of the gap

@@ -14,4 +14,11 @@ $ sisu eval settings.sisu
 }
 $ sisu eval settings.sisu --to toml
 OPENS_AT = 16
-SAUNAS = [{ name = "Kota", degrees = 80 }, { name = "Savu", degrees = 75 }]
+
+[[SAUNAS]]
+name = "Kota"
+degrees = 80
+
+[[SAUNAS]]
+name = "Savu"
+degrees = 75

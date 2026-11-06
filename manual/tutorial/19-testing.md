@@ -571,12 +571,36 @@ refused, and the tests are run as usual:
 
 <!-- file: examples/19-testing/sorting_fixed.sisu -->
 ```sisu
-PLACEHOLDER
+# The sort with its bug fixed: an equal number is kept, not dropped.
+
+## The numbers of `xs`, smallest first.
+def sort_numbers(xs: Slice[int]) -> list[int]:
+    var out: list[int] = []
+    for x in xs:
+        var i = 0
+        while i < len(out) and out[i] < x:
+            i += 1
+        out.insert(i, x)
+    return out
+
+test "the numbers come out in order":
+    check(arbitrary[list[int]]) do xs:
+        let out = sort_numbers(xs)
+        return all([out[i] <= out[i + 1] for i in range(len(out) - 1)])
+
+test "every number is kept":
+    check(arbitrary[list[int]]) do xs:
+        return len(sort_numbers(xs)) == len(xs)
 ```
 
 <!-- output: examples/19-testing/sorting_fixed.console -->
 ```console
-PLACEHOLDER
+$ sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sorting_fixed.sisu
+error[D0033]: the token is for other code (content hash 9c5428daab4aad00); `sorting_fixed.sisu` has content hash 0b5213361e20538c
+$ sisu test sorting_fixed.sisu
+test "the numbers come out in order" ... ok
+test "every number is kept" ... ok
+2 passed, 0 failed, 0 blocked
 ```
 
 D0033 (`cli.token-other-code`) names the content hash the token was made for and the file's

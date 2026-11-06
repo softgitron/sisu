@@ -1,2 +1,6 @@
 $ sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sorting_fixed.sisu
+error[D0033]: the token is for other code (content hash 9c5428daab4aad00); `sorting_fixed.sisu` has content hash 0b5213361e20538c
 $ sisu test sorting_fixed.sisu
+test "the numbers come out in order" ... ok
+test "every number is kept" ... ok
+2 passed, 0 failed, 0 blocked

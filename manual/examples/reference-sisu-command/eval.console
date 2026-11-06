@@ -12,3 +12,6 @@ STOVE:
   kilowatts: 9
   wood: true
 $ sisu eval
+usage: sisu eval <file>
+
+the constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator

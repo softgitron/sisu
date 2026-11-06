@@ -1,2 +1,14 @@
 $ sisu check --holes schedule.sisu
+schedule.sisu:11:12: the typed hole `todo("read the turns")` of type `list[Turn]`, in `parse_turns`
+  in scope: `text: str`
+  nothing in scope is of its type
+  `Turn` is a struct of `name: String`, `hour: int`
+  reached by the tests "turns from text"
+schedule.sisu:15:12: the typed hole `todo("lay out the evening")` of type `list[String]`, in `schedule`
+  in scope: `turns: ref list[Turn]`
+  nothing in scope is of its type
+  reached by the tests "a free hour says so"
 $ sisu check --holes --format=json schedule_read.sisu
+[
+  {"at": "schedule_read.sisu:19:12", "name": "lay out the evening", "type": "list[String]", "function": "schedule", "scope": ["turns: ref list[Turn]"], "fits": [], "types": [], "requires": [], "ensures": [], "tests": ["a free hour says so"]}
+]

@@ -107,12 +107,27 @@ the caller: its trace goes on to the call that broke it.
 
 <!-- file: examples/reference-contracts/preconditions.sisu -->
 ```sisu
-PLACEHOLDER
+# Each clause of `requires` is checked on entry, in the order written.
+def per_bench(guests: int, benches: int) -> int:
+    requires benches > 0
+    requires guests >= 0
+    return (guests + benches - 1) // benches
+
+def main():
+    print(per_bench(7, 3))
+    print(per_bench(-1, 0))
 ```
 
 <!-- output: examples/reference-contracts/preconditions.console -->
 ```console
-PLACEHOLDER
+$ sisu run preconditions.sisu
+3
+panic: precondition of `per_bench` failed: benches > 0
+    benches > 0
+    │
+    0
+  at per_bench (preconditions.sisu:3:14)
+  at main (preconditions.sisu:9:11)
 ```
 
 Both clauses of the second call fail, and the first, `benches > 0`, is

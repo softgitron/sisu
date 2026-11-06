@@ -1,3 +1,22 @@
 $ sisu check inlined.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> inlined.sisu:15:11
+   |
+15 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+  = fix: write what `to_celsius` returns in the call's place: `celsius_of(212.0)`
+
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> inlined.sisu:16:11
+   |
+16 |     print(to_celsius(sauna))
+   |           ^^^^^^^^^^^^^^^^^
+  = fix: write what `to_celsius` returns in the call's place: `celsius_of(sauna)`
+
 $ sisu fix inlined.sisu
+inlined.sisu:15:11: W0023 fixed: write what `to_celsius` returns in the call's place: `celsius_of(212.0)`
+inlined.sisu:16:11: W0023 fixed: write what `to_celsius` returns in the call's place: `celsius_of(sauna)`
+fixes applied to `inlined.sisu`: 2
 $ sisu run inlined.sisu
+100.0
+80.0

@@ -1,1 +1,9 @@
 $ sisu run w0033_fix_inline_body_fixed.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`
+  --> w0033_fix_inline_body_fixed.sisu:14:11
+   |
+14 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+  = fix: write what `to_celsius` returns in the call's place: `celsius_of(212.0)`
+
+100.0

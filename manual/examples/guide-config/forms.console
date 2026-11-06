@@ -1,12 +1,13 @@
 $ sisu eval forms.sisu
-error[E0617]: `LIMITS` holds an infinite or not-a-number float, which JSON cannot write
+error[E0617]: `LIMITS.timeout` holds an infinite or not-a-number float, which JSON cannot write
   --> forms.sisu:7:7
   |
 7 | const LIMITS: Limits = Limits(timeout=1.0 / 0.0, mirror=None)
   |       ^^^^^^
 
 $ sisu eval forms.sisu --to toml
-LIMITS = { timeout = inf }
+[LIMITS]
+timeout = inf
 $ sisu eval forms.sisu --to yaml
 LIMITS:
   timeout: .inf

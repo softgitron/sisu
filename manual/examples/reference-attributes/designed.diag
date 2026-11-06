@@ -2,3 +2,4 @@
 3:2-3:10 W0030 resolve.unchecked-attribute name="no_block" what="that the function does not block"
 4:2-4:7 W0030 resolve.unchecked-attribute name="stack" what="the function's bound on its stack"
 18:13-18:26 W0023 type.deprecated name="old_levels" reason="use `levels`"
+  fix type.inline-call 18:13-18:26 "levels(3)"

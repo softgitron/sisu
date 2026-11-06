@@ -1,2 +1,11 @@
 $ sisu check --holes holes.sisu
+holes.sisu:13:12: the typed hole `todo("add a margin")` of type `int`, in `planned`
+  in scope: `chore: ref Chore`
+  of its type: `chore.doubled()`, `chore.hours`
+  given: `chore.hours >= 0`
+  to keep: `result >= chore.hours`
+  reached by the tests "a margin is never negative", "contract of planned"
 $ sisu check --holes --format=json holes.sisu
+[
+  {"at": "holes.sisu:13:12", "name": "add a margin", "type": "int", "function": "planned", "scope": ["chore: ref Chore"], "fits": ["chore.doubled()", "chore.hours"], "types": [], "requires": ["chore.hours >= 0"], "ensures": ["result >= chore.hours"], "tests": ["a margin is never negative", "contract of planned"]}
+]

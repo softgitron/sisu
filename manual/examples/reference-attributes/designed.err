@@ -21,4 +21,5 @@ warning[W0023]: `old_levels` is deprecated: use `levels`
    |
 18 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
    |             ^^^^^^^^^^^^^
+  = fix: write what `old_levels` returns in the call's place: `levels(3)`
 

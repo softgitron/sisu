@@ -1,2 +1,33 @@
 $ sisu check inline_body.sisu
+warning[W0033]: `@fix_inline` rewrites a call of `thrice` with the expression it returns, so its body is one `return`, and its parameters take no `mut` or `own`: its calls warn without the rewrite
+  --> inline_body.sisu:11:2
+   |
+11 | @fix_inline
+   |  ^^^^^^^^^^
+
+warning[W0023]: `twice` is deprecated: use `scaled`
+  --> inline_body.sisu:18:13
+   |
+18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
+   |             ^^^^^^^^^^^^
+  = fix: write what `twice` returns in the call's place: `scaled(turns, 2)`
+
+warning[W0023]: `thrice` is deprecated: use `scaled`
+  --> inline_body.sisu:18:28
+   |
+18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
+   |                            ^^^^^^^^^^^^^
+
+warning[W0023]: `twice` is deprecated: use `scaled`
+  --> inline_body.sisu:18:44
+   |
+18 |     print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")
+   |                                            ^^^^^^^^^^^^^^^^
+  = fix: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+
 $ sisu fix --dry-run inline_body.sisu
+inline_body.sisu:18:13: W0023 fixed: write what `twice` returns in the call's place: `scaled(turns, 2)`
+  18:13-18:25 "scaled(turns, 2)"
+inline_body.sisu:18:44: W0023 fixed: write what `twice` returns in the call's place: `scaled((turns + 1), 2)`
+  18:44-18:60 "scaled((turns + 1), 2)"
+fixes that would be applied to `inline_body.sisu`: 2, and `--dry-run` leaves it as it is

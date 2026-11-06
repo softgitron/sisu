@@ -3,4 +3,5 @@ warning[W0023]: `to_fahrenheit` is deprecated: use Temperature(celsius).fahrenhe
    |
 15 |     print(to_fahrenheit(80.0))
    |           ^^^^^^^^^^^^^^^^^^^
+  = fix: write what `to_fahrenheit` returns in the call's place: `Temperature(80.0).fahrenheit()`
 

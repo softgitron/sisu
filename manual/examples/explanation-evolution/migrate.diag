@@ -1,1 +1,2 @@
 15:11-15:30 W0023 type.deprecated name="to_fahrenheit" reason="use Temperature(celsius).fahrenheit()"
+  fix type.inline-call 15:11-15:30 "Temperature(80.0).fahrenheit()"

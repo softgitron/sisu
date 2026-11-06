@@ -1,1 +1,2 @@
 3:11-3:24 E0278 resolve.prelude-internal name="days_in_month"
+  fix resolve.import-from-std 2:1-2:1 "from std.time import days_in_month\n"

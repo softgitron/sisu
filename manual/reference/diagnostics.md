@@ -3836,6 +3836,7 @@ error[E0278]: `days_in_month` is the prelude's own, for the standard library's c
   |
 3 |     print(days_in_month(2028, 2))
   |           ^^^^^^^^^^^^^
+  = fix: import it from `std.time`: `from std.time import days_in_month`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -3848,7 +3849,11 @@ needs. Here the import is enough:
 
 <!-- file: examples/reference-diagnostics/e0278_prelude_internal_fixed.sisu -->
 ```sisu
-PLACEHOLDER
+# The program imports the function from the module that has it.
+from std.time import days_in_month
+
+def main():
+    print(days_in_month(2028, 2))
 ```
 
 <!-- output: examples/reference-diagnostics/e0278_prelude_internal_fixed.out -->
@@ -3874,12 +3879,30 @@ its first byte to the first byte after it:
 
 <!-- file: examples/reference-diagnostics/e0279_plain_padding.sisu -->
 ```sisu
-PLACEHOLDER
+# A plain struct whose fields C's layout leaves a gap between.
+from std.mem import Plain, size_of
+
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    sensor: u8
+    value: i32
+
+def main():
+    print("{size_of[Sample]()} bytes")
 ```
 
 <!-- output: examples/reference-diagnostics/e0279_plain_padding.console -->
 ```console
-PLACEHOLDER
+$ sisu run e0279_plain_padding.sisu
+error[E0279]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding between `sensor: u8` and `value: i32`, at offsets 1 to 4, and a plain type has none (22)
+  --> e0279_plain_padding.sisu:5:9
+  |
+5 | @derive(Plain, Copy)
+  |         ^^^^^
+  = note: a field of its own there, `_pad1: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+
+error[D0006]: the program was not run: errors found (1)
 ```
 
 The note gives two ways out. Ordering the fields from the widest leaves
@@ -3888,12 +3911,27 @@ word leave none at the end:
 
 <!-- file: examples/reference-diagnostics/e0279_plain_padding_fixed.sisu -->
 ```sisu
-PLACEHOLDER
+# The widest field first leaves C's layout no gap between the fields.
+from std.mem import Plain, read_plain, size_of
+
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Sample:
+    value: i32
+    sensor: u8
+    level: u8
+    flags: u16
+
+def main():
+    let data = b"\x2d\x00\x00\x00\x02\x07\x00\x00"
+    print("{size_of[Sample]()} bytes")
+    print("{read_plain[Sample](data, 0):?}")
 ```
 
 <!-- output: examples/reference-diagnostics/e0279_plain_padding_fixed.out -->
 ```text
-PLACEHOLDER
+8 bytes
+Sample(value=45, sensor=2, level=7, flags=0)
 ```
 
 Shown in [chapter 27](../tutorial/27-systems.md#data-laid-out-as-c-lays-it-out).
@@ -3910,12 +3948,30 @@ end, which an array of the struct repeats:
 
 <!-- file: examples/reference-diagnostics/e0280_plain_padding_end.sisu -->
 ```sisu
-PLACEHOLDER
+# A plain struct that C's layout pads at its end.
+from std.mem import Plain, size_of
+
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    value: i32
+    sensor: u8
+
+def main():
+    print("{size_of[Sample]()} bytes")
 ```
 
 <!-- output: examples/reference-diagnostics/e0280_plain_padding_end.console -->
 ```console
-PLACEHOLDER
+$ sisu run e0280_plain_padding_end.sisu
+error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `sensor: u8`, at offsets 5 to 8, the end of the struct, and a plain type has none (22)
+  --> e0280_plain_padding_end.sisu:5:9
+  |
+5 | @derive(Plain, Copy)
+  |         ^^^^^
+  = note: a field of its own there, `_pad5: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+
+error[D0006]: the program was not run: errors found (1)
 ```
 
 Give the bytes fields of their own, so that they are the struct's and
@@ -3925,12 +3981,27 @@ Give the bytes fields of their own, so that they are the struct's and
 
 <!-- file: examples/reference-diagnostics/e0280_plain_padding_end_fixed.sisu -->
 ```sisu
-PLACEHOLDER
+# Fields of its own make the bytes at the end the struct's.
+from std.mem import Plain, read_plain, size_of
+
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Sample:
+    value: i32
+    sensor: u8
+    _pad5: u8
+    _pad6: u16
+
+def main():
+    let data = b"\x2d\x00\x00\x00\x02\x00\x00\x00"
+    print("{size_of[Sample]()} bytes")
+    print("{read_plain[Sample](data, 0).sensor}")
 ```
 
 <!-- output: examples/reference-diagnostics/e0280_plain_padding_end_fixed.out -->
 ```text
-PLACEHOLDER
+8 bytes
+2
 ```
 
 Shown in [chapter 27](../tutorial/27-systems.md#data-laid-out-as-c-lays-it-out).
@@ -11247,12 +11318,39 @@ warns (W0023) without the fix:
 
 <!-- file: examples/reference-diagnostics/w0033_fix_inline_body.sisu -->
 ```sisu
-PLACEHOLDER
+# A `@fix_inline` function whose body is more than one `return`.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`")
+@fix_inline
+def to_celsius(fahrenheit: f64) -> f64:
+    let celsius = celsius_of(fahrenheit)
+    return celsius
+
+def main():
+    print(to_celsius(212.0))
 ```
 
 <!-- output: examples/reference-diagnostics/w0033_fix_inline_body.console -->
 ```console
-PLACEHOLDER
+$ sisu run w0033_fix_inline_body.sisu
+warning[W0033]: `@fix_inline` rewrites a call of `to_celsius` with the expression it returns, so its body is one `return`, and its parameters take no `mut` or `own`: its calls warn without the rewrite
+  --> w0033_fix_inline_body.sisu:9:2
+  |
+9 | @fix_inline
+  |  ^^^^^^^^^^
+
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`
+  --> w0033_fix_inline_body.sisu:15:11
+   |
+15 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+
+100.0
 ```
 
 Write the body as one `return`, and the call's warning gets its fix,
@@ -11260,12 +11358,33 @@ which `sisu fix` applies ([R16](sisu-command.md#sisu-fix)):
 
 <!-- file: examples/reference-diagnostics/w0033_fix_inline_body_fixed.sisu -->
 ```sisu
-PLACEHOLDER
+# The body is one `return`, which each call can be rewritten to.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`")
+@fix_inline
+def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    print(to_celsius(212.0))
 ```
 
 <!-- output: examples/reference-diagnostics/w0033_fix_inline_body_fixed.console -->
 ```console
-PLACEHOLDER
+$ sisu run w0033_fix_inline_body_fixed.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`
+  --> w0033_fix_inline_body_fixed.sisu:14:11
+   |
+14 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+  = fix: write what `to_celsius` returns in the call's place: `celsius_of(212.0)`
+
+100.0
 ```
 
 Shown in [chapter 28](../tutorial/28-code-that-lasts.md#letting-the-compiler-rewrite-the-callers).

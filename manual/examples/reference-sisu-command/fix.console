@@ -1,4 +1,17 @@
 $ sisu fix --dry-run tally.sisu
+tally.sisu:3:16: E0300 fixed: copy it: `.copy()`
+  3:20-3:20 ".copy()"
+tally.sisu:7:14: E0339 fixed: write `mut` before the argument: `mut `
+  7:14-7:14 "mut "
+tally.sisu:8:17: E0200 fixed: a similar name is in scope: `turns`
+  8:17-8:21 "turns"
+fixes that would be applied to `tally.sisu`: 3, and `--dry-run` leaves it as it is
 $ sisu fix tally.sisu
+tally.sisu:3:16: E0300 fixed: copy it: `.copy()`
+tally.sisu:7:14: E0339 fixed: write `mut` before the argument: `mut `
+tally.sisu:8:17: E0200 fixed: a similar name is in scope: `turns`
+fixes applied to `tally.sisu`: 3
 $ sisu run tally.sisu
+1 in the sauna
 $ sisu fix tally.sisu
+nothing in `tally.sisu` has a fix to apply

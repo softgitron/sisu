@@ -1,1 +1,8 @@
 $ sisu run preconditions.sisu
+3
+panic: precondition of `per_bench` failed: benches > 0
+    benches > 0
+    │
+    0
+  at per_bench (preconditions.sisu:3:14)
+  at main (preconditions.sisu:9:11)

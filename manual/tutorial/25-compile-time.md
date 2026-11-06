@@ -841,7 +841,14 @@ $ sisu eval settings.sisu
 }
 $ sisu eval settings.sisu --to toml
 OPENS_AT = 16
-SAUNAS = [{ name = "Kota", degrees = 80 }, { name = "Savu", degrees = 75 }]
+
+[[SAUNAS]]
+name = "Kota"
+degrees = 80
+
+[[SAUNAS]]
+name = "Savu"
+degrees = 75
 ```
 
 A struct becomes a mapping of its fields and a list a sequence; TOML

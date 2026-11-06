@@ -1,1 +1,9 @@
 $ sisu run e0280_plain_padding_end.sisu
+error[E0280]: `Sample` cannot derive `Plain`: C's layout leaves 3 bytes of padding after `sensor: u8`, at offsets 5 to 8, the end of the struct, and a plain type has none (22)
+  --> e0280_plain_padding_end.sisu:5:9
+  |
+5 | @derive(Plain, Copy)
+  |         ^^^^^
+  = note: a field of its own there, `_pad5: Array[u8, 3]`, makes those bytes the struct's, or the fields ordered from the widest leave none
+
+error[D0006]: the program was not run: errors found (1)
