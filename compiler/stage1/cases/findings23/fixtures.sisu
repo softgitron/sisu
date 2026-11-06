@@ -1,0 +1,38 @@
+# A test's fixtures (RULES.md, R200; 17, "Fixtures"): a `@fixture`
+# function that takes nothing is requested by a test that names it as a
+# parameter, set up before the test by a call of it and torn down after it
+# by its value's drop, beside the capabilities the test names.
+struct Schema:
+    fields: list[String]
+
+impl Schema:
+    def knows(self, name: str) -> bool:
+        return self.fields.contains(name.to_string())
+
+struct Scratch:
+    name: String
+
+impl Drop for Scratch:
+    def drop(mut self):
+        print("dropped {self.name}")
+
+@fixture(scope="module")
+def schema() -> Schema:
+    return Schema(fields=["id".to_string(), "name".to_string()])
+
+@fixture
+def scratch() -> Scratch:
+    print("set up scratch")
+    return Scratch(name="scratch".to_string())
+
+test "rejects unknown fields"(schema: Schema):
+    assert schema.knows("id")
+    assert not schema.knows("nope")
+
+test "a fixture and a capability"(fs: Fs, scratch: Scratch, schema: Schema):
+    assert fs.write_text(Path.new("{scratch.name}.txt"), "x").is_ok()
+    assert fs.read_to_string(Path.new("scratch.txt")).ok() == Some("x".to_string())
+    assert len(schema.fields) == 2
+
+def main():
+    print(len(schema().fields))

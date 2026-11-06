@@ -3,8 +3,9 @@
 ##! ```text
 ##! block     := NEWLINE INDENT stmt+ DEDENT
 ##! stmt      := let_stmt | return_stmt | 'break' | 'continue' | 'pass' | if_stmt
-##!              | while_stmt | for_stmt | assert_stmt | defer_stmt | with_stmt
-##!              | item | expr_stmt | assign_stmt
+##!              | while_stmt | for_stmt | assert_stmt | expect_stmt | defer_stmt
+##!              | with_stmt | unsafe_stmt | yield_stmt | select_stmt | comptime_stmt
+##!              | contract | item | expr_stmt | assign_stmt
 ##! let_stmt  := ('let' | 'var') patterns (':' type)? ('=' exprs let_else?)? NEWLINE
 ##! let_else  := 'else' ('as' name)? ':' (block | expr | return_stmt | 'break' | 'continue')
 ##! if_stmt   := 'if' cond ':' block ('elif' cond ':' block)* ('else' ':' block)?
@@ -12,6 +13,16 @@
 ##! while_stmt:= 'while' cond ':' block
 ##! for_stmt  := 'for' patterns 'in' ('mut' | 'own')? expr ':' block
 ##! assign_stmt := exprs ('=' | '+=' | ...) exprs NEWLINE
+##! return_stmt := 'return' exprs? NEWLINE
+##! assert_stmt := ('assert' | 'debug_assert') expr (',' expr)? NEWLINE
+##! expect_stmt := 'expect' expr (',' expr)? NEWLINE
+##! defer_stmt := 'defer' (':' block | stmt)
+##! with_stmt := 'with' expr ('as' name)? ':' block
+##! unsafe_stmt := 'unsafe' ':' block
+##! yield_stmt := 'yield' expr? NEWLINE
+##! select_stmt := 'select' ':' NEWLINE INDENT ('case' pattern '=' expr ':' block)+ DEDENT
+##! comptime_stmt := 'comptime' stmt
+##! contract  := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLINE
 ##! ```
 
 from stage1.diag import Diagnostic, Msg

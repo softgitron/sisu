@@ -1,0 +1,4 @@
+test "rejects unknown fields" ... ok
+test "a fixture and a capability" ... ok
+2 passed, 0 failed, 0 blocked
+--- stderr

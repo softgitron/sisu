@@ -1,0 +1,20 @@
+build	--emit-sir	lamp.sisu	--dir	cases/findings23
+build	--emit-sir	--release	--contracts	off	lamp.sisu	--dir	cases/findings23
+build	--native	--emit-sir	--output	bright	lamp.sisu	--dir	cases/findings23
+build	--native	--emit-sir	lamp_library.sisu	--dir	cases/findings23
+build	lamp_library.sisu	--dir	cases/findings23
+build	--release	lamp.sisu	--dir	cases/findings23
+build	--native	lamp.sisu	--dir	cases/findings23
+build	--emit-sir	--dir	cases/packages/served_build.pkg
+build	--native	--for-run	--emit-sir	--release	--dir	cases/packages/served_build.pkg
+check	--holes	--dir	cases/packages/served_build.pkg
+check	--holes	../packages/served_build.pkg	--dir	cases/findings23
+check	--holes	--format=json	../packages/served_build.pkg	--dir	cases/findings23
+check	--holes	lamp.sisu	lamp_library.sisu	--dir	cases/findings23
+fix	--dry-run	fix_left.sisu	--dir	cases/findings23
+fix	--dry-run	fix_inline_parens.sisu	--dir	cases/findings23
+query	values	../repl/values.ws.sisu	--dir	cases/findings23
+query	values	../repl/sheet.ws.sisu	--dir	cases/findings23
+query	values	../repl/wrong.ws.sisu	--dir	cases/findings23
+grammar	--dir	cases/findings23
+grammar	extra	--dir	cases/findings23

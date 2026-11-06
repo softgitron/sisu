@@ -1,0 +1,19 @@
+# The fields `E0279`'s and `E0280`'s note names (RULES.md, R198): numbers
+# at C's offsets, which leave no gap and are `Copy`, so the struct derives
+# both `Copy` and `Plain`.
+from std.mem import Plain
+
+@repr(c)
+@derive(Copy, Plain)
+struct Reading:
+    id: u8
+    _pad1: u8
+    _pad2: u16
+    value: i32
+    flag: u16
+    _pad10: u16
+
+def main():
+    let r = Reading(id=1, _pad1=0, _pad2=0, value=7, flag=2, _pad10=0)
+    let copied = r
+    print(copied.value + r.value)

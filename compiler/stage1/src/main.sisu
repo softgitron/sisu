@@ -151,7 +151,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.17.0"
+const VERSION: str = "0.18.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -656,17 +656,16 @@ def run_command(
                 continue
             words.push(given[k].copy())
             k += 1
-        let native = words.contains("--native")
+        # `--emit-sir`: the SIR the build would hand its backend, on standard
+        # output with the line that names the executable, rather than built
+        # (RULES.md, R170 and R195); `--native` is implied.
+        let emit_sir = words.contains("--emit-sir")
+        let native = words.contains("--native") or emit_sir
         let release = words.contains("--release")
         # `--for-run`: the build of `sisu run`, which a program's errors stop
         # with the line that says it was not run (`D0006`, `D0021`), where a
         # build says it was not compiled (`D0132`; RULES.md, R57).
         let for_run = words.contains("--for-run")
-        # `--emit-sir` with `--for-run`: the SIR the build would hand its
-        # backend, on standard output, rather than built (RULES.md, R170).
-        let emit_sir = for_run and words.contains("--emit-sir")
-        if words.contains("--emit-sir") and not for_run:
-            return Err(Usage(text=usage()))
         let flags = [
             "--native",
             "--release",
@@ -715,7 +714,7 @@ def run_command(
         let locked = words.contains("--locked")
         let accept = words.contains("--accept-unsafe")
         let how = BuildHow(
-            native=native or emit_sir,
+            native=native,
             release=release,
             for_run=for_run,
             emit_sir=emit_sir,
@@ -753,6 +752,17 @@ def run_command(
         # `eval FILE [--to json|toml|yaml]`: a configuration module's
         # constants, rendered (08; RULES.md, R165).
         return eval_command(sys, home, rest, catalog, mut o, served)
+    if command == "grammar":
+        # `grammar`: the parser's grammar from its modules' `##!` comments,
+        # in one order (RULES.md, R202).
+        if len(rest) != 1:
+            return Err(Usage(text=usage()))
+        var texts: list[(String, String)] = []
+        for m in GRAMMAR_MODULES:
+            let file = "{home}/stage1/src/parser/{m}.sisu"
+            texts.push(("parser/{m}.sisu", sys.fs.read_to_string(Path.new(file))?))
+        o.emit(grammar_text(texts), "")
+        return Ok(())
     if command == "fix":
         # `fix FILE [--dry-run] [--all]`: each diagnostic's preferred fix
         # applied to the file (10; RULES.md, R176).
@@ -3182,9 +3192,14 @@ def build_command(
             built.contracts = level ?? CONTRACTS_ALL
             let d = deferred_program(base, built, path, catalog, mut kept, False)
             let (sir, errs, status) = deferred_answer(d, catalog, True)
-            var shown = sir.copy()
-            if not d.entry:
-                shown = String.new()
+            var exe = output_for(
+                built.disk, built.package_name, built.build_root.copy(), how.release
+            )
+            if let Some(given) = output:
+                exe = given.copy()
+            var shown = String.new()
+            if d.entry and not sir.is_empty():
+                shown = "{EMITTED_EXECUTABLE}{exe}\n{sir}"
             o.emit(shown, errs)
             if status != 0:
                 return Err(Exit(status=status))
@@ -3197,6 +3212,16 @@ def build_command(
     if failed:
         return Err(Failed)
     return Ok(())
+
+## The line before each program's SIR in the answer of `build --emit-sir`
+## (RULES.md, R195): a comment of the SIR, which its readers pass by, naming
+## the executable the backend would make of it.
+pub const EMITTED_EXECUTABLE: str = "# executable "
+
+## What comes before the line of `build --emit-sir` for a program of a
+## build that links nothing (a library, without `main`): the line the
+## build prints, `built ...`, as a comment of the SIR (RULES.md, R195).
+pub const EMITTED_BUILT: str = "# "
 
 ## How `build` builds: natively (`--native`), in the release profile
 ## (`--release`), and for `sisu run` (`--for-run`).
@@ -3305,11 +3330,17 @@ def build_program(
             why.push("beyond the slice: {b}\n")
         o.emit("", why)
         return Ok(False)
-    if how.emit_sir:
-        # What the backend would be handed, and nothing for a program
-        # without `main`, which the driver says it cannot run (R170).
-        if done.entry:
-            o.emit(done.sir, "")
+    var exe = output_for(built.disk, built.package_name, built.build_root.copy(), release)
+    if let Some(given) = output:
+        exe = given.copy()
+    if how.emit_sir and done.entry:
+        # What the backend would be handed, after the line that names the
+        # executable it would make (RULES.md, R170 and R195).
+        o.emit("{EMITTED_EXECUTABLE}{exe}\n{done.sir}", "")
+        return Ok(True)
+    if how.emit_sir and how.for_run:
+        # Nothing for a program without `main`, which the driver says it
+        # cannot run (R170).
         return Ok(True)
     if not native or not done.entry:
         # The plain build: checked and lowered (a library has no `main` to
@@ -3325,11 +3356,13 @@ def build_program(
                 Param(name="modules".to_string(), value="{built.own_modules}"),
             ]
             line = catalog.render("cli.built", params)
+        # A build that emits its SIR names what it built without linking as
+        # a comment of the SIR (RULES.md, R195).
+        if how.emit_sir:
+            o.emit("{EMITTED_BUILT}{line}\n", "")
+            return Ok(True)
         o.emit("{line}\n", "")
         return Ok(True)
-    var exe = output_for(built.disk, built.package_name, built.build_root.copy(), release)
-    if let Some(o) = output:
-        exe = o.copy()
     # The backend makes the executable's directory before it links; here
     # the SIR is written into it first.
     _ = sys.fs.create_dir(Path.new(parent(exe)))
@@ -3467,8 +3500,9 @@ def repl_serve(sys: System, given_home: str, catalog_file: str, given: Catalog) 
         var dir = cwd.copy()
         var words: list[String] = []
         var misused = not served_command(command) or args.contains("--repl-serve")
-        # A build is served when it hands its SIR back (RULES.md, R170).
-        if command == "build" and args.contains("--emit-sir") and args.contains("--for-run"):
+        # A build is served when it hands its SIR back (RULES.md, R170 and
+        # R195), or when it calls no backend (one without `--native`).
+        if command == "build" and (args.contains("--emit-sir") or not args.contains("--native")):
             misused = args.contains("--repl-serve")
         var k = 0
         while k < len(args):
@@ -3559,7 +3593,7 @@ def serve_one(
 ## REPL's (RULES.md, R158).
 pure def served_command(command: str) -> bool:
     return match command:
-        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval" | "fix" | "explain-borrow" | "audit": True
+        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval" | "fix" | "explain-borrow" | "audit" | "grammar": True
         case _: False
 
 ## What the run time prints of an I/O error that stops `main`, without the
@@ -3797,6 +3831,7 @@ def query_command(
         return Err(Usage(text=usage()))
     let kind = words[0].copy()
     let whole = kind == "diagnostics"
+        or kind == "values"
         or kind == "symbols"
         or kind == "inlay"
         or kind == "format"
@@ -3819,6 +3854,11 @@ def query_command(
     let text = sys.fs.read_to_string(Path.new(given ?? file.copy()))?
     if kind == "symbols":
         o.emit(query.symbols(text, catalog), "")
+        return Ok(())
+    if kind == "values":
+        # A worksheet's inline values (RULES.md, R196).
+        var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
+        o.emit(sheet_values(sys, home, base, file, text, catalog)?, "")
         return Ok(())
     if explains:
         let line = words[2].parse_int() else:
@@ -3882,27 +3922,75 @@ def holes_command(
             o.emit("", catalog.plain_error("cli.unknown-option", params))
             return Err(Failed)
         paths.push(rest[k].copy())
-    if len(paths) != 1:
+    if len(paths) > 1:
         return Err(Usage(text=usage()))
-    let file = paths[0].copy()
-    let text = sys.fs.read_to_string(Path.new(file))?
+    # A package's directory, or without a path the working directory's
+    # package, reports the holes of each of its modules, a workspace's of
+    # each member's in turn (RULES.md, R195).
+    var given = String.new()
+    if let Some(p) = paths.first():
+        given = p.copy()
+    else:
+        let found = nearest_package(sys, "check", catalog, mut o) else:
+            return Err(Failed)
+        given = found
     var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
-    var env = base.environment()
-    let (input, at, _) = query_input(sys, home, file, text, mut env, catalog)?
-    let checked = check_input(base, input, catalog, True)
-    let typed = checked.typed else:
-        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o, None)
-    if checked.has_error:
-        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o, None)
+    var files: list[(String, bool)] = [(given.copy(), True)]
+    if package.is_dir(sys.fs, absolute(sys, given)):
+        files = []
+        for layout in layouts_of(sys, given, False, build_request(sys)) ?? []:
+            if let Some(first) = layout.modules.first():
+                files.push((first.disk.copy(), False))
+        if files.is_empty():
+            return check_with(
+                sys, home, given, False, build_request(sys), base, catalog, mut o, None
+            )
     var out = String.new()
     var objects: list[String] = []
+    for (file, as_given) in files:
+        let text = sys.fs.read_to_string(Path.new(file))?
+        var env = base.environment()
+        let (input, at, _) = query_input(sys, home, file, text, mut env, catalog)?
+        let checked = check_input(base, input, catalog, True)
+        let typed = checked.typed else:
+            return check_with(
+                sys, home, given, False, build_request(sys), base, catalog, mut o, None
+            )
+        if checked.has_error:
+            return check_with(
+                sys, home, given, False, build_request(sys), base, catalog, mut o, None
+            )
+        hole_lines(input, at, file, as_given, typed, json, catalog, mut out, mut objects)
+    if json:
+        if objects.is_empty():
+            out = "[]\n".to_string()
+        else:
+            out = "[\n  {objects.join(",\n  ")}\n]\n"
+    o.emit(out, "")
+    return Ok(())
+
+## The lines of `check --holes` (or with `json` its objects) for each typed
+## hole of the checked program of `input`, whose module `at` is `file`:
+## named `file` as given when `as_given`, else each module by its own file,
+## as `check` names a package's (RULES.md, R174, R181, R195).
+pure def hole_lines(
+    input: Input,
+    at: int,
+    file: str,
+    as_given: bool,
+    typed: typeck.Typed,
+    json: bool,
+    catalog: Catalog,
+    mut out: String,
+    mut objects: list[String],
+):
     for i in range(len(input.modules)):
         let m = query_module(typed.prog, input, i)
         if i > 0 and m == typed.prog.root:
             continue
         var name = input.modules[i].file.copy()
-        if i == at or name.is_empty():
-            name = file.copy()
+        if (as_given and i == at) or name.is_empty():
+            name = file.to_string()
         let mtext = input.modules[i].text.copy()
         let lines = Lines.of(mtext)
         for h in query.holes(typed, [m]):
@@ -3974,13 +4062,6 @@ def holes_command(
                     each.push(quote(t))
                 let ps = [Param(name="tests".to_string(), value=each.join(", "))]
                 out.push("  {catalog.render("cli.hole-tests", ps)}\n")
-    if json:
-        if objects.is_empty():
-            out = "[]\n".to_string()
-        else:
-            out = "[\n  {objects.join(",\n  ")}\n]\n"
-    o.emit(out, "")
-    return Ok(())
 
 ## `fix FILE [--dry-run] [--all]` (10: "apply compiler-suggested
 ## migrations"; RULES.md, R176): the preferred fix of each diagnostic
@@ -4021,6 +4102,9 @@ def fix_command(
     var out = String.new()
     var applied = 0
     var round = 0
+    # The errors of the text the fixes leave, when the last round checked it
+    # (RULES.md, R199).
+    var left: int? = None
     while round < FIX_ROUNDS:
         round += 1
         var env = base.environment()
@@ -4028,8 +4112,10 @@ def fix_command(
         var kept = Kept.new()
         let r = report_of(base, input, file, catalog, mut kept)
         let chosen = fixes_to_apply(r, at, all, text, catalog)
+        left = Some(r.errors(catalog))
         if chosen.is_empty():
             break
+        left = None
         let lines = Lines.of(text)
         var said = String.new()
         var edits: list[Edit] = []
@@ -4053,6 +4139,7 @@ def fix_command(
             let params = [Param(name="at".to_string(), value="{file}:{line}:{col}")]
             out.push(catalog.render("cli.fix-undone", params))
             out.push("\n")
+            left = None
             break
         out.push(said)
         applied += len(chosen)
@@ -4061,14 +4148,88 @@ def fix_command(
     let count = Param(name="count".to_string(), value="{applied}")
     let named = Param(name="file".to_string(), value=file.copy())
     if applied == 0:
-        out.push(catalog.render("cli.fix-none", [named]))
+        out.push(catalog.render("cli.fix-none", [named.copy()]))
     elif dry:
-        out.push(catalog.render("cli.fix-would", [count, named]))
+        out.push(catalog.render("cli.fix-would", [count, named.copy()]))
     else:
         sys.fs.write_text(Path.new(file), text)?
-        out.push(catalog.render("cli.fix-done", [count, named]))
+        out.push(catalog.render("cli.fix-done", [count, named.copy()]))
+    # The status says whether the program checks after the fixes (RULES.md,
+    # R199): 0 when no error is left, 1 when one is, which no fix applies
+    # to; the round stopped by an undoing fix or the last round checks the
+    # text once more.
+    var errors = 0
+    if let Some(n) = left:
+        errors = n
+    else:
+        var env = base.environment()
+        let (input, _, _) = query_input(sys, home, file, text, mut env, catalog)?
+        var kept = Kept.new()
+        errors = report_of(base, input, file, catalog, mut kept).errors(catalog)
+    if errors > 0:
+        let params = [named.copy(), Param(name="count".to_string(), value="{errors}")]
+        o.emit(out, catalog.plain_error("cli.fix-errors-left", params))
+        return Err(Exit(status=1))
     o.emit(out, "")
     return Ok(())
+
+## The parser's modules whose `##!` comments hold its grammar, in the order
+## `grammar` prints them (RULES.md, R202): from a file's declarations down to
+## its types.
+const GRAMMAR_MODULES: list[str] = ["items", "stmts", "exprs", "patterns", "types"]
+
+## The grammar of `texts` (each module's name and text): for each, a line
+## `-- TITLE (NAME)`, its first paragraph of `##!` lines without its last
+## stop, then the lines of its `##!` comments' ```` ```text ```` blocks, a
+## blank line between modules (RULES.md, R202).
+pure def grammar_text(texts: list[(String, String)]) -> String:
+    var out = String.new()
+    for (name, text) in texts:
+        var title = String.new()
+        var titled = False
+        var inside = False
+        var lines: list[String] = []
+        for line in text.split("\n"):
+            if not line.starts_with("##!"):
+                continue
+            var body = line.strip_prefix("##!")
+            if body.starts_with(" "):
+                body = body.strip_prefix(" ")
+            # The title is the comment's first paragraph.
+            if not titled:
+                if body.is_empty():
+                    titled = True
+                elif title.is_empty():
+                    title = body.to_string()
+                else:
+                    title = "{title} {body}"
+                continue
+            if body.starts_with("```"):
+                # A fence opens a block, ```` ```text ```` the grammar's, and
+                # the next closes it.
+                inside = not inside and body == "```text"
+                continue
+            if inside:
+                lines.push(body.to_string())
+        if lines.is_empty():
+            continue
+        if not out.is_empty():
+            out.push("\n")
+        let shown = title.strip_suffix(":").strip_suffix(".")
+        out.push("-- {shown} ({name})\n")
+        for l in lines:
+            out.push("{l}\n")
+    return out
+
+test "the grammar of the parser's comments":
+    let items = "##! Declarations.\n##!\n##! ```text\n##! file := item* EOF\n##! ```\n\nconst X: int = 1\n"
+    let types = "##! Types.\n##!\n##! ```text\n##! type := path\n##! ```\n##! `ref T?` is not a rule.\n"
+    let texts = [
+        ("parser/items.sisu".to_string(), items.to_string()),
+        ("parser/types.sisu".to_string(), types.to_string()),
+    ]
+    assert grammar_text(texts)
+        == "-- Declarations (parser/items.sisu)\nfile := item* EOF\n\n-- Types (parser/types.sisu)\ntype := path\n"
 
 ## How many times `fix` checks a file again after fixing it (RULES.md,
 ## R176): a fix that brings a diagnostic with a fix of its own is applied
@@ -4472,24 +4633,11 @@ def held_build(
     regions: list[session.Region],
 ) -> Built ! IoError:
     var kept = Kept.new()
-    var env = base.environment()
-    let layout = package.load_file_with(sys.fs, name, disk, text, build_request(sys))
-    var inputs: list[Input] = []
-    if len(layout.packages) == 1 and layout.problems.is_empty():
-        var input = file_input(sys, home, name, text, False, mut env, catalog)?
-        # The files `embed` names, beside where the program stands (RULES.md,
-        # R95).
-        input.embedded = embedded_files(sys, disk, None, text, catalog)
-        inputs.push(input)
-    else:
-        if layout.modules.is_empty():
-            return Ok(Built.Stopped(problems_report(layout, catalog)))
-        var held: dict[String, String] = {}
-        _ = held.insert(disk.to_string(), text.to_string())
-        inputs.push(held_layout_input(sys, home, layout, False, mut env, catalog, held)?)
-    var built = inputs[0].copy()
-    built.contracts = CONTRACTS_ALL
-    built.regions = regions.copy()
+    let (input, problems) = held_input(sys, home, base, name, disk, text, catalog, regions)?
+    if let Some(p) = problems:
+        return Ok(Built.Stopped(p.copy()))
+    let built = input else:
+        return Ok(Built.Refused(String.new()))
     let (r, sir) = report_with(base, built, name, catalog, mut kept, True, False)
     let front = r.front(catalog, None)
     if front.errors(catalog) > 0:
@@ -4506,6 +4654,38 @@ def held_build(
             why.push("beyond the slice: {b}\n")
         return Ok(Built.Refused(why))
     return Ok(Built.Sir(sir))
+
+## The program held in memory as `held_build` builds it, `text` named
+## `name` and standing at `disk`, as an input with every contract checked;
+## or the report of its manifests' problems when they leave it no module.
+def held_input(
+    sys: System,
+    home: str,
+    base: typeck.Base,
+    name: str,
+    disk: str,
+    text: str,
+    catalog: Catalog,
+    regions: list[session.Region],
+) -> (Input?, Report?) ! IoError:
+    var env = base.environment()
+    let layout = package.load_file_with(sys.fs, name, disk, text, build_request(sys))
+    if len(layout.packages) == 1 and layout.problems.is_empty():
+        var alone = file_input(sys, home, name, text, False, mut env, catalog)?
+        # The files `embed` names, beside where the program stands (RULES.md,
+        # R95).
+        alone.embedded = embedded_files(sys, disk, None, text, catalog)
+        alone.contracts = CONTRACTS_ALL
+        alone.regions = regions.copy()
+        return Ok((Some(alone), None))
+    if layout.modules.is_empty():
+        return Ok((None, Some(problems_report(layout, catalog))))
+    var held: dict[String, String] = {}
+    _ = held.insert(disk.to_string(), text.to_string())
+    var built = held_layout_input(sys, home, layout, False, mut env, catalog, held)?
+    built.contracts = CONTRACTS_ALL
+    built.regions = regions.copy()
+    return Ok((Some(built), None))
 
 ## `sir --repl SESSION INPUT --kept OUT [--load]` (RULES.md, R79): the
 ## program of a REPL session, SESSION's text (the session's program so far:
@@ -4653,16 +4833,35 @@ def worksheet_answer(
     # The worksheet named NAME, the file as given by default, standing in
     # DIR, the file's own directory by default (RULES.md, R95).
     let file = named ?? files[0].copy()
-    var sheet = source.copy()
+    var disk = absolute(sys, files[0])
+    if dir.is_some():
+        disk = standing(sys, dir, base_name(file))
+    let (stopped, instrumented) = instrumented_sheet(sys, home, base, file, disk, source, catalog)?
+    if let Some(a) = stopped:
+        return Ok(a.copy())
+    match held_build(sys, home, base, file, disk, instrumented, catalog, [])?:
+        case Sir(sir):
+            return Ok(Answer.done(sir))
+        case Stopped(r):
+            return Ok(Answer.failed(r.human(catalog)))
+        case Refused(why):
+            return Ok(Answer.failed(why))
+
+## The worksheet `source`, named `file` and standing at `disk`, with each
+## top-level statement marked and shown (`session.instrument`, RULES.md,
+## R79), or the answer of `sir --worksheet` when the worksheet as written
+## does not build: the diagnostics of the phase that stopped it, drawn in
+## the file as written.
+def instrumented_sheet(
+    sys: System, home: str, base: typeck.Base, file: str, disk: str, source: str, catalog: Catalog
+) -> (Answer?, String) ! IoError:
+    var sheet = source.to_string()
     var shift = 0
     var delta = 0
     if not source.starts_with("#!"):
         sheet = "{session.SHEBANG}{source}"
         shift = 1
         delta = session.SHEBANG.byte_len()
-    var disk = absolute(sys, files[0])
-    if dir.is_some():
-        disk = standing(sys, dir, base_name(file))
     match held_build(sys, home, base, file, disk, sheet, catalog, [])?:
         case Sir(_):
             pass
@@ -4682,21 +4881,101 @@ def worksheet_answer(
             var rest_report = r.copy()
             rest_report.diags = kept
             if rest_report.errors(catalog) > 0 or none_shown:
-                return Ok(
-                    Answer.failed(
-                        rebased(rest_report, delta, source.byte_len(), 0, file, source, catalog)
-                    )
+                let shown_report = rebased(
+                    rest_report, delta, source.byte_len(), 0, file, source, catalog
                 )
+                return Ok((Some(Answer.failed(shown_report)), String.new()))
         case Refused(why):
-            return Ok(Answer.failed(why))
-    let instrumented = session.instrument(sheet, shift, catalog)
-    match held_build(sys, home, base, file, disk, instrumented, catalog, [])?:
-        case Sir(sir):
-            return Ok(Answer.done(sir))
-        case Stopped(r):
-            return Ok(Answer.failed(r.human(catalog)))
-        case Refused(why):
-            return Ok(Answer.failed(why))
+            return Ok((Some(Answer.failed(why)), String.new()))
+    return Ok((None, session.instrument(sheet, shift, catalog)))
+
+## `query values FILE` (RULES.md, R196): the values and the output of each
+## top-level statement of the worksheet FILE, whose text is `text`, as
+## `sisu ws` and the language server's inline values show them, from the
+## program `sir --worksheet` writes, run by stage 1's evaluator: a line
+## `LINE\tvalue\tVALUE` for each value a statement shows and
+## `LINE\toutput\tTEXT` for each line it printed, by the line it ends on
+## in the file as written, then where the evaluator stopped, the line of
+## the statement it was running, `LINE\tstopped\tWHY` for what it does not
+## run (the world among it) or `LINE\tpanicked\tMESSAGE`; nothing for a
+## worksheet that does not build.
+def sheet_values(
+    sys: System, home: str, base: typeck.Base, file: str, text: str, catalog: Catalog
+) -> String ! IoError:
+    let disk = absolute(sys, file)
+    let (stopped, instrumented) = instrumented_sheet(sys, home, base, file, disk, text, catalog)?
+    if stopped.is_some():
+        return Ok(String.new())
+    let (input, report) = held_input(sys, home, base, file, disk, instrumented, catalog, [])?
+    let built = input else:
+        return Ok(String.new())
+    if report.is_some():
+        return Ok(String.new())
+    var kept = Kept.new()
+    let (_, done) = report_program(base, built, file, catalog, mut kept)
+    let checked = done else:
+        return Ok(String.new())
+    var program = checked.program.copy()
+    let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
+    holes.close(mut program, catalog.render("panic.hole-closure", [hole]))
+    let (printed, stop) = interp.run_sheet(program, SHEET_BUDGET, catalog)
+    return Ok(sheet_lines(printed, stop))
+
+## The steps a worksheet's run by the evaluator may take (RULES.md, R196),
+## a hundred times a `comptime` expression's.
+const SHEET_BUDGET: int = 100000000
+
+## The lines of `query values` of what a worksheet's run printed, with the
+## markers `__ws_at` and `__ws_show` write (`session.WS_HELPERS`), and why
+## it stopped (RULES.md, R196).
+pure def sheet_lines(printed: str, stop: interp.Stop?) -> String:
+    var out = String.new()
+    var current = 0
+    for l in printed.split("\n"):
+        if l.starts_with("\u{1}"):
+            current = l.strip_prefix("\u{1}").trim().parse_int() ?? 0
+            continue
+        if l.starts_with("\u{2}"):
+            let rest = l.strip_prefix("\u{2}")
+            var cut = rest.byte_len()
+            if let Some(at) = rest.find(" "):
+                cut = at
+            let n = rest.byte_slice(0, cut).parse_int() ?? 0
+            var v = String.new()
+            if cut < rest.byte_len():
+                v = rest.byte_slice(cut + 1, rest.byte_len()).to_string()
+            out.push("{n}\tvalue\t{query.field(v)}\n")
+            continue
+        out.push("{current}\toutput\t{query.field(l)}\n")
+    # The text ends with a line break, whose empty last line is no output.
+    if printed.is_empty() or printed.ends_with("\n"):
+        let tail = "{current}\toutput\t\n"
+        if out.ends_with(tail):
+            out = out.byte_slice(0, out.byte_len() - tail.byte_len()).to_string()
+    let Some(why) = stop else:
+        return out
+    match why:
+        case interp.Stop.Panicked(m) | interp.Stop.Hole(m):
+            out.push("{current}\tpanicked\t{query.field(m)}\n")
+        case interp.Stop.Refinement(ty, value, predicate):
+            out.push(
+                "{current}\tpanicked\t{query.field("`{value}` is not a `{ty}`: `{predicate}`")}\n"
+            )
+        case interp.Stop.Budget:
+            out.push("{current}\tstopped\t{query.field("its budget of {SHEET_BUDGET} steps")}\n")
+        case interp.Stop.World(what):
+            out.push("{current}\tstopped\t{query.field(what)}\n")
+        case interp.Stop.NotKept(what):
+            out.push("{current}\tstopped\t{query.field(what)}\n")
+        case interp.Stop.Beyond(what):
+            out.push("{current}\tstopped\t{query.field(what)}\n")
+    return out
+
+test "a worksheet's printed markers as the lines of `query values`":
+    let printed = "\u{1}1\n\u{1}2\n\u{2}2 16\nadded 3\n\u{1}5\n"
+    assert sheet_lines(printed, None) == "2\tvalue\t16\n2\toutput\tadded 3\n"
+    let stopped = sheet_lines("\u{1}4\n", Some(interp.Stop.World("the standard error")))
+    assert stopped == "4\tstopped\tthe standard error\n"
 
 ## Where a program held in memory stands on disk: `name`'s last part in
 ## `dir`, or `name` in the working directory without one (RULES.md, R95).

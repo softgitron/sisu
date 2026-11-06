@@ -28,8 +28,9 @@
 #                                                per item of tab-separated fields (RULES.md, R164, R169)
 #   sisu1 fix FILE [--dry-run] [--all]           each diagnostic's preferred fix (with `--all` each
 #                                                lint's) applied to FILE, checked again until none
-#                                                applies, with `sisu fix`'s status (RULES.md, R176)
-#   sisu1 check --holes [--format=json] FILE     each typed hole with its type, what fits it, the
+#                                                applies, with `sisu fix`'s status: 1 when errors
+#                                                without a fix are left (RULES.md, R176, R199)
+#   sisu1 check --holes [--format=json] [PATH]   each typed hole with its type, what fits it, the
 #                                                types it names, its contract and the tests that
 #                                                reach it (RULES.md, R174, R181)
 #   sisu1 eval FILE [--to json|toml|yaml]        a configuration module's `const` items, evaluated at
@@ -59,6 +60,13 @@
 #                                                ownership rules', status 3 when it defers one (R189)
 #   sisu1 sir --tests --std [PATH]               with the standard library's doc examples as tests,
 #                                                and `test --std` runs them (RULES.md, R185)
+#   sisu1 build --emit-sir [--release] [--contracts=LEVEL] [--output OUT] [PATH]
+#                                                the SIR the native build hands its backend, after
+#                                                a line `# executable PATH` naming what it would
+#                                                make, `--native` implied, served (RULES.md, R195)
+#   sisu1 query values FILE                      a worksheet's values and output by line, from
+#                                                stage 1's evaluator (RULES.md, R196)
+#   sisu1 grammar                                the parser's grammar, from its `##!` comments (R202)
 #   sisu1 --version                              stage 1's version, `sisu1 VERSION` (RULES.md, R56)
 #   sisu1 test [OPTIONS] [PATH]                  the tests, built by stage 1 and run by stage 0's
 #                                                runner (`sisu test --from-sir`), exiting 1 when

@@ -24,6 +24,7 @@ import stage1.typeck.call
 import stage1.typeck.contracts
 import stage1.typeck.expr
 import stage1.typeck.fix_inline
+import stage1.typeck.fixtures
 import stage1.typeck.instances
 import stage1.typeck.pat
 import stage1.typeck.tasks
@@ -580,11 +581,14 @@ pub pure def check_program(
         var package_features: Features? = None
         if m.package < len(features):
             package_features = Some(features[m.package].copy())
-        match cfg.filter(module, tests, package_features).module:
-            case Some(built):
-                parsed.push(built)
-            case None:
-                parsed.push(module)
+        var built = module
+        if let Some(filtered) = cfg.filter(built, tests, package_features).module:
+            built = filtered
+        # A test's fixtures, lowered into its body (17; RULES.md, R200).
+        if tests:
+            if let Some(lowered) = fixtures.lower(built):
+                built = lowered
+        parsed.push(built)
     # The instances of templates the program needs (08, "Reflection"):
     # check, declare what the check asked for, and check again, until it
     # asks for nothing new. An instance is declared after everything else,
@@ -2379,7 +2383,7 @@ impl Checker:
             if at.start < call.start or at.end > call.end or at.start >= at.end:
                 return None
             texts.push(cx.source.byte_slice(at.start, at.end).to_string())
-        return fix_inline.inlined(form, texts)
+        return fix_inline.placed(form, texts, cx.source, call.start, call.end)
 
     ## `W0023` (or `W0025`) for a use at `span` of a deprecated type or
     ## constant `d` (RULES.md, R40), but in its own declaration: the

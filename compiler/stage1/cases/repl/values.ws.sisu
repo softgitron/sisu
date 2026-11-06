@@ -1,0 +1,12 @@
+# A worksheet's inline values (RULES.md, R196): each statement's value and
+# what it printed, by the line it ends on, from stage 1's evaluator, which
+# marks where it stops: here at the first statement that uses the world.
+let prices = [3, 5, 8]
+var total = 0
+for p in prices:
+    total += p
+    print("added {p}")
+let label = if total > 10: "dear" else: "cheap"
+"{label}: {total}"
+print_err("to standard error")
+total + 1

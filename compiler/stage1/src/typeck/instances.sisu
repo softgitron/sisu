@@ -645,7 +645,7 @@ impl Resolver:
             if at > off:
                 var x = Diagnostic.new(Msg.ResolvePlainPadding, span.start, span.end)
                 x = x.with("ty", ty_name).with("bytes", "{at - off}").with("start", "{off}")
-                x = x.with("end", "{at}").with("before", before ?? String.new())
+                x = x.with("end", "{at - 1}").with("before", before ?? String.new())
                 x = x.with("after", shown)
                 x.notes.push(padding_note(off, at - off))
                 out.push(x)
@@ -657,7 +657,7 @@ impl Resolver:
             if let Some(last) = before:
                 var x = Diagnostic.new(Msg.ResolvePlainPaddingEnd, span.start, span.end)
                 x = x.with("ty", ty_name).with("bytes", "{size - off}").with("start", "{off}")
-                x = x.with("end", "{size}").with("before", last)
+                x = x.with("end", "{size - 1}").with("before", last)
                 x.notes.push(padding_note(off, size - off))
                 out.push(x)
         return out
@@ -1540,13 +1540,32 @@ pure def named_types(ast: Ast, f: FnDef) -> list[String]:
     return out
 
 ## The note of a gap of `count` bytes at `offset` of a plain struct
-## (RULES.md, R182): a field that holds them.
+## (RULES.md, R182, R198): the fields of numbers that hold them, which are
+## `Copy` and plain where an `Array[u8, N]` is not `Copy`.
 pure def padding_note(offset: int, count: int) -> Note:
-    let params = [
-        MsgParam(name="name".to_string(), value="_pad{offset}"),
-        MsgParam(name="count".to_string(), value="{count}"),
-    ]
+    let params = [MsgParam(name="fields".to_string(), value=padding_fields(offset, count))]
     return Note(msg=Msg.ResolvePlainPaddingFill, params=params)
+
+## The fields that fill `count` bytes from `offset` in C's layout, each the
+## widest unsigned number its offset's alignment allows and the bytes left
+## hold, named by its offset: `_pad1: u8, _pad2: u16` for bytes 1 to 3.
+pure def padding_fields(offset: int, count: int) -> String:
+    var fields: list[String] = []
+    var at = offset
+    let end = offset + count
+    while at < end:
+        var width = 8
+        while width > 1 and (at % width != 0 or at + width > end):
+            width = width // 2
+        fields.push("_pad{at}: u{width * 8}")
+        at += width
+    return fields.join(", ")
+
+test "the fields that fill a gap are numbers at their alignment":
+    assert padding_fields(1, 3) == "_pad1: u8, _pad2: u16"
+    assert padding_fields(10, 2) == "_pad10: u16"
+    assert padding_fields(1, 7) == "_pad1: u8, _pad2: u16, _pad4: u32"
+    assert padding_fields(3, 1) == "_pad3: u8"
 
 ## The enum a field's type holds, itself or as a list's or an option's
 ## element, which `json.from_json` has no form for (RULES.md, R193).

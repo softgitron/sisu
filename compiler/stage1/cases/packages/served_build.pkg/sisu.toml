@@ -1,0 +1,7 @@
+# RULES.md, R195: a package that `build --emit-sir` builds as the driver's
+# served `sisu build --native` and `sisu run --native` ask for it, its
+# executable named in the answer, and whose typed hole `check --holes` of
+# the package's directory reports, by its module's file.
+[package]
+name = "lamps"
+version = "0.1.0"

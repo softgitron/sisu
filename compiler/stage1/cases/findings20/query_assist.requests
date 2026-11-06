@@ -11,7 +11,7 @@ query	format	query_assist.sisu	--text	query_assist_broken.text	--dir	cases/findi
 query	rename	query_assist.sisu	20	9	--dir	cases/findings20
 query	holes	holes.sisu	--dir	cases/findings20
 check	--holes	holes.sisu	--dir	cases/findings20
-check	--holes	--dir	cases/findings20
+check	--holes	holes.sisu	slice_of_slice.sisu	--dir	cases/findings20
 build	--for-run	--emit-sir	slice_of_slice.sisu	--dir	cases/findings20
 build	--for-run	--emit-sir	prelude_internal.sisu	--dir	cases/findings20
 build	--emit-sir	slice_of_slice.sisu	--dir	cases/findings20

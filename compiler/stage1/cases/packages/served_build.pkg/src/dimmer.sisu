@@ -1,0 +1,13 @@
+##! `lamps.dimmer`: a lamp turned down.
+
+## A lamp, by the power it draws.
+pub struct Lamp:
+    pub watts: int
+
+## The lamp at a `step`th of its power.
+pub def dimmed(lamp: Lamp, step: int) -> Lamp:
+    return Lamp(watts=lamp.watts // step)
+
+## The lamp's colour at a power, still to be written.
+pub def colour(watts: int) -> str:
+    return todo("colour")

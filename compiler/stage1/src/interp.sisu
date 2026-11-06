@@ -177,6 +177,9 @@ struct Interp:
     fuel: int
     funcs: dict[String, int]
     catalog: Catalog
+    ## What a worksheet's run printed, which the run keeps (RULES.md,
+    ## R196); `None` at compile time, where printing is the world.
+    printed: String?
 
 @derive(Eq, Copy)
 enum State:
@@ -203,7 +206,7 @@ pub pure def evaluate(mut prog: Program, catalog: Catalog) -> Evaluated:
     for i in range(len(prog.functions)):
         if not funcs.contains(prog.functions[i].name.copy()):
             _ = funcs.insert(prog.functions[i].name.copy(), i)
-    var it = Interp(frames=[], fuel=0, funcs=funcs, catalog=catalog.copy())
+    var it = Interp(frames=[], fuel=0, funcs=funcs, catalog=catalog.copy(), printed=None)
     var state: dict[String, State] = {}
     for n in names:
         visit(mut prog, n, mut state, mut out, mut it)
@@ -356,8 +359,35 @@ pub pure def value_of(prog: Program, name: str, budget: int, catalog: Catalog) -
     for i in range(len(prog.functions)):
         if not funcs.contains(prog.functions[i].name.copy()):
             _ = funcs.insert(prog.functions[i].name.copy(), i)
-    var it = Interp(frames=[], fuel=budget, funcs=funcs, catalog=catalog.copy())
+    var it = Interp(frames=[], fuel=budget, funcs=funcs, catalog=catalog.copy(), printed=None)
     return Ok(Some(it.call(prog, at, [])?))
+
+## A worksheet's run by the evaluator (RULES.md, R196): the program's
+## `main` run with a budget of `budget` steps, its `System` a value nothing
+## can use, so that the first use of the world stops it; what it printed,
+## and why it stopped, when it did.
+pub pure def run_sheet(prog: Program, budget: int, catalog: Catalog) -> (String, Stop?):
+    var at = -1
+    for i in range(len(prog.functions)):
+        if prog.functions[i].name == "main" and at < 0:
+            at = i
+    if at < 0:
+        return (String.new(), Some(Stop.Beyond("a worksheet without its `main`")))
+    var funcs: dict[String, int] = {}
+    for i in range(len(prog.functions)):
+        if not funcs.contains(prog.functions[i].name.copy()):
+            _ = funcs.insert(prog.functions[i].name.copy(), i)
+    var it = Interp(
+        frames=[], fuel=budget, funcs=funcs, catalog=catalog.copy(), printed=Some(String.new())
+    )
+    var args: list[Value] = []
+    for _ in range(prog.functions[at].param_count):
+        args.push(Value.Unit)
+    let ran = it.call(prog, at, args)
+    let printed = it.printed ?? String.new()
+    return match ran:
+        case Ok(_): (printed, None)
+        case Err(stop): (printed, Some(stop.copy()))
 
 ## Declares an intrinsic the baked statements call, unless the program
 ## does: pure, borrowing and keeping nothing.
@@ -969,6 +999,14 @@ impl Interp:
             # Nothing reaches the world at compile time: the first use of it
             # is the error.
             case "print":
+                # A worksheet's run keeps what it prints (RULES.md, R196).
+                if let Some(p) = self.printed:
+                    let line = self.text(args, 0)?
+                    var kept = p.copy()
+                    kept.push(line)
+                    kept.push("\n")
+                    self.printed = Some(kept)
+                    return Ok(Value.Unit)
                 return Err(Stop.World("the standard output"))
             case "print_err" | "eprint":
                 return Err(Stop.World("the standard error"))

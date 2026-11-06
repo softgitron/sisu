@@ -14,6 +14,11 @@ pub struct InlineForm:
     ## Each use of a parameter, in the order of the text: its start and end
     ## in `text` and the parameter's index.
     pub uses: list[(int, int, int)]
+    ## Whether each use stands alone between delimiters, a whole argument,
+    ## element or index (after `(`, `[`, `{`, `,` or a keyword's `=`, before
+    ## `)`, `]`, `}` or `,`), where an argument needs no parentheses of its
+    ## own (RULES.md, R197).
+    pub delimited: list[bool]
     pub params: int
     ## Whether the text names nothing but its parameters (a member after
     ## `.` and a keyword argument's name are no names of a scope), so that
@@ -45,6 +50,7 @@ pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
             case _:
                 tokens.push((t.kind, t.start, t.end))
     var uses: list[(int, int, int)] = []
+    var delimited: list[bool] = []
     var alone = True
     var wrap = False
     var depth = 0
@@ -117,6 +123,14 @@ pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
                         found = Some(p)
                 if let Some(p) = found:
                     uses.push((start, end, p))
+                    let opens = i == 0
+                        or opening(before)
+                        or (
+                            before == SyntaxKind.Eq
+                                and i >= 2
+                                and tokens[i - 2].0 == SyntaxKind.Ident
+                        )
+                    delimited.push(opens and (i + 1 == len(tokens) or closing(after)))
                 else:
                     alone = False
                 continue
@@ -133,6 +147,7 @@ pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
         InlineForm(
             text=text.to_string(),
             uses=uses,
+            delimited=delimited,
             params=len(params),
             alone=alone,
             wrap=wrap,
@@ -165,17 +180,112 @@ pub pure def inlined(form: InlineForm, args: list[String]) -> String?:
             return None
     var out = String.new()
     var at = 0
-    for (start, end, p) in form.uses:
+    for k in range(len(form.uses)):
+        let (start, end, p) = form.uses[k]
         out.push(form.text.byte_slice(at, start))
-        if plain(args[p]) or primary(args[p]):
+        # Parentheses only where precedence needs them (RULES.md, R197): not
+        # for an argument that stands alone between delimiters, unless it is
+        # a generator, which a call's other arguments would take apart.
+        let alone = k < len(form.delimited) and form.delimited[k] and not generator(args[p])
+        if plain(args[p]) or primary(args[p]) or alone:
             out.push(args[p])
         else:
             out.push("({args[p]})")
         at = end
     out.push(form.text.byte_slice(at, form.text.byte_len()))
-    if form.wrap:
-        return Some("({out})")
     return Some(out)
+
+## The call's replacement as `inlined` writes it, in parentheses where the
+## form is more than a chain and the call does not stand alone between
+## delimiters in `source` (RULES.md, R177, R197).
+pub pure def placed(
+    form: InlineForm, args: list[String], source: str, start: int, end: int
+) -> String?:
+    let text = inlined(form, args)?
+    if not form.wrap or stands_alone(source, start, end):
+        return Some(text)
+    return Some("({text})")
+
+## Whether the expression from `start` to `end` of `source` stands alone:
+## after `(`, `[`, `{`, `,`, an assignment's or a keyword's `=`, `return`
+## or the start of its line, and before `)`, `]`, `}`, `,` or the end of
+## its line, so that the expression written there in its place needs no
+## parentheses.
+pub pure def stands_alone(source: str, start: int, end: int) -> bool:
+    var b = start - 1
+    while b >= 0 and (source.byte_at(b) == 32 or source.byte_at(b) == 9):
+        b -= 1
+    var opens = b < 0 or source.byte_at(b) == 10
+    if not opens:
+        let c = source.byte_at(b)
+        # `(`, `[`, `{` and `,`.
+        opens = c == 40 or c == 91 or c == 123 or c == 44
+        # `=` but not `==`, `!=`, `<=`, `>=` or an augmented assignment's.
+        if c == 61 and b > 0:
+            let p = source.byte_at(b - 1)
+            opens = p == 32 or (p >= 97 and p <= 122) or (p >= 65 and p <= 90) or p == 95
+            if p == 32 and b > 1:
+                let q = source.byte_at(b - 2)
+                opens = not (
+                    q == 61
+                        or q == 33
+                        or q == 60
+                        or q == 62
+                        or q == 43
+                        or q == 45
+                        or q == 42
+                        or q == 47
+                        or q == 37
+                        or q == 38
+                        or q == 124
+                        or q == 94
+                )
+        if c == 110 and b >= 5 and source.byte_slice(b - 5, b + 1) == "return":
+            opens = b == 5 or not word_byte(source.byte_at(b - 6))
+    if not opens:
+        return False
+    var a = end
+    while a < source.byte_len() and (source.byte_at(a) == 32 or source.byte_at(a) == 9):
+        a += 1
+    if a >= source.byte_len():
+        return True
+    let c = source.byte_at(a)
+    # `)`, `]`, `}`, `,`, a line break or a comment.
+    return c == 41 or c == 93 or c == 125 or c == 44 or c == 10 or c == 13 or c == 35
+
+## Whether a byte belongs to a name.
+pure def word_byte(c: int) -> bool:
+    return (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
+
+## Whether a token opens a place an expression fills whole.
+pure def opening(k: SyntaxKind) -> bool:
+    return match k:
+        case LParen | LBracket | LBrace | Comma: True
+        case _: False
+
+## Whether a token closes a place an expression fills whole.
+pure def closing(k: SyntaxKind) -> bool:
+    return match k:
+        case RParen | RBracket | RBrace | Comma: True
+        case _: False
+
+## Whether an argument's text is a generator, `x for x in xs` at its top
+## level, which keeps its parentheses wherever it goes.
+pure def generator(text: str) -> bool:
+    let lexed = lex(text)
+    var depth = 0
+    for t in lexed.tokens:
+        match t.kind:
+            case LParen | LBracket | LBrace:
+                depth += 1
+            case RParen | RBracket | RBrace:
+                depth -= 1
+            case ForKw:
+                if depth == 0:
+                    return True
+            case _:
+                pass
+    return False
 
 ## Whether an argument's text needs no parentheses in any place: a name,
 ## a literal or a chain of calls, members and indexes.
@@ -193,16 +303,22 @@ pub pure def plain(text: str) -> bool:
     let lexed = lex(text)
     if not lexed.diagnostics.is_empty():
         return False
+    var first = True
     for t in lexed.tokens:
         if t.kind.is_trivia():
             continue
+        let leading = first
+        first = False
         match t.kind:
             case Ident | Dot | IntNumber | FloatNumber | CharLit | SelfKw:
                 continue
             case StringStart | StringText | StringEnd | Newline | Eof | Indent | Dedent:
                 continue
             case Minus:
-                continue
+                # A negative number's sign, not a subtraction (RULES.md, R197).
+                if leading:
+                    continue
+                return False
             case _:
                 return False
     return True
@@ -211,7 +327,21 @@ test "the form of an expression and a call of it":
     let form = form_of("levels(gain) + gain", ["gain".to_string()]) ?? panic("no form")
     assert form.alone == False
     assert form.wrap
-    assert inlined(form, ["3".to_string()]) == Some("(levels(3) + 3)".to_string())
+    assert inlined(form, ["3".to_string()]) == Some("levels(3) + 3".to_string())
+    assert placed(form, ["3".to_string()], "print(f(3))", 6, 10)
+        == Some("levels(3) + 3".to_string())
+    assert placed(form, ["3".to_string()], "f(3) * 2", 0, 4) == Some("(levels(3) + 3)".to_string())
+    let call = form_of("celsius_of(f)", ["f".to_string()]) ?? panic("no form")
+    assert inlined(call, ["sauna + 4.0".to_string()]) == Some("celsius_of(sauna + 4.0)".to_string())
+    assert inlined(call, ["x for x in xs".to_string()])
+        == Some("celsius_of((x for x in xs))".to_string())
+    let scaled = form_of("f * 2", ["f".to_string()]) ?? panic("no form")
+    assert inlined(scaled, ["a + 1".to_string()]) == Some("(a + 1) * 2".to_string())
+    assert plain("-1") and not plain("half - 1")
+    assert stands_alone("let x = f(1)\n", 8, 12)
+    assert stands_alone("    return f(1)", 11, 15)
+    assert not stands_alone("x == f(1)", 5, 9)
+    assert not stands_alone("y = f(1) if c else 0", 4, 8)
     assert inlined(form, ["f(1)".to_string()]).is_none()
     let one = form_of("Temperature(celsius).fahrenheit()", ["celsius".to_string()]) ?? panic("no")
     assert not one.wrap
