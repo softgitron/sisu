@@ -1128,9 +1128,9 @@ D0126 cli     native.rt-build             building the runtime in Sisu from `{se
 # `--explore N` (decision 356): a seed whose run exits as the first's did
 # but prints other output differs from it too.
 D0127 cli     cli.explore-differs         schedule seed {seed} of {count} printed other output than seed {first}, with the same exit status {status}; `--schedule-seed {seed}` runs it again
-# A program's tests run from stage 1's SIR, its transcripts from the Rust
-# front end's, which writes the world of transcripts (decision 380).
-D0128 cli     cli.transcript-front-end    a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:\n{diagnostics}
+# D0128 is retired: a program's transcripts run from stage 1's SIR, whose
+# `sir --tests --transcripts` keeps their world (its R223, decision 1280),
+# and the Rust front end no longer builds the program for them.
 # What `sisu explain` and `sisu new` need, and the toolchain's version
 # (decision 386; the manual's findings R16).
 D0129 cli     cli.missing-code            `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch`
@@ -1234,3 +1234,11 @@ D0160 cli     cli.since-without-mutate    `--since REV` names the changed region
 D0161 cli     cli.cover-unreached         {at}: no test reaches this {kind}
 D0162 cli     cli.cover-summary           regions: {count}, {reached} reached by the tests and {unreached} not
 D0163 cli     cli.cover-alone             `--cover` counts the regions the tests reach in the interpreter; it does not combine with `{option}`
+# Stage 1's 0.21.0 forms relied on (its R221 and R223; decision 1280): a
+# stage 1 older than 0.21.0, which `SISU_STAGE1` may still name, says so
+# where the driver no longer builds around it.
+D0164 cli     cli.stage1-too-old          {what} needs stage 1's `sisu1 0.21.0` or later, and the stage 1 run is older
+# `--mutate --since REV` outside a git repository (decision 1283; the
+# manual's finding of its step 38): the reason `D0158` gives, in a line,
+# where git printed its whole usage.
+D0165 cli     cli.mutate-no-git           the working directory is not in a git repository

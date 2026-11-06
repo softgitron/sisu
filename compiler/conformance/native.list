@@ -258,6 +258,7 @@ testing/expect
 testing/explore_output
 testing/fakes
 testing/hole_in_task
+testing/json_events
 testing/named_capabilities
 testing/parallel
 testing/parametrised

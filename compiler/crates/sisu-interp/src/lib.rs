@@ -125,6 +125,17 @@ pub struct Options {
     /// as the new one (`sisu test --update`).
     pub snapshots: std::sync::Arc<std::collections::BTreeMap<String, String>>,
     pub update: bool,
+    /// A test of a module's fixtures run alone, as a replay token runs it
+    /// (decision 1284): of its fixtures, by their functions, those whose
+    /// making and those whose drop print what they print, as in the run
+    /// of every test, where the first test that reads a fixture shows its
+    /// making and the last its drop; the others are made and dropped
+    /// quietly. None shows every fixture's.
+    pub fixture_lines: Option<(Vec<String>, Vec<String>)>,
+    /// The failure database (17, "Property-based testing and fuzzing";
+    /// decision 1285): the choices of a test's last failing case, by the
+    /// test's function, which its `check` tries first, as a replay token's.
+    pub saved_cases: std::sync::Arc<std::collections::BTreeMap<String, Vec<i64>>>,
 }
 
 /// What `--stats` reports (18, Phases 5 and 6; 20, I-9).
@@ -710,8 +721,8 @@ impl<'p> Interp<'p, '_> {
     /// Drops `v`, of type `ty` when it is known, now, outside any frame's
     /// pending drops: what [`Interp::drop_next`] does, each part dropped
     /// with everything it owns before the next, a declared type's glue run
-    /// as a call of its own. A value that holds no declared type's value
-    /// (a `Shared`, a channel's end) is let go as its cell is.
+    /// as a call of its own; a `Shared` and the other values the runtime
+    /// keeps as a frame's drop lets them go (decision 1286).
     fn drop_now(&mut self, v: Value, ty: Option<sir::Type>) -> Result<(), Unwind> {
         let arg = |i: usize| match &ty {
             Some(sir::Type::Named(_, a)) => a.get(i).cloned(),
@@ -774,6 +785,44 @@ impl<'p> Interp<'p, '_> {
             Value::Dyn(d) => self.drop_now(d.value, Some(d.ty))?,
             Value::Entry(e) => self.drop_now(e.key, arg(0))?,
             Value::Cell(x) => self.drop_now(*x, arg(0))?,
+            // A `Shared` counts one owner fewer, and the last drops its
+            // value; a channel's end is closed, a mutex drops what it holds,
+            // an arena its slots, a function value its environment and a
+            // handle its count, as a frame's drop does them (decision 1286).
+            Value::Shared(id) => {
+                let Some(cell) = self.heap.get_mut(id as usize) else { return Ok(()) };
+                cell.strong = cell.strong.saturating_sub(1);
+                if cell.strong > 0 {
+                    return Ok(());
+                }
+                let v = std::mem::replace(&mut cell.value, Value::Moved);
+                let serial = cell.serial;
+                self.mon_heap_freed(serial, id);
+                self.drop_now(v, arg(0))?;
+            }
+            Value::Weak(id) => {
+                if let Some(cell) = self.heap.get_mut(id as usize) {
+                    cell.weak = cell.weak.saturating_sub(1);
+                }
+            }
+            Value::Mutex(m) => self.drop_now(m.value, arg(0))?,
+            Value::Arena(a) => {
+                let t = arg(0);
+                for (_, x) in a.slots {
+                    self.drop_now(x, t.clone())?;
+                }
+            }
+            v @ (Value::Sender(_) | Value::Receiver(_)) => self.drop_channel_end(&v),
+            Value::Closure(c) => {
+                let tys = self.env_types(&c);
+                let env = std::rc::Rc::try_unwrap(c).map(|c| c.env).unwrap_or_else(|c| c.env.clone());
+                for (i, x) in env.into_iter().enumerate().rev() {
+                    self.drop_now(x, tys.get(i).cloned())?;
+                }
+            }
+            Value::Cap(id) if !matches!(&ty, Some(sir::Type::Named(n, _)) if n == "Lent") => {
+                self.release_cap(id)
+            }
             _ => {}
         }
         Ok(())

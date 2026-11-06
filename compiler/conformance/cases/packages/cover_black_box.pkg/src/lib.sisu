@@ -1,0 +1,21 @@
+# `sisu test --cover` of a package with a black-box test file (decision
+# 1286): `triple` is reached only by `tests/triple.sisu`, which counts for
+# the package's report after the black-box file's tests, so only `label`'s
+# `else` is left unreached.
+pub def double(n: int) -> int:
+    return n * 2
+
+pub def triple(n: int) -> int:
+    return n * 3
+
+pub def label(n: int) -> str:
+    if n > 0:
+        return "positive"
+    else:
+        return "not positive"
+
+test "doubles":
+    expect double(4) == 8
+
+test "labels a positive number":
+    expect label(1) == "positive"

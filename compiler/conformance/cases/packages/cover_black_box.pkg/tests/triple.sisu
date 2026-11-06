@@ -1,0 +1,4 @@
+from sizes import triple
+
+test "triples":
+    expect triple(3) == 9

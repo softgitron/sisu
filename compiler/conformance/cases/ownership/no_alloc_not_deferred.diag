@@ -1,0 +1,2 @@
+6:14-6:33 E0282 type.no-alloc name="doubled" what="`list.new`"
+6:15-6:20 E0282 type.no-alloc name="doubled" what="`list.push`"

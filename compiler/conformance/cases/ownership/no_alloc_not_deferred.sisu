@@ -1,0 +1,10 @@
+# `@no_alloc`'s `E0282` is not an ownership rule's: a run stops at it with
+# `D0006`, and `--defer-borrow`, whose monitor observes the ownership rules
+# alone, refuses it as the plain run does (decision 1282).
+@no_alloc
+def doubled(xs: list[int]) -> list[int]:
+    let ys = [x * 2 for x in xs]
+    return ys
+
+def main():
+    print(doubled([1, 2]))

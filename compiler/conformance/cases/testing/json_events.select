@@ -1,0 +1,7 @@
+{"event":"start","test":"halves an even number"}
+{"event":"end","test":"halves an even number","result":"ok"}
+{"event":"start","test":"halves an odd number down"}
+{"event":"end","test":"halves an odd number down","result":"failed","message":"expectation failed: halve(7) == 4\n  left:  3\n  right: 4\n  at test \"halves an odd number down\" (json_events.sisu:14:5)","output":"halving 7\n","replay":"1-636b9d352b5f0278-0.0.1-t1-s0-r0"}
+{"event":"start","test":"waits on a hole"}
+{"event":"end","test":"waits on a hole","result":"blocked","hole":"the third case"}
+{"event":"summary","passed":1,"failed":1,"blocked":1}

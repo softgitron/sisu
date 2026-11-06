@@ -1,0 +1,10 @@
+tests of `sizes`:
+test "doubles" ... ok
+test "labels a positive number" ... ok
+2 passed, 0 failed, 0 blocked
+tests of `tests/triple.sisu`:
+test "triples" ... ok
+1 passed, 0 failed, 0 blocked
+src/lib.sisu:15:9: no test reaches this branch
+src/lib.sisu:15:9: no test reaches this statement
+regions: 7, 5 reached by the tests and 2 not

@@ -1,0 +1,10 @@
+test "small numbers stay small" ... FAILED
+test "a sum is a sum" ... ok
+
+test "small numbers stay small" ... FAILED
+panic: the property failed for 50 (case 1, shrunk 0 times)
+  the property returned False
+  at test "small numbers stay small" (failure_database.sisu:7:5)
+replay: sisu test --replay 1-c17b54a0e06ff5e1-0.0.1-t0-s0-r0-c6.99 failure_database.sisu
+
+1 passed, 1 failed, 0 blocked

@@ -250,6 +250,62 @@ pub fn write(path: &std::path::Path, entries: &BTreeMap<u64, Entry>) {
     let _ = std::fs::write(path, text);
 }
 
+/// The failure database (17, "Property-based testing and fuzzing": failing
+/// examples saved and replayed first; decision 1285): beside the test
+/// cache, the choices of each test's last failing case, by the test's name,
+/// one JSON object a line, `{"test": NAME, "choices": [..]}`; the choices a
+/// replay token carries (decision 461), which the test's `check` tries
+/// before its own cases.
+pub fn failures_beside(cache: &std::path::Path) -> std::path::PathBuf {
+    if cache.extension().is_some_and(|x| x == "test-cache") {
+        cache.with_extension("failures")
+    } else {
+        cache.with_file_name("failures")
+    }
+}
+
+/// The saved cases, by test name (none when there is no file, or it does
+/// not read).
+pub fn read_failures(path: &std::path::Path) -> BTreeMap<String, Vec<i64>> {
+    let mut out = BTreeMap::new();
+    for line in std::fs::read_to_string(path).unwrap_or_default().lines() {
+        let Ok(j) = crate::json::parse(line) else { continue };
+        let Some(name) = j.get("test").and_then(|t| t.as_str()) else { continue };
+        let Some(choices) = j.get("choices").and_then(|c| c.as_array()) else { continue };
+        let choices: Option<Vec<i64>> = choices
+            .iter()
+            .map(|c| match c {
+                crate::json::Json::Num(n) if n.fract() == 0.0 => Some(*n as i64),
+                _ => None,
+            })
+            .collect();
+        if let Some(choices) = choices {
+            out.insert(name.to_string(), choices);
+        }
+    }
+    out
+}
+
+/// Writes the saved cases, the file removed when none is left; a database
+/// that cannot be written is none, and nothing fails for it.
+pub fn write_failures(path: &std::path::Path, saved: &BTreeMap<String, Vec<i64>>) {
+    use crate::json::Json;
+    if saved.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let mut text = String::new();
+    for (name, choices) in saved {
+        let j = Json::obj(vec![
+            ("test", Json::str(name.clone())),
+            ("choices", Json::Arr(choices.iter().map(|c| Json::num(*c as f64)).collect())),
+        ]);
+        text.push_str(&j.write());
+        text.push('\n');
+    }
+    let _ = std::fs::write(path, text);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

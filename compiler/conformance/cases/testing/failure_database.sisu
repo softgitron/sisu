@@ -1,0 +1,12 @@
+# select --jobs 1
+# The failure database (17, "Property-based testing and fuzzing"; decision
+# 1285): the run finds the choices of the test's last failing case in
+# `failure_database.failures` beside the program and tries that case before
+# its own, so the property fails at its first case, not shrunk again.
+test "small numbers stay small":
+    check(arbitrary[int]) do n:
+        return n < 50
+
+test "a sum is a sum":
+    check(arbitrary[int]) do n:
+        return n + 0 == n

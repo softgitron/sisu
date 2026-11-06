@@ -151,6 +151,9 @@ fn run_one(
     function: &str,
 ) -> (TestResult, RunReport) {
     let mut i = Interp::new(prog, host, options);
+    if i.replay_case.is_none() {
+        i.replay_case = options.saved_cases.get(function).cloned();
+    }
     let r = i.run_test(function);
     let status = if matches!(r, TestResult::Passed) { exit::OK } else { exit::ERROR };
     let report = i.report(status);
@@ -193,7 +196,9 @@ fn run_group(
         for (f, param) in &fixtures[k] {
             let id = match made.iter().find(|(g, _)| *g == f.as_str()) {
                 Some(&(_, id)) => id,
-                None => match i.module_fixture(f) {
+                None => match quietly(&mut i, options.fixture_lines.as_ref().map(|l| &l.0), f, |i| {
+                    i.module_fixture(f)
+                }) {
                     Ok(id) => {
                         made.push((f.as_str(), id));
                         id
@@ -206,6 +211,9 @@ fn run_group(
             };
             given.push((*param, i.fixture_ref(id)));
         }
+        if options.replay_case.is_none() {
+            i.replay_case = options.saved_cases.get(&tests[k].1).cloned();
+        }
         let mut r = match failed {
             Some(r) => r,
             None => i.run_test_given(&tests[k].1, &given),
@@ -213,7 +221,10 @@ fn run_group(
         for (f, _) in last.iter().filter(|(_, at)| *at == pos) {
             let Some(at) = made.iter().position(|(g, _)| g == f) else { continue };
             let (function, id) = made.remove(at);
-            if let Some(m) = i.drop_fixture(id, function)
+            let dropped = quietly(&mut i, options.fixture_lines.as_ref().map(|l| &l.1), function, |i| {
+                i.drop_fixture(id, function)
+            });
+            if let Some(m) = dropped
                 && !matches!(r, TestResult::Failed(_))
             {
                 r = TestResult::Failed(m);
@@ -225,6 +236,26 @@ fn run_group(
         out.push((k, (r, report, o, e)));
     }
     out
+}
+
+/// `f` on the interpreter, what it prints dropped unless `shown` (the
+/// fixtures whose lines a test run alone shows, decision 1284) is none or
+/// names `function`.
+fn quietly<R>(
+    i: &mut Interp<'_, '_>,
+    shown: Option<&Vec<String>>,
+    function: &str,
+    f: impl FnOnce(&mut Interp<'_, '_>) -> R,
+) -> R {
+    if shown.is_none_or(|s| s.iter().any(|g| g == function)) {
+        return f(i);
+    }
+    let (o, e) = i.host.take_held();
+    let r = f(i);
+    let _ = i.host.take_held();
+    i.host.stdout(&o);
+    i.host.stderr(&e);
+    r
 }
 
 /// The units the tests run in: each test alone, but those that share a

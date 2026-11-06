@@ -1,0 +1,27 @@
+# A module's fixture made once for the tests that read it and dropped after
+# the last (decisions 1202 and 1244); each failing test's replay token runs
+# it alone, the fixture's making shown by the first test that reads it and
+# its drop by the last, as the run of every test shows them (decision 1284).
+struct Shelf:
+    items: list[int]
+
+impl Drop for Shelf:
+    def drop(mut self):
+        print("shelf put away")
+
+@fixture(scope="module")
+def shelf() -> Shelf:
+    print("shelf set up")
+    return Shelf(items=[1, 2, 3])
+
+test "first"(shelf: Shelf):
+    print("first sees {shelf.items.len()}")
+    expect shelf.items.len() == 2
+
+test "second"(shelf: Shelf):
+    print("second sees {shelf.items[0]}")
+    expect shelf.items[0] == 2
+
+test "third"(shelf: Shelf):
+    print("third")
+    expect shelf.items.len() == 4

@@ -734,6 +734,113 @@ pub(crate) fn run_command(
     code
 }
 
+/// `SISU_RUN_CACHE=0`: `sisu run --native` of a file builds its executable
+/// aside every time, not from the cache of built executables.
+pub const RUN_CACHE_VAR: &str = "SISU_RUN_CACHE";
+
+/// How many executables the cache of `sisu run --native` keeps, the most
+/// recently run.
+const RUN_CACHE_KEEP: usize = 32;
+
+/// The executable of a file's `sisu run --native` from the cache of built
+/// executables (decision 1287; D-089's condition): the program is built
+/// again only when its SIR changed or what compiles and links it did. The
+/// key hashes the SIR's text, the profile, the lowering and the backend,
+/// the directory the debug information records, and the size and time of
+/// this executable, the runtime in Rust's library, the runtime in Sisu's
+/// object and, when it lowers, stage 2's executable; the executable is
+/// kept under `target/run-cache/KEY/`, the 32 most recently run. None when
+/// the cache is off ([`RUN_CACHE_VAR`]) or cannot be written: the caller
+/// builds aside.
+pub(crate) fn cached_build(
+    prog: &sisu_sir::Program,
+    name: &str,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> Option<Result<PathBuf, i32>> {
+    if std::env::var(RUN_CACHE_VAR).is_ok_and(|v| v == "0") {
+        return None;
+    }
+    let stamp = |p: &Path| -> Option<String> {
+        let m = std::fs::metadata(p).ok()?;
+        let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+        Some(format!("{} {} {}", p.display(), m.len(), t.as_nanos()))
+    };
+    let me = std::env::current_exe().ok()?;
+    let rust = sisu_codegen::find_runtime(&me).ok()?;
+    let rt = match crate::front::Rt::ready(host) {
+        Ok(rt) => rt,
+        Err(code) => return Some(Err(code)),
+    };
+    let mut parts = vec![
+        stamp(&me)?,
+        stamp(&rust)?,
+        stamp(&rt.object)?,
+        profile.name().to_string(),
+        lowering().name().to_string(),
+        backend_for(profile).name().to_string(),
+        sources().comp_dir,
+    ];
+    if lowering() == Lowering::Stage2 {
+        match crate::front::Stage2::ready(host) {
+            Ok(s2) => parts.push(stamp(&s2.exe)?),
+            Err(code) => return Some(Err(code)),
+        }
+    }
+    let sir = sisu_sir::write::write(prog);
+    let hash = |seed: u64| {
+        let mut h = seed;
+        for part in parts.iter().map(String::as_bytes).chain([sir.as_bytes()]) {
+            for b in part {
+                h ^= u64::from(*b);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            h ^= 0xff;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h
+    };
+    let key = format!("{:016x}{:016x}", hash(0xcbf2_9ce4_8422_2325), hash(0x6c62_272e_07bb_0142));
+    let root = crate::front::compiler_dir().join("target").join("run-cache");
+    let dir = root.join(&key);
+    let name = if name.is_empty() { "program" } else { name };
+    let exe = dir.join(name);
+    if exe.is_file() {
+        // Its time says when it last ran, which the eviction reads.
+        let _ = std::fs::write(dir.join("used"), "");
+        return Some(Ok(exe));
+    }
+    let part = root.join(format!("{key}.part-{}", std::process::id()));
+    std::fs::create_dir_all(&part).ok()?;
+    if let Err(code) = build(Code::Sir(prog), &part.join(name), profile, host) {
+        let _ = std::fs::remove_dir_all(&part);
+        return Some(Err(code));
+    }
+    let _ = std::fs::write(part.join("used"), "");
+    // Another run that built it first keeps its own.
+    if std::fs::rename(&part, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&part);
+    }
+    evict(&root);
+    exe.is_file().then_some(Ok(exe))
+}
+
+/// Removes all but the [`RUN_CACHE_KEEP`] most recently run executables
+/// of the cache.
+fn evict(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let mut kept: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| !n.to_string_lossy().contains(".part-")))
+        .filter_map(|p| Some((std::fs::metadata(p.join("used")).ok()?.modified().ok()?, p)))
+        .collect();
+    kept.sort_by_key(|k| std::cmp::Reverse(k.0));
+    for (_, p) in kept.into_iter().skip(RUN_CACHE_KEEP) {
+        let _ = std::fs::remove_dir_all(p);
+    }
+}
+
 /// Runs a built executable as `sisu run --native` does: once with the seed
 /// of `how`, or under `--explore N` seeds; its exit status is the run's.
 pub(crate) fn run_built(exe: &Path, args: &[String], how: &Run, host: &mut dyn Host) -> i32 {

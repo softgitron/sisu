@@ -1,0 +1,37 @@
+test "first" ... FAILED
+test "second" ... FAILED
+test "third" ... FAILED
+
+test "first" ... FAILED
+what the test printed:
+  shelf set up
+  first sees 3
+expectation failed: shelf.items.len() == 2
+    shelf.items.len() == 2
+    │           │
+    [1, 2, 3]   3
+  at test "first" (module_fixture.sisu:19:5)
+replay: sisu test --replay 1-c2745b7912c65641-0.0.1-t0-s0-r0 module_fixture.sisu
+
+test "second" ... FAILED
+what the test printed:
+  second sees 1
+expectation failed: shelf.items[0] == 2
+    shelf.items[0] == 2
+    │
+    1
+  at test "second" (module_fixture.sisu:23:5)
+replay: sisu test --replay 1-c2745b7912c65641-0.0.1-t1-s0-r0 module_fixture.sisu
+
+test "third" ... FAILED
+what the test printed:
+  third
+  shelf put away
+expectation failed: shelf.items.len() == 4
+    shelf.items.len() == 4
+    │           │
+    [1, 2, 3]   3
+  at test "third" (module_fixture.sisu:27:5)
+replay: sisu test --replay 1-c2745b7912c65641-0.0.1-t2-s0-r0 module_fixture.sisu
+
+0 passed, 3 failed, 0 blocked

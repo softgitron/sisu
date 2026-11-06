@@ -307,24 +307,6 @@ pub fn stage1_sir_reports() -> bool {
     Stage1 { exe, compiler }.sir_reports()
 }
 
-/// [`Stage1::keeps_transcripts`] of the stage-1 executable as it is,
-/// without building it: false when it is missing or a source of stage 1 is
-/// newer.
-pub fn stage1_keeps_transcripts() -> bool {
-    if let Ok(v) = std::env::var(TRANSCRIPTS_VAR) {
-        return v == "1";
-    }
-    let compiler = compiler_dir();
-    if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
-        return Stage1 { exe: PathBuf::from(given), compiler }.keeps_transcripts();
-    }
-    let exe = stage1_exe(&compiler);
-    if stale(&exe, &compiler.join("stage1").join("src")) {
-        return false;
-    }
-    Stage1 { exe, compiler }.keeps_transcripts()
-}
-
 /// [`Stage1::takes_the_roles`] of the stage-1 executable as it is, without
 /// building it: false when it is missing or a source of stage 1 is newer.
 pub fn stage1_takes_the_roles() -> bool {
@@ -529,17 +511,6 @@ impl Stage1 {
     /// later, its R116; decision 721).
     pub fn takes_target_runtime(&self) -> bool {
         self.version().is_some_and(|v| v >= REPL_SERVE_SINCE)
-    }
-
-    /// Whether this stage 1's `sir --tests` keeps the world of transcripts,
-    /// `transcript_world` and `transcript_system`, for a program that has
-    /// transcripts (`sisu1 0.11.0` and later, its R120; decision 722).
-    /// [`TRANSCRIPTS_VAR`] decides when it is set.
-    pub fn keeps_transcripts(&self) -> bool {
-        if let Ok(v) = std::env::var(TRANSCRIPTS_VAR) {
-            return v == "1";
-        }
-        self.version().is_some_and(|v| v >= TRANSCRIPTS_SINCE)
     }
 
     /// Whether this stage 1's `sir --tests --modules` names each test's
@@ -942,10 +913,16 @@ fn settle(stdout: String, mut stderr: String, status: i32) -> Ran {
     Ran { stdout, stderr, status }
 }
 
-/// Builds stage 1 with the Rust front end, as `stage1/sisu1` does (`sisu
-/// build --native --output EXE` in `compiler/stage1`), under a lock, so
-/// that the commands that start at once build it once: each waits for the
-/// lock and then finds it built.
+/// Builds stage 1, under a lock, so that the commands that start at once
+/// build it once: each waits for the lock and then finds it built. The
+/// stage 1 built before builds the next when its version is the sources'
+/// or the one before (decision 1281): `sisu build --native` in
+/// `compiler/stage1` with it as the front end, the fixed point's path
+/// (D-078), where the executable stage 1 builds of itself is the same
+/// program; without one, or when its build fails, the Rust front end
+/// builds it, as `stage1/sisu1` does. [`STAGE1_BUILDER_VAR`] `rust` asks
+/// for the Rust front end. Which built it is written beside it
+/// (`target/stage1/built-by`).
 fn build(exe: &Path, package: &Path, src: &Path, profile: &str, host: &mut dyn Host) -> Result<(), i32> {
     let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let fail = |host: &mut dyn Host, detail: String| {
@@ -973,34 +950,29 @@ fn build(exe: &Path, package: &Path, src: &Path, profile: &str, host: &mut dyn H
     if !stale(exe, src) && built_in(exe, profile) {
         return Ok(());
     }
-    let me = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(e) => return Err(fail(host, e.to_string())),
-    };
     let part = dir.join(format!("sisu1.part-{}", std::process::id()));
-    let mut cmd = std::process::Command::new(me);
-    cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(package);
-    // In the release profile, every contract checked, unless asked for the
-    // debug one (decision 860); the fixed points build their own.
-    if profile == "release" {
-        cmd.args(["--release", "--contracts=all"]);
+    // The previous stage 1, copied aside so that the build may replace it.
+    let seed = previous_stage1(exe, package).and_then(|version| {
+        let copy = dir.join(format!("sisu1.seed-{}", std::process::id()));
+        std::fs::copy(exe, &copy).ok().map(|_| (copy, version))
+    });
+    let mut built_by = None;
+    if let Some((copy, version)) = &seed {
+        if build_with(Some(copy), package, &part, profile).is_ok_and(|()| part.is_file()) {
+            built_by = Some(format!("stage1 {}.{}.{}", version.0, version.1, version.2));
+        }
+        let _ = std::fs::remove_file(copy);
     }
-    // Stage 1 is built with the Rust lowering, since stage 2 is built with
-    // stage 1 (decision 304).
-    cmd.env(FRONT_END_VAR, "rust").env(LOWER_VAR, "rust").env(BACKEND_VAR, "cranelift").env_remove(KEEP_SIR);
-    for v in RUNTIME_VARS {
-        cmd.env_remove(v);
-    }
-    cmd.stdin(std::process::Stdio::null());
-    let out = match cmd.output() {
-        Ok(o) => o,
-        Err(e) => return Err(fail(host, e.to_string())),
-    };
-    if !out.status.success() || !part.is_file() {
+    if built_by.is_none() {
         let _ = std::fs::remove_file(&part);
-        let mut detail = String::from_utf8_lossy(&out.stdout).into_owned();
-        detail.push_str(&String::from_utf8_lossy(&out.stderr));
-        return Err(fail(host, detail.trim_end().to_string()));
+        match build_with(None, package, &part, profile) {
+            Ok(()) if part.is_file() => built_by = Some("rust".to_string()),
+            Ok(()) => return Err(fail(host, String::new())),
+            Err(detail) => {
+                let _ = std::fs::remove_file(&part);
+                return Err(fail(host, detail));
+            }
+        }
     }
     if let Err(e) = std::fs::rename(&part, exe) {
         let _ = std::fs::remove_file(&part);
@@ -1011,8 +983,68 @@ fn build(exe: &Path, package: &Path, src: &Path, profile: &str, host: &mut dyn H
     {
         return Err(fail(host, e.to_string()));
     }
+    let _ = std::fs::write(exe.with_file_name("built-by"), built_by.unwrap_or_default() + "\n");
     drop(lock);
     Ok(())
+}
+
+/// The version of the stage 1 at `exe` when it may build the package's
+/// sources (decision 1281): it is the version the package's manifest names
+/// or the minor version before it, of the same major one, and
+/// [`STAGE1_BUILDER_VAR`] does not ask for the Rust front end.
+fn previous_stage1(exe: &Path, package: &Path) -> Option<(u32, u32, u32)> {
+    if std::env::var(STAGE1_BUILDER_VAR).is_ok_and(|v| v == "rust") || !exe.is_file() {
+        return None;
+    }
+    let manifest = std::fs::read_to_string(package.join("sisu.toml")).ok()?;
+    let wanted = manifest.lines().find_map(|l| {
+        let v = l.trim().strip_prefix("version")?.trim_start().strip_prefix('=')?.trim();
+        stage1_version(&format!("sisu1 {}", v.trim_matches('"')))
+    })?;
+    let printed = std::process::Command::new(exe)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let have = stage1_version(&String::from_utf8_lossy(&printed.stdout))?;
+    (have.0 == wanted.0 && (have.1 == wanted.1 || have.1 + 1 == wanted.1)).then_some(have)
+}
+
+/// `sisu build --native --output PART` in `compiler/stage1`, its front end
+/// the stage 1 at `seed` (neither built nor served: one process for the
+/// build), or the Rust one; what it printed when it failed.
+fn build_with(seed: Option<&Path>, package: &Path, part: &Path, profile: &str) -> Result<(), String> {
+    let me = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(me);
+    cmd.args(["build", "--native", "--output"]).arg(part).current_dir(package);
+    // In the release profile, every contract checked, unless asked for the
+    // debug one (decision 860); the fixed points build their own.
+    if profile == "release" {
+        cmd.args(["--release", "--contracts=all"]);
+    }
+    match seed {
+        Some(seed) => {
+            cmd.env_remove(FRONT_END_VAR).env(STAGE1_VAR, seed).env(crate::serve::SERVE_VAR, "0");
+        }
+        None => {
+            cmd.env(FRONT_END_VAR, "rust");
+        }
+    }
+    // Stage 1 is built with the Rust lowering, since stage 2 is built with
+    // stage 1 (decision 304).
+    cmd.env(LOWER_VAR, "rust").env(BACKEND_VAR, "cranelift").env_remove(KEEP_SIR);
+    for v in RUNTIME_VARS {
+        cmd.env_remove(v);
+    }
+    cmd.stdin(std::process::Stdio::null());
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let mut detail = String::from_utf8_lossy(&out.stdout).into_owned();
+    detail.push_str(&String::from_utf8_lossy(&out.stderr));
+    Err(detail.trim_end().to_string())
 }
 
 /// Stage 2, the lowering written in Sisu (`compiler/stage2`), built and
@@ -1381,10 +1413,6 @@ const REPL_OPTIONS_SINCE: (u32, u32, u32) = (0, 9, 0);
 /// `--target-runtime` (decisions 720 and 721).
 const REPL_SERVE_SINCE: (u32, u32, u32) = (0, 10, 0);
 
-/// The first stage 1 whose `sir --tests` keeps the world of transcripts
-/// (decision 722).
-const TRANSCRIPTS_SINCE: (u32, u32, u32) = (0, 11, 0);
-
 /// The first stage 1 whose `sir --tests --modules` writes each test's
 /// module (its R142; decision 900).
 const MODULES_SINCE: (u32, u32, u32) = (0, 12, 0);
@@ -1442,10 +1470,9 @@ const WORLD_SINCE: (u32, u32, u32) = (0, 21, 0);
 /// keep one process of stage 1 for the session, whatever its version says.
 pub const REPL_SERVE_VAR: &str = "SISU_STAGE1_REPL_SERVE";
 
-/// `SISU_STAGE1_TRANSCRIPTS=1` (or `0`): whether a program's transcripts
-/// run from stage 1's SIR when it keeps their world, whatever its version
-/// says.
-pub const TRANSCRIPTS_VAR: &str = "SISU_STAGE1_TRANSCRIPTS";
+/// `SISU_STAGE1_BUILDER=rust`: the driver builds stage 1 with the Rust
+/// front end, not with the stage 1 built before (decision 1281).
+pub const STAGE1_BUILDER_VAR: &str = "SISU_STAGE1_BUILDER";
 
 /// `SISU_STAGE1=PATH`: the stage-1 executable to run, as it is, neither
 /// built nor checked against its sources.

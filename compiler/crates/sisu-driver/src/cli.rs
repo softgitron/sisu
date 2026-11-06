@@ -271,6 +271,8 @@ struct Opts {
     /// `sisu test --jobs N`: the threads that run the tests (0: the
     /// default).
     jobs: usize,
+    /// `sisu test --format=json` (decision 1285).
+    json: bool,
     /// `sisu test --filter TEXT --tag T --skip-tag T`: which tests run.
     select: Select,
     /// `sisu bench --iterations N`: how often each benchmark's loop runs.
@@ -855,6 +857,8 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--no-cache",
                     "--no-default-features",
                     "--accept-unsafe",
+                    "--format=json",
+                    "--format=human",
                 ],
                 "check" => &[
                     "--format=ids",
@@ -1292,6 +1296,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 bound,
                 sim,
                 jobs,
+                json: p.flags.contains(&"--format=json"),
                 select,
                 iterations,
                 samples,
@@ -1307,9 +1312,9 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 return stage1_command(cmd, &p, &opts, t, program_args, &features, locked, host);
             }
             // `sisu test --std` without a program: the standard library's
-            // examples from `sisu1 0.17.0`'s `sir --tests --std` of an empty
-            // program (its R185, decision 1144), as the Rust front end runs
-            // them on one.
+            // examples alone, from stage 1's `sir --tests --std` naming no
+            // path (its R185 and R221, decisions 1144 and 1280), as the Rust
+            // front end runs them on an empty program.
             if front == FrontEnd::Stage1
                 && let [input] = inputs.as_slice()
                 && input.shown == "--std"
@@ -1394,7 +1399,7 @@ fn from_sir(
     // --tests`), run in the interpreter (decision 285).
     if cmd == "test" {
         stage.set("the interpreter");
-        return test_from_sir(&prog, flags, opts, input, false, None, None, host);
+        return test_from_sir(&prog, flags, opts, input, false, None, None, None, host);
     }
     if cmd == "bench" {
         stage.set("the interpreter");
@@ -1580,6 +1585,7 @@ fn test_from_sir(
     sources: bool,
     deferred: Option<&str>,
     regions: Option<&[Region]>,
+    kept: Option<&std::cell::RefCell<Coverage>>,
     host: &mut dyn Host,
 ) -> i32 {
     let has = |f: &str| flags.contains(&f);
@@ -1688,12 +1694,35 @@ fn test_from_sir(
             ));
             return exit::ERROR;
         }
+        // A test that shares a module's fixture runs alone, its fixture's
+        // lines shown as the run of every test showed them: the making by
+        // the first test that reads it, the drop by the last (decision
+        // 1284).
+        let module_fixtures = |k: usize| -> Vec<String> {
+            prog.test_fixtures
+                .get(k)
+                .into_iter()
+                .flatten()
+                .filter(|x| x.module.is_some())
+                .map(|x| x.function.clone())
+                .collect()
+        };
+        let own = module_fixtures(t.test);
+        let fixture_lines = (!own.is_empty()).then(|| {
+            let read_by = |f: &String, ks: std::ops::Range<usize>| {
+                ks.into_iter().any(|k| module_fixtures(k).contains(f))
+            };
+            let made = own.iter().filter(|f| !read_by(f, 0..t.test)).cloned().collect();
+            let dropped = own.iter().filter(|f| !read_by(f, t.test + 1..prog.tests.len())).cloned().collect();
+            (made, dropped)
+        });
         let options = Options {
             seed: t.seed,
             case_seed: t.case_seed,
             replay_case: t.choices.clone(),
             strategy: t.strategy.clone(),
             sim: t.sim,
+            fixture_lines,
             ..options
         };
         let seeds = Seeds { first: t.seed, explore: None };
@@ -1705,6 +1734,7 @@ fn test_from_sir(
             search: false,
             transcripts: Vec::new(),
             cache: None,
+            json: opts.json,
         };
         let (code, _) = run_tests(prog, host, &options, seeds, &run);
         return code;
@@ -1742,9 +1772,10 @@ fn test_from_sir(
         (path, salt)
     });
     // The transcripts beside the program, when every test runs: they run
-    // against the world of transcripts, from the SIR the tests run when
-    // stage 1 keeps it there (`sisu1 0.11.0`, decision 722), else on the
-    // Rust front end's build of the program (decisions 380 and 687).
+    // against the world of transcripts, from the SIR the tests run, which
+    // `sir --tests --transcripts` keeps on the driver's word (its R223,
+    // decision 1280); a SIR without it is a stage 1 older than 0.21.0's,
+    // which the driver no longer builds around (`D0164`).
     let mut transcripts = Vec::new();
     let found = if sources && opts.select.is_all() {
         crate::transcript::find(&input.disk.display().to_string())
@@ -1756,8 +1787,11 @@ fn test_from_sir(
             .iter()
             .all(|w| prog.functions.iter().any(|f| f.name == *w));
         let world = match prog.entry {
-            Some(_) if kept && crate::front::stage1_keeps_transcripts() => Ok(prog.clone()),
-            Some(_) => transcript_sir(input, opts.level),
+            Some(_) if kept => Ok(prog.clone()),
+            Some(_) => Err(text(
+                msg::CLI_STAGE1_TOO_OLD,
+                &[("what", "a transcript (it runs on the world `sir --tests --transcripts` keeps)".into())],
+            )),
             None => Err(text(msg::CLI_TRANSCRIPT_NO_MAIN, &[("file", file.to_string())])),
         };
         for path in found {
@@ -1769,16 +1803,42 @@ fn test_from_sir(
             transcripts.push((shown, outcome.err()));
         }
     }
-    let run = TestRun { file: &input.shown, hash, only, bound: opts.bound, search: true, transcripts, cache };
+    // The failure database beside the cache, read and written when it is
+    // (decision 1285): each test's last failing case tried first.
+    let failures = cache.as_ref().map(|(path, _)| crate::testcache::failures_beside(path));
+    let saved = failures.as_deref().map(crate::testcache::read_failures).unwrap_or_default();
+    let options = Options { saved_cases: std::sync::Arc::new(saved_by_function(prog, &saved)), ..options };
+    let run = TestRun {
+        file: &input.shown,
+        hash,
+        only,
+        bound: opts.bound,
+        search: true,
+        transcripts,
+        cache,
+        json: opts.json,
+    };
     let (code, reports) = run_tests(prog, host, &options, opts.seeds, &run);
+    if let Some(path) = &failures {
+        save_failures(path, prog, &which, &reports, saved);
+    }
     if options.update {
         let ran: Vec<&str> = which.iter().filter_map(|&k| prog.tests.get(k)).map(|t| t.0.as_str()).collect();
         if let Err(code) = update_snapshots(&input.disk, &options.snapshots, &ran, &reports, prog, host) {
             return code;
         }
     }
-    if let Some(regions) = regions {
-        host.stdout(&cover_report(prog, regions, &merge_coverage(&reports)));
+    // `--cover` of a package with black-box test files: the counts kept for
+    // one report after them (decision 1286).
+    match (regions, kept) {
+        (Some(_), Some(kept)) => {
+            let mut k = kept.borrow_mut();
+            for (key, n) in merge_coverage(&reports) {
+                *k.entry(key).or_default() += n;
+            }
+        }
+        (Some(regions), None) => host.stdout(&cover_report(prog, regions, &merge_coverage(&reports))),
+        (None, _) => {}
     }
     if let Some(stderr) = deferred {
         let violation = reports.iter().any(|r| r.violation);
@@ -1788,6 +1848,43 @@ fn test_from_sir(
         host.stderr(&defer_account(&declarations, &findings, violation, &coverage));
     }
     code
+}
+
+/// The saved cases of the failure database (decision 1285), by test name,
+/// as the run takes them, by the test's function.
+fn saved_by_function(
+    prog: &sisu_sir::Program,
+    saved: &std::collections::BTreeMap<String, Vec<i64>>,
+) -> std::collections::BTreeMap<String, Vec<i64>> {
+    prog.tests.iter().filter_map(|(name, f)| Some((f.clone(), saved.get(name)?.clone()))).collect()
+}
+
+/// The failure database after a run (decision 1285): a test that failed on
+/// a case keeps its choices, one that passed loses its entry, the others
+/// (not run, or failed without a case) are kept as they were.
+fn save_failures(
+    path: &std::path::Path,
+    prog: &sisu_sir::Program,
+    which: &[usize],
+    reports: &[sisu_interp::RunReport],
+    saved: std::collections::BTreeMap<String, Vec<i64>>,
+) {
+    let mut now = saved.clone();
+    for (&k, report) in which.iter().zip(reports) {
+        let Some((name, _)) = prog.tests.get(k) else { continue };
+        match (&report.case, report.status == exit::OK) {
+            (_, true) => {
+                now.remove(name);
+            }
+            (Some(choices), false) => {
+                now.insert(name.clone(), choices.clone());
+            }
+            (None, false) => {}
+        }
+    }
+    if now != saved {
+        crate::testcache::write_failures(path, &now);
+    }
 }
 
 /// A region of `sir --tests --cover` (stage 1's R216): a statement's or a
@@ -1914,6 +2011,17 @@ fn mutants_of(stdout: &str) -> Vec<Mutant> {
 /// by file (canonical) and line: the changed region of `--since REV`.
 fn changed_lines(rev: &str) -> Result<std::collections::HashSet<(std::path::PathBuf, u32)>, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    // Outside a repository `git diff` compares two paths and prints its
+    // whole usage for one: the driver says why in a line (decision 1283).
+    let inside = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !inside.status.success() {
+        return Err(text(msg::CLI_MUTATE_NO_GIT, &[]));
+    }
     let out = std::process::Command::new("git")
         .args(["diff", "--relative", "--unified=0", "--no-color", "--no-ext-diff", rev, "--"])
         .current_dir(&cwd)
@@ -1921,7 +2029,9 @@ fn changed_lines(rev: &str) -> Result<std::collections::HashSet<(std::path::Path
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        // git's first line says why (`fatal: bad revision`), not its usage.
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        return Err(err.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().trim().to_string());
     }
     let mut lines = std::collections::HashSet::new();
     let mut file: Option<std::path::PathBuf> = None;
@@ -2089,28 +2199,22 @@ fn mutate_tests(
     exit::OK
 }
 
-/// `sisu test --std` outside a package and without a file, from stage 1
-/// (decision 1144): its `sir --tests --std` naming no path from `sisu1
-/// 0.21.0` (its R221, decision 1245), before it of an empty program
-/// written aside, whose tests are the standard library's examples, run as
-/// a program's are, the replay lines naming the flag as the Rust front
-/// end's run names it; `--defer-borrow` defers them as a program's.
+/// `sisu test --std` outside a package and without a file, from stage 1's
+/// `sir --tests --std` naming no path, sent from the working directory,
+/// where no package is (its R221, decisions 1245 and 1280): the standard
+/// library's examples alone, run as a program's tests are, the replay
+/// lines naming the flag as the Rust front end's run names it;
+/// `--defer-borrow` defers them as a program's. A stage 1 older than
+/// 0.21.0, which lowers no examples without a program, is `D0164`.
 fn std_examples_of_stage1(p: &Parsed<'_>, opts: &Opts, input: &Input, host: &mut dyn Host) -> i32 {
     let stage1 = match crate::front::Stage1::ready(host) {
         Ok(s) => s,
         Err(code) => return code,
     };
-    // From `sisu1 0.21.0` `sir --tests --std` naming no path lowers the
-    // examples alone (its R221, decision 1245), and the empty program
-    // aside retires.
-    let alone = stage1.keeps_the_world();
-    let dir = std::env::temp_dir().join(format!("sisu-std-examples-{}", std::process::id()));
-    let file = dir.join("examples.sisu");
-    if !alone && std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, "")).is_err() {
-        let _ = std::fs::remove_dir_all(&dir);
+    if !stage1.keeps_the_world() {
         host.stderr(&plain_error(
-            msg::CLI_CANNOT_READ,
-            &[("path", file.display().to_string()), ("reason", "it cannot be written".into())],
+            msg::CLI_STAGE1_TOO_OLD,
+            &[("what", "`sisu test --std` without a program".into())],
         ));
         return exit::ERROR;
     }
@@ -2125,13 +2229,7 @@ fn std_examples_of_stage1(p: &Parsed<'_>, opts: &Opts, input: &Input, host: &mut
     if opts.contracts_given {
         words.push(format!("--contracts={}", opts.level.name()));
     }
-    if !alone {
-        words.push(file.display().to_string());
-    }
     let ran = stage1.run(&words, crate::front::Backend::Unused, host);
-    if !alone {
-        let _ = std::fs::remove_dir_all(&dir);
-    }
     let r = match ran {
         Ok(r) => r,
         Err(code) => return code,
@@ -2145,30 +2243,9 @@ fn std_examples_of_stage1(p: &Parsed<'_>, opts: &Opts, input: &Input, host: &mut
     }
     let deferred = deferring.then_some(r.stderr.as_str());
     match read_sir(&r.stdout, host) {
-        Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, deferred, None, host),
+        Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, deferred, None, None, host),
         Err(code) => code,
     }
-}
-
-/// The SIR a program's transcripts run (17): the program as the Rust front
-/// end builds it, with the world of transcripts (`transcript_world`,
-/// `transcript_system`) that only it writes (decision 380), or why it does
-/// not: its errors, which stage 1, whose SIR the tests run, did not find.
-fn transcript_sir(input: &Input, level: sisu_lower::ContractLevel) -> Result<sisu_sir::Program, String> {
-    let mut db = FreedAside(Db::new());
-    db.contracts = level;
-    input.load(&mut db);
-    let file = input.file.as_str();
-    if let Some(sir) = db.sir_with(file, &["transcript_world", "transcript_system"]) {
-        return Ok(sir);
-    }
-    let errors: Vec<sisu_diag::Diagnostic> =
-        db.diagnostics(file).into_iter().filter(|d| d.is_error()).collect();
-    let shown = match db.checked(file) {
-        Some(c) => sisu_diag::render::render_human(&c.map, &errors),
-        None => String::new(),
-    };
-    Err(text(msg::CLI_TRANSCRIPT_FRONT_END, &[("diagnostics", shown.trim_end().to_string())]))
 }
 
 /// `sisu bench --from-sir FILE`: the benchmarks of serialised SIR that
@@ -2382,6 +2459,40 @@ fn errors_line(errors: &str, lowered: bool) -> Option<String> {
     Some(plain_error(id, &[("count", codes.len().to_string())]))
 }
 
+/// The codes of the findings a deferred build wrote in the conformance
+/// form, `SPAN CODE ID` (stage 1's R189).
+fn deferred_codes(stderr: &str) -> Vec<&str> {
+    stderr
+        .lines()
+        .filter(|l| !l.starts_with(' '))
+        .filter_map(|l| l.split(' ').nth(1))
+        .filter(|c| c.starts_with('E') && c.len() == 5)
+        .collect()
+}
+
+/// The errors a run's build printed (`stderr`), with stage 1's `D0021` (the
+/// ownership checker's errors, which `--defer-borrow` defers to the monitor)
+/// said as `D0006` when an error before it is not an ownership rule's, an
+/// `E04xx`: `@no_alloc`'s `E0282`, which stage 1 finds among the ownership
+/// checker's findings of the SIR, is not one the monitor observes
+/// (decision 1282).
+fn owned_line(stderr: &str) -> String {
+    let codes: Vec<&str> = stderr.lines().filter_map(|l| l.strip_prefix("error[E")).collect();
+    if codes.iter().all(|c| c.starts_with("04")) {
+        return stderr.to_string();
+    }
+    let mut out = String::new();
+    for line in stderr.split_inclusive('\n') {
+        if line.starts_with("error[D0021]") {
+            let count = codes.len().to_string();
+            out.push_str(&plain_error(msg::CLI_ERRORS_FOUND, &[("count", count)]));
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
 /// `sisu check --holes FILE` (decision 1063): stage 1's, which lists each
 /// typed hole of the program that holds the file (its R174), when it has
 /// it; `D0009` before `sisu1 0.15.0`. One readable file is the command's
@@ -2549,7 +2660,16 @@ fn stage1_command(
         host.stderr(&r.stderr);
         r.status
     };
-    let run = |host: &mut dyn Host, words: &[String], backend: Backend| stage1.run(words, backend, host);
+    // A run's build ends with the line that says why it was not run, which
+    // is `D0021` only after the ownership checker's errors (decision 1282).
+    let run = |host: &mut dyn Host, words: &[String], backend: Backend| {
+        stage1.run(words, backend, host).map(|mut r| {
+            if words.iter().any(|w| w == "--for-run") {
+                r.stderr = owned_line(&r.stderr);
+            }
+            r
+        })
+    };
     match cmd {
         "tokens" | "parse" => {
             let mut words = vec![cmd.to_string()];
@@ -2757,6 +2877,17 @@ fn stage1_command(
                         Err(code) => return code,
                     };
                     let regions = cover.then(|| regions_of(&r.stdout));
+                    // A package's black-box test files reach its code too:
+                    // under `--cover` the package's report comes after them,
+                    // with what each reached of the package (decision 1286).
+                    let boxes = if black_box && input.package.is_some() {
+                        black_box_files(&input.shown)
+                    } else {
+                        Vec::new()
+                    };
+                    let later = cover && !boxes.is_empty();
+                    let kept = std::cell::RefCell::new(Coverage::new());
+                    let mut reported: Option<sisu_sir::Program> = None;
                     // Its diagnostics, and the line `sisu run` ends with when
                     // it fails; its warnings before the report.
                     let mut code = match answered(host, &r, program) {
@@ -2780,8 +2911,12 @@ fn stage1_command(
                                     true,
                                     deferred.as_deref(),
                                     regions.as_deref(),
+                                    later.then_some(&kept),
                                     host,
                                 );
+                                if later {
+                                    reported = Some(prog.clone());
+                                }
                                 if !has("--mutate") {
                                     code
                                 } else if code != exit::OK {
@@ -2804,33 +2939,51 @@ fn stage1_command(
                             Err(code) => code,
                         },
                     };
-                    if black_box && input.package.is_some() {
-                        for path in black_box_files(&input.shown) {
-                            let Ok(source) = std::fs::read_to_string(&path) else { continue };
-                            heading(&path, host);
-                            let file = Input::single(&path, source);
-                            let r = match run(host, &sir_words(&path), Backend::Unused) {
-                                Ok(r) => r,
-                                Err(c) => return c,
-                            };
-                            let c = match answered(host, &r, &path) {
-                                Err(c) => c,
-                                Ok(deferred) => match read_sir(&r.stdout, host) {
-                                    Ok(prog) => test_from_sir(
-                                        &prog,
-                                        &p.flags,
-                                        opts,
-                                        &file,
-                                        true,
-                                        deferred.as_deref(),
-                                        None,
-                                        host,
-                                    ),
-                                    Err(c) => c,
-                                },
-                            };
-                            code = worse(code, c);
+                    for path in boxes {
+                        let Ok(source) = std::fs::read_to_string(&path) else { continue };
+                        heading(&path, host);
+                        let file = Input::single(&path, source);
+                        let mut words = sir_words(&path);
+                        if later {
+                            words.insert(2, "--cover".into());
                         }
+                        let r = match run(host, &words, Backend::Unused) {
+                            Ok(r) => r,
+                            Err(c) => return c,
+                        };
+                        let reached = std::cell::RefCell::new(Coverage::new());
+                        let c = match answered(host, &r, &path) {
+                            Err(c) => c,
+                            Ok(deferred) => match read_sir(&r.stdout, host) {
+                                Ok(prog) => test_from_sir(
+                                    &prog,
+                                    &p.flags,
+                                    opts,
+                                    &file,
+                                    true,
+                                    deferred.as_deref(),
+                                    later.then_some(&[][..]),
+                                    later.then_some(&reached),
+                                    host,
+                                ),
+                                Err(c) => c,
+                            },
+                        };
+                        // The package's functions in a black-box program are
+                        // named by the package (`calc.mean` for `mean`).
+                        if let Some((name, _)) = &input.package {
+                            let prefix = format!("{name}.");
+                            let mut k = kept.borrow_mut();
+                            for ((f, line, col), n) in reached.into_inner() {
+                                if let Some(own) = f.strip_prefix(&prefix) {
+                                    *k.entry((own.to_string(), line, col)).or_default() += n;
+                                }
+                            }
+                        }
+                        code = worse(code, c);
+                    }
+                    if let (Some(prog), Some(regions)) = (&reported, &regions) {
+                        host.stdout(&cover_report(prog, regions, &kept.borrow()));
                     }
                     code
                 } else {
@@ -2911,7 +3064,7 @@ fn stage1_command(
                             match read_sir(&r.stdout, host) {
                                 Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
                                 Ok(prog) => {
-                                    test_from_sir(&prog, &p.flags, opts, input, true, None, None, host)
+                                    test_from_sir(&prog, &p.flags, opts, input, true, None, None, None, host)
                                 }
                                 Err(code) => code,
                             }
@@ -3033,8 +3186,26 @@ fn stage1_command(
                 if let Some(dir) = e.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
-                let code = match crate::native::build(crate::native::Code::Sir(&prog), e, profile, host) {
-                    Ok(()) => {
+                // A file's executable from the cache of built executables,
+                // built again only when its SIR or the toolchain changed
+                // (decision 1287); a package's where its builds go.
+                let cached = match exe.is_some() {
+                    true => crate::native::cached_build(
+                        &prog,
+                        &target.path.as_deref().map(stem).unwrap_or_default(),
+                        profile,
+                        host,
+                    ),
+                    false => None,
+                };
+                let built = match cached {
+                    Some(r) => r,
+                    None => crate::native::build(crate::native::Code::Sir(&prog), e, profile, host)
+                        .map(|()| e.to_path_buf()),
+                };
+                let code = match built {
+                    Ok(e) => {
+                        let e = e.as_path();
                         let how = crate::native::Run {
                             seed: opts.seeds.first,
                             explore: opts.seeds.explore,
@@ -3138,6 +3309,22 @@ fn stage1_command(
                 Err(code) => return code,
             };
             let deferring = defer && r.status == DEFERRED;
+            // A deferred error the monitor does not observe, one that is not
+            // an ownership rule's (`@no_alloc`'s `E0282`), stops the run as
+            // the build without the option says it, with `D0006` (decision
+            // 1282), where the run called it a candidate false positive.
+            if deferring && !deferred_codes(&r.stderr).iter().all(|c| c.starts_with("E04")) {
+                let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                words.extend(contracts);
+                program(&mut words);
+                return match run(host, &words, Backend::Unused) {
+                    Ok(plain) => {
+                        host.stderr(&plain.stderr);
+                        plain.status.max(exit::ERROR)
+                    }
+                    Err(code) => code,
+                };
+            }
             // A program with an error not deferred: from `sisu1 0.20.0` the
             // build writes it as the build without the option does (its
             // R211, decision 1242).
@@ -4316,6 +4503,7 @@ fn command(
                             search: false,
                             transcripts: Vec::new(),
                             cache: None,
+                            json: opts.json,
                         };
                         let (code, _) = run_tests(&prog, host, &options, seeds, &run);
                         return code;
@@ -4389,6 +4577,7 @@ fn command(
                         search: true,
                         transcripts,
                         cache,
+                        json: opts.json,
                     };
                     let (code, reports) = run_tests(&prog, host, &options, seeds, &run);
                     if options.update {
@@ -4899,6 +5088,9 @@ struct TestRun<'a> {
     /// The test cache's file and the options its keys hash, when results
     /// may come from it (decision 242).
     cache: Option<(std::path::PathBuf, String)>,
+    /// `--format=json` (17, "Output and caching"; decision 1285): a line of
+    /// JSON for each test's start and end, in the place of the report.
+    json: bool,
 }
 
 /// A time in nanoseconds as a person reads it: `850 ns`, `12.4 µs`, `3.1 ms`.
@@ -5285,7 +5477,10 @@ fn run_tests(
     let (mut passed, mut failed, mut blocked) = (0, 0, 0);
     let mut out = String::new();
     let mut failures = String::new();
+    // `--format=json` (decision 1285): each test's start and end.
+    let mut events: Vec<crate::json::Json> = Vec::new();
     for (i, (name, r, report)) in results.iter().enumerate() {
+        let mut token_of: Option<String> = None;
         let outcome = match r {
             // A result the cache gave says so (decision 1145).
             TestResult::Passed if from_cache.get(i).copied().unwrap_or(false) => {
@@ -5347,6 +5542,7 @@ fn run_tests(
                         },
                         sim: options.sim,
                     };
+                    token_of = Some(token.write());
                     text(msg::CLI_REPLAY_TOKEN, &[("token", token.write()), ("file", run.file.to_string())])
                 };
                 let nl = if m.ends_with('\n') { "" } else { "\n" };
@@ -5393,14 +5589,40 @@ fn run_tests(
                 outcome
             }
         };
+        if run.json {
+            use crate::json::Json;
+            events.push(Json::obj(vec![("event", Json::str("start")), ("test", Json::str(name.clone()))]));
+            let mut end = vec![("event", Json::str("end")), ("test", Json::str(name.clone()))];
+            let result = match r {
+                TestResult::Passed => "ok",
+                TestResult::Failed(_) => "failed",
+                TestResult::Blocked(_) => "blocked",
+            };
+            end.push(("result", Json::str(result)));
+            if from_cache.get(i).copied().unwrap_or(false) {
+                end.push(("cached", Json::Bool(true)));
+            }
+            match r {
+                TestResult::Failed(m) => end.push(("message", Json::str(m.trim_end()))),
+                TestResult::Blocked(h) => end.push(("hole", Json::str(h.clone()))),
+                TestResult::Passed => {}
+            }
+            if !matches!(r, TestResult::Passed) && (!report.out.is_empty() || !report.err.is_empty()) {
+                end.push(("output", Json::str(format!("{}{}", report.out, report.err))));
+            }
+            if let Some(t) = &token_of {
+                end.push(("replay", Json::str(t.clone())));
+            }
+            events.push(Json::obj(end));
+        }
         out.push_str(&text(
             msg::CLI_TEST_RESULT,
             &[("name", sisu_diag::render::quote(name)), ("outcome", outcome)],
         ));
         out.push('\n');
     }
-    for (name, failure) in &run.transcripts {
-        let name = sisu_diag::render::quote(name);
+    for (path, failure) in &run.transcripts {
+        let name = sisu_diag::render::quote(path);
         let outcome = match failure {
             None => {
                 passed += 1;
@@ -5414,6 +5636,22 @@ fn run_tests(
                 "FAILED"
             }
         };
+        if run.json {
+            use crate::json::Json;
+            events.push(Json::obj(vec![
+                ("event", Json::str("start")),
+                ("transcript", Json::str(path.clone())),
+            ]));
+            let mut end = vec![
+                ("event", Json::str("end")),
+                ("transcript", Json::str(path.clone())),
+                ("result", Json::str(if failure.is_none() { "ok" } else { "failed" })),
+            ];
+            if let Some(why) = failure {
+                end.push(("message", Json::str(why.trim_end())));
+            }
+            events.push(Json::obj(end));
+        }
         out.push_str(&text_line(msg::CLI_TRANSCRIPT_RESULT, &[("name", name), ("outcome", outcome.into())]));
     }
     out.push_str(&failures);
@@ -5457,6 +5695,16 @@ fn run_tests(
             _ => out.push_str(&text(msg::CLI_EXPLORE_SUMMARY, &range)),
         }
         out.push('\n');
+    }
+    if run.json {
+        use crate::json::Json;
+        events.push(Json::obj(vec![
+            ("event", Json::str("summary")),
+            ("passed", Json::num(passed as f64)),
+            ("failed", Json::num(failed as f64)),
+            ("blocked", Json::num(blocked as f64)),
+        ]));
+        out = events.iter().map(|e| e.write() + "\n").collect();
     }
     host.stdout(&out);
     let reports = results.into_iter().map(|(_, _, r)| r).collect();
@@ -6054,6 +6302,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         bound: 0,
         sim: None,
         jobs: 0,
+        json: false,
         select: Select::default(),
         iterations: 0,
         samples: BENCH_SAMPLES,

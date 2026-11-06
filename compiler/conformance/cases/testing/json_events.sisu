@@ -1,0 +1,18 @@
+# select --format=json
+# `sisu test --format=json` (17, "Output and caching"; decision 1285): a
+# line of JSON for each test's start and end, with its result, what a test
+# that did not pass printed, how it failed and its replay token, then the
+# counts.
+def halve(n: int) -> int:
+    return n // 2
+
+test "halves an even number":
+    expect halve(8) == 4
+
+test "halves an odd number down":
+    print("halving 7")
+    expect halve(7) == 4
+
+test "waits on a hole":
+    let n: int = todo("the third case")
+    expect n == 0

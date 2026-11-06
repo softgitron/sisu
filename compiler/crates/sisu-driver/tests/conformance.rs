@@ -543,12 +543,12 @@ fn the_repl_echoes_its_inputs_when_asked() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A program's transcripts run from the SIR its tests run from when stage 1
-/// keeps the world of transcripts there (`sisu1 0.11.0`, decision 722), so
-/// a program that looks a `dict[String, V]` up by a `str` (stage 1's R113),
-/// which the Rust front end refuses, passes its transcript; with an older
-/// stage 1 the transcript runs on the Rust front end's build and says why it
-/// cannot.
+/// A program's transcripts run from the SIR its tests run from, which
+/// `sir --tests --transcripts` keeps their world in (`sisu1 0.21.0`, its
+/// R223, decision 1280), so a program that looks a `dict[String, V]` up by
+/// a `str` (stage 1's R113), which the Rust front end refuses, passes its
+/// transcript; an older stage 1 says it is too old (`D0164`), the Rust
+/// front end no longer building the program for them.
 #[test]
 fn transcripts_run_from_stage_1s_sir_when_it_keeps_their_world() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
@@ -564,7 +564,7 @@ fn transcripts_run_from_stage_1s_sir_when_it_keeps_their_world() {
     let keeps = version
         .strip_prefix("sisu1 ")
         .map(|v| v.split('.').map(|n| n.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>())
-        .is_some_and(|v| v >= vec![0, 11, 0]);
+        .is_some_and(|v| v >= vec![0, 21, 0]);
     let dir = std::env::temp_dir().join(format!("sisu-transcript-stage1-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("tests")).expect("a directory");
@@ -588,7 +588,7 @@ fn transcripts_run_from_stage_1s_sir_when_it_keeps_their_world() {
         assert!(stdout.contains("transcript \"tests/menu.transcript\" ... ok"), "{stdout}");
         assert_eq!(out.status.code(), Some(0), "{stdout}");
     } else {
-        assert!(stdout.contains("transcript runs on the Rust front end's build"), "{stdout}");
+        assert!(stdout.contains("needs stage 1's `sisu1 0.21.0` or later"), "{stdout}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1192,4 +1192,98 @@ fn first_difference(a: &str, b: &str) -> String {
             (x, y) => return format!("line {n}: the notes have {x:?}, `sisu grammar` {y:?}"),
         }
     }
+}
+
+/// `sisu test --std` outside a package runs the standard library's doc
+/// examples alone from stage 1's `sir --tests --std` naming no path, sent
+/// from the working directory (its R221, decision 1280), where the driver
+/// wrote an empty program aside (decision 1144): every example passes and
+/// nothing is written there.
+#[test]
+fn test_std_alone_runs_the_examples_outside_a_package() {
+    let dir = std::env::temp_dir().join(format!("sisu-std-alone-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+        .args(["test", "--std"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let summary = stdout.lines().rev().find(|l| l.contains(" passed, ")).unwrap_or_default().to_string();
+    let passed: usize = summary.split(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    assert!(
+        passed > 150 && summary.contains(" 0 failed, 0 blocked"),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{summary}");
+    assert_eq!(
+        std::fs::read_dir(&dir).map(Iterator::count).unwrap_or(1),
+        0,
+        "nothing is written beside the run"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `sisu test --mutate --since REV` outside a git repository says so in a
+/// line of its own, `D0158` with `D0165`'s reason, where git's whole usage
+/// followed (decision 1283, the manual's finding of its step 38).
+#[test]
+fn mutate_since_outside_git_says_so_in_a_line() {
+    let dir = std::env::temp_dir().join(format!("sisu-mutate-no-git-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(
+        dir.join("one.sisu"),
+        "def one() -> int:\n    return 1\n\ntest \"one\":\n    expect one() == 1\n",
+    )
+    .expect("the program");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+        .args(["test", "--mutate", "--since", "HEAD", "one.sisu"])
+        .current_dir(&dir)
+        .env("GIT_CEILING_DIRECTORIES", std::env::temp_dir())
+        .output()
+        .expect("sisu runs");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(
+        stderr,
+        "error[D0158]: the lines changed since `HEAD` could not be read from git: the working directory is not in a git repository\n"
+    );
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A run's build that stops at `@no_alloc`'s `E0282`, which stage 1 finds
+/// among the ownership checker's findings, ends with `D0006`, not `D0021`,
+/// whose `--defer-borrow` the monitor could not stand in for (decision
+/// 1282); `--defer-borrow` refuses it the same way.
+#[test]
+fn an_allocation_error_is_not_an_ownership_rules() {
+    let dir = std::env::temp_dir().join(format!("sisu-no-alloc-run-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(
+        dir.join("na.sisu"),
+        "@no_alloc\ndef twice(xs: list[int]) -> list[int]:\n    let ys = [x * 2 for x in xs]\n    return ys\n\n\
+         def main():\n    print(twice([1, 2]))\n",
+    )
+    .expect("the program");
+    for args in
+        [&["run", "na.sisu"][..], &["run", "--defer-borrow", "na.sisu"], &["run", "--native", "na.sisu"]]
+    {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            stderr.ends_with("error[D0006]: the program was not run: errors found (2)\n"),
+            "{args:?}: {stderr}"
+        );
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {stderr}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
