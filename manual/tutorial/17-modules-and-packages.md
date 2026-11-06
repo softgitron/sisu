@@ -624,9 +624,7 @@ $ sisu run app -- poem.txt
   functions into the root module and makes them part of it, so the
   program calls `wordcount.words(text)`. Without `pub`, the import is
   the root module's own, and a user's `wordcount.words` gets E0257
-  (`resolve.not-reexported`). In stage 0, `from wordcount import words`
-  does not find a re-exported function (E0204); `import wordcount` and
-  the module's name do.
+  (`resolve.not-reexported`).
 - The workspace has one lockfile, beside its manifest, for all its
   members, so they always build with the same versions.
 - The app's manifest names the library by its path, `../wordcount`, as

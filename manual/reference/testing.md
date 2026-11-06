@@ -854,12 +854,10 @@ transcript "tests/greet.transcript" ... ok
 1 passed, 0 failed, 0 blocked
 ```
 
-**Stage 0 differs.** The `.sisu` files of a package's `tests/`
-directory, 17's black-box tests, are not run; only its transcripts are.
-The transcripts run
-from the SIR that the tests run from, which stage 1's `sir --tests` writes
-with the world a transcript runs in, so a program that writes a form only
-stage 1 takes, such as `^` in a slice's bound, or calls `cli.about`
+The transcripts run from the SIR that the tests run from, which stage
+1's `sir --tests` writes with the world a transcript runs in, so a
+program that writes a form only stage 1 takes, such as `^` in a slice's
+bound, or calls `cli.about`
 ([G6](../guides/command-line.md#4-test-the-command-line-with-a-transcript)),
 passes its transcripts as it passes its tests. With a stage 1 older than
 0.11.0 they run on the Rust front end's build, and such a program fails

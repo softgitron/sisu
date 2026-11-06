@@ -204,7 +204,7 @@ holds it; a `None` inside a list has no TOML at all, and is E0617
 there. Where a form refuses a value, choose a value it has, such as a
 large number of seconds for JSON, or the form that has it.
 
-**Status.** In stage 0, with the differences noted.
+**Status.** In stage 0.
 [08](../../proposal/08-metaprogramming.md#configuration-files) renders
 the values through each type's `Encode` (leaning, D-063); `sisu eval`
 writes a value's own structure, which is what `@derive(Encode)` would

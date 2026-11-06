@@ -480,11 +480,7 @@ E0241 (`resolve.not-object-safe`) names the method and the reason.
 `Shape.unit()` would need to know which type to make, and a
 `dyn Shape` cannot say. A trait can be a `dyn` when each method takes
 `self` or `mut self`, has no type parameters of its own, and mentions
-`Self` only as its receiver. Stage 0 checks the rules where a `dyn`
-type is written in a signature, as here, but not in the type of a
-local, `let shapes: list[Box[dyn Shape]]`, and a call through such a
-`dyn` of a method that breaks a rule stops the interpreter with an
-internal error.
+`Self` only as its receiver.
 
 ## An enum or a trait
 

@@ -172,10 +172,6 @@ True True True True
 True True True
 ```
 
-**Stage 0 differs.** `==` between two `Shared` values gives `False`
-whatever they hold, where 02 compares what they hold and keeps
-`Shared.same(a, b)` for identity ([R7](ownership.md#sharing-cells-and-graphs)).
-
 **Status.** In stage 0 (D-025).
 
 ## Logic

@@ -246,13 +246,7 @@ is a constant and a lowercase one binds a value (R6, Patterns, when it is
 written). A package is named in lowercase letters, digits and `_`
 ([R16, sisu new](sisu-command.md#sisu-new)).
 
-**Stage 0 differs.** [02](../../proposal/02-syntax.md) enforces the
-naming rules. Stage 0 enforces them only in patterns, where the case of
-a name decides what it means, and for packages and modules: `struct
-point`, `def Main()` and `const pi` compile without a word.
-
-**Status.** Designed (D-055); in stage 0 for patterns, packages and
-modules.
+**Status.** In stage 0 (D-055).
 
 ## Keywords
 
@@ -690,11 +684,7 @@ def main():
 [9, 16] {"Aino": 8, "Eero": 10} set() ()
 ```
 
-**Stage 0 differs.** Generator expressions and list literals typed as an
-`Array` are designed and stage 0 does not have them yet; it builds an
-`Array` with `Array.filled`.
-
-**Status.** In stage 0 (D-044), except generator expressions.
+**Status.** In stage 0 (D-044).
 
 ## Operators and punctuation
 

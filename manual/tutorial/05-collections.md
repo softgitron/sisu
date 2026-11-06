@@ -384,9 +384,9 @@ let scores = [7, 9, 4, 9]  # => [7, 9, 4, 9]
   a key before a colon, `{name: len(name) for name in ...}`.
 
 > **From Python.** Comprehensions are written as in Python. A
-> comprehension in parentheses, Python's generator expression, is
-> designed in [02](../../proposal/02-syntax.md#literals) and is not in
-> the compiler yet.
+> comprehension in parentheses, Python's generator expression, is one
+> too, and [chapter 16](16-closures-and-iterators.md#generators) shows
+> it.
 
 ## Functions for collections
 

@@ -330,8 +330,9 @@ re-export it. A package's public API is what its root module declares
 and re-exports.
 
 **Stage 0 differs.** `from sauna import feel`, naming a re-exported
-item in a `from` import, is E0204 in both front ends; `import sauna`
-with `sauna.feel(...)` works.
+item in a `from` import, is E0204 under the Rust front end
+(`--front-end=rust`); stage 1 binds it (R24), and `import sauna` with
+`sauna.feel(...)` works in both.
 
 **Status.** In stage 0, with the difference noted.
 

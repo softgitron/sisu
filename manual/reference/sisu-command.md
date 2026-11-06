@@ -25,7 +25,7 @@ the compiler's [architecture notes](../../compiler/docs/architecture.md),
   error together.
 - The page describes the `sisu` of this repository, stage 0 of the
   compiler. Its toolchain calls itself 0.0.1 in the replay tokens and
-  capability logs it writes; it has no command that prints its version.
+  capability logs it writes, and `sisu --version` prints it.
 - Each section ends with a status. **In stage 0** means that the
   compiler does what the section says, as its examples show.
   **Designed** means that the proposal decides it and no compiler has it
@@ -327,7 +327,7 @@ A value other than `stage1` or `rust` is D0115. When stage 1 is missing
 (D0116), fails to build (D0117) or stops as a compiler may not (D0118),
 the message names `--front-end=rust` as the way on. Stage 1's own
 executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
-0.6.0`, its minor number the round of its rules), which the driver asks
+0.15.0`, its minor number the round of its rules), which the driver asks
 to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
@@ -2031,11 +2031,7 @@ level, so its `--unsafe` report heads it "no level", a file that may
 hold any unsafe code, and lists what it holds, here nothing, and the
 standard library's level.
 
-**Stage 0 differs.** The line of the standard library names `sisu1
-audit --unsafe --std`, stage 1's own command, where `sisu audit
---unsafe --std` is the command to run.
-
-**Status.** In stage 0, with the difference noted; `--unsafe` is stage
+**Status.** In stage 0; `--unsafe` is stage
 1's (its decision 425 in the [architecture
 notes](../../compiler/docs/architecture.md)). The proposal's `sisu
 audit`, which lists the capability summary, holes and advisories as

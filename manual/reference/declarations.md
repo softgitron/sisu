@@ -947,12 +947,7 @@ error[E0242]: `Basket` implements `Container`, which requires `Named`, but `Bask
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** `sisu run` and `sisu check`, which use stage 1,
-accept an impl method whose signature differs from the trait's, such as
-`-> f64` for the trait's `-> int`, and run it; `sisu test`, on the Rust
-front end, reports E0234.
-
-**Status.** In stage 0 (D-013, Q-12), with the difference noted.
+**Status.** In stage 0 (D-013, Q-12).
 
 ## Type declarations
 

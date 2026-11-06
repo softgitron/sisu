@@ -165,10 +165,9 @@ param       := ('mut' | 'own')? ( name ':' type ('=' expr)?
 - `from` names the parameters that a returned borrow comes from
   ([R7](ownership.md#returning-a-borrow)).
 
-**Stage 0 differs.** `*xs: T` parses, and the checker stops at it with
-"beyond the slice: beyond the type checker's slice: variadic
-parameters", a message with no code, after which `sisu check` exits
-with status 0 and `sisu run` with 1.
+**Stage 0 differs.** `*xs: T` parses, and is E0900, whose message names
+the disagreement of 02 and 14 that it waits for
+([R3](declarations.md#parameters)).
 
 **Status.** In stage 0, except variadic parameters.
 
@@ -391,7 +390,7 @@ assert_stmt   := 'assert' expr (',' expr)? NEWLINE
 expect_stmt   := 'expect' expr NEWLINE
 debug_assert_stmt := 'debug_assert' expr (',' expr)? NEWLINE
 defer_stmt    := 'defer' (':' block | stmt)
-with_stmt     := 'with' expr 'as' name ':' block
+with_stmt     := 'with' expr ('as' name)? ':' block
 select_stmt   := 'select' ':' NEWLINE INDENT select_arm+ DEDENT
 select_arm    := 'case' pattern '=' expr ':' block
 yield_stmt    := 'yield' expr? NEWLINE
@@ -410,7 +409,8 @@ contract_stmt := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLI
 - `comptime` before a statement runs it at compile time: `comptime for`,
   `comptime if`, `comptime assert` and `comptime e`
   ([R12](compile-time.md#asking-for-compile-time-evaluation)).
-- `with` needs its `as NAME` (E0100 without it), and `select` is
+- `with` without `as NAME` keeps its value unnamed to the end of the
+  block ([R5](statements.md#with-and-defer)), and `select` is
   [R9](concurrency.md#waiting-for-the-first-of-several).
 
 **Status.** In stage 0.
@@ -574,11 +574,7 @@ def main():
 (5,) 5 650
 ```
 
-**Stage 0 differs.** A comprehension in parentheses, a generator
-expression, parses and is E0900, as planned
-([chapter 16](../tutorial/16-closures-and-iterators.md)).
-
-**Status.** In stage 0 (D-044), except generator expressions.
+**Status.** In stage 0 (D-044).
 
 ## If and match expressions
 
@@ -646,11 +642,6 @@ type_element  := (name ':')? type
   Trait for T` is the result of a derive; `ptr mut T` is a raw pointer
   of `std.mem` ([R7](ownership.md#unsafe-code-and-raw-pointers)).
 
-**Stage 0 differs.** `F[_]`, which
-[03](../../proposal/03-types-and-generics.md#what-is-not-in-the-type-system)
-reserves for higher-kinded types, is E0100 with no word that it is
-reserved.
-
 **Status.** In stage 0 (D-002).
 
 ## Patterns
@@ -674,8 +665,8 @@ name binds ([R6](patterns.md#names-that-bind-and-names-that-name)). A
 missing pattern is E0105 (`parse.expected-pattern`).
 
 **Stage 0 differs.** Star unpacking in a binding, `let first, *rest =
-xs`, parses, and the checker reports it with E0326, E0329 and E0387
-rather than as missing ([R3](declarations.md#bindings)).
+xs`, parses, and is E0900, whose message names the list pattern of a
+`match` ([R3](declarations.md#bindings)).
 
 **Status.** In stage 0, except star unpacking in `let`.
 

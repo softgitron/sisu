@@ -234,8 +234,9 @@ the `Iterator` trait and its adapters (`map`, `filter`, `fold`, `take`,
 `collect[T]`), laziness, generators with `yield` and `Iter[T]`,
 generator expressions, and `?` inside closures with `try_map` and
 `try_collect`. Exercises: a pipeline over records, an infinite generator
-taken lazily, a fallible parse of many lines. Stage 0 runs all of it;
-`try_collect` is a list's method, so a pipeline collects before it.
+taken lazily, a fallible parse of many lines. Stage 0 runs all of it,
+but `collect()` always makes a list (`collect[T]` is E0349), and
+`try_collect` ends the chain at its `map`.
 
 **17. Modules and packages** ([written](tutorial/17-modules-and-packages.md)). Files and directories as modules, `pub`
 and `pub(package)`, `import` and `from ... import`, re-exports, the
@@ -365,7 +366,8 @@ callback, records from a device's bytes. Stage 0 runs the unsafe code,
 the raw pointers and C interop, under `sisu run` and in tests, checking
 raw memory in the interpreter and in a native debug build, and the
 exercises practise the safe side. The
-allocators (`list.with_allocator`, `Region`, `try_push`), header import,
+allocators (`list.with_allocator` and `try_push`, where `Region` exists
+under `RawBuf`), header import,
 `--target` and the runtimes of the profiles other than `full` are
 designed (`full` and `single` get one runtime, `freestanding` is E1023), and
 the resource attributes compile with W0030, checking nothing.
@@ -977,6 +979,7 @@ solutions and passing checks.
 | 30 | Stage 1's eighteenth round (R158 to R163, decisions 920 to 925) and the stage 0 round's decisions 940 to 945 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 11 codes in R17's tables (E0616, D0139 to D0148), 2 entries added (E0616 with its label `comptime.function-here`, D0148), E0604's entry rewritten for the closures kept and its note `comptime.kept-functions`, E0609's narrowed to templates, W0022's and D0103's texts brought up to date, 8 sessions blessed (4 changed by the rounds: R12's `not_a_type` as E0616, R12's `limits` and R17's `e0604_not_kept`, whose closures are kept now and which capture a tuple instead, and the standard library's four new doc examples in `sisu test --std`'s count; 4 new; G31's `divide.console` retired, its quotient now a run) and 18 conformance expectations (3 changed by the rounds, 1 with its example, 14 new, 1 retired); slices as views that drop nothing (chapter 12 with `towels`, R4), `sisu bench src/MODULE.sisu` (G27 with the package `letters`, R16, R15), `--explain-size` and its seven parts (R16 with D0148, G20, R22, chapter 27, R2, chapter 15), `E0616` and a template's syntax error reported once (R12 with `syntax_once`, R17), closures kept in compile-time results and what they may capture (chapter 25 with `kept_closures`, R12, R17's E0604), the attributes of fields, variants and methods and a call routed by a method's attribute (chapter 25 with `handlers`, R14 with `members`, R12), `Graphemes` and `Normalize` with the rules they leave out (chapter 6 with `graphemes` and `normal_forms`, R2), and `BigRatio` with `Decimal`'s exact quotient and Q-82 (chapter 24 with `quotient`, R2 with `exact`, G31 with `divide`) taught with checked examples; the findings at 44 (3 settled, 3 narrowed, 2 new), every check passing |
 | 31 | Stage 1's nineteenth round (R164 to R168, decisions 960 to 964) and the stage 0 round's decisions 980 to 986 in the manual: the codes they added to R17, the features they made teachable, the waiting guide G22, every changed session reviewed, the findings checked again | done (1): G22 Generate configuration written (`guides/config.md`, four sessions), 3 codes in R17's tables, each with an entry (E0617, D0149, D0150), and D0033's entry pointing at them, 11 sessions blessed (2 changed by the rounds: R16's `designed`, whose `sisu eval` now runs and leaves the session, and R15's `gauge`, whose module token is D0149, given two commands more for the package's run and D0150; 9 new) and 3 conformance expectations, all new; the server of stage 1 with `SISU_STAGE1_SERVE=0` and its timings (R16's new section, `sisu check`), the editor's answers from stage 1 and the Rust front end's rest (G1, R16's `sisu lsp`), `sisu eval` with its three forms, E0602 and E0617 (chapter 25 with `settings`, G22, R12, R16 with `eval`, R17), the module's and the package's tokens (R15, R16, R17), the templates' builtins and E0609's list (R12 with `template_builtins` and `template_calls`, R14 with `positions`) and the graphemes' wait for Unicode's data files (R2) taught with checked examples; the findings at 48 (3 settled, 2 narrowed, 6 new), every check passing |
 | 32 | Stage 1's twentieth round (R169 to R175, decisions 1000 to 1006) and the stage 0 round's decisions 1020 to 1026 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 6 codes in R17's tables (E0278, D0170 to D0174), 1 entry added (E0278) and the entries of D0103 (a tuple's parts now, not a struct's fields or `CString.as_ptr`) and W0022 (a member's `attributes` read) rewritten, 9 sessions blessed (3 changed by the rounds: chapter 27's `cstring`, native now, R14's `members`, without W0022, and R16's `help`, which lists `eval`; 2 changed with their examples: R14's `export_pointer`, now a struct of an `i32`, a `u8` and an `f32`, and G19's `ffi`, whose wrapper passes a `CString`; 4 new) and 6 conformance expectations (2 changed by the rounds, 1 with its example, 3 new); the native widths and `CString.as_ptr` (chapter 27, G19, R22, R2 with `widths`), structs at C's offsets and the tuple limit (R14 with `export_pointer` and `export_tuple`, G19, R22, R17's D0103), `sisu eval` in the help (R16), the editor's answers from stage 1 and the five the driver does not route yet (G1, R16), stage 1's `check --holes` and its routing to come (R16, G26, chapters 3 and 28, X13), the prelude's visible names and E0278 (R13, R17 with `e0278_prelude_internal`, chapter 17, R16's `sisu lsp`), a member's `attributes` read without W0022 (R14, R17, chapter 25), a slice of a slice made in one expression (chapter 12 with `towels`, R4) and the prelude's functions in constants (R12 with `benches`, G22) taught with checked examples; the findings at 47 (3 settled, 6 narrowed, 1 split off, 1 new), every check passing |
+| 33 | The maintenance round of the prose: every sentence that says what the compiler does or does not do, in all 92 pages and this plan, checked against the copy of the compiler that step 32 checked, the findings list's counts made a table, and the pages measured against [STYLE.md](STYLE.md)'s limits | done (1): about 570 claims read and 53 programs run, 39 stale claims fixed in 23 pages and this plan (22 that the rounds made true, among them `round_to`, generator expressions, `Array` literals, the naming rules, `==` of `Shared`, `with` without `as`, black-box tests and `from` imports of re-exported names; 13 that they narrowed; 4 where a page and the findings list disagreed), G2 cut to 1,000 words, chapter 2 back within 3,500 and G22's status without "with the differences noted", no session changed; the findings at 48 (1 new), every check passing |
 | | Total | about 160 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -1000,110 +1003,45 @@ stage 0" is one that the compiler's rounds in progress have taken on.
 The last group holds the diagnostics that lack a fix or mislead,
 whatever their area.
 
-The list holds 47 findings in ten groups. The rounds R11 to R26
-settled 41 that the writers recorded (R24 alone 14, R25 9, R16 5),
-stage 1's third round, R27 to R36, with the decisions 354 to 360,
-settled 22 more (R33 alone 4, decision 357 3), and its fourth round,
-R37 to R46, with the decisions 361 to 388, settled 38 (R45 alone 13,
-R43 7, decision 386 6, decision 380 5), and its fifth round, R47 to R55,
-with the stage 0 round's decisions 420 to 429, settled 17 (R55 5, R54 4,
-R48 3, R53 1, and the decisions 421, 426, 428 and 429 one each) and
-narrowed four more, while two were found stale (`sisu run
---explore` prints the output of the seed it reports, and R0103 is
-raised), and its sixth round, R56 to R64, with the stage 0 round's
-decisions 460 to 470, settled 19 (R63 6, R61 3, R64 2, R57 to R60 and
-R62 one each, and the decisions 464, 465 and 467 one each) and narrowed
-four more (R63 two, the decisions 466 and 468 one each), and its
-seventh round, R65 to R72, with the stage 0 round's decisions 500 to
-508, settled 18 (R69 3, R70 3, R68 2, R71 2, R67 and R72 one each,
-decision 507 2, and the decisions 503, 504, 505 and 508 one each) and
-narrowed four more, and its eighth round, R73 to R78, with the decisions
-520 to 525 and the stage 0 round's decisions 540 to 547, settled 20
-(R77 8, R76 4, R74 2, decision 547 2, R73, R75, R78 and decision 545
-one each) and narrowed four more (R76, R77, R78 and decision 546 one
-each), and its ninth round, R79 to R94, with the decisions 580 to 595
-and the stage 0 round's decisions 560 to 567, settled 17 (R88 2, R79
-to R87, R89 to R91, R93 and R94 one each, and decision 567 one) and
-narrowed six more (R92, R94, the decisions 560 and 561 together, and
-564, 565 and 566 one each), and the stage 0 round's decisions 620 to
-627 settled 4 (decision 622 2, the decisions 624 and 627 one each) and
-narrowed two more (the decisions 623 and 626), and stage 1's tenth
-round, R95 to R103, with the decisions 600 to 608 and the stage 0
-round's decisions 640 to 646, settled 21 (R101 11, R97 2, R103 2, R96,
-R98, R99, R100, decision 644 one each, and R102, which decided against
-the `pure` adapters the item asked for, one) and narrowed three more
-(R101, and the decisions 642 and 643), and its eleventh round, R104
-to R110, with the decisions 660 to 666, settled 20 (R104 12, R106 2,
-R108 2, R105, R107, R109 and R110 one each), decided against one
-(E0501 in `sisu check`, R104) and narrowed three more (R108), while one
-was found stale (the compile-time evaluator's speed: a sieve of 4,000
-takes 1.2 seconds and one of 20,000 1.8), and its twelfth round, R111
-to R119, with the stage 0 round's decisions 680 to 694, settled 5 (R113
-2, R114, and the decisions 684 and 685 one each), found one to be the
-runtime's intended behaviour (decision 691: a scope whose body has no
-result cannot carry a failure nobody joined, so G14's test joins its
-tasks), decided against one (the `zip` temporaries, R114) and narrowed
-eight more (R115 two, R116, R117, R118 with decision 683, R119, and the
-decisions 682 and 694), and its thirteenth round, R120 to R126, with
-the stage 0 round's decisions 720 to 729, settled 6 (R123, R124, R126,
-and the decisions 721 and 722 with R120, which settled two) and
-narrowed four more (R120, R121, R122 with decision 723, and R126,
-which decided against a `Hash` for `TotalF64`), and its fourteenth
-round, R127 to R133, with the stage 0 round's decisions 780 to 787,
-settled 7 (R128, R129, R130, R131, the decisions 783 and 785 one each,
-and the proposal's 00 and 14, which no longer say "There is no
-compiler", one) and narrowed one more (R133, which leaves NFC names to
-generated tables), and its fifteenth round, R134 to R141, with the
-stage 0 round's decisions 820 to 828, settled 4 (R138, R140, and the
-decisions 822 and 827 one each), decided against one (the trace
-context of 06, decision 826) and narrowed five more (R136, R137 two,
-and the decisions 823 and 828), and its sixteenth round, R142 to R149,
-with the stage 0 round's decisions 860 to 866, settled 3 (R143, R144
-and decision 864 one each) and narrowed six more (R145, R146, R148 two,
-decision 864, and R142 with decision 865), and its seventeenth round,
-R150 to R157, with the stage 0 round's decisions 900 to 904, settled 4
-(R151, R152 and decision 900 one each, and R154, which decided against
-`try_collect` after the other adapters and recorded the spelling that
-works, one) and narrowed four more (R151, R153 with R156, R155, and
-decision 901), and its eighteenth round, R158 to R163, with the stage 0
-round's decisions 940 to 945, settled 3 (R159 2, R161 1) and narrowed
-three more (R162 with R163, and the decisions 941 and 944), and its
-nineteenth round, R164 to R168, with the stage 0 round's decisions 980
-to 986, settled 3 (R166, and the decisions 984 and 985 one each) and
-narrowed one more (R167), and its twentieth round, R169 to R175, with
-the stage 0 round's decisions 1020 to 1026, settled 3 (R171, R172 and
-decision 1020 one each) and narrowed six more (R169, R170, R174, R175,
-and the decisions 1021 and 1022), and the narrowing of R174 made
-`sisu check --holes` an item of its own; 12 were
-corrections to this
-plan, its conventions or its tools, now made where they belong, and a
-finding that several pages recorded is one item that names each page;
-4 come from the maintenance round, 12 from step 14, which checked the
-manual against the third round, 11 from step 15, which checked it
-against the fourth, 8 from step 16, which checked it against the
-fifth, 4 from step 17, which checked it against the sixth, 7 from
-step 18, which checked it against the seventh, 3 from step 19,
-which checked it against the eighth, 3 from step 20, which checked
-it against the ninth, 2 from step 21, which checked it against the
-stage 0 round's decisions 620 to 627, 4 from step 22, which checked
-it against stage 1's tenth round and the decisions 640 to 646, 2
-from step 23, which checked it against the eleventh, 1 from step
-24, which checked it against the twelfth and the decisions 680 to 694,
-1 from step 25, which checked it against the thirteenth and the
-decisions 720 to 729, 4 from step 26, which checked it against the
-fourteenth and the decisions 780 to 787, 1 from step 27, which
-checked it against the fifteenth and the decisions 820 to 828, and 3
-from step 28, which checked it against the sixteenth and the decisions
-860 to 866, 2 from step 29, which checked it against the
-seventeenth and the decisions 900 to 904, 2 from step 30, which
-checked it against the eighteenth and the decisions 940 to 945, 6
-from step 31, which checked it against the nineteenth and the decisions
-980 to 986, and 1 from step 32, which checked it against the twentieth
-and the decisions 1020 to 1026.
+The list holds 48 findings in ten groups. An item leaves it when a
+round of the compiler settles it, decides against what it asks, or
+finds it stale or intended, each checked against the compiler before
+the item goes; an item that a round narrows stays, rewritten to what is
+left. A finding that several pages recorded is one item that names each
+page, and 12 of the writers' findings were corrections to this plan,
+its conventions or its tools, now made where they belong. Each step
+that checks the manual against a round of the compiler adds a row to
+this table: what the round did to the list, the findings the step
+added, and the size of the list after the step.
+
+| Step | Rules and decisions | Settled | Decided against | Narrowed | Found stale or intended | New | After |
+|---|---|---|---|---|---|---|---|
+| 13 | R11 to R26 | 41 (R24 alone 14, R25 9, R16 5) | | | | 4 | 209 |
+| 14 | R27 to R36, decisions 354 to 360 | 22 (R33 alone 4, decision 357 3) | | | | 12 | 199 |
+| 15 | R37 to R46, decisions 361 to 388 | 38 (R45 alone 13, R43 7, decision 386 6, decision 380 5) | | | | 11 | 172 |
+| 16 | R47 to R55; the stage 0 round's decisions 420 to 429 | 17 (R55 5, R54 4, R48 3, R53 1, and the decisions 421, 426, 428 and 429 one each) | | 4 | 2 stale (`sisu run --explore` prints the output of the seed it reports, and R0103 is raised) | 8 | 161 |
+| 17 | R56 to R64; the stage 0 round's decisions 460 to 470 | 19 (R63 6, R61 3, R64 2, R57 to R60 and R62 one each, and the decisions 464, 465 and 467 one each) | | 4 (R63 two, the decisions 466 and 468 one each) | | 4 | 146 |
+| 18 | R65 to R72; the stage 0 round's decisions 500 to 508 | 18 (R69 3, R70 3, R68 2, R71 2, R67 and R72 one each, decision 507 2, and the decisions 503, 504, 505 and 508 one each) | | 4 | | 7 | 135 |
+| 19 | R73 to R78, decisions 520 to 525; the stage 0 round's decisions 540 to 547 | 20 (R77 8, R76 4, R74 2, decision 547 2, R73, R75, R78 and decision 545 one each) | | 4 (R76, R77, R78 and decision 546 one each) | | 3 | 118 |
+| 20 | R79 to R94, decisions 580 to 595; the stage 0 round's decisions 560 to 567 | 17 (R88 2, R79 to R87, R89 to R91, R93 and R94 one each, and decision 567 one) | | 6 (R92, R94, the decisions 560 and 561 together, and 564, 565 and 566 one each) | | 3 | 104 |
+| 21 | the stage 0 round's decisions 620 to 627 | 4 (decision 622 2, the decisions 624 and 627 one each) | | 2 (the decisions 623 and 626) | | 2 | 102 |
+| 22 | R95 to R103, decisions 600 to 608; the stage 0 round's decisions 640 to 646 | 21 (R101 11, R97 2, R103 2, R96, R98, R99, R100, decision 644 one each, and R102, which decided against the `pure` adapters the item asked for, one) | | 3 (R101, and the decisions 642 and 643) | | 4 | 85 |
+| 23 | R104 to R110, decisions 660 to 666 | 20 (R104 12, R106 2, R108 2, R105, R107, R109 and R110 one each) | 1 (E0501 in `sisu check`, R104) | 3 (R108) | 1 stale (the compile-time evaluator's speed: a sieve of 4,000 takes 1.2 seconds and one of 20,000 1.8) | 2 | 65 |
+| 24 | R111 to R119; the stage 0 round's decisions 680 to 694 | 5 (R113 2, R114, and the decisions 684 and 685 one each) | 1 (the `zip` temporaries, R114) | 8 (R115 two, R116, R117, R118 with decision 683, R119, and the decisions 682 and 694) | 1 the runtime's intended behaviour (decision 691: a scope whose body has no result cannot carry a failure nobody joined, so G14's test joins its tasks) | 1 | 59 |
+| 25 | R120 to R126; the stage 0 round's decisions 720 to 729 | 6 (R123, R124, R126, and the decisions 721 and 722 with R120, which settled two) | | 4 (R120, R121, R122 with decision 723, and R126, which decided against a `Hash` for `TotalF64`) | | 1 | 54 |
+| 26 | R127 to R133; the stage 0 round's decisions 780 to 787 | 7 (R128, R129, R130, R131, the decisions 783 and 785 one each, and the proposal's 00 and 14, which no longer say "There is no compiler", one) | | 1 (R133, which leaves NFC names to generated tables) | | 4 | 51 |
+| 27 | R134 to R141; the stage 0 round's decisions 820 to 828 | 4 (R138, R140, and the decisions 822 and 827 one each) | 1 (the trace context of 06, decision 826) | 5 (R136, R137 two, and the decisions 823 and 828) | | 1 | 47 |
+| 28 | R142 to R149; the stage 0 round's decisions 860 to 866 | 3 (R143, R144 and decision 864 one each) | | 6 (R145, R146, R148 two, decision 864, and R142 with decision 865) | | 3 | 47 |
+| 29 | R150 to R157; the stage 0 round's decisions 900 to 904 | 4 (R151, R152 and decision 900 one each, and R154, which decided against `try_collect` after the other adapters and recorded the spelling that works, one) | | 4 (R151, R153 with R156, R155, and decision 901) | | 2 | 45 |
+| 30 | R158 to R163; the stage 0 round's decisions 940 to 945 | 3 (R159 2, R161 1) | | 3 (R162 with R163, and the decisions 941 and 944) | | 2 | 44 |
+| 31 | R164 to R168; the stage 0 round's decisions 980 to 986 | 3 (R166, and the decisions 984 and 985 one each; one of the three a part of an item that stays) | | 1 (R167) | | 6 | 48 |
+| 32 | R169 to R175; the stage 0 round's decisions 1020 to 1026 | 3 (R171, R172 and decision 1020 one each) | | 6 (R169, R170, R174, R175, and the decisions 1021 and 1022); R174's narrowing made `sisu check --holes` an item of its own | | 1 | 47 |
+| 33 | none: the prose of every page, read against the compiler of step 32 | | | | | 1 | 48 |
+| | Total | 275 | 3 | 68 | 3 stale, 1 intended | 82 | 48 |
 
 ### Syntax and names
 
-- [14](../proposal/14-non-goals.md) lists "variadic functions" among what Sisu does not have, where [02](../proposal/02-syntax.md#declarations) gives `*xs: T` (X1).
+- [14](../proposal/14-non-goals.md) lists "variadic functions" among what Sisu does not have, where [02](../proposal/02-syntax.md#declarations) gives `*xs: T` (R3, R19, R20).
 - `for i, d in enumerate(own drafts)` is E0100 ("expected `->`"), so consuming a list with its positions takes a counter (chapter 13).
 - The lints of D-048 read their tables from Python's Unicode data (15.1): a letter's script comes from its character name, an approximation of Unicode's `Scripts.txt`, and the confusables are a subset of `confusables.txt`, so some look-alikes go unreported (R136; R1).
 - E0278, which a program gets for naming one of the prelude's 43 helpers, such as `days_in_month`, has no fix: its fix imports the helper from a module of the standard library that has it as a `pub` item, and no module has one, since a `pub` `days_in_month` in `std.time` would change that module's page, which the conformance suite's `doc/std_pages` holds, so a program that needs the helper writes its own (R175; R13, R17; a home for `days_in_month` assigned to stage 1).
@@ -1153,12 +1091,13 @@ and the decisions 1020 to 1026.
 
 - The sized integers have no narrowing methods of their own but `truncate_to` (`to_u8()` of a `u32` is E0304), so a `u32` is narrowed through `to_int()` (chapter 24, R2).
 - `filter` hands its function a reference to each item, so no named function fits it: `filter(is_big)` with `def is_big(x: ref int)` is E0300 ("expected `(ref ref int) -> bool`"), and one that takes `word: ref str` is shown as `(str) -> bool` and refused too; the fix wraps it in a closure, `x -> is_big(x)` (chapter 18).
+- A struct that derives `Decode` with a field of an enum, whose variants `decode` cannot make (E0609 for the enum itself), passes `sisu check`, and `sisu run` stops it before `main` with E0501, "invalid SIR in `json.field#Mood`: bb3: calls missing function json.from_json", an error of the compiler's own, where E0608 at the derive would say why (G7).
 - `Zone.named` knows 52 zones, each with today's rules, which it gives an earlier year too, and the tz database with each zone's history, `std.x.tzdata` of 11, is not written (G9, chapter 21).
 
 ### Tooling and the driver
 
 - `sisu explain CODE` prints the code's message alone, without the long form with an example that 10 describes, whose text is Q-66 (chapter 1, R17).
-- `sisu run --profile` and `--target` are D0009, and `sisu fix`, `why`, `review`, `publish`, `add` and `update` are D0003, as planned, with the registry of D-031 they wait for (chapters 25 and 28, G20, G27; `sisu fix` assigned to stages 1 and 0).
+- `sisu run --profile` and `--target` are D0009, and `sisu fix`, `why`, `review`, `publish`, `add` and `update` are D0003, as planned, with the registry of D-031 they wait for (chapters 17 and 28, G20, G27; `sisu fix` assigned to stages 1 and 0).
 - `sisu check --holes` is D0009, though stage 1 answers it from 0.15.0 with each hole's type, function, bindings in scope and those of its type (R174), since the driver does not route it yet; 10's types, contracts, tests, fits to depth two and JSON form are left for a later round of stage 1 (G26, R16, chapters 3 and 28, X13; the routing assigned to stage 0, the whole report to stage 1).
 - The native executable of a ten-line program is 6.25 MB in both profiles (21 MB when the driver is a debug build), 1.74 MB stripped: the link drops what nothing reaches, and what remains is the runtime's code, Rust's standard library, 3.8 MB of debug information and 0.4 MB of symbols, with the C library and `libgcc_s` linked dynamically, where [12](../proposal/12-interop-and-targets.md#binary-size-and-startup) links statically and plans a `release-size` profile (chapter 27, G20, R22).
 - `sisu lsp` answers selection ranges, rename, code actions, inlay hints and formatting from the Rust front end, though stage 1 answers each from 0.15.0 (R169), since the driver does not route them yet (decision 1024; G1, R16; assigned to stage 0).
@@ -1166,7 +1105,7 @@ and the decisions 1020 to 1026.
 - `sisu eval` without a file, or with `--to xml`, prints stage 1's own usage in its `Debug` form, `error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | ...")`, which names stage 1's commands and none of `eval`'s (G22, R16; assigned to stage 0).
 - `sisu eval --to toml` writes a list of structs as one line of inline tables however long it grows, 150 columns for two services, where TOML's `[[SERVICES]]` tables would keep one line to a field (G22; assigned to stage 1).
 - The Rust front end, the oracle, trails stage 1's twentieth round: under `--front-end=rust` a program may name the prelude's helpers, `days_in_month(2028, 2)` printing 29 where stage 1 gives E0278, and a slice of a slice made in one expression, `towels.as_slice()[:2]`, is still E0406 when used on a later line (R172, R175; chapter 12, R13, R17).
-- `sisu run --stats` prints scheduling latencies that differ between runs, so only `--stats stack-depth` can be shown (chapter 19, G27).
+- `sisu run --stats` prints scheduling latencies that differ between runs, so only `--stats stack-depth` can be shown (G27).
 - A worksheet's expression statement that shows an optional value or a result, `line.find("M")`, is E0318 under `sisu run` of the same file, so since R103 such a worksheet is no longer a script, though it starts with `#!/usr/bin/env sisu`, and the conformance runner records its E0318 (chapter 6, R16).
 - The interval that `sisu bench` reports is one run's, so on a busy machine two runs of one benchmark gave 100.3 to 110.2 µs and 134.1 to 184.7 µs (G27).
 - The grammar of the architecture notes, "Parsing and the syntax tree", which stage 1's parser repeats in its `##!` comments, is a sketch without `trait_def`, `suite_def`, `bench_def`, `extern_block`, parameters, generic parameters, `where` clauses, visibility, `select`, `yield`, `unsafe:`, `comptime` statements, contracts or `expect`; R20 is written from the parser itself, and nothing checks either text against it (R20).

@@ -209,10 +209,10 @@ a units error shows metres per second and not an exponent vector.
   translation for each language (Q-69).
 - **A fix that misleads is worse than none.** The corpus checks that a
   fix with edits fixes, but a note cannot be checked that way, and the
-  manual's findings record notes that send a reader into the same error
-  again, such as E0407's `.copy()` for a borrowed result, or that offer
-  `.to_lowercase()` for a `str` where a `String` is expected, which
-  changes the text.
+  manual's findings recorded notes that sent a reader into the same
+  error again, such as E0407's `.copy()` for a borrowed result, or that
+  offered `.to_lowercase()` for a `str` where a `String` is expected,
+  which changes the text, until stage 1's R24 rewrote them.
 - **Stability constrains.** A code is never reused, so splitting one
   diagnostic into two takes a new code, and the tests and pages that pin
   a message's human form must all be blessed again when its words

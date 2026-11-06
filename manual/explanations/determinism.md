@@ -157,8 +157,8 @@ shape, removing the parallelism gives the same result, and a loop that
 fails reports the failure of the lowest index (D-069). A histogram
 counted on one worker and on eight has the same bits by construction,
 and chapter 26 builds one as an exercise; stage 0 still runs the chunks
-on one task, so the claim is tested only when the runtime's pool of
-workers exists.
+on one task, and only `par.map` on a pool of workers, natively, so the
+claim is tested for the rest only when the runtime's pool exists.
 
 Simulation and replay are the third. A replay token can reproduce a
 failing test only if everything the test computes outside the fakes
@@ -188,9 +188,9 @@ each need, and each project otherwise has to enforce by review.
   fixed reduction shape constrains how parallel loops split their work.
   Relaxed SIMD and GPU code cannot meet the guarantee at all and must
   opt out.
-- **`pure` code can do less.** No lock, no atomic, no `select`, and in
-  stage 0 not yet the iterator methods, whose `count`, `map` and `sum`
-  are not marked `pure` (a gap the plan's findings record).
+- **`pure` code can do less.** No lock, no atomic, no `select`, and no
+  iterator adapter such as `map`, which takes any function and so is
+  not `pure` (R102): a `pure` function folds or loops instead.
 - **The promise is new.** Each rule has shipped somewhere, but the
   combination is checked by no language, so the corpus is the first test
   of whether it holds in practice.

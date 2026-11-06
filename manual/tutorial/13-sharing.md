@@ -976,8 +976,7 @@ goes round one without end.
 it is not there. `install_order` is a depth-first search: a helper
 method visits a package's needs before it adds the package to the
 order, and a set of the packages already added keeps each one to one
-place. A set of `Key`s is not available in stage 0 (E0398 says so);
-keep each key's `index`, which is unique while nothing is removed.
+place.
 
 </details>
 

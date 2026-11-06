@@ -774,7 +774,9 @@ every such collection is dead. Allocation failure panics; `try_push`
 and its kind return `! OutOfMemory` for code that must handle it.
 
 **Status.** Designed (D-060, leaning; Q-4); stage 0 has the global
-allocator only, and none of `with_allocator`, `Region` or `try_push`.
+allocator only, and neither `with_allocator` nor `try_push`; `Region`
+exists in `std.mem`, under `RawBuf`
+([chapter 27](../tutorial/27-systems.md#what-is-still-to-come)).
 
 ## Unsafe code and raw pointers
 
@@ -788,8 +790,9 @@ the root manifest lists it under `[trust]`.
 **Status.** Designed ([04](../../proposal/04-memory-and-ownership.md),
 [22](../../proposal/22-unsafe.md)), and arriving: the compiler checks
 `unsafe` blocks and expressions, and warns about one that holds no
-unsafe operation (W0009); raw pointers and foreign calls do not run in
-stage 0 yet.
+unsafe operation (W0009); raw pointers run, checked by the interpreter,
+and foreign calls run natively, while the interpreter emulates six C
+functions ([R3](declarations.md#foreign-functions)).
 
 ## How the rules are checked
 

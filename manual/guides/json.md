@@ -284,7 +284,8 @@ does the checking that a `match` on `Json` does by hand.
 
 **Status.** In stage 0 (11), with two differences: an enum is encoded
 and not decoded, since `decode` makes no enum's variants yet (E0609),
-and `@derive(Decode)`, which 11 gives a struct, is accepted on an enum
-too, whose `decode` then stops the run at E0501, an error of the
+and `@derive(Decode)`, which 11 gives a struct, is E0608 on an enum; a
+struct that derives `Decode` and has a field of an enum passes
+`sisu check`, and `sisu run` stops it at E0501, an error of the
 compiler's own. Without `from std.json import Decode, Encode`, the
 derive is E0243, whose note names the import.

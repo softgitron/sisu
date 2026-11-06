@@ -353,9 +353,10 @@ for spruce, pine, birch, alder, oak and rowan.
   shows.
 
 `iter()` borrows each element, so the closures see `ref str` items, and
-the list stays as it is. In stage 0, `collect()` always makes a list: a
-type argument such as `collect[set[int]]()` compiles but still gives a
-list. A set comes from a set comprehension, as in chapter 5.
+the list stays as it is. In stage 0, `collect()` always makes a list,
+and a type argument such as `collect[set[int]]()` is E0349
+(`type.not-generic`). A set comes from a set comprehension, as in
+chapter 5.
 
 > **From Python.** Python's `map(f, xs)` and `filter(f, xs)` are
 > functions that take a list. In Sisu they are methods of an iterator,

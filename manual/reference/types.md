@@ -435,11 +435,6 @@ where a narrower one is expected is E0300 with no fix: the conversion is
 one of the methods in the table, chosen for what it does with a value
 that does not fit.
 
-**Stage 0 differs.** `x.into()` where no type is expected,
-as inside an interpolation, is accepted by the checker and stops the
-interpreter ("no impl of `Into` for `u8`"); give it a type, as in `let
-wide: u32 = small.into()`.
-
 **Status.** In stage 0 (D-016).
 
 ## Floating point
@@ -1662,11 +1657,7 @@ it says `@derive(Copy)` and all its fields are `Copy` (E0244,
 [R17](diagnostics.md#e0244); D-007). Which types are `Copy` is
 [R7](ownership.md#copy-types-and-explicit-copies).
 
-**Stage 0 differs.** `impl Copy
-for T:` written by hand is accepted without a word and makes nothing
-`Copy`; `@derive(Copy)` is the way.
-
-**Status.** In stage 0 (D-007), with the differences noted.
+**Status.** In stage 0 (D-007).
 
 ## Refinement types
 

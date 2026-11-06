@@ -270,9 +270,6 @@ out again
 the evening ends
 ```
 
-**Stage 0 differs.** `with VALUE:` without `as NAME`, Python's `with
-lock:`, is E0100 ("expected `as`").
-
 **Status.** In stage 0 (D-008).
 
 ## Generators

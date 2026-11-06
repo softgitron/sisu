@@ -5602,9 +5602,9 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Declare the function in the type's body, as the fixed program does, or
-call one the type has. For a variant that an enum does not have,
-`Light.Blue`, stage 0 gives this code too, where E0327 would say that
-`Light` has no variant `Blue`.
+call one the type has. A variant that an enum does not have,
+`Light.Blue`, is E0327 instead, which says that `Light` has no variant
+`Blue`.
 
 <!-- file: examples/reference-diagnostics/e0351_unknown_associated_fixed.sisu -->
 ```sisu
@@ -9574,8 +9574,7 @@ error[E1002]: `[package]` needs `version`
 
 ```
 
-Add the key. Stage 0 also reports E1002 for a `version` that is there
-but not `MAJOR.MINOR.PATCH`, beside E1003.
+Add the key.
 
 <!-- file: examples/reference-diagnostics/e1002_missing_key_fixed.files/sisu.toml -->
 ```toml

@@ -306,8 +306,8 @@ A package that another names in `[dependencies]` and may import.
 
 ### Deprecation
 
-Marking an item that will go, with `@deprecated("...")`; the warning at
-each use is designed. [Chapter 28](../tutorial/28-code-that-lasts.md);
+Marking an item that will go, with `@deprecated("...")`, whose every
+use gets the warning W0023. [Chapter 28](../tutorial/28-code-that-lasts.md);
 [R14](attributes.md#deprecation-and-migrations).
 
 ### Derive

@@ -263,8 +263,8 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
   oracle, and not for users, which is why the native backend was built
   beside stage 1 rather than after it.
 - **The interpreter's tools have no native counterpart yet.** The
-  ownership monitor, the counterexample mode, record and replay, hot
-  replacement and `sisu test` run on the interpreter only.
+  ownership monitor, the counterexample mode, record and replay and hot
+  replacement run on the interpreter only.
 - **Self-hosting freezes early mistakes.** A compiler written in its own
   language must keep compiling through every change of the language,
   which makes early design errors expensive to undo; editions and the

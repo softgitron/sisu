@@ -540,9 +540,9 @@ def main():
   partial order only: no `f64` is less or more than NaN, so `f64` has
   `PartialOrd` and not `Ord`. A type with a total order gives
   `Some(self.cmp(other))`.
-- `board.sort()` sorts the list in place by that order. Stage 0 has a
-  bug here: `sorted(board)` stops with an internal error when the
-  elements are not `Copy` and their order is written by hand, so the
+- `board.sort()` sorts the list in place by that order. `sorted(board)`
+  would give references to players, which are not `Copy`, and a list
+  holds no references (E0438, `borrow.ref-in-collection`), so the
   example sorts in place.
 
 Your own trait names its supertraits in parentheses after its name,

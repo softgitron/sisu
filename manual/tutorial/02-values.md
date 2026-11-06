@@ -864,9 +864,8 @@ Some(300) None
 - `round()` rounds an `f64` to the nearest whole number, halves away
   from zero, and gives an `f64`. `truncate_to_int()` drops the fraction
   and gives an `int`. To get the nearest `int`, round first, then
-  truncate. A method that does both, `round_to[int]()`, is designed in
-  [the proposal's tour](../../proposal/01-tour.md#bindings-and-basic-types)
-  and is not in the compiler yet.
+  truncate. A method that does both, `round_to[int]()`, comes in
+  [chapter 24](24-numbers.md#conversions-that-can-lose-information).
 
 > **From Python.** Python's `round(2.5)` is 2, because Python rounds a
 > half to the even neighbour. Sisu's `2.5.round()` is 3.0: a half rounds

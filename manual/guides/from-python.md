@@ -66,9 +66,6 @@ Roni 10
 Eero 11
 ```
 
-Python prints the line it skipped and a line for each player, which is
-what the port of step 4 prints too.
-
 ## 1. Turn each class into a struct
 
 A `struct` declares its fields with their types, and calling its name
@@ -100,7 +97,7 @@ Aino: [12]
   when a player is built. The default is computed for each new player.
 - A player is built by position, `Player("Aino")`, or by keyword,
   `Player(name="Roni")`.
-- `append` is `push`. A method takes `self` first, as in Python, with
+- A method takes `self` first, as in Python, with
   no type written.
 - There is no inheritance (D-012). What a base class shares, a trait
   shares ([chapter 14](../tutorial/14-traits.md)).
@@ -326,8 +323,7 @@ meaning, as step 4 does. A port of Python 3 takes the second.
 
 These are the habits, with the Sisu spelling of each. R19 shows the
 diagnostic that each one gets, and which ones carry a fix that writes
-the Sisu spelling, `.is_none()` for `x is None`, `x ->` for `lambda
-x:` and `struct` for `class` among them, or a note, as `try:` does:
+the Sisu spelling or a note:
 
 | Python | Sisu |
 |---|---|
@@ -351,12 +347,9 @@ x:` and `struct` for `class` among them, or a note, as `try:` does:
 | `lambda x: e` | `x -> e`, or `it` |
 | `:=`, `else` on a loop | `if let`, or a chained condition |
 | `a < b > c` | a chain that points one way |
-| `class`, `try` and `except` | steps 1 and 3 |
 
-Four habits compile and mean something else, each to remove a trap: a
-default argument is computed at each call, each iteration of a loop
-binds its own variable, a closure cannot outlive a borrowed loop
-variable, and an `int` has 64 bits and panics past them. R19's section
+Four habits compile and mean something else, each to remove a trap.
+R19's section
 "Python habits whose meaning Sisu changes" shows each.
 
 **Status.** In stage 0, with one of Python's builtins narrower than
