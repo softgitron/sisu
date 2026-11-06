@@ -33,12 +33,29 @@ answer 0
   "EMPTY": []
 }
 answer 0
-SERVICES = [{ name = "web", port = 8080, replicas = 3, tier = "Free" }, { name = "api", port = 9000, replicas = 1, tier = { Paid = { seats = 5 } }, owner = "ops" }]
 REGION = "eu-north"
 RATIO = 0.25
-LIMITS = { cpu = 4, memory = 16 }
 ZONES = ["a", "b\tc"]
 EMPTY = []
+
+[[SERVICES]]
+name = "web"
+port = 8080
+replicas = 3
+tier = "Free"
+
+[[SERVICES]]
+name = "api"
+port = 9000
+replicas = 1
+owner = "ops"
+
+[SERVICES.tier.Paid]
+seats = 5
+
+[LIMITS]
+cpu = 4
+memory = 16
 answer 0
 SERVICES:
   - name: "web"
@@ -106,12 +123,6 @@ error[E0602]: the compile-time evaluation of this expression panicked: invariant
 14 | pub const WEB: Service = Service(name="web".to_string(), replicas=none_left(3))
    |           ^^^
 
-error[E0617]: `SQUARE` holds a function, which JSON cannot write
-  --> config_refused.sisu:15:7
-   |
-15 | const SQUARE: (int) -> int = (x: int) -> x * x
-   |       ^^^^^^
-
 error: Failed
 answer 0
 {
@@ -122,7 +133,7 @@ answer 0
   "NONE": null
 }
 answer 1
-error[E0617]: `MAYBE` holds nothing (`None`) in a list, which TOML cannot write
+error[E0617]: `MAYBE[0]` holds nothing (`None`) in a list, which TOML cannot write
   --> config_maybe.sisu:4:7
   |
 4 | const MAYBE: list[int?] = [None, Some(2)]

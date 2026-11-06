@@ -12,14 +12,14 @@
 ##! tabs and line breaks written `\\`, `\t` and `\n` (`field`).
 
 import stage1.typeck
-from stage1.diag import Catalog, Lines, TextRange
+from stage1.diag import Catalog, Lines, TextRange, quote
 from stage1.parser import parse
 from stage1.syntax.ast import Mode, Vis
 from stage1.syntax.kinds import SyntaxKind, keyword_kind
 from stage1.syntax.tree import Element, Tree
 from stage1.typeck.program import DefKind, ModuleId, Program
 from stage1.typeck.thir import ArgMode, Callee, TBody, TExprKind
-from stage1.typeck.ty import DefId, Ty, TyData, Types
+from stage1.typeck.ty import DefId, Ty, TyData, TyKey, Types
 
 ## The keywords a statement or a declaration starts with, which a
 ## completion offers where a name may be written (stage 0's `KEYWORDS`).
@@ -496,6 +496,12 @@ pub pure def references(
                 if means:
                     out.push("{field(path)}\t{range_of(text, lines, t.start, t.end)}\tuse\n")
                 continue
+            # A keyword argument's name in a construction means its field
+            # (RULES.md, R179).
+            if let Some(found) = keyword_field(typed, module, tree, text, k):
+                if found == target:
+                    out.push("{field(path)}\t{range_of(text, lines, t.start, t.end)}\tuse\n")
+                continue
             if let Some(found) = target_at(typed, module, t.start):
                 means = found == target
             # A type's name written in a type means the type.
@@ -865,7 +871,32 @@ pub pure def target_of(
                 if let Some(d) = import_meaning(typed.prog, tree, text, k):
                     return Some(Target.Def(d))
                 return None
+            if let Some(found) = keyword_field(typed, m, tree, text, k):
+                return Some(found)
     return target_at(typed, m, offset)
+
+## The field that the name `k` of a keyword argument names, `x` of
+## `Point(x=1)`: a name before `=` among the arguments of a struct's
+## construction (RULES.md, R179), which `references` and `rename` count
+## among the field's uses.
+pure def keyword_field(typed: typeck.Typed, m: ModuleId, tree: Tree, text: str, k: int) -> Target?:
+    var next = k + 1
+    while next < len(tree.tokens) and tree.tokens[next].kind.is_trivia():
+        next += 1
+    if next >= len(tree.tokens) or tree.tokens[next].kind != SyntaxKind.Eq:
+        return None
+    let t = tree.tokens[k]
+    let (bi, ei) = expr_at(typed, m, t.start) else:
+        return None
+    let TExprKind.Struct(d, _) = typed.bodies[bi].exprs[ei].kind.copy() else:
+        return None
+    let s = typed.prog.struct_info(d) else:
+        return None
+    let name = text.byte_slice(t.start, t.end)
+    for i in range(len(s.fields)):
+        if s.fields[i].name == name:
+            return Some(Target.Field(d, i))
+    return None
 
 ## Whether token `k` is written in an import line.
 pure def in_import(tree: Tree, k: int) -> bool:
@@ -1211,10 +1242,14 @@ pub pure def format_edits(text: str, formatted: str) -> String:
 
 # ---------------------------------------------------------------- typed holes
 
-## A typed hole (10, "Holes"; D-061; RULES.md, R174): its module and
-## range, its name (empty for `todo()`), the type its place needs, the
-## function it is written in, the bindings in scope before it with their
-## types (`n: int`), and the names of those whose type is the hole's.
+## A typed hole (10, "Holes"; RULES.md, R174 and R181): where it is, its
+## name, the type its place needs, the function it is written in, the
+## bindings in scope before it with their types (`n: int`), the names and
+## the expressions to depth two of those whose type is the hole's
+## (`base`, `self.hours`, `t.total()`, `area(shape)`), the definitions of
+## the program's types the hole's type mentions, the `requires` of its
+## function as facts and its `ensures` as obligations, and the tests that
+## reach its function.
 pub struct Hole:
     pub module: ModuleId
     pub start: int
@@ -1224,11 +1259,23 @@ pub struct Hole:
     pub function: String
     pub scope: list[String]
     pub fits: list[String]
+    pub types: list[HoleType]
+    pub requires: list[String]
+    pub ensures: list[String]
+    pub tests: list[String]
+
+## A type the hole's type mentions, defined by the program: a struct with
+## its fields (`hours: int`) or an enum with its variants (`Circle(r: f64)`).
+pub struct HoleType:
+    pub name: String
+    pub is_struct: bool
+    pub members: list[String]
 
 ## The typed holes of the bodies of `modules`, by module and position.
 pub pure def holes(typed: typeck.Typed, modules: list[ModuleId]) -> list[Hole]:
     let prog = ref typed.prog
     let types = ref typed.types
+    let reached = tests_reaching(typed)
     var out: list[Hole] = []
     for bi in range(len(typed.bodies)):
         let m = body_module(typed, bi)
@@ -1236,6 +1283,17 @@ pub pure def holes(typed: typeck.Typed, modules: list[ModuleId]) -> list[Hole]:
             continue
         let body = ref typed.bodies[bi]
         let names = generic_names(prog, body.def_)
+        var requires: list[String] = []
+        var ensures: list[String] = []
+        # The local `ensures` calls `result`, which is not in scope in the
+        # body.
+        var result_local = -1
+        if let Some(c) = body.contracts:
+            for r in c.requires:
+                requires.push(r.text.copy())
+            for e in c.ensures:
+                ensures.push(e.text.copy())
+            result_local = c.result ?? -1
         for e in body.exprs:
             match e.kind:
                 case TExprKind.Call(Callee.Fn(d, _), args):
@@ -1251,14 +1309,31 @@ pub pure def holes(typed: typeck.Typed, modules: list[ModuleId]) -> list[Hole]:
                     var scope: list[String] = []
                     var fits: list[String] = []
                     var seen: list[String] = []
-                    for l in body.locals:
+                    var bound: list[(String, Ty)] = []
+                    for li in range(len(body.locals)):
+                        let l = ref body.locals[li]
                         if l.span.end > e.span.start or not named(l.name) or seen.contains(l.name):
+                            continue
+                        if li == result_local:
                             continue
                         seen.push(l.name.copy())
                         scope.push("{l.name}: {shown(prog, types, l.ty, names)}")
+                        bound.push((l.name.copy(), l.ty))
                         let bare = shown(prog, types, types.strip_ref(l.ty), names)
                         if bare == ty:
                             fits.push(l.name.copy())
+                    for x in fits_deeper(typed, bound, ty, names, body.def_):
+                        if not fits.contains(x):
+                            fits.push(x.copy())
+                    var mentioned: list[DefId] = []
+                    mentions(prog, types, e.ty, mut mentioned)
+                    var defined: list[HoleType] = []
+                    for t in mentioned:
+                        if let Some(h) = hole_type(prog, types, t):
+                            defined.push(h)
+                    var tests: list[String] = []
+                    if let Some(ts) = reached.get(body.def_):
+                        tests = ts.copy()
                     out.push(
                         Hole(
                             module=m,
@@ -1269,11 +1344,150 @@ pub pure def holes(typed: typeck.Typed, modules: list[ModuleId]) -> list[Hole]:
                             function=function_name(prog, types, body.def_),
                             scope=scope,
                             fits=fits,
+                            types=defined,
+                            requires=requires.copy(),
+                            ensures=ensures.copy(),
+                            tests=tests,
                         )
                     )
                 case _:
                     pass
     out.sort_by((a, b) -> hole_order(a, b))
+    return out
+
+## The expressions of depth two whose type is the hole's `ty` (10: "the
+## expressions that fit to depth two"; RULES.md, R181), from the bindings
+## in scope `bound`: a field of one (`self.hours`), a method of one that
+## takes nothing else (`t.total()`), and a function of the program's own
+## modules, but the hole's, that takes one of them alone (`area(shape)`).
+pure def fits_deeper(
+    typed: typeck.Typed, bound: list[(String, Ty)], ty: str, names: list[String], within: DefId
+) -> list[String]:
+    let prog = ref typed.prog
+    let types = ref typed.types
+    var out: list[String] = []
+    for (name, lty) in bound:
+        let bare = types.strip_ref(lty)
+        let TyData.Adt(d, _) = types.data(bare) else:
+            continue
+        if let Some(s) = prog.struct_info(d):
+            for f in s.fields:
+                if shown(prog, types, f.ty, generic_names(prog, d)) == ty:
+                    out.push("{name}.{f.name}")
+        for ((key, method), m) in prog.methods.items():
+            if key != TyKey.Adt(d) or m == within:
+                continue
+            let f = prog.fn_info(m) else:
+                continue
+            if f.self_mode.is_none() or not f.params.is_empty() or not f.generics.is_empty():
+                continue
+            if shown(prog, types, f.ret, names) == ty:
+                out.push("{name}.{method}()")
+    for i in range(len(prog.defs)):
+        let d = DefId(index=i)
+        let def_ = ref prog.defs[i]
+        if d == within or prog.modules[def_.module.index].is_std:
+            continue
+        let DefKind.Fn(f) = def_.kind() else:
+            continue
+        if f.owner.is_some() or len(f.params) != 1 or not f.generics.is_empty():
+            continue
+        if f.intrinsic.is_some() or shown(prog, types, f.ret, names) != ty:
+            continue
+        let wanted = shown(prog, types, types.strip_ref(f.params[0].ty), names)
+        for (name, lty) in bound:
+            if shown(prog, types, types.strip_ref(lty), names) == wanted:
+                out.push("{def_.name}({name})")
+    out.sort()
+    return out
+
+## The structs and enums of the program's own modules that `ty` names,
+## through its type arguments, references, tuples and functions, each once.
+pure def mentions(prog: Program, types: Types, ty: Ty, mut out: list[DefId]):
+    match types.data(ty):
+        case TyData.Adt(d, args):
+            if not prog.modules[prog.defs[d.index].module.index].is_std and not out.contains(d):
+                out.push(d)
+            for a in args:
+                mentions(prog, types, a, mut out)
+        case TyData.Ref(inner, _):
+            mentions(prog, types, inner, mut out)
+        case TyData.Tuple(elems, _):
+            for t in elems:
+                mentions(prog, types, t, mut out)
+        case TyData.Fn(params, ret, _):
+            for t in params:
+                mentions(prog, types, t, mut out)
+            mentions(prog, types, ret, mut out)
+        case _:
+            pass
+
+## The definition of the struct or enum `d`, as the hole's report writes it.
+pure def hole_type(prog: Program, types: Types, d: DefId) -> HoleType?:
+    let names = generic_names(prog, d)
+    let name = prog.defs[d.index].name.copy()
+    if let Some(s) = prog.struct_info(d):
+        var members: list[String] = []
+        for f in s.fields:
+            members.push("{f.name}: {shown(prog, types, f.ty, names)}")
+        return Some(HoleType(name=name, is_struct=True, members=members))
+    if let Some(e) = prog.enum_info(d):
+        var members: list[String] = []
+        for v in e.variants:
+            if v.fields.is_empty():
+                members.push(v.name.copy())
+                continue
+            var each: list[String] = []
+            for (n, t) in v.fields:
+                match n:
+                    case Some(x):
+                        each.push("{x}: {shown(prog, types, t, names)}")
+                    case None:
+                        each.push(shown(prog, types, t, names))
+            members.push("{v.name}({each.join(", ")})")
+        return Some(HoleType(name=name, is_struct=False, members=members))
+    return None
+
+## For each function of the program, the names of the tests whose bodies
+## call it, directly or through other functions, in the tests' order: the
+## tests that reach a hole of it (RULES.md, R181).
+pure def tests_reaching(typed: typeck.Typed) -> dict[DefId, list[String]]:
+    var calls: dict[DefId, list[DefId]] = {}
+    for body in typed.bodies:
+        var callees: list[DefId] = []
+        for e in body.exprs:
+            match e.kind:
+                case TExprKind.Call(Callee.Fn(d, _), _) | TExprKind.FnRef(d, _):
+                    if not callees.contains(d):
+                        callees.push(d)
+                case _:
+                    pass
+        match calls.get(body.def_):
+            case Some(xs):
+                var all = xs.copy()
+                for c in callees:
+                    if not all.contains(c):
+                        all.push(c)
+                _ = calls.insert(body.def_, all)
+            case None:
+                _ = calls.insert(body.def_, callees)
+    var out: dict[DefId, list[String]] = {}
+    for t in typed.prog.tests:
+        let name = typed.prog.defs[t.index].name.copy()
+        var seen: set[DefId] = set()
+        var work = [t]
+        while let Some(d) = work.pop():
+            if not seen.add(d):
+                continue
+            var names: list[String] = []
+            if let Some(xs) = out.get(d):
+                names = xs.copy()
+            if not names.contains(name):
+                names.push(name.copy())
+                _ = out.insert(d, names)
+            if let Some(cs) = calls.get(d):
+                for c in cs:
+                    work.push(c)
     return out
 
 pure def hole_order(a: Hole, b: Hole) -> Ordering:
@@ -1291,9 +1505,13 @@ pure def function_name(prog: Program, types: Types, d: DefId) -> String:
     return def_.name.copy()
 
 ## `query holes`: the typed holes of module `m`, whose text is `text`,
-## one line each, `RANGE\tNAME\tTYPE\tFUNCTION\tSCOPE\tFITS`, SCOPE the
-## bindings in scope with their types and FITS the names of those that fit,
-## each separated by `, `.
+## one line each, `RANGE\tNAME\tTYPE\tFUNCTION\tSCOPE\tFITS\tTYPES\tREQUIRES\tENSURES\tTESTS`:
+## SCOPE the bindings in scope with their types and FITS the names and
+## expressions of depth two of its type, each separated by `, `; TYPES the
+## definitions of the types it mentions, `struct Task {name: String}` and
+## `enum Shape {Circle(r: f64), Square}`, REQUIRES and ENSURES the
+## clauses of its function, each separated by `; `, and TESTS the tests
+## that reach it, quoted and separated by `, ` (RULES.md, R174, R181).
 pub pure def holes_answer(typed: typeck.Typed, m: ModuleId, text: str) -> String:
     let lines = Lines.of(text)
     var out = String.new()
@@ -1301,7 +1519,72 @@ pub pure def holes_answer(typed: typeck.Typed, m: ModuleId, text: str) -> String
         let at = range_of(text, lines, h.start, h.end)
         let scope = field(h.scope.join(", "))
         let fits = field(h.fits.join(", "))
-        out.push("{at}\t{field(h.name)}\t{field(h.ty)}\t{field(h.function)}\t{scope}\t{fits}\n")
+        var defined: list[String] = []
+        for t in h.types:
+            defined.push(type_line(t))
+        var tests: list[String] = []
+        for t in h.tests:
+            tests.push(quote(t))
+        let more = "{field(defined.join("; "))}\t{field(h.requires.join("; "))}\t{field(h.ensures.join("; "))}\t{field(tests.join(", "))}"
+        out.push(
+            "{at}\t{field(h.name)}\t{field(h.ty)}\t{field(h.function)}\t{scope}\t{fits}\t{more}\n"
+        )
+    return out
+
+## A type of a hole's report as one line: `struct Task {name: String}`.
+pub pure def type_line(t: HoleType) -> String:
+    let kind = if t.is_struct: "struct" else: "enum"
+    return "{kind} {t.name} {{{t.members.join(", ")}}}"
+
+## A hole's report in JSON (10: "a human form and a JSON form"; RULES.md,
+## R181): an object of its fields, each list an array of strings, the
+## types an array of objects; `at` the file, line and column.
+pub pure def hole_json(h: Hole, at: str) -> String:
+    var types: list[String] = []
+    for t in h.types:
+        let kind = if t.is_struct: "struct" else: "enum"
+        types.push(
+            "{{\"name\": {json_text(t.name)}, \"kind\": \"{kind}\", \"members\": {json_list(t.members)}}}"
+        )
+    var parts: list[String] = []
+    parts.push("\"at\": {json_text(at)}")
+    parts.push("\"name\": {json_text(h.name)}")
+    parts.push("\"type\": {json_text(h.ty)}")
+    parts.push("\"function\": {json_text(h.function)}")
+    parts.push("\"scope\": {json_list(h.scope)}")
+    parts.push("\"fits\": {json_list(h.fits)}")
+    parts.push("\"types\": [{types.join(", ")}]")
+    parts.push("\"requires\": {json_list(h.requires)}")
+    parts.push("\"ensures\": {json_list(h.ensures)}")
+    parts.push("\"tests\": {json_list(h.tests)}")
+    return "{{{parts.join(", ")}}}"
+
+pure def json_list(xs: list[String]) -> String:
+    var each: list[String] = []
+    for x in xs:
+        each.push(json_text(x))
+    return "[{each.join(", ")}]"
+
+## Text in double quotes, as JSON writes it.
+pub pure def json_text(s: str) -> String:
+    var out = String.new("\"")
+    for c in s.chars():
+        let n = c.code()
+        if c == '"':
+            out.push("\\\"")
+        elif c == '\\':
+            out.push("\\\\")
+        elif c == '\n':
+            out.push("\\n")
+        elif c == '\t':
+            out.push("\\t")
+        elif n < 32:
+            out.push("\\u00")
+            out.push("0123456789abcdef".byte_slice(n >> 4, (n >> 4) + 1))
+            out.push("0123456789abcdef".byte_slice(n & 15, (n & 15) + 1))
+        else:
+            out.push_char(c)
+    out.push("\"")
     return out
 
 test "a field holds no tab and no line break":

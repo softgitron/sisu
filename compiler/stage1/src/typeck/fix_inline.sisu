@@ -1,0 +1,221 @@
+##! `@fix_inline` (09 and 10, "Migration"; D-067; RULES.md, R177): a
+##! deprecated function whose body is the migration, one `return` of an
+##! expression, so that a call of it is rewritten as that expression with
+##! the call's arguments in its parameters' places, the fix of the call's
+##! `W0023` that `sisu fix` applies.
+
+from stage1.lexer import lex
+from stage1.syntax.kinds import SyntaxKind
+
+## The expression a `@fix_inline` function returns, as its module writes
+## it, with each use of a parameter in it.
+pub struct InlineForm:
+    pub text: String
+    ## Each use of a parameter, in the order of the text: its start and end
+    ## in `text` and the parameter's index.
+    pub uses: list[(int, int, int)]
+    pub params: int
+    ## Whether the text names nothing but its parameters (a member after
+    ## `.` and a keyword argument's name are no names of a scope), so that
+    ## it means the same in a module of another scope.
+    pub alone: bool
+    ## Whether it is more than a name, a literal or a chain of calls,
+    ## members and indexes, and so is written in parentheses where a call
+    ## stood.
+    pub wrap: bool
+    ## Where the first call it makes ends (its `)`), or the text's end: an
+    ## argument with an effect of its own may only be used before it, so
+    ## that what the call evaluated first is still evaluated first.
+    pub first_return: int
+
+## The form of the expression `text` of a function whose parameters are
+## `params`, or `None` where a parameter's name is bound again inside it
+## (by a closure or a comprehension), which a substitution would change.
+pub pure def form_of(text: str, params: list[String]) -> InlineForm?:
+    let lexed = lex(text)
+    if not lexed.diagnostics.is_empty():
+        return None
+    var tokens: list[(SyntaxKind, int, int)] = []
+    for t in lexed.tokens:
+        if t.kind.is_trivia():
+            continue
+        match t.kind:
+            case Newline | Indent | Dedent | Eof:
+                continue
+            case _:
+                tokens.push((t.kind, t.start, t.end))
+    var uses: list[(int, int, int)] = []
+    var alone = True
+    var wrap = False
+    var depth = 0
+    var first_return = text.byte_len()
+    var opened: list[bool] = []
+    for i in range(len(tokens)):
+        let (kind, start, end) = tokens[i]
+        var before = SyntaxKind.Eof
+        if i > 0:
+            before = tokens[i - 1].0
+        var after = SyntaxKind.Eof
+        if i + 1 < len(tokens):
+            after = tokens[i + 1].0
+        match kind:
+            case LParen | LBracket | LBrace:
+                # A `(` after a name, a `)` or a `]` is a call's.
+                let call = kind == SyntaxKind.LParen
+                    and (
+                        before == SyntaxKind.Ident
+                            or before == SyntaxKind.RParen
+                            or before == SyntaxKind.RBracket
+                    )
+                opened.push(call)
+                depth += 1
+                continue
+            case RParen | RBracket | RBrace:
+                if let Some(call) = opened.pop():
+                    if call and end < first_return:
+                        first_return = end
+                depth -= 1
+                continue
+            case ForKw:
+                # A comprehension's names: each up to `in`.
+                var k = i + 1
+                while k < len(tokens) and tokens[k].0 != SyntaxKind.InKw:
+                    let (kk, s, e) = tokens[k]
+                    if kk == SyntaxKind.Ident
+                            and params.contains(text.byte_slice(s, e).to_string()):
+                        return None
+                    k += 1
+                wrap = wrap or depth == 0
+                continue
+            case Arrow:
+                # A closure's parameters, before its `->`.
+                var k = i - 1
+                var inner = 0
+                while k >= 0:
+                    let (kk, s, e) = tokens[k]
+                    if kk == SyntaxKind.RParen:
+                        inner += 1
+                    elif kk == SyntaxKind.LParen:
+                        inner -= 1
+                    elif kk == SyntaxKind.Ident
+                            and params.contains(text.byte_slice(s, e).to_string()):
+                        return None
+                    if inner <= 0:
+                        break
+                    k -= 1
+                wrap = wrap or depth == 0
+                continue
+            case Ident:
+                let name = text.byte_slice(start, end)
+                if before == SyntaxKind.Dot or before == SyntaxKind.QuestionDot:
+                    continue
+                if after == SyntaxKind.Eq:
+                    continue
+                var found: int? = None
+                for p in range(len(params)):
+                    if params[p] == name:
+                        found = Some(p)
+                if let Some(p) = found:
+                    uses.push((start, end, p))
+                else:
+                    alone = False
+                continue
+            case Dot | QuestionDot | IntNumber | FloatNumber | CharLit:
+                continue
+            case StringStart | StringText | StringEnd | InterpStart | InterpEnd | FormatSpec:
+                continue
+            case RawString | ByteString | SelfKw:
+                continue
+            case _:
+                if depth == 0:
+                    wrap = True
+    return Some(
+        InlineForm(
+            text=text.to_string(),
+            uses=uses,
+            params=len(params),
+            alone=alone,
+            wrap=wrap,
+            first_return=first_return,
+        )
+    )
+
+## The call's replacement, the form with `args` (each argument's text, in
+## the parameters' order) in its parameters' places; `None` where that
+## could change what the call does: an argument that is more than a name,
+## a chain of members or a literal, used other than once, out of the
+## arguments' order, or after a call of the body's has returned.
+pub pure def inlined(form: InlineForm, args: list[String]) -> String?:
+    if len(args) != form.params:
+        return None
+    var counts: list[int] = []
+    for _ in range(form.params):
+        counts.push(0)
+    for (_, _, p) in form.uses:
+        counts[p] += 1
+    var last = -1
+    for (start, _, p) in form.uses:
+        if plain(args[p]):
+            continue
+        if counts[p] != 1 or p < last or start > form.first_return:
+            return None
+        last = p
+    for p in range(form.params):
+        if counts[p] == 0 and not plain(args[p]):
+            return None
+    var out = String.new()
+    var at = 0
+    for (start, end, p) in form.uses:
+        out.push(form.text.byte_slice(at, start))
+        if plain(args[p]) or primary(args[p]):
+            out.push(args[p])
+        else:
+            out.push("({args[p]})")
+        at = end
+    out.push(form.text.byte_slice(at, form.text.byte_len()))
+    if form.wrap:
+        return Some("({out})")
+    return Some(out)
+
+## Whether an argument's text needs no parentheses in any place: a name,
+## a literal or a chain of calls, members and indexes.
+pub pure def primary(text: str) -> bool:
+    let form = form_of(text, []) else:
+        return False
+    return not form.wrap
+
+## Whether an argument's text is a name, a chain of members after one, or
+## a number, a character or a string without interpolation: what may be
+## written more than once, or in another place, and mean the same.
+pub pure def plain(text: str) -> bool:
+    if text.is_empty():
+        return False
+    let lexed = lex(text)
+    if not lexed.diagnostics.is_empty():
+        return False
+    for t in lexed.tokens:
+        if t.kind.is_trivia():
+            continue
+        match t.kind:
+            case Ident | Dot | IntNumber | FloatNumber | CharLit | SelfKw:
+                continue
+            case StringStart | StringText | StringEnd | Newline | Eof | Indent | Dedent:
+                continue
+            case Minus:
+                continue
+            case _:
+                return False
+    return True
+
+test "the form of an expression and a call of it":
+    let form = form_of("levels(gain) + gain", ["gain".to_string()]) ?? panic("no form")
+    assert form.alone == False
+    assert form.wrap
+    assert inlined(form, ["3".to_string()]) == Some("(levels(3) + 3)".to_string())
+    assert inlined(form, ["f(1)".to_string()]).is_none()
+    let one = form_of("Temperature(celsius).fahrenheit()", ["celsius".to_string()]) ?? panic("no")
+    assert not one.wrap
+    assert inlined(one, ["x.c".to_string()]) == Some("Temperature(x.c).fahrenheit()".to_string())
+    assert inlined(one, ["read()".to_string()])
+        == Some("Temperature(read()).fahrenheit()".to_string())
+    assert form_of("[x for x in xs]", ["x".to_string(), "xs".to_string()]).is_none()

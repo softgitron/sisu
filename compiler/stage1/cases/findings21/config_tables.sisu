@@ -1,0 +1,22 @@
+# `eval --to toml` (RULES.md, R180): a list of structs as an array of
+# tables and a struct as a table of its own, after the values written on
+# one line, as TOML's own style has it.
+struct Service:
+    name: String
+    port: int
+
+struct Retry:
+    times: int
+    backoff: f64
+
+struct Limits:
+    timeout: f64
+    retry: Retry
+
+const NAME: str = "shop"
+const SERVICES: list[Service] = [
+    Service(name="web".to_string(), port=80),
+    Service(name="db".to_string(), port=5432),
+]
+const LIMITS: Limits = Limits(timeout=2.5, retry=Retry(times=3, backoff=0.5))
+const TAGS: list[str] = ["a", "b"]

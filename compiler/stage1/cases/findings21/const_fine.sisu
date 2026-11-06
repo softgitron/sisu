@@ -1,0 +1,16 @@
+# Constants evaluated at compile time by `check` (RULES.md, R178) and
+# computed again where the program reads them, as before.
+struct Limits:
+    timeout: int
+    retries: int
+
+    invariant self.retries <= 5
+
+const LIMITS: Limits = Limits(timeout=30, retries=3)
+const TABLE: list[int] = [n * n for n in range(5)]
+const PICK: int = TABLE[4]
+const NAMES: dict[str, int] = {"a": 1, "b": 2}
+
+def main():
+    let b = NAMES["b"]
+    print("{LIMITS.retries} {PICK} {b} {len(TABLE)}")

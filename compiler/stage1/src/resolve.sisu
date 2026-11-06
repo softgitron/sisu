@@ -426,10 +426,9 @@ pub pure def reads_attributes(text: str) -> bool:
     return False
 
 ## The prelude's helpers that a std module has as a `pub` item, which
-## `E0278`'s fix imports from there (RULES.md, R175): none yet, since a
-## std module's new `pub` item changes its page, which the conformance
-## suite's `doc/std_pages` holds.
-const PRELUDE_HELPERS: list[(str, str)] = []
+## `E0278`'s fix imports from there (RULES.md, R175 and R183):
+## `days_in_month`, which `std.time` gives a program.
+const PRELUDE_HELPERS: list[(str, str)] = [("days_in_month", "std.time")]
 
 ## Where an import a fix adds goes: the start of the first line that is
 ## not blank and not a comment (a module's `##!` text stays first).

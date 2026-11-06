@@ -1,0 +1,13 @@
+# `sisu fix` (RULES.md, R176; 10, "Migration"): each diagnostic's preferred
+# fix applied to the file, and with `--all` the lints' too, the file
+# checked again until no fix applies.
+from std.json import encode
+
+def add(mut xs: list[int], x: int):
+    xs.push(x)
+
+def main():
+    var xs: list[int] = []
+    add(xs, 3)
+    let count = len(xs)
+    print(cuont)

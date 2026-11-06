@@ -1152,6 +1152,7 @@ under the test clock.
 - [`rule_name`](#rule_name): An abbreviation from `at`: letters, or any text inside `<` and `>`; and where it ends.
 - [`rule_seconds`](#rule_seconds): A signed `hh[:mm[:ss]]` from `at`, in seconds; and where it ends.
 - [`rule_change`](#rule_change): A change `Mm.w.d[/time]` from `at`, its time 02:00 when it gives none; and where it ends.
+- [`days_in_month`](#days_in_month): The days of `month` (1 for January to 12) in `year` of the proleptic Gregorian calendar: 29 for February of a leap year (one divisible by 4, and by 400 when by 100), 28 for another, 30 for April, June, September and November, and 31 for the rest. The prelude's own copy, which the standard library's code calls, is not a program's (stage 1's RULES.md, R183).
 
 <a id="Ticker"></a>
 ## `Ticker`
@@ -1530,3 +1531,23 @@ pure def rule_change(cs: list[char], at: int) -> (Change, int)?
 
 A change `Mm.w.d[/time]` from `at`, its time 02:00 when it gives none;
 and where it ends.
+
+<a id="days_in_month"></a>
+## `days_in_month`
+
+```sisu
+pub pure def days_in_month(year: int, month: int) -> int
+```
+
+The days of `month` (1 for January to 12) in `year` of the proleptic
+Gregorian calendar: 29 for February of a leap year (one divisible by 4,
+and by 400 when by 100), 28 for another, 30 for April, June, September
+and November, and 31 for the rest. The prelude's own copy, which the
+standard library's code calls, is not a program's (stage 1's RULES.md,
+R183).
+
+```sisu
+assert days_in_month(2024, 2) == 29
+assert days_in_month(1900, 2) == 28
+assert days_in_month(2026, 11) == 30
+```

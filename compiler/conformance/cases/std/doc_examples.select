@@ -196,4 +196,5 @@ test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
-198 passed, 0 failed, 0 blocked
+test "std.time/days_in_month (doc example)" ... ok
+199 passed, 0 failed, 0 blocked

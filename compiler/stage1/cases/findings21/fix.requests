@@ -1,0 +1,6 @@
+fix	--dry-run	fix_assist.sisu	--dir	cases/findings21
+fix	--dry-run	--all	fix_assist.sisu	--dir	cases/findings21
+fix	--dry-run	fix_inline.sisu	--dir	cases/findings21
+fix	--dry-run	fix_none.sisu	--dir	cases/findings21
+fix	--dry-run	--every	fix_none.sisu	--dir	cases/findings21
+fix	--dry-run	--dir	cases/findings21

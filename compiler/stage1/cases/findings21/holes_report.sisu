@@ -1,0 +1,33 @@
+# The whole hole report (RULES.md, R181; 10, "Holes"): beside the type and
+# the bindings, the expressions that fit to depth two, the definitions of
+# the types the hole's type mentions, the contract in force, the tests that
+# reach the hole, and a JSON form.
+struct Task:
+    name: String
+    hours: int
+
+    def total(self) -> int:
+        return self.hours
+
+enum Size:
+    Small
+    Large(hours: int)
+
+def doubled(t: Task) -> int:
+    return t.hours * 2
+
+def estimate(t: Task, size: Size) -> int:
+    requires t.hours >= 0
+    ensures result >= t.hours
+    let base = t.hours
+    return todo("estimate")
+
+def classify(t: Task) -> Size:
+    return todo()
+
+test "estimates a small task":
+    let t = Task(name="a".to_string(), hours=2)
+    assert estimate(t, Size.Small) >= 2
+
+def main():
+    print(doubled(Task(name="b".to_string(), hours=1)))

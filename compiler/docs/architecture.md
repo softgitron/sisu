@@ -11863,3 +11863,58 @@ query layer and the driver"; D-061, D-086; 10, 12; decisions 980, 981, 983,
       the intrinsics (decisions 945, 986 and 1026) and tagged-pointer
       provenance (decision 904) are not this round's either: the round spent
       its time on 1060 to 1065. This changes no rule of the language.
+
+**Stage 1's twenty-first round** (stage 1's RULES.md, R176 to R184; `fix` at 0.16.0 and `@fix_inline`'s fix, constants evaluated at compile time, a keyword argument's name among a field's references, TOML's tables and `E0617` at the field, the whole hole report, `@derive(Plain)` of a padded `@repr(c)` struct, `std.time.days_in_month`, the merge's differences)
+
+1040. `sisu1 fix FILE [--dry-run] [--all]` applies the preferred fix (the
+      first, with edits) of each diagnostic `check` reports in FILE, and
+      with `--all` of each lint, checking the text again until no fix
+      applies or a round would bring back an earlier text, says each fix
+      it applied (`D0175` to `D0179`), and writes the file once, or with
+      `--dry-run` prints the edits and leaves it. `sisu1 --version` is
+      0.16.0. Stage 1 decides it (RULES.md, R176).
+
+1041. A function marked `@fix_inline` is deprecated by it, and where its
+      body is one `return` of an expression the warning at each call has
+      the fix that writes the expression in the call's place with the
+      arguments in their parameters' places, when that means what the
+      call meant; another body is `W0033`. Stage 1 decides it (RULES.md,
+      R177).
+
+1042. Every command that checks a program evaluates each `const` of the
+      program's modules at compile time, once the program has no other
+      error, and reports a panic or a failed invariant (`E0602`), a
+      refinement not met (`E0810`) or the budget spent (`E0603`) at the
+      constant's name; the SIR keeps computing the value at run time.
+      Stage 1 decides it (RULES.md, R178).
+
+1043. A keyword argument's name in a struct's construction is a reference
+      of the field, which `query references` lists and `query rename`
+      renames. Stage 1 decides it (RULES.md, R179).
+
+1044. `eval --to toml` writes a struct or a mapping as a table and a list
+      of them as an array of tables, after the values written inline,
+      and `E0617` names the path of the field that holds what a form
+      cannot write (`LIMITS.timeout`). Stage 1 decides it (RULES.md,
+      R180).
+
+1045. `check --holes` and `query holes` also give the expressions that fit
+      to depth two, the definitions of the program's types the hole's
+      type names, its function's `requires` and `ensures`, the tests that
+      reach it (`D0180` to `D0187`), and `--format=json`; the values a
+      test sees wait for `sisu test`. Stage 1 decides it (RULES.md,
+      R181).
+
+1046. `@derive(Plain)` of a `@repr(c)` struct whose fields C's layout
+      (decision 1021) leaves a gap between or after is `E0279` or
+      `E0280`, naming the bytes, their offsets and the fields around
+      them. Stage 1 decides it (RULES.md, R182).
+
+1047. `std.time` has a `pub` `days_in_month`, which `E0278`'s fix imports
+      for a program that names the prelude's own copy. Stage 1 decides it
+      (RULES.md, R183).
+
+1048. The conformance suite's `std/bytes`, `std/narrow` and
+      `unsafe/narrow_pointer` differ from stage 0's front end under the
+      rules that already decide their constructs (R48, R152, R4). Stage 1
+      decides it (RULES.md, R184).

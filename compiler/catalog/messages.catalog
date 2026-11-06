@@ -233,6 +233,12 @@ E0277 error   resolve.import-in-body      an import stands at the top level of a
 # the standard library's own code, which 09's fixed list leaves out.
 E0278 error   resolve.prelude-internal    `{name}` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
 -     fix     resolve.import-from-std     import it from `{module}`
+# Stage 1's (RULES.md, R182; 22, "Plain data and reinterpretation"): a
+# `@repr(c)` struct that derives `Plain` with padding, which its bytes
+# would hold, at the offsets C's layout gives its fields (decision 1021).
+E0279 error   resolve.plain-padding       `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding between `{before}` and `{after}`, at offsets {start} to {end}, and a plain type has none (22)
+E0280 error   resolve.plain-padding-end   `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding after `{before}`, at offsets {start} to {end}, the end of the struct, and a plain type has none (22)
+-     note    resolve.plain-padding-fill  a field of its own there, `{name}: Array[u8, {count}]`, makes those bytes the struct's, or the fields ordered from the widest leave none
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -739,6 +745,11 @@ W0023 warning type.deprecated             `{name}` is deprecated: {reason}
 W0024 warning resolve.misspelt-attribute  `@{name}` is not an attribute Sisu reads
 -     fix     resolve.similar-attribute   write `@{name}`
 W0025 warning type.deprecated-plain       `{name}` is deprecated
+# Stage 1's (RULES.md, R177; D-067): a `@fix_inline` function's call,
+# rewritten with what the function returns, and a body that is more than
+# one `return`.
+-     fix     type.inline-call            write what `{name}` returns in the call's place
+W0033 warning type.fix-inline-body        `@fix_inline` rewrites a call of `{name}` with the expression it returns, so its body is one `return`, and its parameters take no `mut` or `own`: its calls warn without the rewrite
 # Stage 1's (RULES.md, R40; D-046): an attribute Sisu reads, standing where
 # it means nothing.
 W0026 warning resolve.misplaced-attribute  `@{name}` means something on {places}, so on {what} it does nothing
@@ -1160,3 +1171,21 @@ D0171 cli     cli.hole-scope              in scope: {bindings}
 D0172 cli     cli.hole-scope-none         nothing is in scope
 D0173 cli     cli.hole-fits               of its type: {names}
 D0174 cli     cli.hole-fits-none          nothing in scope is of its type
+# Stage 1's (RULES.md, R176; 10, "Migration"): `sisu fix`, each fix it
+# applies, and what it did to the file.
+D0175 cli     cli.fixed                   {at}: {code} fixed: {fix}
+D0176 cli     cli.fix-none                nothing in `{file}` has a fix to apply
+D0177 cli     cli.fix-done                fixes applied to `{file}`: {count}
+D0178 cli     cli.fix-would               fixes that would be applied to `{file}`: {count}, and `--dry-run` leaves it as it is
+D0179 cli     cli.fix-undone              the fixes at {at} would bring back a text an earlier round fixed, so they are not applied
+# Stage 1's (RULES.md, R181; 10, "Holes"): the rest of a hole's report,
+# the definitions of the types it mentions, the contract in force where it
+# stands, and the tests that reach it.
+D0180 cli     cli.hole-struct             `{name}` is a struct of {members}
+D0181 cli     cli.hole-struct-empty       `{name}` is a struct without fields
+D0182 cli     cli.hole-enum               `{name}` is an enum of {members}
+D0183 cli     cli.hole-enum-empty         `{name}` is an enum without variants
+D0184 cli     cli.hole-requires           given: `{clause}`
+D0185 cli     cli.hole-ensures            to keep: `{clause}`
+D0186 cli     cli.hole-tests              reached by the tests {tests}
+D0187 cli     cli.hole-tests-none         no test reaches it

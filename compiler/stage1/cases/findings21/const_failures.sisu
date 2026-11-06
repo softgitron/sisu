@@ -1,0 +1,26 @@
+# A constant is computed at compile time (RULES.md, R178): `check` reports
+# a constant whose invariant fails, whose evaluation panics or spends its
+# budget, each at its name, which `sisu run` reported only where `main`
+# read it.
+struct Limits:
+    timeout: int
+    retries: int
+
+    invariant self.retries <= 5
+
+const LIMITS: Limits = Limits(timeout=30, retries=9)
+const TABLE: list[int] = [1, 2, 3]
+const PICK: int = TABLE[5]
+
+def spin() -> int:
+    var n = 0
+    while n >= 0:
+        n += 1
+    return n
+
+@comptime_budget(steps=500)
+const FOREVER: int = spin()
+const FINE: int = TABLE[2]
+
+def main():
+    print(FINE)

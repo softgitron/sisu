@@ -2023,6 +2023,31 @@ done
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
 served_summary="$(printf '  %-24s %4d request files, %4d as expected, %3d otherwise' served "$n" "$same" "$class_unlisted")"
 
+# `fix` as a process (RULES.md, R176): each case with a `NAME.fixed` copied
+# into a directory of its own and fixed there with `fix --all`, what it
+# printed, a line `--- NAME.sisu` and the file it left against the
+# `.fixed`, with the directory's path left out.
+same=0; class_unlisted=0; n=0
+for f in "$here"/cases/*/*.fixed; do
+    [ -f "$f" ] || continue
+    n=$((n + 1))
+    rel="${f#"$repo"/}"
+    name=$(basename "$f" .fixed)
+    box="$work/fix.$name"
+    mkdir -p "$box"
+    cp "${f%.fixed}.sisu" "$box/$name.sisu"
+    { stage1 fix --all "$box/$name.sisu" 2>&1; echo "--- $name.sisu"; cat "$box/$name.sisu"; } |
+        sed -e "s|$box/||g" > "$box.stage1"
+    if cmp -s "$box.stage1" "$f"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: fix (expected $f, stage 1 in $box.stage1)"
+    fi
+done
+total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+served_summary="$served_summary\n$(printf '  %-24s %4d files, %4d fixed as expected, %3d otherwise' fix "$n" "$same" "$class_unlisted")"
+
 echo "stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):"
 printf "%b\n" "${summary#\\n}"
 echo "stage 1's name resolution against stage 0's (names):"

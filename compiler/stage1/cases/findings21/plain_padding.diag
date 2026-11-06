@@ -1,0 +1,2 @@
+7:15-7:20 E0279 resolve.plain-padding ty="Reading" bytes="3" start="1" end="4" before="id: u8" after="value: i32"
+7:15-7:20 E0280 resolve.plain-padding-end ty="Reading" bytes="2" start="10" end="12" before="flag: u16"

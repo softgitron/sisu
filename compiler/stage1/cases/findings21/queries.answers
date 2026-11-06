@@ -1,0 +1,95 @@
+answer 0
+holes_report.sisu:23:12: the typed hole `todo("estimate")` of type `int`, in `estimate`
+  in scope: `t: ref Task`, `size: ref Size`, `base: int`
+  of its type: `base`, `doubled(t)`, `t.hours`, `t.total()`
+  given: `t.hours >= 0`
+  to keep: `result >= t.hours`
+  reached by the tests "estimates a small task", "contract of estimate"
+holes_report.sisu:26:12: the typed hole `todo()` of type `Size`, in `classify`
+  in scope: `t: ref Task`
+  nothing in scope is of its type
+  `Size` is an enum of `Small`, `Large(hours: int)`
+  no test reaches it
+answer 0
+[
+  {"at": "holes_report.sisu:23:12", "name": "estimate", "type": "int", "function": "estimate", "scope": ["t: ref Task", "size: ref Size", "base: int"], "fits": ["base", "doubled(t)", "t.hours", "t.total()"], "types": [], "requires": ["t.hours >= 0"], "ensures": ["result >= t.hours"], "tests": ["estimates a small task", "contract of estimate"]},
+  {"at": "holes_report.sisu:26:12", "name": "", "type": "Size", "function": "classify", "scope": ["t: ref Task"], "fits": [], "types": [{"name": "Size", "kind": "enum", "members": ["Small", "Large(hours: int)"]}], "requires": [], "ensures": [], "tests": []}
+]
+answer 0
+23:12-23:28	estimate	int	estimate	t: ref Task, size: ref Size, base: int	base, doubled(t), t.hours, t.total()		t.hours >= 0	result >= t.hours	"estimates a small task", "contract of estimate"
+26:12-26:18		Size	classify	t: ref Task		enum Size {Small, Large(hours: int)}			
+answer 0
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	4:5-4:9	declaration
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	8:16-8:20	use
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	11:17-11:21	use
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	12:13-12:17	use
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	12:28-12:32	use
+answer 0
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	4:5-4:9	declaration
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	8:16-8:20	use
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	11:17-11:21	use
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	12:13-12:17	use
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	12:28-12:32	use
+answer 0
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	4:5-4:9	count
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	8:16-8:20	count
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	11:17-11:21	count
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	12:13-12:17	count
+COMPILER/stage1/cases/findings21/keyword_refs.sisu	12:28-12:32	count
+answer 0
+NAME = "shop"
+TAGS = ["a", "b"]
+
+[[SERVICES]]
+name = "web"
+port = 80
+
+[[SERVICES]]
+name = "db"
+port = 5432
+
+[LIMITS]
+timeout = 2.5
+
+[LIMITS.retry]
+times = 3
+backoff = 0.5
+answer 0
+{
+  "NAME": "shop",
+  "SERVICES": [
+    {
+      "name": "web",
+      "port": 80
+    },
+    {
+      "name": "db",
+      "port": 5432
+    }
+  ],
+  "LIMITS": {
+    "timeout": 2.5,
+    "retry": {
+      "times": 3,
+      "backoff": 0.5
+    }
+  },
+  "TAGS": [
+    "a",
+    "b"
+  ]
+}
+answer 1
+error[E0617]: `LIMITS.retry.backoff` holds an infinite or not-a-number float, which JSON cannot write
+  --> config_unwritable.sisu:10:7
+   |
+10 | const LIMITS: Limits = Limits(timeout=2.5, retry=Retry(backoff=1.0 / 0.0))
+   |       ^^^^^^
+
+error: Failed
+answer 0
+[LIMITS]
+timeout = 2.5
+
+[LIMITS.retry]
+backoff = inf

@@ -1,0 +1,3 @@
+# A file `sisu fix` has nothing to do in (RULES.md, R176).
+def main():
+    print("nothing to fix")

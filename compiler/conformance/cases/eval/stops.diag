@@ -1,0 +1,1 @@
+11:7-11:10 E0602 comptime.panicked message="assertion failed: n % 2 == 0\n  message: odd\n    n % 2 == 0\n    │ │\n    7 1"

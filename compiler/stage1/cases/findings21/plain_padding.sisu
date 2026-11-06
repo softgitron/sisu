@@ -1,0 +1,22 @@
+# `@derive(Plain)` of a `@repr(c)` struct with padding (RULES.md, R182; 22):
+# each gap C's layout leaves, between two fields or at the end, is `E0279`
+# or `E0280`; a struct whose fields leave none derives it.
+from std.mem import Plain
+
+@repr(c)
+@derive(Copy, Plain)
+struct Reading:
+    id: u8
+    value: i32
+    flag: u16
+
+@repr(c)
+@derive(Copy, Plain)
+struct Packed:
+    value: i32
+    flag: u16
+    id: u8
+    spare: u8
+
+def main():
+    print(Packed(value=1, flag=2, id=3, spare=0).value)

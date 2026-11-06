@@ -1,0 +1,10 @@
+# `E0617` names the field that holds what a form cannot write, by its path
+# from the constant (RULES.md, R180).
+struct Retry:
+    backoff: f64
+
+struct Limits:
+    timeout: f64
+    retry: Retry
+
+const LIMITS: Limits = Limits(timeout=2.5, retry=Retry(backoff=1.0 / 0.0))

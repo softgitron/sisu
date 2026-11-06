@@ -40,19 +40,23 @@ refused	syntax
 answer 1
 error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
 answer 0
-11:12-11:30	parse_task	Task	parse_task	line: str, default_hours: int, name: String	
-18:20-18:33	risky	int	Task.padded	self: ref Task, risky: bool, base: int	base
-24:11-24:22		str	main	t: Task	
+11:12-11:30	parse_task	Task	parse_task	line: str, default_hours: int, name: String		struct Task {name: String, hours: int}			
+18:20-18:33	risky	int	Task.padded	self: ref Task, risky: bool, base: int	base, self.hours				
+24:11-24:22		str	main	t: Task					
 answer 0
 holes.sisu:11:12: the typed hole `todo("parse_task")` of type `Task`, in `parse_task`
   in scope: `line: str`, `default_hours: int`, `name: String`
   nothing in scope is of its type
+  `Task` is a struct of `name: String`, `hours: int`
+  no test reaches it
 holes.sisu:18:20: the typed hole `todo("risky")` of type `int`, in `Task.padded`
   in scope: `self: ref Task`, `risky: bool`, `base: int`
-  of its type: `base`
+  of its type: `base`, `self.hours`
+  no test reaches it
 holes.sisu:24:11: the typed hole `todo()` of type `str`, in `main`
   in scope: `t: Task`
   nothing in scope is of its type
+  no test reaches it
 answer 1
 error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
 answer 0
@@ -251,6 +255,7 @@ error[E0278]: `days_in_month` is the prelude's own, for the standard library's c
   |
 6 |     print(days_in_month(2024, 2))
   |           ^^^^^^^^^^^^^
+  = fix: import it from `std.time`: `from std.time import days_in_month`
 
 error[E0278]: `DrawState` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
   --> prelude_internal.sisu:7:12

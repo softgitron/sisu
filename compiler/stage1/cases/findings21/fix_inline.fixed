@@ -1,0 +1,35 @@
+fix_inline.sisu:26:11: W0025 fixed: write what `twice` returns in the call's place: `scaled(n, 2)`
+fix_inline.sisu:27:11: W0025 fixed: write what `twice` returns in the call's place: `scaled(reading(), 2)`
+fix_inline.sisu:28:11: W0023 fixed: write what `sum_sq` returns in the call's place: `(n * n + 1 * 1)`
+fixes applied to `fix_inline.sisu`: 3
+--- fix_inline.sisu
+# `@fix_inline` (RULES.md, R177; D-067): a deprecated function whose body
+# is the migration, one `return`, so that a call's warning offers the
+# expression in the call's place, and `sisu fix` writes it there.
+def scaled(x: int, by: int) -> int:
+    return x * by
+
+def reading() -> int:
+    return 4
+
+@fix_inline
+def twice(x: int) -> int:
+    return scaled(x, 2)
+
+@deprecated("use the squares themselves")
+@fix_inline
+def sum_sq(a: int, b: int) -> int:
+    return a * a + b * b
+
+@fix_inline
+def chatty(x: int) -> int:
+    print("chatty")
+    return x
+
+def main():
+    let n = 3
+    print(scaled(n, 2) * 2)
+    print(scaled(reading(), 2))
+    print((n * n + 1 * 1) * 2)
+    print(sum_sq(reading(), 1))
+    print(chatty(n))

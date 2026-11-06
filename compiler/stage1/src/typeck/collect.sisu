@@ -70,6 +70,7 @@ from stage1.typeck.borrows import ResultShape
 from stage1.typeck.check import derive_edit
 from stage1.typeck.consts import ConstScope
 from stage1.typeck.contracts import contract_only
+from stage1.typeck.fix_inline import InlineForm, form_of
 from stage1.typeck.folding import Term
 from stage1.typeck.instances import DeriveCheck, DeriveOrigin
 from stage1.typeck.program import (
@@ -2310,6 +2311,31 @@ impl Resolver:
         return out
 
     ## The text of `@name("...")`, its first argument.
+    ## The form of what the `@fix_inline` function `f` returns (RULES.md,
+    ## R177): a free function whose body is one `return` of an expression
+    ## and whose parameters take no `mut` or `own`; `None` for any other.
+    pure def inline_form(self, module: ModuleId, f: FnDef, method: bool) -> InlineForm?:
+        if method:
+            return None
+        let body = f.body.copy() else:
+            return None
+        if len(body.stmts) != 1:
+            return None
+        let ast = self.ast(module)
+        let StmtKind.Return(Some(e)) = ast.stmt(body.stmts[0]).kind else:
+            return None
+        var names: list[String] = []
+        for p in f.params:
+            let ParamKind.Named(name, _, _) = p.kind.copy() else:
+                return None
+            if p.mode != Mode.Borrow:
+                return None
+            names.push(name.text.copy())
+        let text = self.text_in(module, ast.expr(e).range)
+        if text.is_empty():
+            return None
+        return form_of(text, names)
+
     pure def builtin_attr(self, module: ModuleId, attrs: list[Attr], name: str) -> String?:
         for a in attrs:
             if a.name == name:
@@ -2747,6 +2773,23 @@ impl Resolver:
         info.assoc_const = has_attr(f.attrs, ASSOC_CONST_ATTR)
         if has_attr(f.attrs, "deprecated"):
             info.deprecated = Some(self.builtin_attr(module, f.attrs, "deprecated") ?? String.new())
+        # `@fix_inline` (D-067; RULES.md, R177): the function is deprecated
+        # by its body, the migration, which a call's warning offers in the
+        # call's place when it is one `return`.
+        if has_attr(f.attrs, "fix_inline"):
+            if info.deprecated.is_none():
+                info.deprecated = Some(String.new())
+            match self.inline_form(module, f, owner.is_some()):
+                case Some(form):
+                    _ = self.prog.fix_inline.insert(def_, form)
+                case None:
+                    for a in f.attrs:
+                        if a.name == "fix_inline" and not self.is_std(module):
+                            let at = a.range.start + 1
+                            var d = Diagnostic.new(
+                                Msg.TypeFixInlineBody, at, at + a.name.byte_len()
+                            )
+                            self.warn_in(module, d.with("name", f.name.text))
         # A preview warns where it is used, as a deprecated function does
         # (RULES.md, R115).
         if has_attr(f.attrs, "preview"):

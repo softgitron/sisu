@@ -1,0 +1,12 @@
+# A keyword argument's name is a reference of the field it gives a value
+# (RULES.md, R179), so `references` lists it and `rename` renames it.
+struct Bed:
+    rows: int
+    crop: String
+
+def make(n: int) -> Bed:
+    return Bed(rows=n, crop="kale".to_string())
+
+def main():
+    let b = Bed(rows=2, crop="beans".to_string())
+    print(b.rows + make(3).rows)
