@@ -628,6 +628,13 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= BUILDS_SINCE)
     }
 
+    /// Whether this stage 1 has `doc --digest` and `sir --tests --mutants`
+    /// (its R207 and R208): `sisu1 0.19.0` and later (decisions 1201 and
+    /// 1203).
+    pub fn digests(&self) -> bool {
+        self.version().is_some_and(|v| v >= DIGESTS_SINCE)
+    }
+
     /// The environment a run of stage 1 gets: none of the runtime's or the
     /// driver's own switches, the lowering and backend the command chose,
     /// and the working directory as the shell's `PWD`.
@@ -1388,6 +1395,12 @@ const ROLES_SINCE: (u32, u32, u32) = (0, 17, 0);
 /// --holes` takes a package, and which has `query values` (its R195 and
 /// R196; decisions 1140 to 1142).
 const BUILDS_SINCE: (u32, u32, u32) = (0, 18, 0);
+
+/// The version whose `doc --digest` writes a program's or the standard
+/// library's API as one text (its R207) and whose `sir --tests --mutants`
+/// writes the mutants of `sisu test --mutate` (its R208), served
+/// (decisions 1201 and 1203).
+const DIGESTS_SINCE: (u32, u32, u32) = (0, 19, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.

@@ -738,7 +738,37 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         "new" => new_package(rest, host),
         // Stage 1's formatter and `sisu doc` take the command's arguments
         // as `sisu` does, with its messages and exit statuses.
+        // `sisu doc --digest` and `doc --std --digest` (10, "AI-assisted
+        // development"): stage 1's (its R207) from `sisu1 0.19.0` (decision
+        // 1203); before it an unknown option (`D0009`), as on the Rust front
+        // end.
+        "doc" if front == FrontEnd::Stage1 && rest.iter().any(|a| a == "--digest") => {
+            match crate::front::Stage1::ready(host) {
+                Ok(stage1) if stage1.digests() => stage1_as_is(cmd, rest, host),
+                Ok(_) => {
+                    host.stderr(&plain_error(
+                        msg::CLI_UNKNOWN_OPTION,
+                        &[("option", "--digest".into()), ("command", "doc".into())],
+                    ));
+                    EXIT_USAGE
+                }
+                Err(code) => code,
+            }
+        }
         "fmt" | "doc" if front == FrontEnd::Stage1 => stage1_as_is(cmd, rest, host),
+        // `sisu grammar`: the parser's grammar as stage 1 prints it from its
+        // modules' `##!` comments (its R202), from `sisu1 0.18.0` (decision
+        // 1204), so that the manual's and the notes' grammar can be checked
+        // against it; an older stage 1 and the Rust front end have no such
+        // command (`D0003`).
+        "grammar" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
+            Ok(stage1) if stage1.builds() => stage1_as_is(cmd, rest, host),
+            Ok(_) => {
+                host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", cmd.to_string())]));
+                EXIT_USAGE
+            }
+            Err(code) => code,
+        },
         "fmt" => fmt(rest, host),
         // `sisu explain-borrow FILE:LINE`: stage 1's (its R187) from `sisu1
         // 0.17.0` (decision 1104); the Rust front end's before it.
@@ -1803,8 +1833,8 @@ fn from_lir(
 /// its tests (decision 357), a program's transcripts on the Rust front
 /// end's beside them (decision 380), but for the standard library's
 /// examples before `sisu1 0.17.0`; the Rust front end keeps the modes that
-/// need more of the front end than its output: `run --watch` (the front end
-/// again at each save), `run --defer-borrow` and `test --defer-borrow` (the
+/// need more of the front end than its output: `run --watch` before `sisu1
+/// 0.17.0` (the front end again at each save), `run --defer-borrow` and `test --defer-borrow` (the
 /// ownership checker's findings beside the run, decision 1106), and
 /// `check --diary` (the diagnostics as data) before `sisu1 0.17.0`, which
 /// writes the diary itself (decision 1103). `run --record` is stage 1's, its log holding the SIR that `sisu
@@ -1847,9 +1877,14 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
         "build" => !value("--from-sir") && !value("--from-lir"),
         // `run --defer-borrow` from `sisu1 0.17.0`'s deferred SIR (its R189,
         // decision 1106).
+        // `run --watch` from `sisu1 0.17.0`, each save's SIR from the served
+        // `build --for-run --emit-sir` (decision 1200).
         "run" => {
-            let defers = p.flags.contains(&"--defer-borrow") && crate::front::stage1_takes_the_roles();
-            !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch") || (*f == "--defer-borrow" && !defers))
+            let roles = crate::front::stage1_takes_the_roles();
+            let defers = p.flags.contains(&"--defer-borrow") && roles;
+            !p.flags.iter().any(|f| {
+                *f == "--sir" || (*f == "--watch" && !roles) || (*f == "--defer-borrow" && !defers)
+            })
                 && !value("--from-sir")
                 && !value("--from-lir")
         }

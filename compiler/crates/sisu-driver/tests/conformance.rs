@@ -715,7 +715,7 @@ fn stage_1s_usage_errors_are_shown_as_the_commands_usage() {
     assert_eq!(sisu(&["eval", "conf.sisu", "--to", "xml"]), (eval.to_string(), Some(2)));
     let (check, status) = sisu(&["check", "--holes", "conf.sisu", "conf.sisu"]);
     assert!(check.starts_with("usage: sisu check [<file>]\n\nreport diagnostics"), "{check}");
-    assert!(check.contains("`--holes <file>`"), "{check}");
+    assert!(check.contains("`--holes [<path>]`"), "{check}");
     assert_eq!(status, Some(2));
     // From `sisu1 0.18.0` no path is the working directory's package (its
     // R195, decision 1140), which a directory without one does not have.
