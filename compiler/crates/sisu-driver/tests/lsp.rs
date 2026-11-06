@@ -809,7 +809,7 @@ fn stage_1s_queries_answer_as_the_rust_front_end() {
 /// server of stage 1 serves them and when each runs stage 1 as a process
 /// (`SISU_STAGE1_SERVE=0`, decision 980): a document's diagnostics, a
 /// definition, a hover, its symbols, a function's references and the
-/// members after a `.` (decision 1025).
+/// members after a `.` (decision 1023).
 #[test]
 fn stage_1s_queries_answer_alike_served_and_as_a_process() {
     let (uri, _dir) = document("served.sisu", PROGRAM);

@@ -782,7 +782,7 @@ impl Runner<'_> {
         }
         // `NAME.eval`: `sisu eval NAME.sisu ARGS` for each line `# eval
         // ARGS` (once without arguments when there is none), the
-        // configuration module's constants (decisions 984 and 1024).
+        // configuration module's constants (decisions 984 and 1022).
         if let Some(expected) = case.expected("eval") {
             let mut runs: Vec<Vec<String>> = source
                 .lines()

@@ -11535,3 +11535,140 @@ R158, R164 and R165)
 964. The conformance suite's `std/slices` differs from stage 0's front
      end, which has no `std.mem`, as `unsafe/cstring` does (R149). Stage 1
      decides it (RULES.md, R168).
+
+**Stage 0's nineteenth round: a byte laid out as a byte, narrow fields at
+C's offsets, `sisu eval`'s usage and cases, and what was left** (sections
+"Stage 2: the native backend", "Values", "Raw memory, foreign calls and
+the machine intrinsics", "The checked memory model", "The language
+server"; D-085, D-086; 08, 10, 12, 22; decisions 188, 823, 864, 940, 941,
+980 to 986; stage 1's R164, R165, R169 and R170)
+
+1020. A sized integer narrower than 64 bits and an `f32` are their own
+      width natively: a `u8` and an `i8` one byte, a `u16` and an `i16`
+      two, a `u32`, an `i32` and an `f32` four (decision 982's order, done
+      whole). Both lowerings' layout tables give each its size and
+      alignment (`layout.rs`, `layout.sisu`), and a part of a tuple, an
+      option, a result, an enum, a mutex, a cell or a closure's
+      environment takes its size rounded up to a word (`room`), so every
+      other type keeps its size and its parts' offsets; a list, an array
+      and a slice step by the element's own size, so a `list[u8]`, a
+      `Slice[u8]` and `bytes` hold a byte to an element. Every read of a
+      narrow number, from a place, through a reference, from a buffer,
+      loads its width and extends it by its type's sign (`load_bits`,
+      `read_value`, `load_scalar`), every write stores its width
+      (`store_bits`), a copy of a value that is not a whole number of words
+      copies four, two and one bytes after its words, an enum's inline
+      `==` compares a narrow field at its width, and a narrow local is not
+      one of the release profile's variables (decision 246), whose slot a
+      call writes at its width; both lowerings write the same LIR, so the
+      SIR and LIR paths give the same bytes. The runtime in Rust reads an
+      intrinsic's narrow argument and writes its narrow result at its width
+      (`value::scalar`, `set_scalar`), and the runtime in Sisu reads one in
+      its walks of equality, order, the hash and `Debug` (`value.int_at`,
+      by the sign the table's header gives a sized integer), its sums and
+      its `f32` items; a table's key and value, and a pair's parts in
+      `zip` and `enumerate`, each take a word at least, a set's owned
+      items and a text's bytes their own size. `bytes.as_slice` views the
+      bytes in place, a capacity of 0 as decision 940's views of a list,
+      `bytes.to_list` copies them, and `mem.slice.as_ptr` of a `u8`
+      compiles, so `CString.as_ptr()` is valid across a foreign call
+      natively (`unsafe/cstring` in `native.list`, decision 823). The debug
+      information describes each at its width. The checked memory model of
+      the interpreter is unchanged: its raw layouts were these already
+      (decision 302), and the debug profile's checks of raw memory take
+      any bits of a narrow number's width as one of its values. `std/bytes` (a `list[u8]` of a
+      million bytes, its pushes, pops, inserts, slices, sort, sets and
+      dicts, a `Slice[u8]` of a list and of `bytes`, boxes, options, enums
+      and closures of `u8`s) and `std/narrow` (lists, structs, payloads,
+      keys and tuples of `i8`, `u16`, `i32` and `f32`, their signs and
+      overflows) hold the interpreter's output in every native mode. A
+      `list[u8]` of fifty million bytes runs in 51 856 kB at its peak where
+      a list of a word an element (a `list[int]` of as many, the layout a
+      `list[u8]` had) takes 393 784 kB (the release profile; a million's
+      peak, 11 380 kB, is the process's own); the runtime in Sisu's seed
+      is 782 919 bytes where it was 777 695, its object as the fixed point
+      builds it 1 559 880 where it was 1 546 336, and the fixed point
+      holds (sisu2-A and sisu2-B the same
+      31 144 408 bytes, where they were 31 129 464, stage1-A and stage1-B
+      65 449 088, where they were 65 538 936). This changes no rule of the
+      language.
+
+1021. A declared struct lays its fields out at C's offsets natively, each
+      at the next offset its alignment allows (a narrow number's width, a
+      struct's widest field's, a word for any other type, 1 for a type of
+      no bytes), its size a multiple of its widest field's, in both
+      lowerings and the type table, where each field took a word at least;
+      a struct of words keeps its layout. A struct is then laid out in a
+      value as raw memory lays it out (`rawmem.rs` finds each part at its
+      value's offset), so `ptr.of`, `ptr.of_mut` and `as_ref` of a
+      `@repr(c)` struct with `u8` or `i32` fields compile, where they were
+      `D0103` (decision 864): `unsafe/narrow_pointer` hands its own export
+      a pointer to such a struct, writes through `ptr.of_mut` and reads
+      `Layout.of`'s 12 bytes aligned to 4, in `native.list`. A tuple keeps
+      a word for each part, since the runtime's iterators lay their pairs
+      and an entry's key and value out so, and a pointer to a tuple with a
+      narrow number among its parts, or to an option of a raw pointer,
+      stays `D0103`. This changes no rule of the language.
+
+1022. The usage (`D0002`) names `sisu eval FILE [--to toml|yaml]`, and its
+      paragraph on the front ends names `eval` among stage 1's commands
+      (decision 980's note), now that the main tree's stage 1 is 0.14.0
+      (stage 1's R165). The conformance runner has a case kind for it:
+      `NAME.eval` holds, for each line `# eval ARGS` of the case (one run
+      without arguments when there is none), a line `--- sisu eval NAME.sisu
+      ARGS`, the run's standard output, `--- stderr`, its standard error
+      and `--- status N`; `eval/config` writes a module of a struct, a list,
+      a dict, an empty list and a `None` as JSON, TOML (which leaves the
+      `None` out) and YAML, and `eval/stops` a constant whose evaluation
+      panics, `E0602` at its name and status 1 in two forms. The Rust front
+      end, the oracle, has no `eval`, and its run of the suite fails the two,
+      as it is allowed to (decision 268). This changes no rule of the
+      language.
+
+1023. The language server's answers from stage 1's queries (decision 983)
+      are held served and as a process by a driver test rather than by a
+      case of the suite: the runner drives `sisu`'s commands, and the
+      queries are reached through `sisu lsp`'s protocol, which a case's
+      files do not hold. `stage_1s_queries_answer_alike_served_and_as_a_process`
+      opens a document with an error, asks for a definition, a hover, the
+      symbols, a function's references and the members after a `.`, once
+      with `SISU_STAGE1_SERVE=1` and once with `0`, and holds the JSON
+      messages the same, the hover naming the function; with the main
+      tree's stage 1 at 0.14.0, `stage_1s_queries_answer_as_the_rust_front_end`
+      now runs stage 1's queries without a `SISU_STAGE1`. This changes no
+      rule of the language.
+
+1024. `sisu lsp`'s selection ranges, rename, code actions, inlay hints and
+      formatting stay the Rust front end's this round: stage 1's twentieth
+      round gives `query rename`, `actions`, `inlay`, `selection`, `format`
+      and `holes` at 0.15.0 (its R169, decision 1000), but in its own
+      worktree, where no 0.15.0 executable was built that this round could
+      hold the driver's answers to, and the main tree's stage 1 is 0.14.0.
+      The round that has it turns each request into its query from 0.15.0
+      on, as decision 983 did (`query.rs`): a rename's lines into one
+      workspace edit and `refused` into `LSP_NOT_A_NAME` and
+      `LSP_CANNOT_RENAME`, the actions' `fix` and `edit` lines into code
+      actions at the start of the protocol's range, the inlay hints kept in
+      the editor's range, `format`'s runs of lines into edits (`refused`
+      into the messages of `D0075` and `D0076`), and `prepareRename` from
+      `references`; then only the worksheets' values and
+      `sisu.explainBorrow` stay on the Rust front end. This changes no rule
+      of the language.
+
+1025. `sisu run`'s SIR stays asked for as a process (decision 981): stage
+      1's twentieth round serves `build --for-run --emit-sir` at 0.15.0
+      (its R170, decision 1001), which writes the SIR the build hands its
+      backend with the build's diagnostics in their order, but in its own
+      worktree, as decision 1024 says. The round that has it sends that
+      request through decision 980's server for `run` and `build
+      --native` from 0.15.0 on, reads the SIR from the frame's standard
+      output where it read the backend's file, answers an empty one as a
+      SIR without an entry, and measures a two-line `sisu run` served and
+      as a process. This changes no rule of the language.
+
+1026. The formatting, characters', floats', texts' and bytes' families of
+      the intrinsics (decisions 945 and 986) and tagged-pointer provenance
+      (decision 904) are not this round's either: the round spent its time
+      on 1020 and 1021, whose widths each family that moves to the runtime
+      in Sisu now reads with `value.int_at`. This changes no rule of the
+      language.

@@ -661,12 +661,7 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
             return hash_bytes(state, p.cast[ptr[u8]]().read(), w.offset(1).read())
         if k == SIZED:
             return (state ^ int_at(ts, p, t)) *% PRIME
-        if k == INT
-                or k == U64
-                or k == BOOL
-                or k == CHAR
-                or k == FLOAT
-                or k == DATETIME:
+        if k == INT or k == U64 or k == BOOL or k == CHAR or k == FLOAT or k == DATETIME:
             return (state ^ w.read()) *% PRIME
         if k == F32:
             return (state ^ int_at(ts, p, t)) *% PRIME
