@@ -53,12 +53,12 @@ test "feels/hot and too hot" ... ok
 test "feels/every degree feels like something" ... ok
 3 passed, 0 failed, 0 blocked
 $ sisu test --skip-tag slow feels.sisu
-test "feels/the edges of warm" ... ok
-test "feels/hot and too hot" ... ok
+test "feels/the edges of warm" ... ok (cached)
+test "feels/hot and too hot" ... ok (cached)
 2 passed, 0 failed, 0 blocked
 1 not selected
 $ sisu test --filter edges feels.sisu
-test "feels/the edges of warm" ... ok
+test "feels/the edges of warm" ... ok (cached)
 1 passed, 0 failed, 0 blocked
 2 not selected
 ```
@@ -68,6 +68,9 @@ test "feels/the edges of warm" ... ok
 - `--skip-tag slow` leaves out the tests tagged `slow`, and `--tag
   slow` runs only those. `--filter TEXT` runs the tests whose names
   hold the text. The last line counts the tests left out.
+- A test that passed in the first run and has not changed since is
+  `ok (cached)` in the later ones ([What sisu test
+  remembers](#what-sisu-test-remembers)).
 
 A name is fixed text, since runs choose and replay by it, so a brace in
 it is written twice:
@@ -1133,12 +1136,49 @@ test "the vowels of a short word" ... ok
 
 ## What sisu test remembers
 
-A test that passed is not run again while the code is the same: `sisu test` keeps the results in a file beside the
-program, `NAME.test-cache`. `--no-cache` runs everything. `sisu test
---native` runs the same tests compiled, each in a process of its own
-([G20](../guides/native.md)). A JSON report, coverage (`--cover`), mutation testing (`--mutate`)
-and fuzzing (`--fuzz`) are designed in
-[17](../../proposal/17-testing.md) and not in the compiler.
+A test that passed is not run again while the code it reaches is the
+same: `sisu test` keeps the results in a file beside the program,
+`NAME.test-cache`, and reports a remembered one as `ok (cached)`.
+`--no-cache` runs everything:
+
+<!-- file: examples/19-testing/tally.sisu -->
+```sisu
+# Tests whose results `sisu test` remembers until the code changes.
+def tally(prices: list[int]) -> int:
+    var total = 0
+    for p in prices:
+        total += p
+    return total
+
+test "an empty bill is nothing":
+    assert tally([]) == 0
+
+test "a bun and a coffee":
+    assert tally([280, 350]) == 630
+```
+
+<!-- output: examples/19-testing/tally.console -->
+```console
+$ sisu test tally.sisu
+test "an empty bill is nothing" ... ok
+test "a bun and a coffee" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu test tally.sisu
+test "an empty bill is nothing" ... ok (cached)
+test "a bun and a coffee" ... ok (cached)
+2 passed, 0 failed, 0 blocked
+$ sisu test --no-cache tally.sisu
+test "an empty bill is nothing" ... ok
+test "a bun and a coffee" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+`sisu test --native` runs the same tests compiled, each in a process of
+its own ([G20](../guides/native.md)). A JSON report, coverage
+(`--cover`), mutation testing (`--mutate`) and fuzzing (`--fuzz`) are
+designed in [17](../../proposal/17-testing.md); of mutation testing,
+the compiler already makes the mutants, and the runner that tries the
+tests against them is still to come.
 
 ## Exercise 19.1: predict the test clock
 

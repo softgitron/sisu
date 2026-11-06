@@ -1,0 +1,3 @@
+6:9-6:16 W0031 resolve.mixed-script name="rnоdern" scripts="Latin and Cyrillic"
+6:9-6:16 W0032 resolve.confusable name="rnоdern" other="modern"
+  label 2:5-2:11 resolve.confusable-here other="modern"

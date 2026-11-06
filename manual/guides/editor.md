@@ -143,18 +143,18 @@ print("Kota is warm")
 # | Kota is warm
 ```
 
-The values come from a run against a test's fakes, with a budget of
-statements, so typing a loop that never ends cannot hang the editor and
-nothing the script does reaches the world. They are kept until the text
-changes.
+The values come from stage 1, like every other answer: its own
+evaluator runs the script, and where that evaluator stops, at a line
+that reaches the world or standard error, the interpreter runs stage
+1's program of the script for the lines from there on. Both run with a
+budget and against a test's fakes, so typing a loop that never ends
+cannot hang the editor and nothing the script does reaches the world.
+The values are kept until the text changes.
 
-**Status.** In stage 0, with stage 1 answering every request but one:
-a script's values still come from the Rust front end. Stage 1 answers
-them too from its twenty-third round, run by its own evaluator, which
-stops at the first line that reaches the world, and the server asks it
-once stage 0's round in progress routes the query. The Rust front end
-also answers everything when stage 1 is not built or
-`--front-end=rust` is given. Stage 1's completion offers only the names
+**Status.** In stage 0, with stage 1 answering every request, the
+script's values among them, from its twenty-third round. The Rust front
+end answers everything when stage 1 is not built, is older than that
+round, or `--front-end=rust` is given. Stage 1's completion offers only the names
 a program sees, and its references count the names in import lines. The structural editing with a typed palette
 and the stepper of the teaching profile, which
 [10](../../proposal/10-tooling.md) describes for editors, are designed.

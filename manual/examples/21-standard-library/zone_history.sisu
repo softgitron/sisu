@@ -1,0 +1,12 @@
+# A zone gives a past date the offset its clocks showed on that day.
+from std.time import Zone
+
+def main():
+    let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+    let new_york = Zone.named("America/New_York").expect("a zone")
+    for text in ["1950-07-01T12:00:00Z", "2026-07-01T12:00:00Z"]:
+        let t = DateTime.parse(text).expect("a time")
+        print("{helsinki.format(t)} {helsinki.abbreviation_at(t)}")
+    for text in ["1974-01-15T12:00:00Z", "2026-01-15T12:00:00Z"]:
+        let t = DateTime.parse(text).expect("a time")
+        print("{new_york.format(t)} {new_york.abbreviation_at(t)}")

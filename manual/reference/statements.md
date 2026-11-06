@@ -348,8 +348,8 @@ panic: reached the typed hole `todo("middle")`
   at main (holes.sisu:10:11)
 ```
 
-**Stage 0 differs.** `sisu check --holes`, which reports every hole's
-type, bindings and tests at once, is designed
+`sisu check --holes` reports every hole of a file or a package at
+once, with its type, the bindings in scope and the tests that reach it
 ([R16](sisu-command.md#sisu-check---holes)).
 
 **Status.** In stage 0 (D-061).

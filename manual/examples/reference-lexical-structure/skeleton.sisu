@@ -1,0 +1,7 @@
+# `rnоdern`, with a Cyrillic `о`, reads as `modern`: `rn` reads as `m`.
+def modern() -> int:
+    return 1
+
+def main():
+    let rnоdern = 2
+    print(rnоdern + modern())

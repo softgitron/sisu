@@ -8274,9 +8274,11 @@ handles, or write the impl by hand. E0608 is the derive stopping; an
 error in the impl it went on to write is that error's own code, placed
 at the same `@derive` with a note that quotes the impl's line, as
 [E0347](#e0347) is. `std.json`'s `@derive(Decode)` stops so for an
-enum and for a struct with a field that holds one, directly or as a
-list's or an option's element, its reason naming the field, since
-`decode` cannot make an enum's variants yet.
+enum, since `decode` cannot make an enum's variants yet, and for a
+struct with a field that holds an enum, directly or as a list's or an
+option's element, its reason naming the field, when the enum has no
+`impl Decode` of its own; with one, the struct's derived decoder calls
+it ([G7](../guides/json.md#5-give-a-type-a-json-form-of-its-own)).
 
 <!-- file: examples/reference-diagnostics/e0608_derive_failed_fixed.sisu -->
 ```sisu
@@ -12874,13 +12876,25 @@ Example: [R15](testing.md#the-tests-of-one-module).
 the command does.
 
 A command whose words stage 1 reads, such as `sisu eval`, `sisu fix` or
-`sisu check --holes`, was given no file, more than one, or a value it
-does not take, such as `--to xml`. The command prints its own line of
+`sisu check --holes`, was given no file where it needs one, more than
+one, or a value it does not take, such as `--to xml`. The command prints its own line of
 `sisu help` and nothing else, and the status is 2.
 
 Give the command what its usage line names: `sisu eval FILE`.
 
 Example: [R16](sisu-command.md#sisu-eval).
+
+### D0152
+
+`cli.test-cached`: ok (cached).
+
+`sisu test` took the test's result from its cache, since nothing the
+test reaches has changed since it passed, and did not run it
+([R16](sisu-command.md#sisu-test)). It is no error: the test counts as
+passed and the status is a passed test's. `--no-cache` runs it again,
+and prints `ok`.
+
+Example: [chapter 19](../tutorial/19-testing.md#what-sisu-test-remembers).
 
 ### D0190
 
@@ -13683,6 +13697,7 @@ it. `sisu explain CODE` prints the same line.
 | [D0149](#d0149) | `cli.token-module-run` | the token is for the run of the tests of `{module}`; `sisu test --replay {token} {module}` replays it |
 | [D0150](#d0150) | `cli.token-package-run` | the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it |
 | [D0151](#d0151) | `cli.command-usage` | usage: sisu {form}  {about} |
+| [D0152](#d0152) | `cli.test-cached` | ok (cached) |
 | D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
 | D0171 | `cli.hole-scope` | in scope: {bindings} |
 | D0172 | `cli.hole-scope-none` | nothing is in scope |

@@ -25,7 +25,7 @@ $ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0
 error[D0149]: the token is for the run of the tests of `src/gauge.sisu`; `sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu` replays it
 $ sisu test
 test "a full tank" ... ok
-test "gauge/half a tank" ... ok
+test "gauge/half a tank" ... ok (cached)
 test "gauge/more used than there was" ... FAILED
 
 test "gauge/more used than there was" ... FAILED

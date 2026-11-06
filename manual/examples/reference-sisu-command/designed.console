@@ -14,8 +14,6 @@ $ sisu why send hello.sisu:3
 error[D0003]: unknown command `why`; run `sisu help`
 $ sisu fill hello.sisu
 error[D0003]: unknown command `fill`; run `sisu help`
-$ sisu doc --digest hello.sisu
-error[D0009]: unknown option `--digest` for `sisu doc`
 $ sisu run --profile hello.sisu
 error[D0009]: unknown option `--profile` for `sisu run`
 $ sisu test --cover hello.sisu

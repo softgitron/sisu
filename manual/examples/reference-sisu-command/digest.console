@@ -1,0 +1,18 @@
+$ sisu doc --digest stove_api.sisu
+# stove_api: the API as `sisu doc --digest` writes it
+
+# module `stove_api`
+##! The heat of a sauna's stove.
+
+error StoveError
+    TooHot(celsius: int)
+
+## The heat to show, checked against the stove's limit.
+pub def checked(celsius: int) -> int ! StoveError  # inferred
+    requires celsius >= 0
+
+## Writes the heat to the stove's log in `fs`.
+## Capabilities: `fs` (`Fs`).
+pub def save(fs: Fs, celsius: int) -> ! IoError
+
+def main()

@@ -1,0 +1,16 @@
+# Unicode's rules decide where one grapheme ends and the next begins.
+from std.string import Graphemes
+
+def main():
+    let conjunct = "\u{915}\u{94d}\u{937}"
+    let joined = "a\u{200d}b"
+    let family = "\u{1f469}\u{200d}\u{1f467}"
+    let flags = "\u{1f1eb}\u{1f1ee}\u{1f1f8}\u{1f1ea}"
+    for text in [conjunct, joined, family, flags]:
+        var chars = 0
+        for _ in text.chars():
+            chars += 1
+        var shown = 0
+        for _ in text.graphemes():
+            shown += 1
+        print("{chars} characters, graphemes: {shown}")

@@ -864,7 +864,10 @@ leaves out the code that nothing reaches, but links the C library
 dynamically and keeps its debug information: a ten-line program is
 6.25 MB, 1.74 MB stripped, nearly all of it the runtime, as `sisu build
 --native --explain-size` shows part by part
-([R22](../reference/targets.md#binary-size-and-startup)). A native debug build
+([R22](../reference/targets.md#binary-size-and-startup)). The build
+itself is quick: the server of stage 1 answers it, and a package's
+native build takes about 0.14 seconds where starting stage 1 for it
+took 0.33 ([R16](../reference/sisu-command.md#the-server-of-stage-1)). A native debug build
 checks raw memory as the interpreter does, the memory C gives out
 included, except where the interpreter alone knows enough: which
 borrow a pointer came from, which it checks only by address. The

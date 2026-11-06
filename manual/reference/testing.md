@@ -279,7 +279,7 @@ $ sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0
 error[D0149]: the token is for the run of the tests of `src/gauge.sisu`; `sisu test --replay 1-9b13ffa97d89b3d8-0.0.1-t1-s0-r0 src/gauge.sisu` replays it
 $ sisu test
 test "a full tank" ... ok
-test "gauge/half a tank" ... ok
+test "gauge/half a tank" ... ok (cached)
 test "gauge/more used than there was" ... FAILED
 
 test "gauge/more used than there was" ... FAILED
@@ -299,6 +299,10 @@ error[D0150]: the token is for the run of the package's tests, not of `src/gauge
   `--skip-tag` choose among the module's tests only.
 - The replay line names the module's file, and `--replay` with it
   runs the test alone.
+- The module's run and the package's share the test cache, so the
+  package's run takes `gauge/half a tank`, which passed in the module's
+  run, from it: `ok (cached)` ([What sisu test
+  remembers](#what-sisu-test-remembers)).
 - A token holds the module's path with the package's code, since the
   tests of the module and of the package are numbered apart: a token
   of the module's run given to the package's, `sisu test --replay
@@ -600,7 +604,13 @@ that names it E0702.
 **Stage 0 differs.** 17's `scope="module"` is accepted and makes the
 value for each test that names it: a value made once for a module's
 tests needs the runner to keep it between tests, which it runs in
-parallel and in any order. 17's `Expectation`, an assertion of a
+parallel and in any order. Decision 1147 says what that takes: the
+runner makes the value before the first of the module's tests that
+names it, lends it to each as a `ref T`, with `T: Sync` checked, runs
+those tests in turn in one interpreter, and drops the value after the
+last, failed or not; stage 1 keeps its lowering of a value per test
+until the runner reads the fixtures from each test's line of the SIR.
+17's `Expectation`, an assertion of a
 library's own over the argument expression's tree, waits for
 compile-time expressions, which reflection does not give yet
 (decision 1125 of the [architecture
@@ -993,13 +1003,29 @@ begun, and stage 0 times its interpreter.
 
 A test that passed is not run again while its code is the same: `sisu
 test` keeps its results in `FILE.test-cache` beside a file, or in
-`build/debug/test-cache` in a package. `--no-cache` runs everything.
+`build/debug/test-cache` in a package, and reports a test whose result
+it took from there as `ok (cached)` (D0152), a passed test in the
+counts and the status. `--no-cache` runs everything, and a test that
+takes the real `System` is never cached
+([chapter 19](../tutorial/19-testing.md#what-sisu-test-remembers) shows
+a run of each).
 
 **Stage 0 differs.** 17's machine-readable output (JSON, TAP, JUnit XML)
 and the reports of coverage and mutation testing are designed
-([R16](sisu-command.md#options-of-the-existing-commands)).
+([R16](sisu-command.md#options-of-the-existing-commands)). Of `sisu
+test --mutate`, stage 1 does the front end's half from `sisu1 0.19.0`:
+it prints each mutant of the program's own functions and methods, a
+comparison's boundary moved (`<` for `<=`), an operator flipped (`==`
+for `!=`, `+` for `-`, `and` for `or`, `True` for `False`), a negation
+removed, or a one-line call or assignment removed, leaving the calls
+of `print` and of `log` alone, each with the place it changed. The
+runner's half, which keeps the mutants in the changed region, runs
+against each the tests that cover its line, and reports each mutant
+that every test let pass, is not in stage 0 yet, so `--mutate` is
+D0009.
 
-**Status.** In stage 0, except the machine-readable output.
+**Status.** In stage 0, except the machine-readable output and the
+reports of coverage and mutation testing.
 
 ## Diagnostics of this page
 

@@ -1,0 +1,2 @@
+Ok(Sauna(name="Kota", heater=Wood))
+Err(Mismatch(path="$.heater", expected="a heater"))

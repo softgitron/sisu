@@ -331,9 +331,44 @@ def main():
 `a\u{308}` is `a` followed by the combining diaeresis, which a reader
 sees as `ä`. Each grapheme is a `str` that views the text. Flags, a
 `\r\n` line end and emoji joined into one picture are a grapheme each
-too. Some of Unicode's rarer rules are not in `graphemes()` yet, such
-as the joined consonants of Indic scripts, so text in those scripts
-can split where a reader would not.
+too. `graphemes()` follows every rule of Unicode's text segmentation
+(UAX #29), read from Unicode's own data files, so it splits text as a
+reader of any script would:
+
+<!-- file: examples/06-text/joins.sisu -->
+```sisu
+# Unicode's rules decide where one grapheme ends and the next begins.
+from std.string import Graphemes
+
+def main():
+    let conjunct = "\u{915}\u{94d}\u{937}"
+    let joined = "a\u{200d}b"
+    let family = "\u{1f469}\u{200d}\u{1f467}"
+    let flags = "\u{1f1eb}\u{1f1ee}\u{1f1f8}\u{1f1ea}"
+    for text in [conjunct, joined, family, flags]:
+        var chars = 0
+        for _ in text.chars():
+            chars += 1
+        var shown = 0
+        for _ in text.graphemes():
+            shown += 1
+        print("{chars} characters, graphemes: {shown}")
+```
+
+<!-- output: examples/06-text/joins.out -->
+```text
+3 characters, graphemes: 1
+3 characters, graphemes: 2
+3 characters, graphemes: 1
+4 characters, graphemes: 2
+```
+
+The first text is क्ष, two Devanagari consonants joined across a
+virama, which a reader sees as one letter. The joiner U+200D makes one
+picture of two emoji, the woman and the girl of the third text, but
+does not join two letters, so `a` and `b` stay apart. Regional
+indicators pair from the start, so four of them are two flags, Finland
+and Sweden.
 
 The same `ä` written two ways is two different texts, so `==` tells
 them apart. A normal form writes every text one way, and the trait

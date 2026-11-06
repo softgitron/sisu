@@ -243,8 +243,8 @@ Booking(name="Aino", hour=18)
 JsonError`, reads such a form back.
 
 An enum has no derived `Decode` yet, so a struct that derives one with
-a field holding an enum stops at compile time, and `sisu check` says
-which field:
+a field holding an enum that has no `Decode` of its own stops at
+compile time, and `sisu check` says which field:
 
 <!-- file: examples/guide-json/enum_field.sisu -->
 ```sisu
@@ -285,9 +285,52 @@ error[E0609]: making `from_json[Heater]` stopped at compile time: json.decode: n
 ```
 
 E0608 (`comptime.derive-failed`) names the field, and E0609 the
-`decode` that needs it. An enum with a `Decode` written by hand decodes
-alone, but the derive refuses a field of it all the same, so the
-struct's `Decode` is then written by hand too.
+`decode` that needs it. Write the enum a `Decode` of its own, as its
+note says, with `decode_json(j: Json, path: str)`: the struct's derived
+`Decode` then decodes the field with it, and so does a list or an
+option of the enum, and text the enum's impl refuses is its `Mismatch`
+at the field's path:
+
+<!-- file: examples/guide-json/enum_decode.sisu -->
+```sisu
+# A derived `Decode` decodes an enum field with the enum's own impl.
+import std.json
+from std.json import Decode, Json, JsonError
+
+@derive(Debug)
+enum Heater:
+    Wood
+    Electric
+
+impl Decode for Heater:
+    def decode_json(j: Json, path: str) -> Heater ! JsonError:
+        if let Json.Str(s) = j:
+            if s == "wood":
+                return Ok(Heater.Wood)
+            if s == "electric":
+                return Ok(Heater.Electric)
+        let at = path.to_string()
+        let wanted = "a heater".to_string()
+        return Err(JsonError.Mismatch(path=at, expected=wanted))
+
+@derive(Decode, Debug)
+struct Sauna:
+    name: String
+    heater: Heater
+
+def main():
+    for text in [
+        r"""{"name": "Kota", "heater": "wood"}""",
+        r"""{"name": "Kivi", "heater": "gas"}""",
+    ]:
+        print(json.decode[Sauna](text))
+```
+
+<!-- output: examples/guide-json/enum_decode.out -->
+```text
+Ok(Sauna(name="Kota", heater=Wood))
+Err(Mismatch(path="$.heater", expected="a heater"))
+```
 
 ## 6. Read JSON of an unknown shape
 
@@ -332,5 +375,6 @@ does the checking that a `match` on `Json` does by hand.
 **Status.** In stage 0 (11), with two differences: an enum is encoded
 and not decoded, since `decode` makes no enum's variants yet (E0609),
 and `@derive(Decode)`, which 11 gives a struct, is E0608 on an enum and
-on a struct with a field that holds one ([step 5](#5-give-a-type-a-json-form-of-its-own)). Without `from std.json import Decode, Encode`, the
+on a struct with a field that holds an enum without a `Decode` of its
+own ([step 5](#5-give-a-type-a-json-form-of-its-own)). Without `from std.json import Decode, Encode`, the
 derive is E0243, whose note names the import.

@@ -1,0 +1,18 @@
+##! The heat of a sauna's stove.
+
+error StoveError:
+    TooHot(celsius: int)
+
+## The heat to show, checked against the stove's limit.
+pub def checked(celsius: int) -> int !:
+    requires celsius >= 0
+    if celsius > 120:
+        return Err(TooHot(celsius=celsius))
+    return Ok(celsius)
+
+## Writes the heat to the stove's log in `fs`.
+pub def save(fs: Fs, celsius: int) -> ! IoError:
+    return fs.write_text("stove.log", "{celsius}\n")
+
+def main():
+    print(checked(80).or(0))

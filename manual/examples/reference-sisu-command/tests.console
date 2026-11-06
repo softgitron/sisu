@@ -31,7 +31,7 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-test "large numbers/doubles a large number" ... ok
+test "large numbers/doubles a large number" ... ok (cached)
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --tag slow tests.sisu
@@ -41,7 +41,7 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-test "large numbers/doubles a large number" ... ok
+test "large numbers/doubles a large number" ... ok (cached)
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --skip-tag slow --jobs 1 --no-monitor --no-cache tests.sisu

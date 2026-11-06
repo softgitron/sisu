@@ -1,0 +1,31 @@
+# A derived `Decode` decodes an enum field with the enum's own impl.
+import std.json
+from std.json import Decode, Json, JsonError
+
+@derive(Debug)
+enum Heater:
+    Wood
+    Electric
+
+impl Decode for Heater:
+    def decode_json(j: Json, path: str) -> Heater ! JsonError:
+        if let Json.Str(s) = j:
+            if s == "wood":
+                return Ok(Heater.Wood)
+            if s == "electric":
+                return Ok(Heater.Electric)
+        let at = path.to_string()
+        let wanted = "a heater".to_string()
+        return Err(JsonError.Mismatch(path=at, expected=wanted))
+
+@derive(Decode, Debug)
+struct Sauna:
+    name: String
+    heater: Heater
+
+def main():
+    for text in [
+        r"""{"name": "Kota", "heater": "wood"}""",
+        r"""{"name": "Kivi", "heater": "gas"}""",
+    ]:
+        print(json.decode[Sauna](text))

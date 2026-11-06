@@ -283,8 +283,8 @@ True
 
 - `Zone.named(name)` takes a name of the tz database, such as
   `Europe/Helsinki`, and gives `InvalidTime` for a name it does not
-  know. It knows 52 zones, each with the rules of its daylight time as
-  they stand today, which it uses for earlier years too.
+  know. It knows 52 zones, each with its history from the tz database,
+  so a past date gets the offset of its own day.
 - `offset_at(t)` is the zone's offset from UTC at `t`, as a `Duration`,
   and `abbreviation_at(t)` its name for it: `EEST` in the Finnish
   summer, `EET` in the winter.
@@ -292,6 +292,38 @@ True
   `format(t)` writes `t` as RFC 3339 does, with the offset.
 - `Zone.fixed(seconds)` is a zone of one offset, east of UTC, and
   `Zone.utc()` is UTC itself.
+
+A zone's rules have changed over the years, and a date gets the ones in
+force on its day. Finland kept no summer time in 1950, and New York
+kept daylight time through the winter of 1974, to save energy:
+
+<!-- file: examples/21-standard-library/zone_history.sisu -->
+```sisu
+# A zone gives a past date the offset its clocks showed on that day.
+from std.time import Zone
+
+def main():
+    let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+    let new_york = Zone.named("America/New_York").expect("a zone")
+    for text in ["1950-07-01T12:00:00Z", "2026-07-01T12:00:00Z"]:
+        let t = DateTime.parse(text).expect("a time")
+        print("{helsinki.format(t)} {helsinki.abbreviation_at(t)}")
+    for text in ["1974-01-15T12:00:00Z", "2026-01-15T12:00:00Z"]:
+        let t = DateTime.parse(text).expect("a time")
+        print("{new_york.format(t)} {new_york.abbreviation_at(t)}")
+```
+
+<!-- output: examples/21-standard-library/zone_history.out -->
+```text
+1950-07-01T14:00:00+02:00 EET
+2026-07-01T15:00:00+03:00 EEST
+1974-01-15T08:00:00-04:00 EDT
+2026-01-15T07:00:00-05:00 EST
+```
+
+The history is the tz database's of 2026 (its version `2026c`),
+written into `std.time` by a tool of the compiler, so a change of rules
+that a country makes later reaches a program with a later compiler.
 
 A zone's `Debug` form is the code that makes it, so a worksheet shows
 each `let` of a zone as the call you would write:

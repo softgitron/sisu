@@ -1,0 +1,3 @@
+test "an empty bill is nothing" ... ok
+test "a bun and a coffee" ... ok
+2 passed, 0 failed, 0 blocked

@@ -58,6 +58,11 @@ löyly!
 - In a package, `sisu build --native` writes `build/debug/NAME` beside
   the lockfile, `NAME` being the package's, and `--output PATH` writes
   the executable at `PATH` instead.
+- Builds and native runs are served by [the server of stage
+  1](../reference/sisu-command.md#the-server-of-stage-1), which keeps
+  stage 1 running between commands: a package's `sisu build --native`
+  takes about 0.14 seconds, and its `sisu run --native` 0.17, where
+  starting stage 1 for each took 0.33.
 
 The executable needs no `sisu` and no source: copy the one file to
 where it runs, with the C library and `libgcc_s`, which it links

@@ -306,14 +306,14 @@ written in Sisu and compiled natively, which is the default for
 as `sisu help` says, and the Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
 lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix` and `sisu check
---holes` are stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from both
+--holes` are stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from stage 1,
+and from the Rust front end only where stage 1 is not built
 ([sisu lsp](#sisu-lsp)). From `sisu1 0.17.0` stage 1 also answers
-`check --diary`, `test --std` of a file or a package, `run
+`check --diary`, `test --std`, `run --defer-borrow`, `test
 --defer-borrow`, `explain-borrow` and every form of `audit`, each the
 default as the sections of each say, with the Rust front end's answer
-under `--front-end=rust`. `run --watch`, `test --defer-borrow`, `test
---std` without a file or a package, and the other commands use the Rust
-front end whichever you choose. A program's
+under `--front-end=rust`. `run --watch` and the other commands use the
+Rust front end whichever you choose. A program's
 transcripts run on the front end its tests run on, stage 1 unless you
 choose the Rust one (with a stage 1 older than 0.11.0, on the Rust
 front end, D0128). `sisu
@@ -332,7 +332,7 @@ A value other than `stage1` or `rust` is D0115. When stage 1 is missing
 (D0116), fails to build (D0117) or stops as a compiler may not (D0118),
 the message names `--front-end=rust` as the way on. Stage 1's own
 executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
-0.17.0` after stage 1's twenty-second round), which the driver asks
+0.19.0` after stage 1's twenty-fourth round), which the driver asks
 to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
@@ -362,18 +362,20 @@ language server's questions ([sisu lsp](#sisu-lsp)), and from `sisu1
 0.15.0` the build that gives `sisu run` its SIR, also for `sisu run
 --native` of a file: a two-line `sisu run` takes 0.039 seconds served
 where it takes 0.246 as a process, and `sisu run --native` 0.121 where
-it takes 0.347 (with a release build of `sisu`). `sisu build`, with
-`--native` too, and `sisu run --native` of a package still start stage
-1 as a process of their own, since stage 1 serves only the build for a
-run. From `sisu1 0.18.0` stage 1 serves those builds too: its `build
---emit-sir` answers a line `# executable PATH` and the SIR for each
-program the build makes, for the driver to compile into the executable
-the line names, and stage 0's round in progress makes the driver ask it.
-Whatever goes wrong with the server, the command runs stage 1
+it takes 0.347 (with a release build of `sisu`). From `sisu1 0.18.0`
+`sisu build` is served too, with `--native`, `--release`,
+`--contracts`, `--output` and `--explain-size`, and so is `sisu run
+--native` of a package: stage 1's answer names each program the build
+makes with a line `# executable PATH` before its SIR, and the driver
+compiles that SIR into the executable the line names, the same bytes as
+a process gives. A package's `sisu build --native` takes 0.136 seconds
+served where it takes 0.326 as a process, a plain `sisu build` 0.065
+where it takes 0.275, and a package's `sisu run --native` 0.167 where
+it takes 0.333. Whatever goes wrong with the server, the command runs stage 1
 as a process of its own, and `SISU_STAGE1_SERVE=0` makes it do so every
 time. What a command prints is the same either way.
 
-**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980 and 1061 of
+**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980, 1061 and 1140 of
 the [architecture notes](../../compiler/docs/architecture.md)).
 
 ## Running programs
@@ -545,15 +547,16 @@ outcome: conflict reached; the run stopped at a concrete ownership conflict
 </details>
 
 `sisu test --defer-borrow` runs a rejected program's tests in the same
-way.
+way, each under the monitor, with no test cache.
 
 The SIR that the monitor runs comes from stage 1, from `sisu1 0.17.0`
-(its build for a run with `--defer-borrow`): it writes every diagnostic on standard error in the
+(its build for a run with `--defer-borrow`, and for `sisu test` its
+`sir --tests --defer-borrow`): it writes every diagnostic on standard error in the
 form of `--format=ids`, with status 3 when it deferred an error, and
 the driver reads the account's findings from them. An error that is
 not the ownership checker's is not deferred, so the run reports it as
-a plain run does. `sisu test --defer-borrow` still lowers the program
-with the Rust front end, and so does `--front-end=rust`.
+a plain run does. `--front-end=rust` lowers the program with the Rust
+front end instead.
 
 **Status.** In stage 0, a tool of the experiment (18, Phase 3).
 
@@ -984,10 +987,12 @@ and recheck such an edit within the target.
 
 ### sisu check --holes
 
-- `sisu check --holes [--format=human|json] FILE`
+- `sisu check --holes [--format=human|json] [FILE | DIR]`
 
 `sisu check --holes` reports each typed hole `todo("...")` of the
-program's own modules, by module and position, with what the code that
+program's own modules, of a file, of the package in a directory, or
+without a path of the working directory's package, each hole named by
+its module's file, by module and position, with what the code that
 fills it has to work with: the type its place needs and the function it
 is in; the bindings in scope, with their types; the expressions of its
 type, to depth two, a binding, a field of one, a method of one that
@@ -1034,17 +1039,16 @@ $ sisu check --holes --format=json holes.sisu
 ]
 ```
 
-A file that cannot be read is D0001, another option D0009, and no
-file, a directory or more than one path prints the command's usage
-(D0151). Without `--holes`, `sisu check` reports each hole as warning
+A file that cannot be read is D0001, another option D0009, a directory
+outside a package, or no path outside one, D0064, and more than one path
+prints the command's usage (D0151). Without `--holes`, `sisu check` reports each hole as warning
 W0001, and `sisu test` reports a test that reaches one as blocked.
 
 **Stage 0 differs.** `sisu check --holes` is stage 1's, from `sisu1
 0.15.0`, and the whole report and `--format=json` from `sisu1 0.16.0`;
-the Rust front end answers it with D0009. From `sisu1 0.18.0` stage 1
-also reports the holes of a package, by its directory or with no path
-for the working directory's, each named by its module's file, where the
-driver still takes one file and prints the usage without it (D0151). 10's report also shows the
+the Rust front end answers it with D0009, and a package's holes are
+reported from `sisu1 0.18.0`. The usage that `sisu help` and D0151
+print still names `--holes <file>`. 10's report also shows the
 values each test saw at the hole, which wait for `sisu test` to record
 them, and the bindings' capabilities, which their types show here.
 
@@ -1072,7 +1076,10 @@ program with a typed hole, E0445 at each hole
 ([R17](diagnostics.md#e0445)), where `sisu check` and a debug build
 warn with W0001, so that a hole never ships. The [native
 example](#compiling-and-running-natively---native-and---release) builds
-one.
+one. The build is served by [the server of
+stage 1](#the-server-of-stage-1), the driver compiling each executable
+from the SIR it answers, so a package's native build takes about 0.14
+seconds where a process of stage 1 took 0.33.
 
 <!-- output: examples/reference-sisu-command/build.console -->
 ```console
@@ -1141,11 +1148,15 @@ every drop placed and every `comptime` value computed. It prints the SIR
 of a program that the ownership checker rejects as well; a program with
 other errors gets its diagnostics and D0132, as a build does. `--tests`
 includes the program's tests and benchmarks, and `--contracts` sets the
-contracts the SIR checks. Stage 1's own `sir` takes two options more
-from `sisu1 0.17.0`, which the driver does not send it yet: `--std`
-beside `--tests` lowers the standard library's doc examples as tests,
-and `--defer-borrow` prints the SIR of a program whose only errors are
-the ownership checker's ([--defer-borrow](#running-a-rejected-program---defer-borrow)).
+contracts the SIR checks. Stage 1's own `sir` takes options more,
+which `sisu test` and `sisu run` send it and `sisu sir` does not take
+(D0009): from `sisu1 0.17.0`, `--std` beside `--tests` lowers the
+standard library's doc examples as tests, and `--defer-borrow` prints
+the SIR of a program whose only errors are the ownership checker's
+([--defer-borrow](#running-a-rejected-program---defer-borrow)); from
+`sisu1 0.19.0`, `--mutants` beside `--tests` prints each mutant of the
+program, for the `--mutate` that [sisu test](#sisu-test) does not have
+yet.
 The [SIR example](#running-serialised-sir---sir---from-sir-and---from-lir)
 shows the SIR of `hello.sisu`.
 
@@ -1289,7 +1300,7 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-test "large numbers/doubles a large number" ... ok
+test "large numbers/doubles a large number" ... ok (cached)
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --tag slow tests.sisu
@@ -1299,7 +1310,7 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-test "large numbers/doubles a large number" ... ok
+test "large numbers/doubles a large number" ... ok (cached)
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --skip-tag slow --jobs 1 --no-monitor --no-cache tests.sisu
@@ -1358,7 +1369,9 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 - `--no-cache` runs every test. Without it, a test that passed is not
   run again while nothing it reaches has changed: the cache is keyed on
   the code each test reaches and on the options that decide a run, and
-  a cached test is reported `ok` as a run would report it. The cache is
+  a cached test is reported `ok (cached)` (D0152), counted as passed,
+  as the runs with `--filter` and `--tag` in the session show. The
+  cache is
   `FILE.test-cache` beside a file, or `build/debug/test-cache` in a
   package. A test that takes the real `System` is never cached.
 - `FILE`, a module under a package's `src/`, runs that module's tests
@@ -1384,10 +1397,10 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   reaches, and its failure has no token (D0138).
 - `--std` runs the standard library's doc examples besides the
   program's tests, before them; outside a package and without a file,
-  it runs them alone. Stage 1 lowers them as tests from `sisu1
-  0.17.0`, 197 of them, each once, when there is a program to run them
-  with, a file or the package of the working directory; alone, and
-  under `--front-end=rust`, the Rust front end lowers them, and lists
+  it runs them alone, with no test cache, which has no file to sit
+  beside. Stage 1 lowers them as tests from `sisu1 0.17.0`, 197 of
+  them, each once; alone they take about 3 seconds. Under
+  `--front-end=rust` the Rust front end lowers them, and lists
   `std.net`'s two twice.
 - `--native` compiles the tests into one executable and runs each in a
   process of its own, and `--release` compiles them with the release
@@ -1490,6 +1503,9 @@ error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 write a JSON event stream, with TAP and JUnit XML as `--format` options;
 stage 0 prints the human form only, and has none of `--fuzz`, `--cover`
 and `--mutate` ([Commands that are designed](#commands-that-are-designed)).
+For `--mutate`, stage 1 makes the mutants from `sisu1 0.19.0`
+([sisu sir](#sisu-sir)); the runner that keeps those in the changed
+region and runs the tests that cover each is still to come.
 
 **Status.** In stage 0. `--sim`, `--faults` and replay tokens are
 prototypes of the experiment (Q-49, D-070).
@@ -1554,8 +1570,8 @@ in a stable JSON form that CI can follow, which is not begun.
 
 ### sisu doc
 
-- `sisu doc [--output DIR] [PACKAGE OPTIONS] [PATH]`
-- `sisu doc --std [MODULE...] [--output DIR]`
+- `sisu doc [--digest] [--output DIR] [PACKAGE OPTIONS] [PATH]`
+- `sisu doc --std [--digest] [MODULE...] [--output DIR]`
 
 `sisu doc` writes the documentation of a program as Markdown, a page per
 module: the module's `##!` comment, a list of its items, and for each
@@ -1611,11 +1627,69 @@ test "std.time/days_in_month (doc example)" ... ok
 The [package example](#what-a-command-works-on) shows the page of a
 package whose root module has a `##!` comment and no `pub` item.
 
+`--digest` writes the same pages as one plain text, for a reader that
+wants the whole API at once, such as a model with a context window:
+each module after a line `# module PATH` with its `##!` comment, and
+each item's declaration as the page writes it, its inferred error set
+and contracts with it, after `##` lines of its doc comment's first
+paragraph, its capabilities, its holes and its first example. With
+`--output DIR` it is written as `DIR/NAME.txt`. A package's digest
+shows its `pub` items and the standard library's what is written `pub`;
+the whole standard library's, `sisu doc --std --digest`, is about 145
+KB, some 36,000 tokens at four bytes a token.
+
+<!-- file: examples/reference-sisu-command/stove_api.sisu -->
+```sisu
+##! The heat of a sauna's stove.
+
+error StoveError:
+    TooHot(celsius: int)
+
+## The heat to show, checked against the stove's limit.
+pub def checked(celsius: int) -> int !:
+    requires celsius >= 0
+    if celsius > 120:
+        return Err(TooHot(celsius=celsius))
+    return Ok(celsius)
+
+## Writes the heat to the stove's log in `fs`.
+pub def save(fs: Fs, celsius: int) -> ! IoError:
+    return fs.write_text("stove.log", "{celsius}\n")
+
+def main():
+    print(checked(80).or(0))
+```
+
+<!-- output: examples/reference-sisu-command/digest.console -->
+```console
+$ sisu doc --digest stove_api.sisu
+# stove_api: the API as `sisu doc --digest` writes it
+
+# module `stove_api`
+##! The heat of a sauna's stove.
+
+error StoveError
+    TooHot(celsius: int)
+
+## The heat to show, checked against the stove's limit.
+pub def checked(celsius: int) -> int ! StoveError  # inferred
+    requires celsius >= 0
+
+## Writes the heat to the stove's log in `fs`.
+## Capabilities: `fs` (`Fs`).
+pub def save(fs: Fs, celsius: int) -> ! IoError
+
+def main()
+```
+
 **Stage 0 differs.** [10](../../proposal/10-tooling.md) renders each
 example's expressions with their values and serves the pages with
-`--open`; stage 0 writes the examples as they are.
+`--open`; stage 0 writes the examples as they are. `--digest` is stage
+1's, from `sisu1 0.19.0`, which the driver passes it as it passes the
+rest of `sisu doc`'s words, and `sisu help` does not list it yet; the
+Rust front end answers it with D0009.
 
-**Status.** In stage 0.
+**Status.** In stage 0, with the differences noted.
 
 ### The standard library's reference
 
@@ -1852,8 +1926,8 @@ expression among them, and shows stage 1's diagnostics as they are. A top-level 
 whose value is an optional value or a result is shown too, `Some(7)` or
 `Err(Negative)`, where a program, the same file under `sisu run`
 among them, refuses it as unused (E0318);
-the language server's worksheets still run on the Rust front end
-([Choosing the front end](#choosing-the-front-end)).
+the language server shows a worksheet's values from stage 1 too
+([sisu lsp](#sisu-lsp)).
 
 **Status.** In stage 0.
 
@@ -1874,9 +1948,8 @@ starts it, as [Set up your editor](../guides/editor.md) shows. It takes
 no options (D0009).
 
 **Stage 0 differs.** The proposal has one front end. With stage 1 built
-and at `sisu1 0.15.0` or later, stage 1 answers every request but a
-worksheet's values and, before `sisu1 0.17.0`, `sisu.explainBorrow`,
-each a query of its own sent to [the server of
+and at `sisu1 0.18.0` or later, stage 1 answers every request, each a
+query of its own sent to [the server of
 stage 1](#the-server-of-stage-1), a hover in about 9 ms: the
 diagnostics, hover, go-to-definition, references, completion, document
 symbols, selection ranges, rename and its `prepareRename`, code
@@ -1891,12 +1964,14 @@ of the field renames, and from `sisu1 0.17.0` the name of a field in a
 struct pattern, the `x` of `case Point(x=a, y=b)`. Stage 1's
 `sisu.explainBorrow` comes from its `query explain`: a loan a line,
 each range from where the borrow starts to where it is last used. A
-worksheet's values stay with the Rust front end. Stage 1 answers a worksheet's values from `sisu1 0.18.0`
-(its `query values`, run by its own evaluator, which stops at the first
-use of the world), and the server asks it once stage 0's round in
-progress routes the query. The Rust front end answers every question
+worksheet's values come from its `query values`, run by its own
+evaluator; where that evaluator stops at a line, at the first use of
+the world or of standard error, the driver's interpreter runs stage 1's
+program of the worksheet against a test's fakes, as `sisu ws` does, for
+the lines from there on. The Rust front end answers every question
 when stage 1 is not built (the server does not build it under an
-editor) or `--front-end=rust` is given.
+editor), when it is older than `sisu1 0.18.0`, or when
+`--front-end=rust` is given.
 
 **Status.** In stage 0, with the differences noted. The proposal's
 always-on evaluation, structural editing and stepper come after 0.1
@@ -2390,8 +2465,6 @@ $ sisu why send hello.sisu:3
 error[D0003]: unknown command `why`; run `sisu help`
 $ sisu fill hello.sisu
 error[D0003]: unknown command `fill`; run `sisu help`
-$ sisu doc --digest hello.sisu
-error[D0009]: unknown option `--digest` for `sisu doc`
 $ sisu run --profile hello.sisu
 error[D0009]: unknown option `--profile` for `sisu run`
 $ sisu test --cover hello.sisu
@@ -2486,9 +2559,8 @@ and shows the survivors for a person to choose.
 
 ### Options of the existing commands
 
-- `sisu doc --digest` writes a plain-text digest of each package's
-  public API for a model's context; `sisu doc --open` serves the pages
-  locally. Designed ([10](../../proposal/10-tooling.md)).
+- `sisu doc --open` serves the pages locally. Designed
+  ([10](../../proposal/10-tooling.md)).
 - `sisu run --profile` samples the run with the platform's profiler.
   Designed ([10](../../proposal/10-tooling.md), "Debugging and
   profiling").
@@ -2528,7 +2600,7 @@ a command line can produce, by what they report:
 | D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131), [D0151](diagnostics.md#d0151) | The usage, a command's usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
 | [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114, [D0132](diagnostics.md#d0132) | A program with errors that did not run, was not documented, or was not compiled. |
-| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135), [D0137](diagnostics.md#d0137) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed, the program a list is of. |
+| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135), [D0137](diagnostics.md#d0137), [D0152](diagnostics.md#d0152) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed, the program a list is of, a result from the cache. |
 | [D0010](diagnostics.md#d0010), D0011 | `sisu explain`. |
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |

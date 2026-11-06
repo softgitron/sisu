@@ -164,6 +164,44 @@ warning[W0032]: `pаrt` looks like `part`, another name in scope
 3
 ```
 
+W0032 compares the names' skeletons, as Unicode's security
+mechanisms (UTS #39) define them: each character written as what
+Unicode's `confusables.txt` maps it to, which may be more than one
+character, so `rn` reads as `m` and `1` as `l`. Once one of the two
+names holds a letter beyond ASCII, an ASCII look-alike counts too:
+
+<!-- file: examples/reference-lexical-structure/skeleton.sisu -->
+```sisu
+# `rnоdern`, with a Cyrillic `о`, reads as `modern`: `rn` reads as `m`.
+def modern() -> int:
+    return 1
+
+def main():
+    let rnоdern = 2
+    print(rnоdern + modern())
+```
+
+<!-- output: examples/reference-lexical-structure/skeleton.console -->
+```console
+$ sisu run skeleton.sisu
+warning[W0031]: `rnоdern` mixes letters of the Latin and Cyrillic scripts
+  --> skeleton.sisu:6:9
+  |
+6 |     let rnоdern = 2
+  |         ^^^^^^^
+
+warning[W0032]: `rnоdern` looks like `modern`, another name in scope
+  --> skeleton.sisu:6:9
+  |
+6 |     let rnоdern = 2
+  |         ^^^^^^^
+  |
+2 | def modern() -> int:
+  |     ------ `modern` is declared here
+
+3
+```
+
 A keyword where a name should be is an error. Where a function's, a
 parameter's or a field's name should be, it is E0124
 (`parse.keyword-as-name`), and the line declares nothing; elsewhere, the parser reports what it expected:
@@ -217,12 +255,14 @@ error[E0124]: `match` is a keyword and cannot be used as a name here
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** The lints' tables are generated from Unicode 15.1:
-a letter's script comes from its character name, an approximation of
-Unicode's script property, and the confusable letters are a subset of
-Unicode's list (those whose compatibility form is one ASCII letter or
-digit, and the common Cyrillic, Greek and Latin look-alikes), so some
-look-alikes go unreported. A keyword as a binding's name gets E0105, whose
+The lints' tables are generated from Unicode 15.1.0's own data files:
+a letter's or a mark's script is the one `Scripts.txt` gives it, 373
+ranges of 156 scripts, where `Common`, `Inherited` and `Unknown` count
+as no script, so a modifier letter such as `ʰ` is Latin and `αʰ` mixes
+two scripts; and the confusables are the 5,147 records of
+`confusables.txt` whose character can stand in a name.
+
+**Stage 0 differs.** A keyword as a binding's name gets E0105, whose
 note `parse.keyword-name` says that the word is a keyword, and each use
 of it E0103, where E0124 reports the declaration alone.
 

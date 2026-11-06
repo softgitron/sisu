@@ -68,7 +68,12 @@ expected, as in `heater.start(clock)`. A test that only needs some
 fixed time names `clock: TestClock` as a parameter, as the second test
 does, and receives the test clock at 1970-01-01T00:00:00Z. There is
 one test clock for each test: every `TestClock` handle reads it, and so
-does `Fs.in_memory` when it stamps the time of a write.
+does `Fs.in_memory` when it stamps the time of a write. A test may
+freeze the clock at any date, a past one too: a `Zone` of `std.time`
+gives each date the offset its place kept on that day, from the tz
+database's history
+([chapter 21](../tutorial/21-standard-library.md#time-zones)), so
+`format` of a frozen time in 1950 shows Helsinki's offset of 1950.
 
 ## 3. Move the clock forward
 

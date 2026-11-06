@@ -252,11 +252,10 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
   against it. Meanwhile the few commands that stage 1 does not serve
-  yet, such as `sisu test --defer-borrow`, `sisu run --watch` and the
-  language server's worksheets, run the Rust front end, which knows
-  none of the rules added since it was frozen. A doc example of the
-  standard library is still written in the forms both front ends read,
-  since `sisu test --std` without a program runs on the Rust front end. A program's
+  yet, such as `sisu run --watch`, run the Rust front end, which knows
+  none of the rules added since it was frozen; the language server's
+  worksheets and `sisu test --defer-borrow` and `--std` left that list
+  in stage 0's twenty-second round. A program's
   transcripts left that list when stage 1's `sir --tests` came to keep
   the world they run in; until then a transcript of a program that used
   a newer rule failed with the Rust front end's errors (D0128).

@@ -1,0 +1,12 @@
+$ sisu test tally.sisu
+test "an empty bill is nothing" ... ok
+test "a bun and a coffee" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu test tally.sisu
+test "an empty bill is nothing" ... ok (cached)
+test "a bun and a coffee" ... ok (cached)
+2 passed, 0 failed, 0 blocked
+$ sisu test --no-cache tally.sisu
+test "an empty bill is nothing" ... ok
+test "a bun and a coffee" ... ok
+2 passed, 0 failed, 0 blocked

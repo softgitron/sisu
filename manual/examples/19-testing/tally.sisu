@@ -1,0 +1,12 @@
+# Tests whose results `sisu test` remembers until the code changes.
+def tally(prices: list[int]) -> int:
+    var total = 0
+    for p in prices:
+        total += p
+    return total
+
+test "an empty bill is nothing":
+    assert tally([]) == 0
+
+test "a bun and a coffee":
+    assert tally([280, 350]) == 630

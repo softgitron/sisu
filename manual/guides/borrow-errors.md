@@ -194,5 +194,6 @@ The other fixes, by what they cost:
 explain-borrow` and `--defer-borrow` are tools of the experiment
 ([18](../../proposal/18-next-steps.md), Phase 3), and what they print
 may change. Both run on stage 1, from its twenty-second round, and on
-the Rust front end with `--front-end=rust`; `sisu test --defer-borrow`
-still lowers the program with the Rust front end.
+the Rust front end with `--front-end=rust`; so does `sisu test
+--defer-borrow`, which runs a rejected program's tests under the
+monitor.

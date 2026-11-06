@@ -686,10 +686,17 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 `s.graphemes()` goes through the characters as a reader sees them,
-Unicode's graphemes (UAX #29), each a `str` that views `s`: a base
-with the marks after it, `\r\n`, a Hangul syllable written in jamo, a
-flag of two regional indicators and a sequence joined by U+200D are
-one grapheme each, and a control character is one of its own. The
+Unicode's extended graphemes (UAX #29, every rule from GB3 to GB999),
+each a `str` that views `s`: a base with the marks after it, a
+spacing mark with its base, a `Prepend` character with what follows
+it, `\r\n`, a Hangul syllable written in jamo, a flag of two regional
+indicators (paired from the start of their run), an Indic conjunct
+joined across its virama, `"\u{915}\u{94d}\u{937}"`, and pictographs
+joined by U+200D are one grapheme each; U+200D after a letter joins
+nothing, so `"a\u{200d}b"` is two, and a control character is one of
+its own. The properties come from Unicode 15.1.0's own data files, and
+`graphemes()` splits all 1,187 lines of Unicode's
+`GraphemeBreakTest.txt` as the file says. The
 normal forms of UAX #15 are `s.nfc()`, `s.nfd()`, `s.nfkc()` and
 `s.nfkd()`, each a new `String`: the canonical or the compatibility
 decomposition, its marks in canonical order, composed again for `nfc`
@@ -701,15 +708,6 @@ shows both).
 
 **Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#strings-and-text)
 has `s.graphemes()` one method away from `chars()`, with no import.
-Stage 0's graphemes leave out three rules of UAX #29: `Prepend`, a
-character kept with what follows it; the Indic conjuncts joined across
-a virama (GB9c); and the condition that U+200D joins only pictographs
-(GB11), so it joins any two characters; the few characters that extend
-a grapheme without being marks, such as U+200C, do not extend one. The
-three rules need properties that only Unicode's own data files carry
-(`GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt` and
-`emoji-data.txt`), which the tool that writes stage 0's tables does not
-read yet, and they wait for those files.
 
 **Status.** In stage 0 (D-034), with the differences noted.
 

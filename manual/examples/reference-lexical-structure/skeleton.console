@@ -1,0 +1,17 @@
+$ sisu run skeleton.sisu
+warning[W0031]: `rnоdern` mixes letters of the Latin and Cyrillic scripts
+  --> skeleton.sisu:6:9
+  |
+6 |     let rnоdern = 2
+  |         ^^^^^^^
+
+warning[W0032]: `rnоdern` looks like `modern`, another name in scope
+  --> skeleton.sisu:6:9
+  |
+6 |     let rnоdern = 2
+  |         ^^^^^^^
+  |
+2 | def modern() -> int:
+  |     ------ `modern` is declared here
+
+3
