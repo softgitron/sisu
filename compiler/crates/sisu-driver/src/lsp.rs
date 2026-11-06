@@ -144,6 +144,11 @@ pub struct Server {
     /// The inline values of the last worksheet run, by a hash of its
     /// document and text.
     pub(crate) sheet: Option<(u64, Json)>,
+    /// The stage 1 whose queries answer the diagnostics, hover,
+    /// definition, references, completion and symbols (`sisu1 0.14.0` and
+    /// later, its R164; decision 983); none for an older one and under
+    /// `--front-end=rust`, when the Rust front end answers them.
+    pub(crate) stage1: Option<crate::front::Stage1>,
 }
 
 impl Default for Server {
@@ -183,7 +188,15 @@ fn is_capability(prog: &Program, ty: &Ty) -> bool {
 
 impl Server {
     pub fn new() -> Server {
-        Server { docs: BTreeMap::new(), db: Db::new(), utf8: false, shutdown: false, exit: None, sheet: None }
+        Server {
+            docs: BTreeMap::new(),
+            db: Db::new(),
+            utf8: false,
+            shutdown: false,
+            exit: None,
+            sheet: None,
+            stage1: None,
+        }
     }
 
     /// Answers one message: its response, and the notifications it causes.
@@ -341,6 +354,20 @@ impl Server {
                         &crate::cli::text(sisu_diag::msg::LSP_NOT_OPEN, &[]),
                     )];
                 }
+                // Stage 1's queries first, when it answers them (decision
+                // 983).
+                let pos = params.get("position").unwrap_or(&Json::Null);
+                let asked = match method {
+                    "textDocument/hover" => self.stage1_hover(&uri, pos),
+                    "textDocument/definition" => self.stage1_definition(&uri, pos),
+                    "textDocument/documentSymbol" => self.stage1_symbols(&uri),
+                    "textDocument/completion" => self.stage1_completion(&uri, pos),
+                    "textDocument/references" => self.stage1_references(&uri, pos),
+                    _ => None,
+                };
+                if let Some(result) = asked {
+                    return vec![respond(&id, result)];
+                }
                 let result = match method {
                     "textDocument/hover" => self.hover(&uri, params.get("position").unwrap_or(&Json::Null)),
                     "textDocument/definition" => {
@@ -437,9 +464,19 @@ impl Server {
 
     /// `textDocument/publishDiagnostics` for a document.
     fn publish(&mut self, uri: &str) -> Json {
+        let version = self.docs.get(uri).map(|d| d.version).unwrap_or(0.0);
+        if let Some(out) = self.stage1_diagnostics(uri) {
+            return notify(
+                "textDocument/publishDiagnostics",
+                Json::obj(vec![
+                    ("uri", Json::str(uri)),
+                    ("version", Json::Num(version)),
+                    ("diagnostics", Json::Arr(out)),
+                ]),
+            );
+        }
         let a = self.analyse(uri);
         let text = self.docs.get(uri).map(|d| d.text.clone()).unwrap_or_default();
-        let version = self.docs.get(uri).map(|d| d.version).unwrap_or(0.0);
         let lines = Lines::new(&text, self.utf8);
         let diags = self.db.diagnostics(&a.root);
         let file = self
@@ -976,12 +1013,24 @@ pub fn write_message(out: &mut dyn Write, body: &str) {
 }
 
 /// `sisu lsp`: serves standard input and output until `exit`.
-pub fn serve() -> i32 {
+pub fn serve(stage1: bool) -> i32 {
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let stdout = std::io::stdout();
     let mut server = Server::new();
-    while let Some(text) = read_message(&mut input) {
+    // Stage 1 answers the questions it has queries for, when it is the
+    // front end, built, and 0.14.0 or later (decision 983); it is not built
+    // under an editor.
+    if stage1 {
+        server.stage1 = crate::front::Stage1::built().filter(crate::front::Stage1::evaluates);
+    }
+    let status = serve_with(&mut server, &mut input, &stdout);
+    crate::query::clean();
+    status
+}
+
+fn serve_with(server: &mut Server, input: &mut impl std::io::BufRead, stdout: &std::io::Stdout) -> i32 {
+    while let Some(text) = read_message(input) {
         let messages = match crate::json::parse(&text) {
             Ok(Json::Arr(batch)) => batch,
             Ok(m) => vec![m],

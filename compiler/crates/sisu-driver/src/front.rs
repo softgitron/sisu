@@ -384,6 +384,54 @@ impl Stage1 {
         Ok(Stage1 { exe, compiler })
     }
 
+    /// The stage-1 executable as it is, without building it: none when it
+    /// is missing, a source of stage 1 is newer or it is not the driver's
+    /// build in its profile (a stage 1 given by `SISU_STAGE1` as it is).
+    /// What the language server asks (decision 983), which does not build
+    /// stage 1 under an editor.
+    pub fn built() -> Option<Stage1> {
+        let compiler = compiler_dir();
+        if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
+            let given = PathBuf::from(given);
+            return Some(Stage1 { exe: std::fs::canonicalize(&given).unwrap_or(given), compiler });
+        }
+        let exe = stage1_exe(&compiler);
+        if stale(&exe, &compiler.join("stage1").join("src")) || !built_in(&exe, stage1_profile()) {
+            return None;
+        }
+        Some(Stage1 { exe, compiler })
+    }
+
+    /// What `args` print and give, as [`Stage1::run`] gives it, with no
+    /// message of the driver's: through the driver's server of stage 1, or
+    /// a process of its own; none when stage 1 could not be run or stopped
+    /// with a panic or a signal.
+    pub(crate) fn ask(&self, args: &[String]) -> Option<Ran> {
+        if self.serves_every_command()
+            && let Some((stdout, stderr, status)) = crate::serve::ask(&self.compiler, &self.exe, args)
+        {
+            return Some(settle(
+                String::from_utf8_lossy(&stdout).into_owned(),
+                String::from_utf8_lossy(&stderr).into_owned(),
+                status,
+            ));
+        }
+        let mut cmd = std::process::Command::new(&self.exe);
+        cmd.arg("--home").arg(&self.compiler).args(args);
+        cmd.stdin(std::process::Stdio::null());
+        self.environment(&mut cmd, Backend::Unused);
+        let out = cmd.output().ok()?;
+        let status = exit_code(out.status);
+        if status == sisu_interp::exit::PANIC || status >= 128 {
+            return None;
+        }
+        Some(settle(
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            status,
+        ))
+    }
+
     /// Whether this stage 1's `sir --tests PKG/tests/NAME.sisu` compiles a
     /// package's black-box test file, whose dependency is the package
     /// (stage 1's R65): `sisu1 0.7.0` and later (decision 508), asked once
@@ -396,17 +444,37 @@ impl Stage1 {
     }
 
     /// The version `sisu1 --version` prints, asked once in this process
-    /// (none for a stage 1 older than 0.6.0, which names none).
+    /// (none for a stage 1 older than 0.6.0, which names none) and kept
+    /// beside it (`target/stage1/version`, with the executable's size and
+    /// time), so that a command its server answers starts no process of
+    /// stage 1 (decision 980).
     pub fn version(&self) -> Option<(u32, u32, u32)> {
         static ANSWER: std::sync::OnceLock<Option<(u32, u32, u32)>> = std::sync::OnceLock::new();
         *ANSWER.get_or_init(|| {
-            std::process::Command::new(&self.exe)
+            let stamp = profile_stamp(&self.exe, "version");
+            let kept = self.exe.with_file_name("version");
+            if let (Some(stamp), Ok(text)) = (&stamp, std::fs::read_to_string(&kept))
+                && let Some(line) = text.strip_prefix(&format!("{stamp} "))
+            {
+                return stage1_version(line);
+            }
+            let printed = std::process::Command::new(&self.exe)
                 .arg("--version")
                 .stdin(std::process::Stdio::null())
                 .output()
                 .ok()
                 .filter(|o| o.status.success())
-                .and_then(|o| stage1_version(&String::from_utf8_lossy(&o.stdout)))
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())?;
+            let version = stage1_version(&printed);
+            // Written aside and renamed, as `sir-reports` is.
+            if let (Some(stamp), Some(_)) = (stamp, version) {
+                let aside = kept.with_extension(format!("{}", std::process::id()));
+                let first = printed.lines().next().unwrap_or_default();
+                if std::fs::write(&aside, format!("{stamp} {first}\n")).is_ok() {
+                    let _ = std::fs::rename(&aside, &kept);
+                }
+            }
+            version
         })
     }
 
@@ -472,9 +540,7 @@ impl Stage1 {
     /// cannot be: one process of this stage 1 that makes the standard
     /// library's base once and answers the REPL's commands (decision 720).
     pub fn serve(&self) -> Option<Server> {
-        let mut cmd = std::process::Command::new(&self.exe);
-        cmd.arg("--home").arg(&self.compiler).args(["sir", "--repl-serve"]);
-        self.environment(&mut cmd, Backend::Unused);
+        let mut cmd = self.serve_command();
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped());
@@ -482,6 +548,38 @@ impl Stage1 {
         let requests = child.stdin.take();
         let answers = std::io::BufReader::new(child.stderr.take()?);
         Some(Server { child, requests, answers, lost: false })
+    }
+
+    /// The command that starts `sir --repl-serve` of this stage 1, in the
+    /// working directory, with the environment a run of it gets.
+    pub(crate) fn serve_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new(&self.exe);
+        cmd.arg("--home").arg(&self.compiler).args(["sir", "--repl-serve"]);
+        self.environment(&mut cmd, Backend::Unused);
+        cmd
+    }
+
+    /// The stage 1 at `exe`, as it is, with the compiler's directory
+    /// `compiler`: the one the driver's server of stage 1 was started for
+    /// (decision 980).
+    pub(crate) fn at(exe: PathBuf, compiler: PathBuf) -> Stage1 {
+        Stage1 { exe, compiler }
+    }
+
+    /// Whether a command that `sir --repl-serve` serves goes to the
+    /// driver's server of stage 1 (decision 980): `sisu1 0.13.0` and later
+    /// (its R158), unless [`crate::serve::SERVE_VAR`] is `0`.
+    pub fn serves_every_command(&self) -> bool {
+        if std::env::var(crate::serve::SERVE_VAR).is_ok_and(|v| v == "0") {
+            return false;
+        }
+        self.version().is_some_and(|v| v >= SERVE_SINCE)
+    }
+
+    /// Whether this stage 1 has `eval` (its R165; decision 984) and `query`
+    /// (its R164; decision 983), and serves them: `sisu1 0.14.0` and later.
+    pub fn evaluates(&self) -> bool {
+        self.version().is_some_and(|v| v >= QUERY_SINCE)
     }
 
     /// The environment a run of stage 1 gets: none of the runtime's or the
@@ -583,6 +681,21 @@ impl Stage1 {
     /// Runs stage 1 with `args` (after `--home`) in the working directory,
     /// with no standard input, and gives what it printed.
     pub fn run(&self, args: &[String], backend: Backend, host: &mut dyn Host) -> Result<Ran, i32> {
+        // A command `sir --repl-serve` serves, answered by the driver's
+        // server of stage 1, which keeps the standard library's base
+        // (decision 980); a process of its own when it cannot be.
+        if backend == Backend::Unused
+            && (crate::serve::served(args)
+                || (matches!(args.first().map(String::as_str), Some("eval" | "query")) && self.evaluates()))
+            && self.serves_every_command()
+            && let Some((stdout, stderr, status)) = crate::serve::ask(&self.compiler, &self.exe, args)
+        {
+            return Ok(settle(
+                String::from_utf8_lossy(&stdout).into_owned(),
+                String::from_utf8_lossy(&stderr).into_owned(),
+                status,
+            ));
+        }
         let home = match backend {
             Backend::Unused => None,
             Backend::Native | Backend::KeepSir => Some(Home::new(&self.compiler)),
@@ -698,7 +811,7 @@ impl Drop for Server {
 
 /// The line that starts an answer of `sir --repl-serve`, `answer STATUS
 /// OUT ERR`: the status and the two lengths in bytes.
-fn answer_head(line: &str) -> Option<(i32, usize, usize)> {
+pub(crate) fn answer_head(line: &str) -> Option<(i32, usize, usize)> {
     let mut words = line.strip_suffix('\n')?.strip_prefix("answer ")?.split(' ');
     let status = words.next()?.parse().ok()?;
     let out = words.next()?.parse().ok()?;
@@ -1174,6 +1287,15 @@ const TRANSCRIPTS_SINCE: (u32, u32, u32) = (0, 11, 0);
 /// The first stage 1 whose `sir --tests --modules` writes each test's
 /// module (its R142; decision 900).
 const MODULES_SINCE: (u32, u32, u32) = (0, 12, 0);
+
+/// The first stage 1 whose `sir --repl-serve` serves every command that
+/// checks a program, in its request's working directory (its R158;
+/// decision 980).
+const SERVE_SINCE: (u32, u32, u32) = (0, 13, 0);
+
+/// The first stage 1 with `query` and `eval` (its R164 and R165;
+/// decisions 983 and 984).
+const QUERY_SINCE: (u32, u32, u32) = (0, 14, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.

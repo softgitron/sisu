@@ -178,12 +178,17 @@ impl Sisu {
     }
 
     /// A command of the executable with an empty environment, but for the
-    /// front end it is asked to use.
+    /// front end it is asked to use and the runner's own
+    /// `SISU_STAGE1_SERVE`, which keeps the driver's server of stage 1 or
+    /// leaves it (decision 980), so that the suite runs both ways.
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.path);
         cmd.env_clear();
         if let Some(f) = &self.front_end {
             cmd.env("SISU_FRONT_END", f);
+        }
+        if let Some(v) = std::env::var_os("SISU_STAGE1_SERVE") {
+            cmd.env("SISU_STAGE1_SERVE", v);
         }
         cmd
     }

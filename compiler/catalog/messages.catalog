@@ -1134,3 +1134,10 @@ D0145 cli     native.size-symbols         {bytes} bytes ({share}%), the symbols
 D0146 cli     native.size-rest            {bytes} bytes ({share}%), the data, the unwinding tables and the headers
 D0147 cli     native.size-unread          `--explain-size` reads the parts of a 64-bit ELF executable, which `{output}` is not
 D0148 cli     cli.explain-size-native     `--explain-size` explains the size of a native executable: it goes with `--native`
+# A replay token of one module's run given to its package's run, or of
+# the package's run given to a module's, or of one module's to
+# another's (17; decisions 900 and 985, the manual's finding on D0033):
+# which run the token is for and the command that replays it, where D0033
+# said only that it was for other code.
+D0149 cli     cli.token-module-run        the token is for the run of the tests of `{module}`; `sisu test --replay {token} {module}` replays it
+D0150 cli     cli.token-package-run       the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it

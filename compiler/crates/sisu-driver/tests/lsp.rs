@@ -25,8 +25,17 @@ struct Client {
 }
 
 impl Client {
+    /// The server on the Rust front end's answers, which the tests of each
+    /// feature check (stage 1's queries are `stage_1s_queries_answer_as_the_rust_front_end`'s).
     fn start() -> Client {
+        Client::start_on("rust")
+    }
+
+    /// The server on the front end `front`, `rust` or `stage1` (decision
+    /// 983).
+    fn start_on(front: &str) -> Client {
         let mut child = Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .arg(format!("--front-end={front}"))
             .arg("lsp")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -717,4 +726,69 @@ fn latency() {
     }
     println!("slowest change: std/{} in {} ms", worst.1, worst.0);
     c.stop();
+}
+
+/// The server on stage 1's queries (`sisu1 0.14.0` and later, its R164;
+/// decision 983) and on the Rust front end's answers agree on what an
+/// editor relies on: a document's diagnostics' codes, a definition's place,
+/// its symbols' names, the references of a function and the members after
+/// a `.`. With an older stage 1 both are the Rust front end's.
+#[test]
+fn stage_1s_queries_answer_as_the_rust_front_end() {
+    let (uri, _dir) = document("both.sisu", PROGRAM);
+    let broken = format!("{PROGRAM}    print(nope)\n");
+    let mut answers = Vec::new();
+    for front in ["stage1", "rust"] {
+        let mut c = Client::start_on(front);
+        let d = c.open(&uri, &broken);
+        let codes: Vec<String> = d
+            .get("diagnostics")
+            .and_then(Json::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|x| x.get("code").and_then(Json::as_str).map(str::to_string))
+            .collect();
+        let _ = c.change(&uri, 2, PROGRAM);
+        // `area` in `print(area(p.x, p.y))`, on line 20.
+        let def = c.at("textDocument/definition", &uri, 20, 11);
+        let def_line = def.at(&["range", "start", "line"]).and_then(Json::as_u64);
+        let hover = hover_text(&c.at("textDocument/hover", &uri, 20, 11));
+        let symbols = c.request(
+            "textDocument/documentSymbol",
+            Json::obj(vec![("textDocument", Json::obj(vec![("uri", Json::str(uri.clone()))]))]),
+        );
+        let names: Vec<String> = symbols
+            .as_array()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|s| s.get("name").and_then(Json::as_str).map(str::to_string))
+            .collect();
+        let refs = c.request(
+            "textDocument/references",
+            Json::obj(vec![
+                ("textDocument", Json::obj(vec![("uri", Json::str(uri.clone()))])),
+                ("position", Json::obj(vec![("line", Json::num(20)), ("character", Json::num(11))])),
+                ("context", Json::obj(vec![("includeDeclaration", Json::Bool(true))])),
+            ]),
+        );
+        let refs = refs.as_array().map_or(0, <[Json]>::len);
+        // The members of `p` after `p.`, on a line of its own.
+        let _ = c.change(&uri, 3, &format!("{PROGRAM}    print(p.)\n"));
+        let completions = c.at("textDocument/completion", &uri, 22, 12);
+        let mut members: Vec<String> = completions
+            .get("items")
+            .and_then(Json::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|i| i.get("label").and_then(Json::as_str).map(str::to_string))
+            .filter(|l| l == "x" || l == "y")
+            .collect();
+        members.sort();
+        assert!(hover.contains("area"), "{front}: {hover}");
+        c.stop();
+        answers.push((codes, def_line, names, refs, members));
+    }
+    assert_eq!(answers[0], answers[1], "stage 1's queries, then the Rust front end's answers");
+    assert_eq!(answers[1].1, Some(1), "{:?}", answers[1]);
+    assert_eq!(answers[1].4, ["x", "y"], "{:?}", answers[1]);
 }

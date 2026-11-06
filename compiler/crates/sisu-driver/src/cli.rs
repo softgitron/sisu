@@ -364,14 +364,20 @@ impl Input {
     /// `hash` for a program that embeds nothing, whose tokens stay as they
     /// were.
     fn token_hash(&self) -> u64 {
+        self.token_hash_of(self.module.as_deref())
+    }
+
+    /// [`Input::token_hash`] of the run of the tests of `module`, or of the
+    /// whole program's with none (decisions 900 and 985).
+    fn token_hash_of(&self, module: Option<&str>) -> u64 {
         let embedded = self.embedded();
         // A module's run numbers its own tests (decision 900), so its tokens
         // are not the whole package's.
-        if embedded.is_empty() && self.module.is_none() {
+        if embedded.is_empty() && module.is_none() {
             return self.hash();
         }
         let mut all = format!("{:016x}", self.hash());
-        if let Some(m) = &self.module {
+        if let Some(m) = module {
             all.push_str(&format!("\nmodule {m}"));
         }
         for (path, read) in &embedded {
@@ -671,6 +677,9 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             exit::OK
         }
         "explain" => explain(rest, host),
+        // The driver's server of stage 1 (decision 980), which a command
+        // starts; not a command of the usage.
+        crate::serve::COMMAND => crate::serve::serve(rest),
         "repl" => crate::repl::repl(rest, front, host),
         "lsp" => {
             if let Some(bad) = rest.first() {
@@ -680,7 +689,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 ));
                 return EXIT_USAGE;
             }
-            crate::lsp::serve()
+            crate::lsp::serve(front == FrontEnd::Stage1)
         }
         "ws" => crate::repl::worksheet(rest, front, host),
         "new" => new_package(rest, host),
@@ -699,6 +708,18 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             stage1_as_is(cmd, rest, host)
         }
         "audit" => audit(rest, host),
+        // `sisu eval FILE [--to json|toml|yaml]` (08, "Configuration
+        // files"; decision 984): stage 1's `eval` (its R165), from `sisu1
+        // 0.14.0`; an older stage 1 and the Rust front end have no such
+        // command (`D0003`).
+        "eval" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
+            Ok(stage1) if stage1.evaluates() => stage1_as_is(cmd, rest, host),
+            Ok(_) => {
+                host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", cmd.to_string())]));
+                EXIT_USAGE
+            }
+            Err(code) => code,
+        },
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
             let p = split_args(rest, cmd == "run");
             let allowed: &[&str] = match cmd.as_str() {
@@ -1272,6 +1293,39 @@ fn package_module(file: &str) -> Option<(String, String)> {
     None
 }
 
+/// What a replay token for another run of the same package says
+/// (decision 985): `D0150` for the token of the package's run given to a
+/// module's, `D0149` for the token of a module's run given to the
+/// package's or another module's, each with the command that replays it;
+/// none for a token of other code, which `D0033` says.
+fn token_of_other_run(input: &Input, token: &crate::replay::Token) -> Option<String> {
+    input.program.as_ref()?;
+    let written = token.write();
+    if input.module.is_some() && input.token_hash_of(None) == token.hash {
+        let (package, _) = package_module(&input.shown)?;
+        return Some(plain_error(
+            msg::CLI_TOKEN_PACKAGE_RUN,
+            &[("module", input.shown.clone()), ("token", written), ("package", package)],
+        ));
+    }
+    let cwd = std::env::current_dir().ok()?;
+    let cwd = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+    for (_, disk) in &input.disks {
+        let Some((_, module)) = package_module(&disk.display().to_string()) else { continue };
+        if input.module.as_deref() == Some(module.as_str())
+            || input.token_hash_of(Some(&module)) != token.hash
+        {
+            continue;
+        }
+        let file = std::fs::canonicalize(cwd.join(disk)).ok()?;
+        return Some(plain_error(
+            msg::CLI_TOKEN_MODULE_RUN,
+            &[("module", crate::package::relative(&cwd, &file)), ("token", written)],
+        ));
+    }
+    None
+}
+
 /// Keeps the tests of the module `file` alone, with their tags, by the
 /// ` in "FILE"` stage 1's `sir --tests --modules` wrote on each `test`
 /// line of `text` (its R142; decision 900).
@@ -1399,6 +1453,10 @@ fn test_from_sir(
             return exit::ERROR;
         }
         if t.hash != hash {
+            if let Some(other) = token_of_other_run(input, t) {
+                host.stderr(&other);
+                return exit::ERROR;
+            }
             host.stderr(&plain_error(
                 msg::CLI_TOKEN_OTHER_CODE,
                 &[
@@ -3024,6 +3082,10 @@ fn command(
                             return exit::ERROR;
                         }
                         if t.hash != hash {
+                            if let Some(other) = token_of_other_run(input, t) {
+                                host.stderr(&other);
+                                return exit::ERROR;
+                            }
                             host.stderr(&plain_error(
                                 msg::CLI_TOKEN_OTHER_CODE,
                                 &[

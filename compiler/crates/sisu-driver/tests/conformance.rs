@@ -627,3 +627,156 @@ fn one_modules_benchmarks_run_with_its_package() {
     assert!(stdout.lines().nth(1).is_some_and(|l| l.starts_with("1 benchmarks, 0 failed")), "{stdout}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Every command the driver's server of stage 1 answers (decision 980)
+/// prints and gives what it does as a process of its own, under
+/// `SISU_STAGE1_SERVE=0`: a program with an error, one not formatted, a
+/// package, and a command stage 1 refuses.
+#[test]
+fn the_server_of_stage_1_answers_as_a_process_does() {
+    let dir = std::env::temp_dir().join(format!("sisu-served-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("pkg/src")).expect("a scratch directory");
+    std::fs::write(dir.join("bad.sisu"), "def main():\n    let x = 1\n    print(y)\n").expect("a file");
+    std::fs::write(dir.join("loose.sisu"), "def  main():\n  pass\n").expect("a file");
+    std::fs::write(dir.join("pkg/sisu.toml"), "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\n")
+        .expect("a manifest");
+    std::fs::write(dir.join("pkg/src/main.sisu"), "## The entry.\ndef main():\n    print(\"hi\")\n")
+        .expect("a module");
+    let commands: &[&[&str]] = &[
+        &["check", "bad.sisu"],
+        &["check", "--format=ids", "bad.sisu"],
+        &["check", "pkg"],
+        &["sir", "loose.sisu"],
+        &["sir", "bad.sisu"],
+        &["tokens", "loose.sisu"],
+        &["parse", "--tree", "loose.sisu"],
+        &["fmt", "--check", "loose.sisu"],
+        &["lint", "loose.sisu"],
+        &["doc", "pkg"],
+        &["check", "missing.sisu"],
+        &["test", "loose.sisu"],
+    ];
+    for words in commands {
+        let ran = |serve: &str| {
+            let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+                .args(*words)
+                .current_dir(&dir)
+                .env("SISU_STAGE1_SERVE", serve)
+                .output()
+                .expect("sisu runs");
+            (
+                String::from_utf8_lossy(&out.stdout).into_owned(),
+                String::from_utf8_lossy(&out.stderr).into_owned(),
+                out.status.code(),
+            )
+        };
+        let served = ran("1");
+        assert_eq!(served, ran("0"), "{words:?}");
+        // Twice, from the server that the first started.
+        assert_eq!(served, ran("1"), "{words:?}, again");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A replay token of one module's run given to its package's run, and of
+/// the package's given to the module's, says which run it is for and the
+/// command that replays it (decision 985), where `D0033` said it was for
+/// other code.
+#[test]
+fn a_token_of_another_run_of_the_package_names_its_run() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases/packages/failing_test.pkg");
+    let dir = std::env::temp_dir().join(format!("sisu-token-run-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::process::Command::new("cp").arg("-r").arg(&root).arg(&dir).status();
+    let sisu = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        (String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+    let token = |stdout: &str| {
+        stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("replay: sisu test --replay "))
+            .and_then(|r| r.split(' ').next())
+            .map(str::to_string)
+            .unwrap_or_else(|| panic!("a replay line in {stdout}"))
+    };
+    let module = token(&sisu(&["test", "src/stats.sisu"]).0);
+    let (_, err) = sisu(&["test", "--replay", &module]);
+    assert_eq!(
+        err,
+        format!(
+            "error[D0149]: the token is for the run of the tests of `src/stats.sisu`; `sisu test --replay {module} src/stats.sisu` replays it\n"
+        )
+    );
+    let package = token(&sisu(&["test"]).0);
+    let (_, err) = sisu(&["test", "--replay", &package, "src/stats.sisu"]);
+    assert_eq!(
+        err,
+        format!(
+            "error[D0150]: the token is for the run of the package's tests, not of `src/stats.sisu`'s; `sisu test --replay {package} .` replays it\n"
+        )
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `sisu eval FILE` is stage 1's `eval` (its R165; decision 984) from `sisu1
+/// 0.14.0`, a configuration module's constants written as JSON or, with
+/// `--to`, TOML; an older stage 1 has no such command (`D0003`).
+#[test]
+fn eval_writes_a_configurations_constants_with_stage_1() {
+    let dir = std::env::temp_dir().join(format!("sisu-eval-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(dir.join("conf.sisu"), "const PORT: int = 8080\nconst NAME: str = \"web\"\n")
+        .expect("a module");
+    let sisu = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    // The stage 1 the driver runs, as `sisu1 --version` names it.
+    let _ = sisu(&["check", "conf.sisu"]);
+    let exe = std::env::var_os("SISU_STAGE1")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/stage1/sisu1"));
+    let printed = std::process::Command::new(exe).arg("--version").output().expect("sisu1 runs");
+    let version: Vec<u32> = String::from_utf8_lossy(&printed.stdout)
+        .trim()
+        .trim_start_matches("sisu1 ")
+        .split('.')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    if version.as_slice() >= [0, 14, 0].as_slice() {
+        assert_eq!(
+            sisu(&["eval", "conf.sisu"]),
+            ("{\n  \"PORT\": 8080,\n  \"NAME\": \"web\"\n}\n".into(), String::new(), Some(0))
+        );
+        assert_eq!(
+            sisu(&["eval", "conf.sisu", "--to", "toml"]),
+            ("PORT = 8080\nNAME = \"web\"\n".into(), String::new(), Some(0))
+        );
+    } else {
+        assert_eq!(
+            sisu(&["eval", "conf.sisu"]),
+            (String::new(), "error[D0003]: unknown command `eval`; run `sisu help`\n".into(), Some(2))
+        );
+    }
+    assert_eq!(
+        sisu(&["--front-end=rust", "eval", "conf.sisu"]).1,
+        "error[D0003]: unknown command `eval`; run `sisu help`\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
