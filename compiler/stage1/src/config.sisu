@@ -37,10 +37,12 @@ impl Form:
             case Form.Toml: "TOML"
             case Form.Yaml: "YAML"
 
-## What a constant holds that a form cannot write, and the constant's
-## index among those rendered (0 from `data_of`).
+## What a constant holds that a form cannot write, the constant's index
+## among those rendered (0 from `data_of`), and the path of the field or
+## item that holds it, from the constant's name (`LIMITS.timeout`,
+## `SERVICES[1].port`; RULES.md, R180).
 pub error Unwritable:
-    Holds(what: String, at: int)
+    Holds(what: String, at: int, path: String)
 
 ## A value as a configuration holds it.
 pub enum Data:
@@ -75,8 +77,9 @@ pub pure def constants(text: str, catalog: Catalog) -> list[(String, int, int)]:
     return out
 
 ## The data of an evaluated value, or what it holds that has none (`a
-## function`, `a reference`, ...).
-pub pure def data_of(prog: Program, v: interp.Value) -> Data ! Unwritable:
+## function`, `a reference`, ...) at the path from `path`, the
+## constant's name.
+pub pure def data_of(prog: Program, v: interp.Value, path: str) -> Data ! Unwritable:
     match v:
         case interp.Value.Unit:
             return Ok(Data.Null)
@@ -94,8 +97,8 @@ pub pure def data_of(prog: Program, v: interp.Value) -> Data ! Unwritable:
             return Ok(Data.Text(s.copy()))
         case interp.Value.List(xs) | interp.Value.Tuple(xs) | interp.Value.Set(xs):
             var out: list[Data] = []
-            for x in xs:
-                out.push(data_of(prog, x)?)
+            for i in range(len(xs)):
+                out.push(data_of(prog, xs[i], "{path}[{i}]")?)
             return Ok(Data.List(out))
         case interp.Value.Dict(es):
             var out: list[(String, Data)] = []
@@ -109,22 +112,26 @@ pub pure def data_of(prog: Program, v: interp.Value) -> Data ! Unwritable:
                     case _:
                         return Err(
                             Holds(
-                                what="a dict whose keys are not text or integers".to_string(), at=0
+                                what="a dict whose keys are not text or integers".to_string(),
+                                at=0,
+                                path=path.to_string(),
                             )
                         )
-                out.push((key, data_of(prog, x)?))
+                let at = "{path}[{quoted(key)}]"
+                out.push((key.copy(), data_of(prog, x, at)?))
             return Ok(Data.Map(out))
         case interp.Value.Adt(ty, variant, fields):
             if ty == "<shared>" and len(fields) == 1:
-                return data_of(prog, fields[0])
+                return data_of(prog, fields[0], path)
             if ty == "Option":
                 if variant == 0 and len(fields) == 1:
-                    return data_of(prog, fields[0])
+                    return data_of(prog, fields[0], path)
                 return Ok(Data.Null)
             if let Some(TypeDecl.Struct(_, _, decls, _, _, _)) = prog.type_decl(ty):
                 var out: list[(String, Data)] = []
                 for i in range(min(len(decls), len(fields))):
-                    out.push((decls[i].name.copy(), data_of(prog, fields[i])?))
+                    let at = "{path}.{decls[i].name}"
+                    out.push((decls[i].name.copy(), data_of(prog, fields[i], at)?))
                 return Ok(Data.Map(out))
             let (name, names) = interp.variant_info(prog, ty, variant)
             if fields.is_empty():
@@ -137,25 +144,30 @@ pub pure def data_of(prog: Program, v: interp.Value) -> Data ! Unwritable:
             if named:
                 var out: list[(String, Data)] = []
                 for i in range(len(fields)):
-                    out.push((names[i].copy() ?? String.new(), data_of(prog, fields[i])?))
+                    let n = names[i].copy() ?? String.new()
+                    out.push((n.copy(), data_of(prog, fields[i], "{path}.{n}")?))
                 inner = Data.Map(out)
             elif len(fields) == 1:
-                inner = data_of(prog, fields[0])?
+                inner = data_of(prog, fields[0], path)?
             else:
                 var out: list[Data] = []
-                for f in fields:
-                    out.push(data_of(prog, f)?)
+                for i in range(len(fields)):
+                    out.push(data_of(prog, fields[i], "{path}[{i}]")?)
                 inner = Data.List(out)
             return Ok(Data.Map([(name, inner)]))
         case interp.Value.Fn(_) | interp.Value.Closure(_, _, _):
-            return Err(Holds(what="a function".to_string(), at=0))
+            return Err(Holds(what="a function".to_string(), at=0, path=path.to_string()))
         case interp.Value.Ref(_):
-            return Err(Holds(what="a reference".to_string(), at=0))
+            return Err(Holds(what="a reference".to_string(), at=0, path=path.to_string()))
         case _:
-            return Err(Holds(what="an iterator".to_string(), at=0))
+            return Err(Holds(what="an iterator".to_string(), at=0, path=path.to_string()))
 
 ## The constants `entries` written in `form`, or what one of them holds
-## that the form cannot write, with its index.
+## that the form cannot write, with its index and the path to it. TOML
+## writes a struct, a dict or an enum's variant with fields as a table of
+## its own (`[LIMITS]`, `[LIMITS.retry]`) and a list of them as an array of
+## tables (`[[SERVICES]]`), after the values written on one line, as
+## TOML's own style has it (RULES.md, R180).
 pub pure def render(form: Form, entries: list[(String, Data)]) -> String ! Unwritable:
     var out = String.new()
     match form:
@@ -165,28 +177,90 @@ pub pure def render(form: Form, entries: list[(String, Data)]) -> String ! Unwri
             var parts: list[String] = []
             for i in range(len(entries)):
                 let (n, d) = entries[i].copy()
-                match json(d, 1):
+                match json(d, 1, n):
                     case Ok(text):
                         parts.push("  {quoted(n)}: {text}")
-                    case Err(Holds(what, _)):
-                        return Err(Holds(what=what, at=i))
+                    case Err(Holds(what, _, path)):
+                        return Err(Holds(what=what, at=i, path=path))
             out.push("{{\n{parts.join(",\n")}\n}}\n")
         case Form.Toml:
+            var lines = String.new()
+            var tables = String.new()
             for i in range(len(entries)):
                 let (n, d) = entries[i].copy()
                 if let Data.Null = d:
                     continue
-                match toml(d):
-                    case Ok(text):
-                        out.push("{key(n)} = {text}\n")
-                    case Err(Holds(what, _)):
-                        return Err(Holds(what=what, at=i))
+                match toml_entry(key(n), n, d):
+                    case Ok((line, table)):
+                        lines.push(line)
+                        tables.push(table)
+                    case Err(Holds(what, _, path)):
+                        return Err(Holds(what=what, at=i, path=path))
+            out.push(lines)
+            if lines.is_empty():
+                out.push(tables.strip_prefix("\n"))
+            else:
+                out.push(tables)
         case Form.Yaml:
             if entries.is_empty():
                 out.push("{{}}\n")
             for (n, d) in entries:
                 out.push(yaml_entry(key_text(n), d, 0))
     return Ok(out)
+
+## Whether TOML writes `d` as a table of its own: a mapping.
+pure def is_table(d: Data) -> bool:
+    if let Data.Map(_) = d:
+        return True
+    return False
+
+## Whether TOML writes `d` as an array of tables: a list that is not empty,
+## every item of which is a mapping.
+pure def is_tables(d: Data) -> bool:
+    let Data.List(xs) = d else:
+        return False
+    if xs.is_empty():
+        return False
+    for x in xs:
+        if not is_table(x):
+            return False
+    return True
+
+## The TOML of the entry `name` (its key as TOML writes it, `path` the
+## path to it as a message names it) holding `d`: a line `KEY = VALUE`
+## for a value that TOML writes inline, or the tables it is written as,
+## each after a blank line.
+pure def toml_entry(name: str, path: str, d: Data) -> (String, String) ! Unwritable:
+    match d:
+        case Data.Map(fs):
+            return Ok((String.new(), "\n[{name}]\n{toml_fields(name, path, fs)?}"))
+        case Data.List(xs):
+            if is_tables(d):
+                var out = String.new()
+                for i in range(len(xs)):
+                    let Data.Map(fs) = xs[i].copy() else:
+                        continue
+                    out.push("\n[[{name}]]\n{toml_fields(name, "{path}[{i}]", fs)?}")
+                return Ok((String.new(), out))
+        case _:
+            pass
+    return Ok(("{name} = {toml(d, path)?}\n", String.new()))
+
+## The fields of the table `name` (`path` as a message names it): the
+## values written inline first, then the tables, as TOML has them; a
+## field that holds nothing is left out.
+pure def toml_fields(name: str, path: str, fs: list[(String, Data)]) -> String ! Unwritable:
+    var lines = String.new()
+    var tables = String.new()
+    for (k, x) in fs:
+        if let Data.Null = x:
+            continue
+        if is_table(x) or is_tables(x):
+            let (_, table) = toml_entry("{name}.{key(k)}", "{path}.{k}", x)?
+            tables.push(table)
+        else:
+            lines.push("{key(k)} = {toml(x, "{path}.{k}")?}\n")
+    return Ok("{lines}{tables}")
 
 ## Text in double quotes, as JSON writes it (and YAML and TOML read it).
 pub pure def quoted(s: str) -> String:
@@ -229,8 +303,9 @@ pure def float_text(x: f64) -> String:
         return t
     return "{t}.0"
 
-## The JSON of `d` at nesting `depth`, two spaces a level.
-pure def json(d: Data, depth: int) -> String ! Unwritable:
+## The JSON of `d` at nesting `depth`, two spaces a level, `path` the
+## path to it as a message names it.
+pure def json(d: Data, depth: int, path: str) -> String ! Unwritable:
     let pad = "  ".repeat(depth + 1)
     let end = "  ".repeat(depth)
     match d:
@@ -242,7 +317,8 @@ pure def json(d: Data, depth: int) -> String ! Unwritable:
             return Ok("{i}")
         case Data.Float(x):
             if x - x != 0.0:
-                return Err(Holds(what="an infinite or not-a-number float".to_string(), at=0))
+                let what = "an infinite or not-a-number float".to_string()
+                return Err(Holds(what=what, at=0, path=path.to_string()))
             return Ok(float_text(x))
         case Data.Text(s):
             return Ok(quoted(s))
@@ -250,15 +326,15 @@ pure def json(d: Data, depth: int) -> String ! Unwritable:
             if xs.is_empty():
                 return Ok("[]".to_string())
             var parts: list[String] = []
-            for x in xs:
-                parts.push("{pad}{json(x, depth + 1)?}")
+            for i in range(len(xs)):
+                parts.push("{pad}{json(xs[i], depth + 1, "{path}[{i}]")?}")
             return Ok("[\n{parts.join(",\n")}\n{end}]")
         case Data.Map(fs):
             if fs.is_empty():
                 return Ok("{{}}".to_string())
             var parts: list[String] = []
             for (k, x) in fs:
-                parts.push("{pad}{quoted(k)}: {json(x, depth + 1)?}")
+                parts.push("{pad}{quoted(k)}: {json(x, depth + 1, "{path}.{k}")?}")
             return Ok("{{\n{parts.join(",\n")}\n{end}}}")
 
 ## A key as TOML writes it: bare when it is letters, digits, `_` and `-`.
@@ -271,11 +347,12 @@ pure def key(k: str) -> String:
     return k.to_string()
 
 ## A TOML value, inline: a mapping is an inline table, whose fields that
-## hold nothing are left out.
-pure def toml(d: Data) -> String ! Unwritable:
+## hold nothing are left out; `path` the path to it as a message names it.
+pure def toml(d: Data, path: str) -> String ! Unwritable:
     match d:
         case Data.Null:
-            return Err(Holds(what="nothing (`None`) in a list".to_string(), at=0))
+            let what = "nothing (`None`) in a list".to_string()
+            return Err(Holds(what=what, at=0, path=path.to_string()))
         case Data.Bool(b):
             return Ok((if b: "true" else: "false").to_string())
         case Data.Int(i):
@@ -290,15 +367,15 @@ pure def toml(d: Data) -> String ! Unwritable:
             return Ok(quoted(s))
         case Data.List(xs):
             var parts: list[String] = []
-            for x in xs:
-                parts.push(toml(x)?)
+            for i in range(len(xs)):
+                parts.push(toml(xs[i], "{path}[{i}]")?)
             return Ok("[{parts.join(", ")}]")
         case Data.Map(fs):
             var parts: list[String] = []
             for (k, x) in fs:
                 if let Data.Null = x:
                     continue
-                parts.push("{key(k)} = {toml(x)?}")
+                parts.push("{key(k)} = {toml(x, "{path}.{k}")?}")
             if parts.is_empty():
                 return Ok("{{}}".to_string())
             return Ok("{{ {parts.join(", ")} }}")
@@ -394,3 +471,27 @@ test "the forms write the same constants":
         case Err(_):
             assert False
     assert render(Form.Toml, [("XS".to_string(), Data.List([Data.Null]))]).is_err()
+
+test "TOML writes a struct as a table and a list of them as an array of tables":
+    let a = Data.Map([("name".to_string(), Data.Text("web".to_string())), ("port".to_string(), Data.Int(80))])
+    let b = Data.Map([("name".to_string(), Data.Text("db".to_string())), ("port".to_string(), Data.Int(5432))])
+    let limits = Data.Map([
+        ("timeout".to_string(), Data.Int(30)),
+        ("retry".to_string(), Data.Map([("times".to_string(), Data.Int(3))])),
+    ])
+    let entries = [
+        ("SERVICES".to_string(), Data.List([a, b])),
+        ("LIMITS".to_string(), limits),
+        ("NAME".to_string(), Data.Text("x".to_string())),
+    ]
+    match render(Form.Toml, entries):
+        case Ok(t):
+            assert t == "NAME = \"x\"\n\n[[SERVICES]]\nname = \"web\"\nport = 80\n\n[[SERVICES]]\nname = \"db\"\nport = 5432\n\n[LIMITS]\ntimeout = 30\n\n[LIMITS.retry]\ntimes = 3\n"
+        case Err(_):
+            assert False
+    let bad = [("LIMITS".to_string(), Data.Map([("timeout".to_string(), Data.Float(1.0 / 0.0))]))]
+    match render(Form.Json, bad):
+        case Ok(_):
+            assert False
+        case Err(Holds(_, _, path)):
+            assert path == "LIMITS.timeout"

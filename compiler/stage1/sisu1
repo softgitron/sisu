@@ -110,7 +110,7 @@ fi
 # hole, RULES.md, R27), which stage 1 returns as the error
 # `Exit(status=N)`: the run time prints it as the last line of standard
 # error, which goes, and N is the exit status.
-if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ] || [ "${1:-}" = test ]; then
+if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ] || [ "${1:-}" = test ] || [ "${1:-}" = fix ]; then
     err=$(mktemp)
     trap 'rm -f "$err"' EXIT
     "$exe" --home "$compiler" "$@" 2> "$err"

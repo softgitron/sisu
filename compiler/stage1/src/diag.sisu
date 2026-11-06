@@ -599,6 +599,11 @@ pub enum Msg:
     ResolveSimilarAttribute
     TypeDeprecated
     TypeDeprecatedPlain
+    TypeFixInlineBody
+    ResolvePlainPadding
+    ResolvePlainPaddingEnd
+    ResolvePlainPaddingFill
+    TypeInlineCall
     TypePreview
     TypePreviewPlain
     TypeDecimalQuotient
@@ -1204,6 +1209,11 @@ impl Msg:
             case ResolveSimilarAttribute: "resolve.similar-attribute"
             case TypeDeprecated: "type.deprecated"
             case TypeDeprecatedPlain: "type.deprecated-plain"
+            case TypeFixInlineBody: "type.fix-inline-body"
+            case ResolvePlainPadding: "resolve.plain-padding"
+            case ResolvePlainPaddingEnd: "resolve.plain-padding-end"
+            case ResolvePlainPaddingFill: "resolve.plain-padding-fill"
+            case TypeInlineCall: "type.inline-call"
             case TypePreview: "type.preview"
             case TypePreviewPlain: "type.preview-plain"
             case TypeDecimalQuotient: "type.decimal-quotient"

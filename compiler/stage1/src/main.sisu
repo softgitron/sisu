@@ -93,6 +93,7 @@ from stage1.cfg import Features
 from stage1.diag import (
     Catalog,
     Diagnostic,
+    Edit,
     Filed,
     Lines,
     Msg,
@@ -147,7 +148,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.15.0"
+const VERSION: str = "0.16.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -719,6 +720,10 @@ def run_command(
         # `eval FILE [--to json|toml|yaml]`: a configuration module's
         # constants, rendered (08; RULES.md, R165).
         return eval_command(sys, home, rest, catalog, mut o, served)
+    if command == "fix":
+        # `fix FILE [--dry-run] [--all]`: each diagnostic's preferred fix
+        # applied to the file (10; RULES.md, R176).
+        return fix_command(sys, home, rest, catalog, mut o, served)
     if command == "query":
         # `query KIND FILE [LINE COL] [--text PATH]`: the language server's
         # questions about a position of a file (RULES.md, R164).
@@ -2246,8 +2251,10 @@ pure def report_program(
     # The ownership checker runs when the front end found no error.
     let program = program_files(input, checked)
     var consuming: dict[String, String] = {}
+    var constants: list[Constant] = []
     if let Some(typed) = checked.typed:
         consuming = consuming_methods(typed.prog)
+        constants = constants_of(typed.prog, input, catalog)
     let lowered = lower_of(checked, base, input, catalog, mut kept) else:
         return (report, None)
     if not lowered.beyond.is_empty():
@@ -2283,6 +2290,12 @@ pure def report_program(
                     let why = "a failed `comptime` expression in a file of the standard library or one the compiler wrote"
                     if not report.beyond.contains(why.to_string()):
                         report.beyond.push(why.to_string())
+        # A constant's value is computed at compile time (RULES.md, R178):
+        # each `const` of the program's modules evaluated as `eval`
+        # evaluates it, one that fails an error at its name.
+        if evaluated.errors.is_empty():
+            for (k, d) in const_failures(done.program, constants, catalog):
+                report.failed.push(Filed(file=k, diag=d.copy(), label_files=[]))
     sort_filed(mut report.owned, catalog, True)
     sort_filed(mut report.failed, catalog, True)
     for x in report.owned:
@@ -2297,6 +2310,77 @@ pure def report_program(
     if evaluated_all and not report.has_error and report.beyond.is_empty():
         return (report, Some(done))
     return (report, None)
+
+## A `const` item of the program's own modules (RULES.md, R178): its
+## module's index among the input's, its function's name in SIR, its name
+## and where it is written, and its budget of steps.
+struct Constant:
+    file: int
+    function: String
+    name: String
+    start: int
+    end: int
+    budget: int
+
+## Each `const` item of the program's own modules, not the standard
+## library's, in the order of the modules and of their text.
+pure def constants_of(typed: Program, input: Input, catalog: Catalog) -> list[Constant]:
+    var out: list[Constant] = []
+    for i in range(len(input.modules)):
+        let m = query_module(typed, input, i)
+        if i > 0 and m == typed.root:
+            continue
+        if typed.modules[m.index].is_std:
+            continue
+        var prefix = String.new()
+        if m != typed.root:
+            prefix = "{typed.modules[m.index].name}."
+        for (name, start, end) in config.constants(input.modules[i].text, catalog):
+            var budget = DEFAULT_COMPTIME_BUDGET
+            if let Some(d) = typed.lookup(m, name):
+                budget = typed.comptime_budgets.get(d) ?? budget
+            out.push(
+                Constant(
+                    file=i,
+                    function="{prefix}{name}",
+                    name=name.copy(),
+                    start=start,
+                    end=end,
+                    budget=budget,
+                )
+            )
+    return out
+
+## Each of `constants` whose evaluation at compile time fails, with the
+## error at its name (RULES.md, R178): a panic, a failed invariant or
+## contract among them, is `E0602`, a refinement its value does not meet
+## `E0810`, the budget spent `E0603` (`@comptime_budget` on the constant
+## raises it), the world used `E0601`. A constant that reaches a typed
+## hole, or what the evaluator does not run, is left to the run, which
+## computes every constant as before.
+pure def const_failures(
+    prog: sir.Program, constants: list[Constant], catalog: Catalog
+) -> list[(int, Diagnostic)]:
+    var out: list[(int, Diagnostic)] = []
+    for c in constants:
+        let (i, start, end) = (c.file, c.start, c.end)
+        let Err(stop) = interp.value_of(prog, c.function, c.budget, catalog) else:
+            continue
+        match stop:
+            case interp.Stop.Panicked(message):
+                let d = Diagnostic.new(Msg.ComptimePanicked, start, end)
+                out.push((i, d.with("message", message)))
+            case interp.Stop.Refinement(ty, value, predicate):
+                let d = Diagnostic.new(Msg.RefineNotSatisfied, start, end)
+                out.push((i, d.with("value", value).with("ty", ty).with("predicate", predicate)))
+            case interp.Stop.Budget:
+                let d = Diagnostic.new(Msg.ComptimeBudget, start, end).with("item", c.name)
+                out.push((i, d.with("steps", "{c.budget}")))
+            case interp.Stop.World(what):
+                out.push((i, Diagnostic.new(Msg.ComptimeIo, start, end).with("what", what)))
+            case _:
+                pass
+    return out
 
 ## The front end's part of what `check` prints of a checked program
 ## (stage 0's `Db::checked`): the syntax diagnostics of each module, the
@@ -2914,7 +2998,7 @@ def serve_one(
 ## REPL's (RULES.md, R158).
 pure def served_command(command: str) -> bool:
     return match command:
-        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval": True
+        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval" | "fix": True
         case _: False
 
 ## What the run time prints of an I/O error that stops `main`, without the
@@ -3209,8 +3293,12 @@ def holes_command(
     sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
 ) -> ! {IoError, UsageError, CommandError}:
     var paths: list[String] = []
+    var json = False
     for k in range(1, len(rest)):
-        if rest[k] == "--holes":
+        if rest[k] == "--holes" or rest[k] == "--format=human":
+            continue
+        if rest[k] == "--format=json":
+            json = True
             continue
         if rest[k].starts_with("--"):
             let params = [
@@ -3233,6 +3321,7 @@ def holes_command(
     if checked.has_error:
         return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o)
     var out = String.new()
+    var objects: list[String] = []
     for i in range(len(input.modules)):
         let m = query_module(typed.prog, input, i)
         if i > 0 and m == typed.prog.root:
@@ -3244,6 +3333,9 @@ def holes_command(
         let lines = Lines.of(mtext)
         for h in query.holes(typed, [m]):
             let (line, col) = lines.line_col(mtext, h.start)
+            if json:
+                objects.push(query.hole_json(h, "{name}:{line}:{col}"))
+                continue
             var shown = "`todo()`".to_string()
             if not h.name.is_empty():
                 shown = "`todo({quote(h.name)})`"
@@ -3273,8 +3365,203 @@ def holes_command(
                 let ps = [Param(name="names".to_string(), value=each.join(", "))]
                 out.push(catalog.render("cli.hole-fits", ps))
             out.push("\n")
+            # The rest of 10's report (RULES.md, R181): the types' definitions,
+            # the contract in force, and the tests that reach the hole.
+            for t in h.types:
+                var each: list[String] = []
+                for x in t.members:
+                    each.push("`{x}`")
+                var id = "cli.hole-enum".to_string()
+                if t.is_struct:
+                    id = "cli.hole-struct".to_string()
+                if t.members.is_empty():
+                    id.push("-empty")
+                let ps = [
+                    Param(name="name".to_string(), value=t.name.copy()),
+                    Param(name="members".to_string(), value=each.join(", ")),
+                ]
+                out.push("  {catalog.render(id, ps)}\n")
+            for r in h.requires:
+                let ps = [Param(name="clause".to_string(), value=r.copy())]
+                out.push("  {catalog.render("cli.hole-requires", ps)}\n")
+            for e in h.ensures:
+                let ps = [Param(name="clause".to_string(), value=e.copy())]
+                out.push("  {catalog.render("cli.hole-ensures", ps)}\n")
+            if h.tests.is_empty():
+                out.push("  {catalog.render("cli.hole-tests-none", [])}\n")
+            else:
+                var each: list[String] = []
+                for t in h.tests:
+                    each.push(quote(t))
+                let ps = [Param(name="tests".to_string(), value=each.join(", "))]
+                out.push("  {catalog.render("cli.hole-tests", ps)}\n")
+    if json:
+        if objects.is_empty():
+            out = "[]\n".to_string()
+        else:
+            out = "[\n  {objects.join(",\n  ")}\n]\n"
     o.emit(out, "")
     return Ok(())
+
+## `fix FILE [--dry-run] [--all]` (10: "apply compiler-suggested
+## migrations"; RULES.md, R176): the preferred fix of each diagnostic
+## `check` reports in FILE (and with `--all` of each lint `lint` reports
+## there), applied to the file's text, which is checked again and fixed
+## again until no fix applies, a round would bring back a text an earlier
+## one had (a fix that undoes another), or `FIX_ROUNDS` rounds are done;
+## each fix it applies is said on standard output, with its edits under
+## `--dry-run`, which leaves the file as it is.
+def fix_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> ! {IoError, UsageError, CommandError}:
+    var paths: list[String] = []
+    var dry = False
+    var all = False
+    for k in range(1, len(rest)):
+        if rest[k] == "--dry-run":
+            dry = True
+            continue
+        if rest[k] == "--all":
+            all = True
+            continue
+        if rest[k].starts_with("--"):
+            let params = [
+                Param(name="option".to_string(), value=rest[k].copy()),
+                Param(name="command".to_string(), value="fix".to_string()),
+            ]
+            o.emit("", catalog.plain_error("cli.unknown-option", params))
+            return Err(Exit(status=2))
+        paths.push(rest[k].copy())
+    if len(paths) != 1:
+        return Err(Usage(text=usage()))
+    let file = paths[0].copy()
+    let original = sys.fs.read_to_string(Path.new(file))?
+    let base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
+    var text = original.copy()
+    var seen: list[String] = [original.copy()]
+    var out = String.new()
+    var applied = 0
+    var round = 0
+    while round < FIX_ROUNDS:
+        round += 1
+        var env = base.environment()
+        let (input, at, _) = query_input(sys, home, file, text, mut env, catalog)?
+        var kept = Kept.new()
+        let r = report_of(base, input, file, catalog, mut kept)
+        let chosen = fixes_to_apply(r, at, all, text, catalog)
+        if chosen.is_empty():
+            break
+        let lines = Lines.of(text)
+        var said = String.new()
+        var edits: list[Edit] = []
+        for c in chosen:
+            let (line, col) = lines.line_col(text, c.start)
+            let params = [
+                Param(name="at".to_string(), value="{file}:{line}:{col}"),
+                Param(name="code".to_string(), value=c.code.copy()),
+                Param(name="fix".to_string(), value=c.title.copy()),
+            ]
+            said.push(catalog.render("cli.fixed", params))
+            said.push("\n")
+            for e in c.edits:
+                if dry:
+                    let span = lines.span(text, e.start, e.end)
+                    said.push("  {span} {quote(e.text)}\n")
+                edits.push(e.copy())
+        let next = apply_edits(text, edits)
+        if seen.contains(next):
+            let (line, col) = lines.line_col(text, chosen[0].start)
+            let params = [Param(name="at".to_string(), value="{file}:{line}:{col}")]
+            out.push(catalog.render("cli.fix-undone", params))
+            out.push("\n")
+            break
+        out.push(said)
+        applied += len(chosen)
+        seen.push(next.copy())
+        text = next
+    let count = Param(name="count".to_string(), value="{applied}")
+    let named = Param(name="file".to_string(), value=file.copy())
+    if applied == 0:
+        out.push(catalog.render("cli.fix-none", [named]))
+    elif dry:
+        out.push(catalog.render("cli.fix-would", [count, named]))
+    else:
+        sys.fs.write_text(Path.new(file), text)?
+        out.push(catalog.render("cli.fix-done", [count, named]))
+    o.emit(out, "")
+    return Ok(())
+
+## How many times `fix` checks a file again after fixing it (RULES.md,
+## R176): a fix that brings a diagnostic with a fix of its own is applied
+## in the next round.
+const FIX_ROUNDS: int = 16
+
+## One fix `fix` applies: its diagnostic's start, code and the fix as the
+## human form writes it, with its edits.
+struct Chosen:
+    start: int
+    code: String
+    title: String
+    edits: list[Edit]
+
+## The preferred fix (the first, when it has edits) of each diagnostic of
+## the report in its file `at`, and with `all` of each lint (`sisu lint`'s,
+## the unused imports among them), in `check`'s order, but one whose edits
+## touch those of a fix taken before it, which the next round gets.
+pure def fixes_to_apply(r: Report, at: int, all: bool, text: str, catalog: Catalog) -> list[Chosen]:
+    var found: list[Diagnostic] = []
+    for x in r.diags:
+        if x.file == at:
+            found.push(x.diag.copy())
+    if all:
+        for x in r.lints:
+            if x.file == at:
+                found.push(x.diag.copy())
+        var refused: list[(int, int)] = []
+        for x in r.diags:
+            if x.file == at and catalog.is_error(x.diag.msg):
+                refused.push((x.diag.start, x.diag.end))
+        for d in fmt.prune.lints(text, refused, catalog):
+            found.push(d.copy())
+    var out: list[Chosen] = []
+    var taken: list[(int, int)] = []
+    for d in found:
+        let f = d.fixes.first() else:
+            continue
+        if f.edits.is_empty():
+            continue
+        var clash = False
+        for e in f.edits:
+            for (s, t) in taken:
+                if (e.start < t and s < e.end) or e.start == s or e.end == t:
+                    clash = True
+        if clash:
+            continue
+        for e in f.edits:
+            taken.push((e.start, e.end))
+        out.push(
+            Chosen(
+                start=d.start,
+                code=catalog.code(d.msg),
+                title=fix_text(f, catalog),
+                edits=f.edits.copy(),
+            )
+        )
+    return out
+
+## `text` with each of `edits` made, none of which overlaps another.
+pure def apply_edits(text: str, edits: list[Edit]) -> String:
+    var sorted = edits.copy()
+    sorted.sort_by((a, b) -> a.start.cmp(b.start))
+    var out = String.new()
+    var at = 0
+    for e in sorted:
+        let start = min(max(e.start, at), text.byte_len())
+        out.push(text.byte_slice(at, start))
+        out.push(e.text)
+        at = min(max(e.end, start), text.byte_len())
+    out.push(text.byte_slice(at, text.byte_len()))
+    return out
 
 ## `query format`: the edits that make `text` what `fmt` writes, one per
 ## run of changed lines (`query.format_edits`), nothing for a text `fmt`
@@ -3537,12 +3824,12 @@ def eval_with(
         var d: Diagnostic? = None
         match interp.value_of(done.program, name, DEFAULT_COMPTIME_BUDGET, catalog):
             case Ok(Some(v)):
-                match config.data_of(done.program, v):
+                match config.data_of(done.program, v, name):
                     case Ok(data):
                         entries.push((name.copy(), data))
                         places.push((start, end))
-                    case Err(config.Unwritable.Holds(what, _)):
-                        d = Some(no_form(name, what, form, start, end))
+                    case Err(config.Unwritable.Holds(what, _, path)):
+                        d = Some(no_form(path, what, form, start, end))
             case Ok(None):
                 pass
             case Err(stop):
@@ -3572,9 +3859,9 @@ def eval_with(
             case Ok(text):
                 o.emit(text, r.human(catalog))
                 return Ok(())
-            case Err(config.Unwritable.Holds(what, i)):
+            case Err(config.Unwritable.Holds(what, i, path)):
                 let (start, end) = places[i]
-                let x = no_form(entries[i].0, what, form, start, end)
+                let x = no_form(path, what, form, start, end)
                 failed.push(Filed(file=0, diag=x, label_files=[]))
     var shown = r.copy()
     for x in failed:
@@ -3585,7 +3872,9 @@ def eval_with(
     o.emit("", errs)
     return Err(Failed)
 
-## `E0617`: the constant `name` holds `what`, which `form` cannot write.
+## `E0617`: the constant's field or item at `name`, its path from the
+## constant's name (`LIMITS.timeout`; RULES.md, R180), holds `what`, which
+## `form` cannot write.
 pure def no_form(name: str, what: str, form: config.Form, start: int, end: int) -> Diagnostic:
     let d = Diagnostic.new(Msg.EvalNoForm, start, end).with("name", name).with("what", what)
     return d.with("form", form.name())

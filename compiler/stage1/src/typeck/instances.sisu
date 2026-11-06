@@ -28,7 +28,7 @@
 ##! attributes of a std type, which the base does not keep the text of, are
 ##! none to `reflect.attributes_of`.
 
-from stage1.diag import Catalog, Diagnostic, Msg, TextRange
+from stage1.diag import Catalog, Diagnostic, Msg, Note, TextRange
 from stage1.diag import Param as MsgParam
 from stage1.parser import parse
 from stage1.syntax.ast import (
@@ -598,6 +598,89 @@ impl Resolver:
                             f.body_broken = True
                         self.prog.defs[m.index].set_kind(kind_now)
                     break
+            # A plain `@repr(c)` struct has no padding (22), which its bytes
+            # would hold: each gap C's layout leaves (decision 1021) is
+            # `E0279`, between the fields around it or at the end (RULES.md,
+            # R182).
+            if plain and c.field.is_none() and self.prog.c_layout.contains(c.ty):
+                for d in self.plain_gaps(c.ty, c.span):
+                    self.report_other(home, d.copy())
+
+    ## The gaps C's layout leaves in the struct `d` whose fields are plain
+    ## (decision 1021: each field at the next offset its alignment allows,
+    ## the size a multiple of the widest field's), each an `E0279` at the
+    ## derive `span`, naming the bytes, their offsets and the fields around
+    ## them; none where a field's layout is not known.
+    pure def plain_gaps(self, d: DefId, span: TextRange) -> list[Diagnostic]:
+        var out: list[Diagnostic] = []
+        let s = self.prog.struct_info(d) else:
+            return out
+        let ty_name = self.prog.defs[d.index].name.copy()
+        var off = 0
+        var align = 1
+        var before: String? = None
+        for f in s.fields:
+            let (size, a) = self.plain_layout(f.ty, 0) else:
+                return []
+            let at = (off + a - 1) // a * a
+            let shown = "{f.name}: {self.prog.display_in(self.types, f.ty, [])}"
+            if at > off:
+                var x = Diagnostic.new(Msg.ResolvePlainPadding, span.start, span.end)
+                x = x.with("ty", ty_name).with("bytes", "{at - off}").with("start", "{off}")
+                x = x.with("end", "{at}").with("before", before ?? String.new())
+                x = x.with("after", shown)
+                x.notes.push(padding_note(off, at - off))
+                out.push(x)
+            off = at + size
+            align = max(align, a)
+            before = Some(shown)
+        let size = (off + align - 1) // align * align
+        if size > off:
+            if let Some(last) = before:
+                var x = Diagnostic.new(Msg.ResolvePlainPaddingEnd, span.start, span.end)
+                x = x.with("ty", ty_name).with("bytes", "{size - off}").with("start", "{off}")
+                x = x.with("end", "{size}").with("before", last)
+                x.notes.push(padding_note(off, size - off))
+                out.push(x)
+        return out
+
+    ## The size and alignment of a plain field's type in C's layout
+    ## (decision 1021): a narrow number's width, a word for `int`, `f64`
+    ## and the 64-bit integers, two words aligned to one for the 128-bit
+    ## ones, and a struct's own; `None` for any other.
+    pure def plain_layout(self, t: Ty, depth: int) -> (int, int)?:
+        if depth > 16:
+            return None
+        match self.types.data(t):
+            case TyData.Int | TyData.Float:
+                return Some((8, 8))
+            case TyData.Adt(d, _):
+                let def_ = ref self.prog.defs[d.index]
+                if self.prog.modules[def_.module.index].is_std:
+                    let n = def_.name.copy()
+                    if n == "u8" or n == "i8":
+                        return Some((1, 1))
+                    if n == "u16" or n == "i16":
+                        return Some((2, 2))
+                    if n == "u32" or n == "i32" or n == "f32":
+                        return Some((4, 4))
+                    if n == "u64" or n == "i64":
+                        return Some((8, 8))
+                    if n == "u128" or n == "i128":
+                        return Some((16, 8))
+                    return None
+                let s = self.prog.struct_info(d) else:
+                    return None
+                var off = 0
+                var align = 1
+                for f in s.fields:
+                    let (size, a) = self.plain_layout(f.ty, depth + 1) else:
+                        return None
+                    off = (off + a - 1) // a * a + size
+                    align = max(align, a)
+                return Some(((off + align - 1) // align * align, align))
+            case _:
+                return None
 
     # ---------------------------------------------------------------- instances
 
@@ -1437,3 +1520,12 @@ pure def named_types(ast: Ast, f: FnDef) -> list[String]:
                     if not out.contains(n):
                         out.push(n.copy())
     return out
+
+## The note of a gap of `count` bytes at `offset` of a plain struct
+## (RULES.md, R182): a field that holds them.
+pure def padding_note(offset: int, count: int) -> Note:
+    let params = [
+        MsgParam(name="name".to_string(), value="_pad{offset}"),
+        MsgParam(name="count".to_string(), value="{count}"),
+    ]
+    return Note(msg=Msg.ResolvePlainPaddingFill, params=params)

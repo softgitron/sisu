@@ -23,6 +23,7 @@ import stage1.cfg
 import stage1.typeck.call
 import stage1.typeck.contracts
 import stage1.typeck.expr
+import stage1.typeck.fix_inline
 import stage1.typeck.instances
 import stage1.typeck.pat
 import stage1.typeck.tasks
@@ -2332,12 +2333,39 @@ impl Checker:
                 self.report(preview_warning(name, p, span))
             let why = f.deprecated.copy() else:
                 continue
-            if why.is_empty():
-                let diag = Diagnostic.new(Msg.TypeDeprecatedPlain, span.start, span.end)
-                self.report(diag.with("name", name))
-            else:
-                let diag = Diagnostic.new(Msg.TypeDeprecated, span.start, span.end)
-                self.report(diag.with("name", name).with("reason", why))
+            var diag = Diagnostic.new(Msg.TypeDeprecatedPlain, span.start, span.end)
+            diag = diag.with("name", name)
+            if not why.is_empty():
+                diag = Diagnostic.new(Msg.TypeDeprecated, span.start, span.end)
+                diag = diag.with("name", name).with("reason", why)
+            # A `@fix_inline` function's call, rewritten with what it
+            # returns (D-067; RULES.md, R177).
+            if let Some(text) = self.inline_call(cx, e, d):
+                let params = [Param(name="name".to_string(), value=name.copy())]
+                let edits = [Edit(start=span.start, end=span.end, text=text.copy())]
+                diag.fixes.push(Fix(msg=Msg.TypeInlineCall, params=params, edits=edits))
+            self.report(diag)
+
+    ## The text that takes the place of the call `e` of the `@fix_inline`
+    ## function `d` (RULES.md, R177): what it returns with the call's
+    ## arguments in its parameters' places, where that means what the call
+    ## means; in another module than the function's, only a form that names
+    ## nothing but its parameters.
+    pure def inline_call(self, cx: Cx, e: TExprId, d: DefId) -> String?:
+        let form = cx.prog.fix_inline.get(d) else:
+            return None
+        let TExprKind.Call(_, args) = self.exprs[e.index].kind.copy() else:
+            return None
+        if cx.prog.defs[d.index].module != cx.prog.defs[self.def_.index].module and not form.alone:
+            return None
+        let call = self.span_of(e)
+        var texts: list[String] = []
+        for a in args:
+            let at = self.span_of(a.expr)
+            if at.start < call.start or at.end > call.end or at.start >= at.end:
+                return None
+            texts.push(cx.source.byte_slice(at.start, at.end).to_string())
+        return fix_inline.inlined(form, texts)
 
     ## `W0023` (or `W0025`) for a use at `span` of a deprecated type or
     ## constant `d` (RULES.md, R40), but in its own declaration: the
