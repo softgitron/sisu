@@ -101,8 +101,24 @@ error[E0807]: a test has no contract; check what it needs with `assert`
 
 `requires` states what a caller must give. Its clauses are checked
 each time the function is entered, after its arguments are evaluated
-and before its first statement, in the order written. A precondition
-that fails blames the caller.
+and before its first statement, in the order written, so the first
+clause that fails is the one reported. A precondition that fails blames
+the caller: its trace goes on to the call that broke it.
+
+<!-- file: examples/reference-contracts/preconditions.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-contracts/preconditions.console -->
+```console
+PLACEHOLDER
+```
+
+Both clauses of the second call fail, and the first, `benches > 0`, is
+the one the panic names; the line `at main` is the caller's.
+
+**Status.** In stage 0 (D-028).
 
 ## Postconditions
 

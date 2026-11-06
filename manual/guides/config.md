@@ -119,16 +119,20 @@ SERVICES:
         seats: 40
 ```
 
-TOML writes a struct as an inline table on its constant's line, and
-YAML as a mapping in block style. Redirect the output to the file your
+TOML writes the values that fit on a line first, `REGION`, and then
+each struct as a table under a header of its own: a list of structs is
+an array of tables, a `[[SERVICES]]` header for each item, and a field
+that holds a struct or a variant with fields is a table under its
+item's, `[SERVICES.tier.Paid]`. YAML writes a mapping in block style. Redirect the output to the file your
 deployment reads: `sisu eval services.sisu --to yaml > services.yaml`.
 
 ## 4. Let the schema refuse a wrong value
 
-A value that breaks an invariant stops the evaluation, and `sisu eval`
-reports it at the constant's name, writes nothing on standard output
-and ends with status 1. `sisu check` does not evaluate the constants,
-so it passes the same module:
+A value that breaks an invariant stops the evaluation, at compile time:
+`sisu check` evaluates every constant once the module has no other
+error, and reports the failure at the constant's name, E0602
+(`comptime.panicked`). `sisu eval` reports the same, writes nothing on
+standard output and ends with status 1:
 
 <!-- file: examples/guide-config/refused.sisu -->
 ```sisu
@@ -161,15 +165,17 @@ error[E0602]: the compile-time evaluation of this expression panicked: invariant
 
 ```
 
-Run `sisu eval` in the job that writes the file, so a wrong value fails
-the job rather than a deployment.
+Since every command that checks the module stops there, `sisu build`
+and `sisu test` too, a wrong value fails the job that writes the file
+rather than a deployment.
 
 ## 5. Keep to what the form can write
 
 Each form has values it cannot write. JSON has no infinite float and
 TOML no `null`, and none of them can hold a function or a reference.
-A constant that holds such a value is E0617 (`eval.no-form`), named by
-the constant, and the same module may render in another form:
+A constant that holds such a value is E0617 (`eval.no-form`), at the
+constant, with the path of the value in its message, `LIMITS.timeout`,
+and the same module may render in another form:
 
 <!-- file: examples/guide-config/forms.sisu -->
 ```sisu

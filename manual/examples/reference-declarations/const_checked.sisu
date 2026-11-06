@@ -1,0 +1,7 @@
+# A constant is computed when the program is checked, so one that
+# fails stops `sisu check`.
+const BENCHES: list[int] = [4, 9, 2]
+const TOP: int = BENCHES[3]
+
+def main():
+    print("{len(BENCHES)} benches, the top one {TOP}")

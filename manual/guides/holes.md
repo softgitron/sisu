@@ -139,7 +139,30 @@ The last line counts the tests that pass, fail and wait, which is the
 state of the plan. While a test is blocked and none fails, `sisu test` exits with status 3, so a job that runs the
 tests can tell a plan that waits from one that is done.
 
-## 3. Fill the holes one at a time
+## 3. Ask what each hole needs
+
+Before you fill a hole, ask the compiler what the code there has to
+work with. `sisu check --holes` lists each hole with the bindings in
+scope, what is already of its type, the types it names with their
+fields, and the tests that reach it, without running anything:
+
+<!-- output: examples/guide-holes/report.console -->
+```console
+PLACEHOLDER
+```
+
+- `Turn` is a struct of the program's, so the report gives its fields:
+  what `parse_turns` has to build.
+- The tests named are the ones that judge the fill; once it is written,
+  run those.
+- A function with `requires` and `ensures` gets them too, as what is
+  given and what to keep
+  ([R16](../reference/sisu-command.md#sisu-check---holes)).
+- `--format=json` writes one object for each hole, the form for an
+  editor or another tool to read. The second run, of the sketch with
+  its first hole filled (step 4), has one hole left.
+
+## 4. Fill the holes one at a time
 
 Fill one hole, and run the tests. Here `parse_turns` is written, and
 its test passes while the other still waits:
@@ -205,7 +228,7 @@ Fill them in any order: start with the one that the most tests wait
 for, or the one whose type you are least sure of, since filling it may
 change a signature that the others depend on.
 
-## 4. Check that no hole is left
+## 5. Check that no hole is left
 
 Fill the last hole, `schedule`, in the same way, as a loop over the
 hours. With no hole left there is no W0001, every test runs, and the
@@ -250,12 +273,8 @@ error[D0132]: the program was not compiled: errors found (2)
 ```
 
 **Status.** Holes, W0001, blocked tests with their closures and the
-status 3, and the release build's E0445 are in stage 0 (D-061).
-`sisu check --holes`, which lists each hole with the bindings in scope,
-the `requires` around it and the tests that reach it, is designed in
-[10](../../proposal/10-tooling.md), and stage 0 answers it with D0009.
-Stage 1 has a first part of it from `sisu1 0.15.0`, each hole with the
-type its place needs, its function, the bindings in scope and those of
-its type, which the driver routes in a later round
-([R16](../reference/sisu-command.md#sisu-check---holes)). A `sisu
-publish` that refuses a program with a hole is designed too.
+status 3, the release build's E0445 and `sisu check --holes` are in
+stage 0 (D-061), the report from stage 1. The report of
+[10](../../proposal/10-tooling.md) also shows the values each test saw
+at the hole, which wait for `sisu test` to record them. A `sisu
+publish` that refuses a program with a hole is designed.

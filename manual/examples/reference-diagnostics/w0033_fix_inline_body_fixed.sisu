@@ -1,0 +1,14 @@
+# The body is one `return`, which each call can be rewritten to.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`")
+@fix_inline
+def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    print(to_celsius(212.0))

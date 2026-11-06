@@ -1,0 +1,15 @@
+# The widest field first leaves C's layout no gap between the fields.
+from std.mem import Plain, read_plain, size_of
+
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Sample:
+    value: i32
+    sensor: u8
+    level: u8
+    flags: u16
+
+def main():
+    let data = b"\x2d\x00\x00\x00\x02\x07\x00\x00"
+    print("{size_of[Sample]()} bytes")
+    print("{read_plain[Sample](data, 0):?}")

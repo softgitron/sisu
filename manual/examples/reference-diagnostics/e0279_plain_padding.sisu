@@ -1,0 +1,11 @@
+# A plain struct whose fields C's layout leaves a gap between.
+from std.mem import Plain, size_of
+
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    sensor: u8
+    value: i32
+
+def main():
+    print("{size_of[Sample]()} bytes")

@@ -131,6 +131,8 @@ since few readers know which binds first. A comparison binds less
 tightly than `&`, as in Python, so the parentheses of `(mode & WRITE)
 != 0` are there for the reader.
 
+## Counting and turning bits
+
 Every integer type also has methods that count and turn its bits:
 
 <!-- file: examples/24-numbers/bit_methods.sisu -->

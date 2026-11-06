@@ -449,14 +449,34 @@ Reading(minute=45, tenths=798, sensor=2, flags=0)
   `as_bytes` gives a plain value's bytes. Both are safe. `transmute`, for
   types that are not plain, is unsafe.
 
+A plain struct has no padding, since `as_bytes` would read bytes that
+no field owns, so `@derive(Plain)` refuses a struct whose layout has a
+gap: E0279 (`resolve.plain-padding`) between two fields, and E0280
+(`resolve.plain-padding-end`) at the end:
+
+<!-- file: examples/27-systems/plain_gap.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/27-systems/plain_gap.console -->
+```console
+PLACEHOLDER
+```
+
+Each names the bytes and their offsets, from the first byte of the gap
+to the first after it. Order the fields from the widest, as `Reading`
+does, or give the bytes fields of their own; the note's `Array` is not
+`Copy`, which `Plain` needs, so write them as `u8` and `u16` fields
+([R17](../reference/diagnostics.md#e0280)).
+
 > **From Python.** This is `struct.unpack` or `ctypes.Structure`, with
 > the layout checked by the compiler: a `@derive(Plain)` that does not
-> hold, such as one on a struct with a `bool` field, does not compile,
-> and neither does one on a struct of several fields without
-> `@repr(c)`, whose layout would be the compiler's to choose (E0608).
-> The derive does not yet refuse padding, which 22 rules out of a plain
-> type, so keep a plain struct's fields from largest to smallest, as
-> `Reading` does.
+> hold, such as one on a struct with a `bool` field or with padding,
+> does not compile, and neither does one on a struct of several fields
+> without `@repr(c)`, whose layout would be the compiler's to choose
+> (E0608). Where `ctypes` pads a structure without a word, Sisu asks you
+> to say what the bytes are.
 
 ## Calling C
 
@@ -930,7 +950,9 @@ aligned. That is why a field at the end can add padding too.
 </details>
 
 When every test passes, compare your reasoning with
-[`manual/solutions/27-systems/predict_layout.sisu`](../solutions/27-systems/predict_layout.sisu).
+[`manual/solutions/27-systems/predict_layout.sisu`](../solutions/27-systems/predict_layout.sisu). Each
+layout with padding is one that `@derive(Plain)` refuses, with E0279 or
+E0280.
 
 ## Exercise 27.2: the order of the bytes
 
@@ -1256,6 +1278,9 @@ one `Truncated` names.
 
 When every test passes, compare your answer with
 [`manual/solutions/27-systems/records.sisu`](../solutions/27-systems/records.sisu).
+`Reading`'s fields leave no padding, so the section's `@derive(Plain)`
+takes them; with `sensor` first, C's layout would leave a gap, and the
+derive would be E0279.
 
 ## What you learned
 
@@ -1271,7 +1296,8 @@ When every test passes, compare your answer with
 - A safe type keeps its unsafe code behind methods that keep an
   invariant, and drops what it holds.
 - `@repr(c)` lays a struct out as C does, and `@derive(Plain)` with
-  `read_plain` reads one from bytes safely.
+  `read_plain` reads one from bytes safely; a plain struct has no
+  padding (E0279, E0280).
 - `extern "C":` declares C functions, which the interpreter emulates for
   six of them; a safe function that reaches the world through one takes
   a capability (W0014).

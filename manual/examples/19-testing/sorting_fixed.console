@@ -1,0 +1,2 @@
+$ sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sorting_fixed.sisu
+$ sisu test sorting_fixed.sisu

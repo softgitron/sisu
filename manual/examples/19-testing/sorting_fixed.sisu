@@ -1,0 +1,20 @@
+# The sort with its bug fixed: an equal number is kept, not dropped.
+
+## The numbers of `xs`, smallest first.
+def sort_numbers(xs: Slice[int]) -> list[int]:
+    var out: list[int] = []
+    for x in xs:
+        var i = 0
+        while i < len(out) and out[i] < x:
+            i += 1
+        out.insert(i, x)
+    return out
+
+test "the numbers come out in order":
+    check(arbitrary[list[int]]) do xs:
+        let out = sort_numbers(xs)
+        return all([out[i] <= out[i + 1] for i in range(len(out) - 1)])
+
+test "every number is kept":
+    check(arbitrary[list[int]]) do xs:
+        return len(sort_numbers(xs)) == len(xs)

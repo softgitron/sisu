@@ -558,10 +558,15 @@ prints its line. The second reaches it, prints what is in scope there,
 `weight_kg = 7.0`, and stops with a panic that names the hole. A test
 that reaches a hole prints the same closure and is reported as blocked
 rather than failed, as in the exercises, where the closure comes in the
-blocked test's own block after the list. A report of every hole of a
-program at once, with its bindings and the tests that reach it, `sisu check
---holes`, is designed in [10](../../proposal/10-tooling.md); its first
-part is in stage 1, and `sisu` does not run it yet.
+blocked test's own block after the list. `sisu check --holes` reports
+every hole of a program at once, without running it: its type, what is
+in scope, what there is already of its type, and the tests that reach
+it:
+
+<!-- output: examples/03-functions/holes.console -->
+```console
+PLACEHOLDER
+```
 
 ## Exercise 3.1: predict the calls
 

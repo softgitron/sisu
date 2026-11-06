@@ -565,9 +565,24 @@ once, on the shrunk case.
 
 A token fits in a bug report: whoever has the same code can run the
 failure again on any machine, since in a test every source of chance
-is a fake or the seeded scheduler. A token is refused for other code
-or another toolchain. A test that takes the real `System` gets it even under
-`--sim`, and has no token.
+is a fake or the seeded scheduler. It replays one version of the code
+only. Once the bug is fixed, by inserting every number, the token is
+refused, and the tests are run as usual:
+
+<!-- file: examples/19-testing/sorting_fixed.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/19-testing/sorting_fixed.console -->
+```console
+PLACEHOLDER
+```
+
+D0033 (`cli.token-other-code`) names the content hash the token was made for and the file's
+own, so a replay can never run a different program by mistake; a
+token from another toolchain is refused in the same way. A test that
+takes the real `System` gets it even under `--sim`, and has no token.
 
 ## Every small case
 

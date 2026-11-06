@@ -1,0 +1,2 @@
+$ sisu check inline_body.sisu
+$ sisu fix --dry-run inline_body.sisu

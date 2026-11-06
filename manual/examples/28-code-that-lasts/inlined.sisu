@@ -1,0 +1,16 @@
+# A deprecated name whose calls `sisu fix` can rewrite.
+
+## Degrees Celsius of `fahrenheit` degrees.
+pub def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`, which each call can be rewritten to.
+@deprecated("use `celsius_of`, which this calls")
+@fix_inline
+pub def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    let sauna = 176.0
+    print(to_celsius(212.0))
+    print(to_celsius(sauna))

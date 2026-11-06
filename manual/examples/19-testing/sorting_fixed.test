@@ -1,0 +1,3 @@
+test "the numbers come out in order" ... ok
+test "every number is kept" ... ok
+2 passed, 0 failed, 0 blocked

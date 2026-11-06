@@ -6,7 +6,7 @@ reports what type belongs in it; the interpreter runs until it reaches
 the hole; and a test that reaches it ends neither passed nor failed but
 blocked. This page explains why holes are part of the language rather
 than a placeholder function, how the manual's exercises are built on
-them, what the report and the fill engine are designed to do, what the
+them, what the report does and the fill engine is designed to do, what the
 design costs, and what would change it.
 
 **See also:** the tutorial's [chapter
@@ -143,19 +143,19 @@ are asked to work.
 
 ## The report and the fill engine to come
 
-Two tools build on holes, and neither is in stage 0 yet. The first is a
-report. A run and a blocked test already print a hole's closure, the
-values in scope each time it is reached, which is Hazel's idea; `sisu
-check --holes` is designed to print, for every hole at once, the
-expected type and the definitions of the types it mentions, the bindings
-in scope with their conventions and capabilities, the enclosing
-`requires` as facts and `ensures` as obligations, the tests that reach
-it with the closures they reached it with, and the expressions in scope
-that fit, to a depth of two, as GHC lists them. Stage 1, the compiler
-written in Sisu, has its first part, each hole with its type, its
-function, the bindings in scope and those of its type, and the driver
-does not run it yet. It is meant for people,
-as a language-server query, and for programs that write code, in JSON. The last audience is not an
+Two tools build on holes. The first is a report, which stage 0 has. A
+run and a blocked test already print a hole's closure, the values in
+scope each time it is reached, which is Hazel's idea; `sisu check
+--holes` prints, for every hole at once, the expected type and the
+definitions of the types it mentions, the bindings in scope, the
+enclosing `requires` as facts and `ensures` as obligations, the tests
+that reach it, and the expressions in scope that fit, to a depth of two,
+as GHC lists them. Stage 1, the compiler written in Sisu, writes it.
+What the design adds is the closures each test reached the hole with,
+which wait for `sisu test` to record them, and the bindings'
+capabilities beside their types. It is meant for people,
+as a language-server query, and for programs that write code, in
+`--format=json`. The last audience is not an
 afterthought: in a study of filling holes in Hazel, giving a
 code-writing model what the checker knew about a hole helped it far more
 in Hazel, the language with the least training data, than in TypeScript,
@@ -209,8 +209,8 @@ answer.
 - **The report is partial.** A closure leaves out a local that holds a
   borrow or a view, a value whose type writes its own `Debug`, and one
   that holds a capability, so it can miss the value that matters, and
-  `sisu check --holes`, the report of every hole at once, waits for
-  the driver to run stage 1's first part of it.
+  `sisu check --holes` reports the tests that reach a hole without the
+  values they reached it with.
 - **`todo` looks like a call.** It is less visible in a page of code
   than Idris's `?name`, which is the price of not adding a lexical form.
 - **A fill engine can make overfitting cheap.** The safeguards in "The

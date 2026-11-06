@@ -11,3 +11,4 @@ SAUNA: "Kota"
 STOVE:
   kilowatts: 9
   wood: true
+$ sisu eval

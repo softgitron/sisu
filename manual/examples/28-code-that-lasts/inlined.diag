@@ -1,0 +1,4 @@
+15:11-15:28 W0023 type.deprecated name="to_celsius" reason="use `celsius_of`, which this calls"
+  fix type.inline-call 15:11-15:28 "celsius_of(212.0)"
+16:11-16:28 W0023 type.deprecated name="to_celsius" reason="use `celsius_of`, which this calls"
+  fix type.inline-call 16:11-16:28 "celsius_of(sauna)"

@@ -1,0 +1,3 @@
+$ sisu check inlined.sisu
+$ sisu fix inlined.sisu
+$ sisu run inlined.sisu

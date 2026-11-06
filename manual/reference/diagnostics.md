@@ -1590,7 +1590,7 @@ Shown in [chapter 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
 
 ## Names and declarations
 
-Codes E0200 to E0278. Name resolution finds what each name means and
+Codes E0200 to E0280. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -3841,21 +3841,14 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Where a module of the standard library has the helper as a `pub` item,
-the fix, `resolve.import-from-std`, imports it from there; no module
-has one of them yet, so E0278 has no fix today. Declare the function
-the program needs:
+the fix, `resolve.import-from-std`, imports it from there:
+`days_in_month` is `pub` in `std.time`. The prelude's other helpers are
+its own algorithms, with no fix; declare the function the program
+needs. Here the import is enough:
 
 <!-- file: examples/reference-diagnostics/e0278_prelude_internal_fixed.sisu -->
 ```sisu
-# The program declares the function it needs.
-def days_in_month(year: int, month: int) -> int:
-    if month == 2:
-        let leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
-        return if leap: 29 else: 28
-    return if month in [4, 6, 9, 11]: 30 else: 31
-
-def main():
-    print(days_in_month(2028, 2))
+PLACEHOLDER
 ```
 
 <!-- output: examples/reference-diagnostics/e0278_prelude_internal_fixed.out -->
@@ -3865,6 +3858,82 @@ def main():
 
 E0278 is stage 1's; the Rust front end still lets a program name the
 prelude's helpers.
+
+### E0279
+
+`resolve.plain-padding`: `{ty}` cannot derive `Plain`: C's layout
+leaves {bytes} bytes of padding between `{before}` and `{after}`, at
+offsets {start} to {end}, and a plain type has none (22).
+
+A plain type's bytes are all its value's, so `as_bytes` and
+`read_plain` read no byte that a field does not own. C's layout, which
+`@repr(c)` gives a struct ([R14](attributes.md#the-layout-of-a-type)),
+puts each field at the next offset its alignment allows, and a narrow
+field before a wider one leaves a gap. The offsets name the gap from
+its first byte to the first byte after it:
+
+<!-- file: examples/reference-diagnostics/e0279_plain_padding.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-diagnostics/e0279_plain_padding.console -->
+```console
+PLACEHOLDER
+```
+
+The note gives two ways out. Ordering the fields from the widest leaves
+no gap between them, and two narrow fields that fill the rest of the
+word leave none at the end:
+
+<!-- file: examples/reference-diagnostics/e0279_plain_padding_fixed.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-diagnostics/e0279_plain_padding_fixed.out -->
+```text
+PLACEHOLDER
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md#data-laid-out-as-c-lays-it-out).
+
+### E0280
+
+`resolve.plain-padding-end`: `{ty}` cannot derive `Plain`: C's layout
+leaves {bytes} bytes of padding after `{before}`, at offsets {start} to
+{end}, the end of the struct, and a plain type has none (22).
+
+C rounds a struct's size up to a multiple of its widest field's
+alignment, so fields that end before that multiple leave a gap at the
+end, which an array of the struct repeats:
+
+<!-- file: examples/reference-diagnostics/e0280_plain_padding_end.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-diagnostics/e0280_plain_padding_end.console -->
+```console
+PLACEHOLDER
+```
+
+Give the bytes fields of their own, so that they are the struct's and
+`as_bytes` writes them. The note's `Array[u8, 3]` is not `Copy`, which
+`Plain` needs (E0244), so name the bytes with numbers, here a `u8` and a
+`u16`:
+
+<!-- file: examples/reference-diagnostics/e0280_plain_padding_end_fixed.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-diagnostics/e0280_plain_padding_end_fixed.out -->
+```text
+PLACEHOLDER
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md#data-laid-out-as-c-lays-it-out).
 
 ## Types
 
@@ -7319,7 +7388,7 @@ $ sisu build --native --release e0445_hole_release_fixed.sisu
 built `e0445_hole_release_fixed`
 ```
 
-Shown in [Plan with typed holes](../guides/holes.md#4-check-that-no-hole-is-left).
+Shown in [Plan with typed holes](../guides/holes.md#5-check-that-no-hole-is-left).
 
 ### E0446
 
@@ -8351,12 +8420,15 @@ Shown in [R12](compile-time.md#reflection).
 `eval.no-form`: `{name}` holds {what}, which {form} cannot write.
 
 `sisu eval` writes a module's constants as JSON, TOML or YAML
-([R12](compile-time.md#configuration-files)), and the constant `{name}`
-holds a value that the form has no way to write: a function or a
-reference in any form, an infinite or not-a-number float in JSON, or a
-`None` inside a list in TOML. The error stands at the constant's name,
-nothing is written, and the status is 1; `sisu check` and `sisu run`
-do not report it, since only a form needs the value written.
+([R12](compile-time.md#configuration-files)), and `{name}` holds a
+value that the form has no way to write: a function or a reference in
+any form, an infinite or not-a-number float in JSON, or a `None` inside
+a list in TOML. `{name}` is the constant, or the path from it of the
+field or item that holds the value, `LIMITS.timeout` or `MAYBE[0]`
+([Generate configuration](../guides/config.md#5-keep-to-what-the-form-can-write)
+shows one). The error stands at the constant's name, nothing is
+written, and the status is 1; `sisu check` and `sisu run` do not report
+it, since only a form needs the value written.
 
 <!-- file: examples/reference-diagnostics/e0617_no_form.sisu -->
 ```sisu
@@ -10049,7 +10121,7 @@ Shown in [R22](targets.md#runtime-profiles).
 
 ## Warnings
 
-Codes W0001 to W0032. A warning does not stop a program: `sisu run`
+Codes W0001 to W0033. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -11159,6 +11231,45 @@ def main():
 
 Shown in [R1](lexical-structure.md#names).
 
+### W0033
+
+`type.fix-inline-body`: `@fix_inline` rewrites a call of `{name}` with
+the expression it returns, so its body is one `return`, and its
+parameters take no `mut` or `own`: its calls warn without the rewrite.
+
+`@fix_inline` gives each call of a deprecated function a fix that writes
+what it returns in the call's place
+([R14](attributes.md#deprecation-and-migrations)), which needs a body
+that is one `return` of an expression, of a free function whose
+parameters are plain borrows. Another body, a method, or a parameter
+with `mut` or `own` gets the warning at the attribute, and each call
+warns (W0023) without the fix:
+
+<!-- file: examples/reference-diagnostics/w0033_fix_inline_body.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-diagnostics/w0033_fix_inline_body.console -->
+```console
+PLACEHOLDER
+```
+
+Write the body as one `return`, and the call's warning gets its fix,
+which `sisu fix` applies ([R16](sisu-command.md#sisu-fix)):
+
+<!-- file: examples/reference-diagnostics/w0033_fix_inline_body_fixed.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-diagnostics/w0033_fix_inline_body_fixed.console -->
+```console
+PLACEHOLDER
+```
+
+Shown in [chapter 28](../tutorial/28-code-that-lasts.md#letting-the-compiler-rewrite-the-callers).
+
 ## Run time
 
 Codes R0001 to R0160. Messages of a running program: panics, errors that
@@ -11919,7 +12030,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0174. The messages of the `sisu` command itself
+Codes D0001 to D0187. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -12568,6 +12679,20 @@ message's command does.
 
 Example: [R15](testing.md#the-tests-of-one-module).
 
+### D0151
+
+`cli.command-usage`: usage: sisu {form}, and on the lines after it what
+the command does.
+
+A command whose words stage 1 reads, such as `sisu eval`, `sisu fix` or
+`sisu check --holes`, was given no file, more than one, or a value it
+does not take, such as `--to xml`. The command prints its own line of
+`sisu help` and nothing else, and the status is 2.
+
+Give the command what its usage line names: `sisu eval FILE`.
+
+Example: [R16](sisu-command.md#sisu-eval).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -12715,6 +12840,8 @@ it. `sisu explain CODE` prints the same line.
 | [E0276](#e0276) | `resolve.dev-dependency` | cannot import `{name}` here: `{package}` is a dev-dependency of `{this}`, which its tests import and its code does not |
 | [E0277](#e0277) | `resolve.import-in-body` | an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none |
 | [E0278](#e0278) | `resolve.prelude-internal` | `{name}` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09) |
+| [E0279](#e0279) | `resolve.plain-padding` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding between `{before}` and `{after}`, at offsets {start} to {end}, and a plain type has none (22) |
+| [E0280](#e0280) | `resolve.plain-padding-end` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding after `{before}`, at offsets {start} to {end}, the end of the struct, and a plain type has none (22) |
 
 ### Types, every code
 
@@ -13002,6 +13129,7 @@ it. `sisu explain CODE` prints the same line.
 | [W0030](#w0030) | `resolve.unchecked-attribute` | `@{name}` is accepted and checked by nothing yet, so nothing ensures {what} |
 | [W0031](#w0031) | `resolve.mixed-script` | `{name}` mixes letters of the {scripts} scripts |
 | [W0032](#w0032) | `resolve.confusable` | `{name}` looks like `{other}`, another name in scope |
+| [W0033](#w0033) | `type.fix-inline-body` | `@fix_inline` rewrites a call of `{name}` with the expression it returns, so its body is one `return`, and its parameters take no `mut` or `own`: its calls warn without the rewrite |
 
 ### Run time, every code
 
@@ -13303,9 +13431,23 @@ it. `sisu explain CODE` prints the same line.
 | [D0148](#d0148) | `cli.explain-size-native` | `--explain-size` explains the size of a native executable: it goes with `--native` |
 | [D0149](#d0149) | `cli.token-module-run` | the token is for the run of the tests of `{module}`; `sisu test --replay {token} {module}` replays it |
 | [D0150](#d0150) | `cli.token-package-run` | the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it |
+| [D0151](#d0151) | `cli.command-usage` | usage: sisu {form}  {about} |
 | D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
 | D0171 | `cli.hole-scope` | in scope: {bindings} |
 | D0172 | `cli.hole-scope-none` | nothing is in scope |
 | D0173 | `cli.hole-fits` | of its type: {names} |
 | D0174 | `cli.hole-fits-none` | nothing in scope is of its type |
+| D0175 | `cli.fixed` | {at}: {code} fixed: {fix} |
+| D0176 | `cli.fix-none` | nothing in `{file}` has a fix to apply |
+| D0177 | `cli.fix-done` | fixes applied to `{file}`: {count} |
+| D0178 | `cli.fix-would` | fixes that would be applied to `{file}`: {count}, and `--dry-run` leaves it as it is |
+| D0179 | `cli.fix-undone` | the fixes at {at} would bring back a text an earlier round fixed, so they are not applied |
+| D0180 | `cli.hole-struct` | `{name}` is a struct of {members} |
+| D0181 | `cli.hole-struct-empty` | `{name}` is a struct without fields |
+| D0182 | `cli.hole-enum` | `{name}` is an enum of {members} |
+| D0183 | `cli.hole-enum-empty` | `{name}` is an enum without variants |
+| D0184 | `cli.hole-requires` | given: `{clause}` |
+| D0185 | `cli.hole-ensures` | to keep: `{clause}` |
+| D0186 | `cli.hole-tests` | reached by the tests {tests} |
+| D0187 | `cli.hole-tests-none` | no test reaches it |
 

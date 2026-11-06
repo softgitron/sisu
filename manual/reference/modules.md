@@ -247,9 +247,10 @@ the capabilities' operations, such as `FsOps` and `Metadata`, the
 channel and task types, and `iterable_list`. Its 43 other declarations
 are helpers for the standard library's own code, such as
 `days_in_month` and `DrawState`, and a program that names one is E0278
-(`resolve.prelude-internal`, [R17](diagnostics.md#e0278)), whose fix
-imports the helper from a module of the standard library that has it as
-a `pub` item; no module has one yet. The language server's completions
+(`resolve.prelude-internal`, [R17](diagnostics.md#e0278)). For
+`days_in_month`, which `std.time` has as a `pub` item, its fix imports
+it from there; the other helpers are the prelude's own algorithms, with
+no module to import them from. The language server's completions
 offer the `pub` names only. E0278 is stage 1's: the Rust front end
 still lets a program name the helpers. A name marked internal to the
 library, the capabilities' own machinery, is E0701.
@@ -838,8 +839,8 @@ and each preview is stabilised or removed within four releases (D-072).
 
 **Stage 0 differs.** Stage 0 knows one edition, `"2027"`: another
 year is E1003 (`package.bad-value`), "`edition` takes an edition this
-compiler knows". `sisu fix` is designed
-([R16](sisu-command.md#sisu-fix)), and stage 0 has no previews of the
+compiler knows". `sisu fix --edition` is designed
+([R16](sisu-command.md#sisu-fix---edition-and---deps)), and stage 0 has no previews of the
 language: its `@preview` marks a library's item, whose uses warn
 ([R14](attributes.md#preview-features)).
 

@@ -24,7 +24,8 @@ def c_layout(fields: list[(int, int)]) -> (size: int, align: int):
 const BYTE_WORD: int = 16
 # Nine bytes, rounded up to a multiple of 8, the int's alignment.
 const WORD_BYTE: int = 16
-# Each field starts where the last ended, already aligned.
+# Each field starts where the last ended, already aligned: the one
+# layout of the five without padding, which `@derive(Plain)` takes.
 const SMALL_FIRST: int = 8
 # Three bytes of padding before the u32, and three after the last u8.
 const BYTE_AROUND: int = 12

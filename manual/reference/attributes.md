@@ -394,7 +394,7 @@ of the standard library and its declarations.
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; accepted with W0030 and not checked in stage 0 |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
-| `@deprecated("MESSAGE")`, `@fix_inline` | an item, a field, a variant, a method; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` designed |
+| `@deprecated("MESSAGE")`, `@fix_inline` | an item, a field, a variant, a method; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` in stage 0 for a body of one `return` |
 | `@preview("NAME")` | not designed yet; in stage 0 a function, a type, a constant | asks for a feature that is not stable; in stage 0 warns at each use of the item ([Preview features](#preview-features)) | leaning; the item's warning in stage 0 |
 | `@diagnostic_name(f)` | a type made at compile time | says how diagnostics print it ([Names of types in diagnostics](#names-of-types-in-diagnostics)) | leaning |
 | `@intrinsic`, `@builtin`, `@structural`, `@keeps`, `@sealed`, `@marker`, `@internal` | the standard library's declarations | ([Attributes of the standard library](#attributes-of-the-standard-library)) | in stage 0 |
@@ -421,7 +421,8 @@ derive at compile time (D-018). It takes:
 - `Default`, for a struct: each field's own default where it has one,
   and its type's `default()` otherwise;
 - `Plain` of `std.mem`, for a `@repr(c)` struct whose fields are plain
-  ([The layout of a type](#the-layout-of-a-type));
+  and leave no padding (E0279, E0280; [The layout of a
+  type](#the-layout-of-a-type));
 - any trait that declares a `comptime def derive`, the program's own
   included ([R12](compile-time.md#the-derive-protocol)).
 
@@ -854,8 +855,10 @@ fields are then in the order declared, each at an offset that is a
 multiple of its alignment, with padding where needed
 ([12](../../proposal/12-interop-and-targets.md#c-interop)). The derive of
 `std.mem`'s `Plain`, for types whose every bit pattern is a value, asks
-for it on a struct of more than one field (E0608 otherwise), and foreign
-functions take such structs
+for it on a struct of more than one field (E0608 otherwise) and refuses
+one whose layout has padding, which 22 allows no plain type: a gap
+between two fields is E0279 and one at the end E0280
+([R17](diagnostics.md#e0279)). Foreign functions take such structs
 ([R7](ownership.md#unsafe-code-and-raw-pointers)):
 
 <!-- file: examples/reference-attributes/repr.sisu -->
@@ -889,10 +892,7 @@ a C enum ([03](../../proposal/03-types-and-generics.md#algebraic-data-types)).
 
 **Stage 0 differs.** Stage 0 lays out every struct as C does, with or
 without `@repr(c)`. `Plain`'s derive asks for `@repr(c)` itself, so
-`@repr(python)` is refused as a struct without it (E0608), but it does
-not check for padding, which 22 allows no plain type: a `@repr(c)`
-struct of a `u8` and a `u32` derives `Plain`, and its `as_bytes` reads
-the padding. `@repr(u8)` on an enum is kept and changes nothing a safe
+`@repr(python)` is refused as a struct without it (E0608). `@repr(u8)` on an enum is kept and changes nothing a safe
 program can see, and a variant's value, `Red = 1`, is E0900
 ([R2](types.md#structs-and-enums)).
 
@@ -1179,10 +1179,11 @@ driver needs ([04](../../proposal/04-memory-and-ownership.md#resource-attributes
 nothing, and says so at each with W0030 (`resolve.unchecked-attribute`,
 [R17](diagnostics.md#w0030)), so that a program that writes one does
 not take the promise for a check; on a declaration other than a
-function each is W0026, as any misplaced attribute is. `@fix_inline`
-does nothing either, without a warning; the call of the deprecated
-`old_levels` warns (W0023), and `@float(fast)` keeps the arithmetic
-strict, which the permission allows:
+function each is W0026, as any misplaced attribute is. The call of
+the deprecated `old_levels` warns (W0023) with the fix that
+`@fix_inline` gives it ([Deprecation and
+migrations](#deprecation-and-migrations)), and `@float(fast)` keeps the
+arithmetic strict, which the permission allows:
 
 <!-- file: examples/reference-attributes/designed.sisu -->
 ```sisu
@@ -1375,12 +1376,41 @@ warning[W0023]: `Panel.width` is deprecated: use `width_cm`
 3 3
 ```
 
-**Stage 0 differs.** `@fix_inline` does nothing, since `sisu fix` is
-designed ([R16](sisu-command.md#sisu-fix)).
+`@fix_inline` on a deprecated function makes each call's warning carry
+a fix, `type.inline-call`, that writes what the function returns in the
+call's place, each parameter replaced by the call's argument, in
+parentheses where the argument is more than a name, a literal or a
+chain of calls and members. The body must be one `return` of an
+expression, of a free function whose parameters take no `mut` or `own`;
+another is W0033 (`type.fix-inline-body`, [R17](diagnostics.md#w0033))
+at the attribute, and its calls warn without the fix. A call gets no
+fix where the rewrite could mean something else: an argument with
+effects used other than once, or before the expression's other calls,
+a parameter's name bound again inside the expression, a default left
+out, or, in another module, a name the expression takes from the
+function's module. [sisu fix](sisu-command.md#sisu-fix) applies the
+fixes:
+
+<!-- file: examples/reference-attributes/inline_body.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-attributes/inline_body.console -->
+```console
+PLACEHOLDER
+```
+
+**Stage 0 differs.** D-067's `@fix_inline` moves a body of several
+statements into the caller, with its borrows, `own` arguments and
+`defer`, and rewrites methods too, where stage 0 rewrites a call of a
+free function whose body is one `return`; `sisu fix --deps`, which
+would apply the fixes in the packages that depend on a library, is
+designed ([R16](sisu-command.md#sisu-fix---edition-and---deps)).
 
 **Status.** `@deprecated` in stage 0
-([13](../../proposal/13-evolution-and-governance.md)), with the
-difference noted; `@fix_inline` leans (D-067).
+([13](../../proposal/13-evolution-and-governance.md)); `@fix_inline`
+in stage 0 with the differences noted, and leaning (D-067).
 
 ## Preview features
 
@@ -1533,6 +1563,7 @@ idea for later, and `@inline` has no design.
 | [W0022](diagnostics.md#w0022), [W0024](diagnostics.md#w0024), [W0026](diagnostics.md#w0026) | `resolve.unknown-attribute`, `resolve.misspelt-attribute`, `resolve.misplaced-attribute` | [Where an attribute may stand](#where-an-attribute-may-stand) |
 | [E0243](diagnostics.md#e0243), [E0244](diagnostics.md#e0244), [E0242](diagnostics.md#e0242), [E0235](diagnostics.md#e0235) | `resolve.not-derivable`, `resolve.derive-field`, `resolve.supertrait-missing`, `resolve.overlapping-impl` | [Deriving traits](#deriving-traits) |
 | [E0608](diagnostics.md#e0608) | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
+| [E0279](diagnostics.md#e0279), [E0280](diagnostics.md#e0280) | `resolve.plain-padding`, `resolve.plain-padding-end` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
 | E0250, E0251, [E0252](diagnostics.md#e0252), E0253 | `resolve.not-delegable`, `resolve.delegate-to`, `resolve.delegate-self`, `resolve.delegate-field` | [Delegating traits to a field](#delegating-traits-to-a-field) |
 | [E0417](diagnostics.md#e0417), [E0418](diagnostics.md#e0418) | `borrow.must-consume`, `borrow.must-consume-exit` | [Values that must be consumed](#values-that-must-be-consumed) |
 | [E0266](diagnostics.md#e0266), W0006, E0303 | `resolve.bad-cfg`, `resolve.unknown-feature`, `type.unknown-field` | [Conditional compilation](#conditional-compilation) |
@@ -1543,7 +1574,7 @@ idea for later, and `@inline` has no design.
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
 | [W0030](diagnostics.md#w0030) | `resolve.unchecked-attribute` | [Resource limits](#resource-limits) |
 | [E0448](diagnostics.md#e0448) | `resolve.float-attribute` | [Fast floating point](#fast-floating-point) |
-| [W0023](diagnostics.md#w0023), [W0025](diagnostics.md#w0025) | `type.deprecated`, `type.deprecated-plain` | [Deprecation and migrations](#deprecation-and-migrations) |
+| [W0023](diagnostics.md#w0023), [W0025](diagnostics.md#w0025), [W0033](diagnostics.md#w0033) | `type.deprecated`, `type.deprecated-plain`, `type.fix-inline-body` | [Deprecation and migrations](#deprecation-and-migrations) |
 | [W0028](diagnostics.md#w0028), [W0029](diagnostics.md#w0029) | `type.preview`, `type.preview-plain` | [Preview features](#preview-features) |
 | [E0900](diagnostics.md#e0900) | `stage0.unsupported` | [Names of types in diagnostics](#names-of-types-in-diagnostics) |
 | [E0225](diagnostics.md#e0225), E0240, E0701 | `resolve.std-only-attribute`, `resolve.sealed-trait`, `cap.internal` | [Attributes of the standard library](#attributes-of-the-standard-library) |

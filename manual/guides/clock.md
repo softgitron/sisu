@@ -9,7 +9,7 @@ tutorial.
 **See also:** the tutorial's
 [chapter 19](../tutorial/19-testing.md#a-clock-that-moves-when-every-task-waits)
 (the test clock) and
-[chapter 21](../tutorial/21-standard-library.md#time) (`std.time`); the
+[chapter 21](../tutorial/21-standard-library.md#time-that-does-not-drift) (`std.time`); the
 source of `std.time`, [`compiler/std/time.sisu`](../../compiler/std/time.sisu);
 the proposal's [17, Testing](../../proposal/17-testing.md#fixtures).
 
@@ -181,7 +181,7 @@ that passed and waits for the third.
 Code that measures how long its work took reads an `Instant` from the
 clock it was given, `Instant.now(clock)` of `std.time`, and asks its
 `elapsed(clock)` at the end
-([chapter 21](../tutorial/21-standard-library.md#time)). An `Instant`
+([chapter 21](../tutorial/21-standard-library.md#measuring-how-long-work-took)). An `Instant`
 reads the clock's monotonic time, which only goes forward, so on the
 real clock a change of the computer's time does not move it. Under the
 test clock the time it measures is what the test advanced, the same on

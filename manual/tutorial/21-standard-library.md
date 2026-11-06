@@ -2,7 +2,7 @@
 
 The standard library is a set of modules under `std`, which a program
 imports by name, as chapter 17 showed. This chapter visits the ones a
-program reaches for first, one section each, with one example: files
+program reaches for first, in sections of one example each: files
 and streams, time, randomness, the environment and other programs,
 JSON, regular expressions, collections, hashing, encodings, sorting
 and searching, and logging. Each section names the module's source,
@@ -107,7 +107,7 @@ A `Reader` gives bytes and a `Writer` takes them; `BytesReader` and
 `BufWriter` gathers small writes into larger ones. The source is
 [`compiler/std/io.sisu`](../../compiler/std/io.sisu).
 
-## Time
+## Time that does not drift
 
 `DateTime`, `Duration` and the clock are in the prelude. `std.time`
 adds two ways of keeping time over a `Clock` that do not drift: a
@@ -161,6 +161,8 @@ Both run in real time on `sys.clock` and at once on the test clock, so
 the same code is tested without waiting. The source is
 [`compiler/std/time.sisu`](../../compiler/std/time.sisu).
 
+## The parts of a moment
+
 A `DateTime` is a moment, and its methods give its parts in UTC, the
 calendar's and the clock's:
 
@@ -195,6 +197,8 @@ t.day_of_year()  # => 309
 `weekday()` counts as ISO 8601 does, 1 for Monday, so the 5th of
 November 2026 is a Thursday, and `day_of_year()` counts from 1 on the
 1st of January. `second()` and `nanosecond()` give the rest.
+
+## Measuring how long work took
 
 To measure how long something took, `std.time` has `Instant`, a
 reading of a clock:
@@ -242,6 +246,8 @@ test "two readings, and the time between them" ... ok
   move it, and on the test clock it is the test clock's own time,
   which moves only when the test advances it. The readings are the same
   on every run of a test, and a recorded run replays them.
+
+## Time zones
 
 A `DateTime` is in UTC. A `Zone` of `std.time` gives the time that the
 clocks of a place show:

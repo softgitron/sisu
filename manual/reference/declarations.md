@@ -264,6 +264,13 @@ module or in the body of a type, where it is read as `Type.NAME`.
   ([Compile-time and pure functions](#compile-time-and-pure-functions)).
 - A constant is not a pattern: `case LIMIT:` is E0391, and the test is
   a guard, `case n if n == LIMIT:`.
+- Every command that checks the program, `sisu check` among them,
+  computes each constant of the program's modules once the program has
+  no other error, and reports a failure at the constant's name: a panic
+  or a failed invariant is E0602 (`comptime.panicked`), a refinement
+  the value does not meet E0810, and the budget of steps spent E0603
+  ([R12](compile-time.md#budgets)). A constant that reaches a typed
+  hole is left alone, as the hole is.
 
 <!-- file: examples/reference-declarations/constants.sisu -->
 ```sisu
@@ -285,7 +292,23 @@ def main():
 Hei 80 (60, 160) 120
 ```
 
-**Status.** In stage 0.
+A constant that fails stops the program at the check, before it runs:
+
+<!-- file: examples/reference-declarations/const_checked.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-declarations/const_checked.console -->
+```console
+PLACEHOLDER
+```
+
+**Stage 0 differs.** Stage 0 computes each constant twice: once at the
+check, to report a failure, and again when the program first reads it,
+since the lowered program keeps the code that computes it.
+
+**Status.** In stage 0, with the difference noted.
 
 ## Functions
 

@@ -1,0 +1,6 @@
+11:2-11:12 W0033 type.fix-inline-body name="thrice"
+18:13-18:25 W0023 type.deprecated name="twice" reason="use `scaled`"
+  fix type.inline-call 18:13-18:25 "scaled(turns, 2)"
+18:28-18:41 W0023 type.deprecated name="thrice" reason="use `scaled`"
+18:44-18:60 W0023 type.deprecated name="twice" reason="use `scaled`"
+  fix type.inline-call 18:44-18:60 "scaled((turns + 1), 2)"

@@ -324,10 +324,41 @@ use instead. Attributes are data, as chapter 25 showed, and the
 compiler reads this one: each call of a deprecated function, and each
 use of a deprecated type, constant or variant, gets W0023
 (`type.deprecated`), a warning with the attribute's message, and the
-program still runs. A library will also mark such a wrapper
-`@fix_inline`, so that `sisu fix --deps` rewrites each caller to call
-the new function itself (D-067); until `sisu fix` exists, the warning
-tells each caller what to change.
+program still runs, so each caller can change at its own pace.
+
+## Letting the compiler rewrite the callers
+
+When the old function's body is one `return` of an expression, the
+compiler can make the change for each caller. Mark the wrapper
+`@fix_inline` as well, and each call's warning gets a fix that writes
+what the function returns in the call's place, with the call's
+arguments where its parameters were. `sisu fix` applies the fixes and
+writes the file:
+
+<!-- file: examples/28-code-that-lasts/inlined.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/28-code-that-lasts/inlined.console -->
+```console
+PLACEHOLDER
+```
+
+`sisu fix FILE` applies the first fix of each diagnostic of the file,
+checks it again, and stops when nothing is left to fix, with a line for
+each fix it made. `sisu fix --dry-run` prints the edits and leaves the
+file, which is the way to read them before you take them
+([R16](../reference/sisu-command.md#sisu-fix)). A `@fix_inline` whose
+body is more than one `return` gets W0033 (`type.fix-inline-body`), and
+its calls warn without the fix. The design also lets `sisu fix --deps`
+rewrite the calls in the packages that depend on a library (D-067),
+which waits for the registry.
+
+**Try it.** Add a call `to_celsius(sauna + 4.0)` to `main` and run
+`sisu fix --dry-run inlined.sisu`. The fix writes the argument in
+parentheses of its own, `celsius_of((sauna + 4.0))`, so that it keeps
+its meaning whatever the expression around it.
 
 ## Marking what may still change
 
@@ -533,10 +564,19 @@ what the test printed:
 
 This is how a library's next version can grow beside its old one: the
 new functions start as holes with tests, while the old ones keep their
-callers working. `sisu check --holes`, which will list every hole of a
-package with the functions that reach it, is designed in
-[10](../../proposal/10-tooling.md); its first part is in stage 1, and
-`sisu` does not run it yet.
+callers working. `sisu check --holes` lists each hole with what the code
+that fills it has to work with: the bindings in scope, the definitions
+of the types it names, and the tests that reach it:
+
+<!-- output: examples/28-code-that-lasts/holes.console -->
+```console
+PLACEHOLDER
+```
+
+Where a function has a contract, the report also gives its `requires`
+as what the code may assume and its `ensures` as what it must keep, and
+`--format=json` writes the same for a tool to read
+([R16](../reference/sisu-command.md#sisu-check---holes)).
 
 ## What is still to come
 
@@ -1009,14 +1049,15 @@ When every test passes, compare your answer with
 - A new error in an error set breaks each caller's `match` (E0314),
   which is how the compiler makes sure that no caller misses it.
 - An old name can stay as a wrapper over the new one; `@deprecated`
-  makes each call warn with its message (W0023), and `@fix_inline` will
-  let `sisu fix` rewrite the callers.
+  makes each call warn with its message (W0023), and `@fix_inline`
+  gives each call a fix that `sisu fix` applies.
 - `@preview("...")` marks an item that may still change, and each use
   warns with its text (W0028, or W0029 without one).
 - Habits from Python that would mean something else do not compile, and
   the diagnostics name the Sisu spelling (E0344, E0115, E0127).
 - Typed holes plan a change: the program compiles, W0001 lists what is
-  left, and the tests that reach a hole are blocked.
+  left, the tests that reach a hole are blocked, and `sisu check
+  --holes` says what each hole has to work with.
 
 That is the end of the tutorial. You can write a program in Sisu from
 its first line to its native build: values and functions, ownership,

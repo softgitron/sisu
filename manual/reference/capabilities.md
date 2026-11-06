@@ -140,7 +140,7 @@ HTTP and `Status(code)` a status other than `2xx`
 `monotonic()` of the `Clock` it is given, so a change of the system's
 time does not move it on the real clock, a recorded run replays it, and
 a test clock, whose monotonic time is its own time, makes it
-deterministic ([chapter 21](../tutorial/21-standard-library.md#time)).
+deterministic ([chapter 21](../tutorial/21-standard-library.md#measuring-how-long-work-took)).
 
 **Status.** In stage 0 (Q-51).
 

@@ -1,5 +1,3 @@
-$ sisu check --holes hello.sisu
-error[D0009]: unknown option `--holes` for `sisu check`
 $ sisu add json
 error[D0003]: unknown command `add`; run `sisu help`
 $ sisu remove json
@@ -10,8 +8,8 @@ $ sisu publish
 error[D0003]: unknown command `publish`; run `sisu help`
 $ sisu review main..HEAD
 error[D0003]: unknown command `review`; run `sisu help`
-$ sisu fix --edition 2030
-error[D0003]: unknown command `fix`; run `sisu help`
+$ sisu fix --edition 2030 hello.sisu
+error[D0009]: unknown option `--edition` for `sisu fix`
 $ sisu why send hello.sisu:3
 error[D0003]: unknown command `why`; run `sisu help`
 $ sisu fill hello.sisu

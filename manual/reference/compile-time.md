@@ -156,8 +156,9 @@ error[D0006]: the program was not run: errors found (2)
 
 Each `comptime` expression has a budget of 1,000,000 steps of the
 evaluator, counted in SIR's steps, so the count is the same on every
-machine and a build that fits its budget fits it everywhere.
-`@comptime_budget(steps=N)` on the function or the constant that holds
+machine and a build that fits its budget fits it everywhere. So does
+the computation of each constant, which every check of the program
+runs ([R3](declarations.md#constants)). `@comptime_budget(steps=N)` on the function or the constant that holds
 the expression gives it `N` instead
 ([R14](attributes.md#compile-time-budgets)). The budget belongs to the
 item that spends it, so a package that uses another never raises a
@@ -973,9 +974,8 @@ compiling. A feature is a package's named, additive part
 `sisu eval FILE [--to json|toml|yaml]` checks a module as `sisu check`
 checks a file, without its tests, evaluates each of its `const` items
 with the compile-time evaluator, in the order written, and writes them
-in the form `--to` names, JSON without it: one object, one table of
-`NAME = value` lines, or one mapping in block style, keyed by the
-constants' names. Sisu is so its own configuration language: the
+in the form `--to` names, JSON without it: one object, a TOML document,
+or one mapping in block style, keyed by the constants' names. Sisu is so its own configuration language: the
 module's types, refinements and invariants are the schema, and a value
 outside them fails with a diagnostic at the constant's name, as E0602
 for a failed invariant, with nothing written and status 1. The budget
@@ -989,9 +989,22 @@ of steps applies, since a configuration module is ordinary code
   out a field or a constant that holds nothing.
 - A list, a set and a tuple are sequences, a `dict` keyed by text or
   integers a mapping, and text is written in double quotes.
+- TOML writes the values that fit on a line first, `NAME = value`, in
+  the order written, and then each struct, `dict` or variant with
+  fields as a table, `[LIMITS]`, its fields of those kinds as tables
+  under it, `[LIMITS.retry]`, and a list whose every item is one as an
+  array of tables, a `[[SERVICES]]` header for each item. A list of
+  values, or one that mixes mappings with other values, stays on its
+  line.
 - A value the form cannot write, a function, a reference, an infinite
   float in JSON or a `None` in a list in TOML, is E0617
-  (`eval.no-form`, [R17](diagnostics.md#e0617)).
+  (`eval.no-form`, [R17](diagnostics.md#e0617)), at the constant's name,
+  and its message gives the path of the value from the constant:
+  `LIMITS.retry.backoff`, `MAYBE[0]`.
+
+Every command that checks a program computes its constants too, so
+`sisu check` reports the same failures as `sisu eval`, all but E0617,
+which only a form has ([R3](declarations.md#constants)).
 
 A constant may call the prelude's functions as code that runs does:
 `min` and `max`, of two values or of a collection, `abs`, `any`, `all`,

@@ -304,8 +304,8 @@ written in Sisu and compiled natively, which is the default for
 `parse` (`--shape` too), `repl` and `ws`, and the only one for `eval`,
 as `sisu help` says, and the Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
-lint`, `sisu audit --unsafe` and `sisu eval` are stage 1's alone, and
-the Rust front end refuses them; `sisu lsp` answers from both
+lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix` and `sisu check
+--holes` are stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from both
 ([sisu lsp](#sisu-lsp)). The other commands, and `run --watch` and
 `--defer-borrow`, `test --std` and `--defer-borrow`, and `check
 --diary` use the Rust front end whichever you choose. A program's
@@ -897,6 +897,7 @@ experiment ([17](../../proposal/17-testing.md); 18, Phase 6).
 ### sisu check
 
 - `sisu check [--format=human|ids] [--diary LOG] [PACKAGE OPTIONS] [FILE]`
+- `sisu check --holes [--format=human|json] FILE`
 
 `sisu check` reports the program's diagnostics without running it, and
 ends with status 1 if any is an error, 0 otherwise. A program without
@@ -914,6 +915,8 @@ diagnostics prints nothing.
   previous check that this one no longer has, with the edit that
   resolved it. It is the experiment's friction log (18, Phase 3); a log
   that cannot be written is D0013.
+- `--holes` reports the typed holes instead, each with what fills it
+  ([sisu check --holes](#sisu-check---holes)).
 
 <!-- file: examples/reference-sisu-command/broken.sisu -->
 ```sisu
@@ -957,6 +960,49 @@ the language server, `--watch` and the REPL keep what they checked,
 and recheck such an edit within the target.
 
 **Status.** In stage 0.
+
+### sisu check --holes
+
+- `sisu check --holes [--format=human|json] FILE`
+
+`sisu check --holes` reports each typed hole `todo("...")` of the
+program's own modules, by module and position, with what the code that
+fills it has to work with: the type its place needs and the function it
+is in; the bindings in scope, with their types; the expressions of its
+type, to depth two, a binding, a field of one, a method of one that
+takes nothing else, or a function of the program of one binding; each
+struct and enum of the program that its type names, with its fields or
+variants; its function's `requires` as what is given and `ensures` as
+what to keep; and the tests that reach it, the property test of its
+contract among them. `--format=json` writes the same as an array of
+one object for each hole. The status is 0, or 1 with `sisu check`'s
+report when the program has an error.
+
+<!-- file: examples/reference-sisu-command/holes.sisu -->
+```sisu
+PLACEHOLDER
+```
+
+<!-- output: examples/reference-sisu-command/holes.console -->
+```console
+PLACEHOLDER
+```
+
+A file that cannot be read is D0001, another option D0009, and no
+file, a directory or more than one path prints the command's usage
+(D0151). Without `--holes`, `sisu check` reports each hole as warning
+W0001, and `sisu test` reports a test that reaches one as blocked.
+
+**Stage 0 differs.** `sisu check --holes` is stage 1's, from `sisu1
+0.15.0`, and the whole report and `--format=json` from `sisu1 0.16.0`;
+the Rust front end answers it with D0009. 10's report also shows the
+values each test saw at the hole, which wait for `sisu test` to record
+them, and the bindings' capabilities, which their types show here.
+
+**Status.** In stage 0 (D-061; [10](../../proposal/10-tooling.md),
+"AI-assisted development"), with the differences noted. `sisu build
+--release` rejects a hole (E0445); `sisu publish`, which would too, is
+designed.
 
 ### sisu build
 
@@ -1062,7 +1108,9 @@ JSON, or as TOML or YAML with `--to`, keyed by their names, for a
 configuration file ([R12](compile-time.md#configuration-files) has the
 rules of each form). A constant whose evaluation stops is that error at
 its name, and one that holds a value the form cannot write is E0617;
-either way nothing is written and the status is 1.
+either way nothing is written and the status is 1. Without a file, or
+with a form it does not write, it prints its usage (D0151) with status
+2, as every command does whose usage stage 1 checks.
 
 <!-- file: examples/reference-sisu-command/settings.sisu -->
 ```sisu
@@ -2223,33 +2271,6 @@ $ sisu learn
 error[D0003]: unknown command `learn`; run `sisu help`
 ```
 
-### sisu check --holes
-
-`sisu check --holes` reports each typed hole `todo("...")` with its
-context: the expected type and the definitions of the types it
-mentions, the bindings in scope with their conventions and
-capabilities, the enclosing `requires` as facts and `ensures` as
-obligations, the tests that reach it with the values they saw, and the
-expressions that fit it, in a human form and a JSON form. `sisu build
---release` and `sisu publish` reject holes, `sisu audit` lists them and
-`sisu doc` marks the functions that contain one.
-
-**Stage 0 differs.** Stage 1 answers `check --holes FILE` from `sisu1
-0.15.0`, but the driver does not route it yet, so `sisu check --holes`
-is D0009, as [Commands that are designed](#commands-that-are-designed)
-shows. Stage 1's report is a part of 10's: for each hole of the
-program's own modules, by module and position, the hole, the type its
-place needs and the function it is in, then the bindings declared
-before it in its body, with their types (D0170 to D0172), and those of
-the hole's type (D0173, D0174). The definitions of the types, the
-`requires` and `ensures` around it, the tests that reach it, the
-expressions that fit to depth two and the JSON form wait. Until the
-driver routes it, stage 0 reports each hole as warning W0001, and `sisu
-test` reports a test that reaches one as blocked.
-
-**Status.** Designed (D-061; [10](../../proposal/10-tooling.md),
-"AI-assisted development"), with the differences noted.
-
 ### sisu add and sisu remove
 
 `sisu add PACKAGE` and `sisu remove PACKAGE` edit the manifest and the
@@ -2367,13 +2388,13 @@ open as Q-63.
 
 ## Diagnostics of the command line
 
-The driver's messages have codes D0001 to D0174. These are the ones that
+The driver's messages have codes D0001 to D0187. These are the ones that
 a command line can produce, by what they report:
 
 | Codes | Report |
 |---|---|
 | D0001, D0013 | A file that cannot be read or written. |
-| D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131) | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
+| D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131), [D0151](diagnostics.md#d0151) | The usage, a command's usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
 | [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114, [D0132](diagnostics.md#d0132) | A program with errors that did not run, was not documented, or was not compiled. |
 | D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135), [D0137](diagnostics.md#d0137) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed, the program a list is of. |
@@ -2390,7 +2411,8 @@ a command line can produce, by what they report:
 | D0064 to D0067, D0112 | Packages, lockfiles, workspaces and features. |
 | D0070 to [D0073](diagnostics.md#d0073) | `sisu build` and `sisu new`. |
 | D0139 to D0147, [D0148](diagnostics.md#d0148) | `sisu build --native --explain-size`. |
-| D0170 to D0174 | The lines of stage 1's `check --holes`, which `sisu check --holes` does not route yet ([sisu check --holes](#sisu-check---holes)). |
+| D0170 to D0174, D0180 to D0187 | The lines of `sisu check --holes` ([sisu check --holes](#sisu-check---holes)). |
+| D0175 to D0179 | The lines of `sisu fix` ([sisu fix](#sisu-fix)). |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |

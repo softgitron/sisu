@@ -1,0 +1,11 @@
+# A plain struct that C's layout pads at its end.
+from std.mem import Plain, size_of
+
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    value: i32
+    sensor: u8
+
+def main():
+    print("{size_of[Sample]()} bytes")

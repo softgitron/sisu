@@ -187,7 +187,7 @@ $ sisu run --native widths.sisu
   type of its width, `(-1i8).to_bits()` being `255u8`, and
   `i8.from_bits(255u8)` turns it back; the bit methods of a signed type
   are those of its two's complement
-  ([chapter 24](../tutorial/24-numbers.md#working-with-bits)).
+  ([chapter 24](../tutorial/24-numbers.md#counting-and-turning-bits)).
 
 <!-- file: examples/reference-types/integers.sisu -->
 ```sisu

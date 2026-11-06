@@ -1,0 +1,15 @@
+# Fields of its own make the bytes at the end the struct's.
+from std.mem import Plain, read_plain, size_of
+
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Sample:
+    value: i32
+    sensor: u8
+    _pad5: u8
+    _pad6: u16
+
+def main():
+    let data = b"\x2d\x00\x00\x00\x02\x00\x00\x00"
+    print("{size_of[Sample]()} bytes")
+    print("{read_plain[Sample](data, 0).sensor}")

@@ -1,0 +1,2 @@
+$ sisu check --holes schedule.sisu
+$ sisu check --holes --format=json schedule_read.sisu

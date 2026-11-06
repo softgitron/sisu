@@ -1,0 +1,9 @@
+# Each clause of `requires` is checked on entry, in the order written.
+def per_bench(guests: int, benches: int) -> int:
+    requires benches > 0
+    requires guests >= 0
+    return (guests + benches - 1) // benches
+
+def main():
+    print(per_bench(7, 3))
+    print(per_bench(-1, 0))

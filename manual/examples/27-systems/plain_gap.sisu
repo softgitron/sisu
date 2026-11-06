@@ -1,0 +1,13 @@
+# A plain struct may not have padding, which C's layout would put in.
+from std.mem import Plain, size_of
+
+## A sensor's number, its reading and its flags, in that order.
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    sensor: u8
+    value: i32
+    flags: u8
+
+def main():
+    print("{size_of[Sample]()} bytes")

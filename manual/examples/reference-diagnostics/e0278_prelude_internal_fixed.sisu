@@ -1,9 +1,5 @@
-# The program declares the function it needs.
-def days_in_month(year: int, month: int) -> int:
-    if month == 2:
-        let leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
-        return if leap: 29 else: 28
-    return if month in [4, 6, 9, 11]: 30 else: 31
+# The program imports the function from the module that has it.
+from std.time import days_in_month
 
 def main():
     print(days_in_month(2028, 2))

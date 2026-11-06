@@ -844,15 +844,19 @@ OPENS_AT = 16
 SAUNAS = [{ name = "Kota", degrees = 80 }, { name = "Savu", degrees = 75 }]
 ```
 
-A struct becomes a mapping of its fields and a list a sequence. A
-sauna at 130 degrees would stop the evaluation with E0602 at the
-constant's name, and nothing would be written.
+A struct becomes a mapping of its fields and a list a sequence; TOML
+writes a list of structs as an array of tables, a `[[SAUNAS]]` header
+for each sauna. A sauna at 130 degrees would stop the evaluation with
+E0602 at the constant's name, and nothing would be written. The check
+is not only `sisu eval`'s: every command that checks a program computes
+its constants, so `sisu check` and `sisu run` stop at such a constant
+too, before the program runs.
 [Generate configuration](../guides/config.md) renders a whole
 deployment this way, with each form and the values a form cannot
 write.
 
 **Try it.** Add `--to yaml`, then set Savu's heat to 130 and run
-`sisu eval` again.
+`sisu eval` and `sisu check` again.
 
 ## What is still to come
 
@@ -1289,7 +1293,7 @@ A byte of `data` is a `u8`, and a place in the table is an `int`; a
 
 The test of the table checks it against `count_ones()` too, the method
 of every integer that counts its bits ([chapter
-24](24-numbers.md#working-with-bits)). The exercise counts them itself
+24](24-numbers.md#counting-and-turning-bits)). The exercise counts them itself
 so that the compiler has a function of the program's own to run.
 
 When every test passes, compare your answer with

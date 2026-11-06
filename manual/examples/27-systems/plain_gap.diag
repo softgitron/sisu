@@ -1,0 +1,2 @@
+6:9-6:14 E0279 resolve.plain-padding ty="Sample" bytes="3" start="1" end="4" before="sensor: u8" after="value: i32"
+6:9-6:14 E0280 resolve.plain-padding-end ty="Sample" bytes="3" start="9" end="12" before="flags: u8"

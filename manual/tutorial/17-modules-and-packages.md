@@ -4,8 +4,8 @@ In this chapter a program grows past one file. Each file of a package
 is a module, each item is private to its module until it is `pub`, and
 `import` reaches the items of other modules. A package can use another
 as a library, choose its optional parts with features, and share a
-workspace with it. Last, you document a library for its users and take
-a first look at publishing one. Challenge III closes Part III. You need
+workspace with it. Last, you document a library for its users.
+Challenge III closes Part III. You need
 about two hours.
 
 ## A module for each file
@@ -143,7 +143,8 @@ and the core traits such as `Display` and `Iterator`
 ([R13](../reference/modules.md#names-every-module-sees) lists them).
 The prelude declares helpers of its own too, for the standard library's
 code, and a program that names one, such as `days_in_month`, is E0278
-(`resolve.prelude-internal`). Anything else is
+(`resolve.prelude-internal`), whose fix imports `days_in_month` from
+`std.time`, where it is public. Anything else is
 imported by name, so each file says where its names come from. An
 import that the file does not use is no error, and `sisu fmt` keeps
 it; `sisu lint` names it, W0027 (`lint.unused-import`), with a fix that
@@ -513,6 +514,11 @@ docs` puts the pages in the directory `docs`. Only `pub` items appear:
 the documentation is the library's API, and what is private is left
 out.
 
+Publishing a library to a registry, with `sisu publish` checking its
+API against the last version's, is designed in
+[09](../../proposal/09-modules-packages-and-build.md#the-registry) and
+waits for the registry (D-031).
+
 ## A workspace
 
 A library and the program that uses it are often developed together.
@@ -632,29 +638,6 @@ $ sisu run app -- poem.txt
 
 A program that grows into a workspace keeps its tests beside the code
 they test, in each member.
-
-## Publishing, a first look
-
-A library that others may use is published to a registry, which the
-compiler does not have yet: `sisu add`, which adds a dependency from
-the registry, and `sisu publish` are designed in
-[09](../../proposal/09-modules-packages-and-build.md#the-registry) and
-wait for it. Three things are planned to happen when you publish
-(D-031, D-066):
-
-- `sisu publish` compares the library's `pub` items with the last
-  version's. A change that breaks a user, such as a removed function
-  or a new required parameter, needs a new major version, and the
-  registry refuses it under a minor one.
-- The registry shows which capabilities the library's API takes. A
-  library whose functions take no `Fs`, `Net` or other capability, and
-  that is not in anyone's `[trust]`, can only compute.
-- A new library, or a new version of one, waits through a cooldown
-  before builds that admit new packages take it, so that a bad release
-  has time to be found.
-
-Documentation is part of a library's API: every `pub` item with a doc
-comment, and examples that run.
 
 ## Exercise 17.1: the sauna queue
 
@@ -1085,8 +1068,7 @@ When every test passes, compare your answer with
   have no cycles (E1007), and a library obeys the orphan rule (E0236).
 - `##!` and `##` document modules and items, their examples run as
   tests, and `sisu doc` writes a page for each module.
-- Publishing, with its API diff, capability summary and cooldown, waits
-  for the registry.
+- Publishing, with its API diff, waits for the registry.
 
 That is the end of Part III. You can give your types abilities with
 traits, write code once for many types, pass functions and pipelines

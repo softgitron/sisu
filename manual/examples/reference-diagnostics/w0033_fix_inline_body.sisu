@@ -1,0 +1,15 @@
+# A `@fix_inline` function whose body is more than one `return`.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`")
+@fix_inline
+def to_celsius(fahrenheit: f64) -> f64:
+    let celsius = celsius_of(fahrenheit)
+    return celsius
+
+def main():
+    print(to_celsius(212.0))

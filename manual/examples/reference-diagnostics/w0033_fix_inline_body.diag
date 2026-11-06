@@ -1,0 +1,2 @@
+9:2-9:12 W0033 type.fix-inline-body name="to_celsius"
+15:11-15:28 W0023 type.deprecated name="to_celsius" reason="use `celsius_of`"

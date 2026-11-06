@@ -1,0 +1,18 @@
+# `@fix_inline` rewrites the calls of a function whose body is a return.
+def scaled(n: int, by: int) -> int:
+    return n * by
+
+@deprecated("use `scaled`")
+@fix_inline
+def twice(n: int) -> int:
+    return scaled(n, 2)
+
+@deprecated("use `scaled`")
+@fix_inline
+def thrice(n: int) -> int:
+    let by = 3
+    return scaled(n, by)
+
+def main():
+    let turns = 4
+    print("{twice(turns)} {thrice(turns)} {twice(turns + 1)}")

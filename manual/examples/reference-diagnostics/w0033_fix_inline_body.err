@@ -1,0 +1,12 @@
+warning[W0033]: `@fix_inline` rewrites a call of `to_celsius` with the expression it returns, so its body is one `return`, and its parameters take no `mut` or `own`: its calls warn without the rewrite
+  --> w0033_fix_inline_body.sisu:9:2
+  |
+9 | @fix_inline
+  |  ^^^^^^^^^^
+
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`
+  --> w0033_fix_inline_body.sisu:15:11
+   |
+15 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+

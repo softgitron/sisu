@@ -9,7 +9,8 @@ deadline; a written specification decides disputes; and the language is
 governed by written rules. This page explains why the design spends so
 much on changing safely, what each mechanism costs, and what is still
 open. Most of it is designed rather than built: stage 0 knows one
-edition, and `sisu fix` and previews wait.
+edition, `sisu fix` applies the fixes of one program's own files, and
+editions' migrations and previews wait.
 
 **See also:** the reference's [R13, Modules, packages and the
 manifest](../reference/modules.md#editions), [R16, The sisu
@@ -17,7 +18,7 @@ command](../reference/sisu-command.md#sisu-fix) and [R19, False
 friends](../reference/false-friends.md); the tutorial's [chapter
 28](../tutorial/28-code-that-lasts.md) (code that lasts); the guide on
 moving to a new edition, G25 in the [list of
-guides](../README.md#the-guides), which waits for `sisu fix`; the
+guides](../README.md#the-guides), which waits for editions; the
 proposal's [13, Evolution and
 governance](../../proposal/13-evolution-and-governance.md),
 [10](../../proposal/10-tooling.md#migration) and
@@ -148,8 +149,10 @@ Sisu's version is harder than Go's, because the inliner must respect
 ownership: borrows, `own` moves and `defer` move into the caller's scope
 with the body. A major release's API diff then marks the removals that
 came with such a function as ones that migrate themselves. In stage 0
-the call in `main` gets a warning that quotes the attribute, W0023,
-and nothing reads `@fix_inline` yet, since `sisu fix` is designed.
+the call in `main` gets a warning that quotes the attribute, W0023, with
+a fix that writes `Temperature(80.0).fahrenheit()` in the call's place,
+and `sisu fix` applies it to the program's own file; the inliner of a
+body of several statements, and `--deps`, are designed.
 
 The standard library holds itself to a stricter rule. Nothing in `std`
 is ever removed: a deprecated item warns with its replacement named, and
