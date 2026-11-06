@@ -1,0 +1,38 @@
+# A program whose compile-time code reads attributes only through a
+# member's `attributes` (`f.attributes`, `v.attributes`) is not warned of
+# the attributes it reads with `W0022` (RULES.md, R171; R161).
+struct Booking:
+    @column("guest_name")
+    name: String
+    hour: int
+
+enum Heat:
+    @label("cold")
+    Low
+    High
+
+## Each field's column: its `@column` argument, or its own name.
+def columns[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for f in reflect.fields_of(T):
+        var column: str = f.name
+        comptime for a in f.attributes:
+            comptime if a.name == "column":
+                column = a.args[0]
+        out.push(column.to_string())
+    return out
+
+## Each variant's label, or its own name.
+def labels[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for v in reflect.variants_of(T):
+        var label = v.name
+        comptime for a in v.attributes:
+            comptime if a.name == "label":
+                label = a.args[0]
+        out.push(label.to_string())
+    return out
+
+def main():
+    print(columns[Booking]().join(", "))
+    print(labels[Heat]().join(", "))

@@ -6,6 +6,7 @@ answer 0
 COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	9:13-9:17
 answer 0
 COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	4:12-4:15	declaration
+COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	3:25-3:28	use
 COMPILER/stage1/cases/packages/query_modules.pkg/src/main.sisu	5:22-5:25	use
 COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	13:28-13:31	use
 COMPILER/stage1/cases/packages/query_modules.pkg/src/beds.sisu	14:13-14:16	use

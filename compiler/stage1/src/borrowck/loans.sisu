@@ -394,6 +394,34 @@ pub pure def overlap(a: Place, b: Place) -> bool:
                 pass
     return True
 
+## The operands of a call as its result may borrow them: a shared
+## reference to a `Slice` lends what the slice views, not the slice, which
+## holds no element of its own, so a slice of a slice made in one
+## expression (`towels.as_slice()[:2]`) borrows the list, not the
+## temporary first slice (decision 940; RULES.md, R172).
+pure def through_views(
+    f: Function, types: Types, args: list[Operand], ops: list[OpLoans]
+) -> list[OpLoans]:
+    var out: list[OpLoans] = []
+    for i in range(len(ops)):
+        var o = ops[i].copy()
+        if i < len(args):
+            match args[i]:
+                case Operand.Copy(x) | Operand.Move(x):
+                    if lends_view(types.place_ty(f, x)):
+                        o.holds = ops[i].inner.copy()
+                case _:
+                    pass
+        out.push(o)
+    return out
+
+## Whether a type is a shared reference to a `Slice`.
+pure def lends_view(t: Type?) -> bool:
+    if let Some(Type.Ref(inner, False)) = t:
+        if let Some(Type.Named(n, _)) = inner.first():
+            return n == "Slice"
+    return False
+
 pure def is_ref_mut(t: Type?) -> bool:
     if let Some(Type.Ref(_, True)) = t:
         return True
@@ -1089,7 +1117,8 @@ impl Analysis:
                 var callee_loans: OpLoans? = None
                 if let Callee.Value(o) = callee:
                     callee_loans = Some(self.op_loans(st, made, len(args), o))
-                let result = self.call_result(p, types, callee, ops, callee_loans)
+                let viewed = through_views(f, types, args, ops)
+                let result = self.call_result(p, types, callee, viewed, callee_loans)
                 # A callee may store an argument it takes by value (with
                 # `own`, or a view) through a `mut` one.
                 var kept: list[int]? = None

@@ -1,0 +1,17 @@
+query	inlay	query_assist.sisu	--dir	cases/findings20
+query	actions	query_assist.sisu	21	12	--dir	cases/findings20
+query	actions	query_assist.sisu	24	11	--dir	cases/findings20
+query	actions	query_assist.sisu	1	1	--dir	cases/findings20
+query	selection	query_assist.sisu	24	17	--dir	cases/findings20
+query	rename	query_assist.sisu	20	9	tally	--dir	cases/findings20
+query	rename	query_assist.sisu	20	9	def	--dir	cases/findings20
+query	rename	query_assist.sisu	24	5	put	--dir	cases/findings20
+query	format	query_assist.sisu	--dir	cases/findings20
+query	format	query_assist.sisu	--text	query_assist_broken.text	--dir	cases/findings20
+query	rename	query_assist.sisu	20	9	--dir	cases/findings20
+query	holes	holes.sisu	--dir	cases/findings20
+check	--holes	holes.sisu	--dir	cases/findings20
+check	--holes	--dir	cases/findings20
+build	--for-run	--emit-sir	slice_of_slice.sisu	--dir	cases/findings20
+build	--for-run	--emit-sir	prelude_internal.sisu	--dir	cases/findings20
+build	--emit-sir	slice_of_slice.sisu	--dir	cases/findings20

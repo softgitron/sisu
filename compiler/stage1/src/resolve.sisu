@@ -62,20 +62,48 @@ pub struct ModuleNames:
     pub traits: dict[String, dict[String, Signature]]
     ## The declarations that are error sets (R15).
     pub error_sets: set[String]
+    ## The declarations not marked `pub`, and whether any is: of the
+    ## prelude, those only the standard library's code names (09's fixed
+    ## list; RULES.md, R175).
+    pub internal: set[String]
+    pub marks_pub: bool
 
 impl ModuleNames:
     ## The names of a module that declares nothing.
     pub pure def empty() -> ModuleNames:
-        return ModuleNames(items=set(), types=set(), variants=set(), traits={}, error_sets=set())
+        return ModuleNames(
+            items=set(),
+            types=set(),
+            variants=set(),
+            traits={},
+            error_sets=set(),
+            internal=set(),
+            marks_pub=False,
+        )
 
     ## The names `tree`, the tree of `text`, declares at its top level.
     pub pure def of(text: str, tree: Tree) -> ModuleNames:
-        var names = ModuleNames(
-            items=set(), types=set(), variants=set(), traits={}, error_sets=set()
-        )
+        var names = ModuleNames.empty()
         for n in child_nodes(tree, tree.root):
             names.add_item(text, tree, n)
         return names
+
+    ## The names a program's module sees of this one as its prelude: when
+    ## it marks some declarations `pub`, those and not the others, which
+    ## stay in `internal` for `E0278` (RULES.md, R175); a prelude that marks
+    ## none shows all.
+    pub pure def visible(self) -> ModuleNames:
+        if not self.marks_pub:
+            var all = self.copy()
+            all.internal = set()
+            return all
+        var out = self.copy()
+        for n in self.internal:
+            _ = out.items.remove(n.copy())
+            _ = out.types.remove(n.copy())
+            _ = out.error_sets.remove(n.copy())
+            _ = out.traits.remove(n.copy())
+        return out
 
     pure def add_item(mut self, text: str, tree: Tree, n: int):
         let kind = tree.nodes[n].kind
@@ -95,6 +123,10 @@ impl ModuleNames:
             return
         if let Some((start, end)) = item_name(tree, n):
             let name = nfc(text.byte_slice(start, end))
+            if first_child(tree, n, SyntaxKind.Visibility).is_some():
+                self.marks_pub = True
+            else:
+                _ = self.internal.add(name.copy())
             if declares_type(kind):
                 _ = self.types.add(name.copy())
             if kind == SyntaxKind.TraitDef:
@@ -115,6 +147,12 @@ impl ModuleNames:
 pub struct Environment:
     pub prelude: ModuleNames
     pub std: dict[String, ModuleNames]
+
+impl Environment:
+    ## The environment a program's modules are resolved in: the prelude's
+    ## `pub` names (RULES.md, R175).
+    pub pure def for_programs(self) -> Environment:
+        return Environment(prelude=self.prelude.visible(), std=self.std.copy())
 
 ## The module of the standard library an import path names, as stage 0's
 ## `std_sources::module_for` maps them (`std.json`, and the short `json`).
@@ -357,12 +395,55 @@ pub pure def resolve(
         scopes=[Scope.new()],
         packages=[PackageNames(name=String.new(), deps=[], root=None)],
     )
-    var r = Resolver.new(text, tree, env, tables, 0, Scope.new(), False)
+    let seen = env.for_programs()
+    var r = Resolver.new(text, tree, seen, tables, 0, Scope.new(), False)
     r.declare_items()
     r.declare_imports()
     r.check_module()
-    r.check_attributes(text.contains("attributes_of"))
+    r.check_attributes(reads_attributes(text))
     return kept_diagnostics(text, syntax, r.diags, catalog)
+
+## Whether a module's text reads attributes at compile time: a call of
+## `reflect.attributes_of`, or a member's `attributes` (`f.attributes`,
+## `v.attributes`, RULES.md, R161 and R171), which `W0022` then leaves
+## unwarned.
+pub pure def reads_attributes(text: str) -> bool:
+    if text.contains("attributes_of"):
+        return True
+    var rest: str = text
+    while let Some(at) = rest.find(".attributes"):
+        let end = at + 11
+        if end >= rest.byte_len():
+            return True
+        let b = rest.byte_at(end).to_int()
+        let name = (b >= 48 and b <= 57)
+            or (b >= 65 and b <= 90)
+            or (b >= 97 and b <= 122)
+            or b == 95
+        if not name:
+            return True
+        rest = rest.byte_slice(end, rest.byte_len())
+    return False
+
+## The prelude's helpers that a std module has as a `pub` item, which
+## `E0278`'s fix imports from there (RULES.md, R175): none yet, since a
+## std module's new `pub` item changes its page, which the conformance
+## suite's `doc/std_pages` holds.
+const PRELUDE_HELPERS: list[(str, str)] = []
+
+## Where an import a fix adds goes: the start of the first line that is
+## not blank and not a comment (a module's `##!` text stays first).
+pure def import_offset(text: str) -> int:
+    var at = 0
+    while at < text.byte_len():
+        var end = at
+        while end < text.byte_len() and text.byte_at(end).to_int() != 10:
+            end += 1
+        let line = text.byte_slice(at, end).trim()
+        if not line.is_empty() and not line.starts_with("#"):
+            return at
+        at = end + 1
+    return min(at, text.byte_len())
 
 ## The diagnostics but those on a line with a syntax error, sorted.
 pure def kept_diagnostics(
@@ -409,6 +490,7 @@ pub pure def resolve_program(
     env: Environment,
     catalog: Catalog,
 ) -> list[list[Diagnostic]]:
+    let seen = env.for_programs()
     var tables = Tables(paths=[], packages_of=[], scopes=[], packages=[])
     for (name, deps) in packages:
         tables.packages.push(PackageNames(name=name.copy(), deps=deps.copy(), root=None))
@@ -423,7 +505,7 @@ pub pure def resolve_program(
     for i in range(len(modules)):
         let m = ref modules[i]
         let scope = tables.scopes[i].copy()
-        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        var r = Resolver.new(m.text, m.tree, seen, tables, i, scope, m.package != 0)
         r.declare_items()
         var declared = r.module
         # Only the root module's broken names are poisoned (stage 0's
@@ -447,7 +529,7 @@ pub pure def resolve_program(
     for i in range(len(modules)):
         let m = ref modules[i]
         let scope = tables.scopes[i].copy()
-        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        var r = Resolver.new(m.text, m.tree, seen, tables, i, scope, m.package != 0)
         r.collect_imports()
         r.declare_imports()
         let imported = r.module
@@ -462,7 +544,7 @@ pub pure def resolve_program(
     for i in range(len(modules)):
         let m = ref modules[i]
         let scope = tables.scopes[i].copy()
-        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        var r = Resolver.new(m.text, m.tree, seen, tables, i, scope, m.package != 0)
         r.collect_imports()
         r.declare_imports()
         let again = r.module
@@ -471,7 +553,7 @@ pub pure def resolve_program(
     # then data a name Sisu does not read may be (D-046).
     var reads = False
     for m in modules:
-        if m.text.contains("attributes_of"):
+        if reads_attributes(m.text):
             reads = True
     # Each module's bodies.
     var out: list[list[Diagnostic]] = []
@@ -479,7 +561,7 @@ pub pure def resolve_program(
         let m = ref modules[i]
         var scope = tables.scopes[i].copy()
         scope.poisoned = poisoned.copy()
-        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        var r = Resolver.new(m.text, m.tree, seen, tables, i, scope, m.package != 0)
         r.check_module()
         r.check_attributes(reads)
         for d in r.diags:
@@ -1515,6 +1597,19 @@ impl Resolver:
                 case Node(c):
                     self.error_names(c, inside or self.kind(c) == SyntaxKind.Error)
 
+    ## A name the prelude keeps for the standard library's code (`E0278`;
+    ## RULES.md, R175), with the import of the std module that has it as a
+    ## `pub` item as the fix, where one does.
+    pure def internal_name(self, name: str, start: int, end: int) -> Diagnostic:
+        let d = Diagnostic.new(Msg.ResolvePreludeInternal, start, end).with("name", name)
+        for (helper, path) in PRELUDE_HELPERS:
+            if helper == name:
+                let at = import_offset(self.text)
+                let edit = Edit(start=at, end=at, text="from {path} import {name}\n")
+                let param = Param(name="module".to_string(), value=path.to_string())
+                return d.fix_params(Msg.ResolveImportFromStd, [param], [edit])
+        return d
+
     ## A value name at token `t`, reported when nothing declares it.
     pure def use_name(mut self, t: int):
         let name = self.text_of(t)
@@ -1523,6 +1618,9 @@ impl Resolver:
         if self.broken.contains(name.copy()):
             return
         let token = self.tree.tokens[t]
+        if self.env.prelude.internal.contains(name.copy()):
+            self.diags.push(self.internal_name(name, token.start, token.end))
+            return
         var d = Diagnostic.new(Msg.ResolveUndefinedName, token.start, token.end).with("name", name)
         # Python's conversions, `int("42")` and `str(n)`, are methods here
         # (RULES.md, R45), and `uint` is no fix for `int`.
@@ -1866,6 +1964,9 @@ impl Resolver:
     pure def undefined_type(mut self, n: int, name: str):
         let node = ref self.tree.nodes[n]
         let (start, end) = (node.start, node.end)
+        if self.env.prelude.internal.contains(name.to_string()):
+            self.diags.push(self.internal_name(name, start, end))
+            return
         var candidates: list[String] = []
         for s in SCALARS:
             candidates.push(s.to_string())
@@ -2837,6 +2938,9 @@ impl Resolver:
                 if self.names_type(name):
                     return
                 let node = ref self.tree.nodes[n]
+                if self.env.prelude.internal.contains(name.to_string()):
+                    self.report(self.internal_name(name, node.start, node.end))
+                    return
                 let d = Diagnostic.new(Msg.ResolveUndefinedType, node.start, node.end)
                 self.report(d.with("name", name))
             case IndexExpr:
@@ -3069,7 +3173,10 @@ impl Resolver:
                 let known = if segments > 1: self.knows_value(name)
                     or self.knows_type(name) else: self.knows_type(name)
                 if not known and not self.module.poisoned.contains(name.to_string()):
-                    if self.annotation:
+                    if segments == 1 and self.env.prelude.internal.contains(name.to_string()):
+                        let at = ref self.tree.tokens[t]
+                        self.report(self.internal_name(name, at.start, at.end))
+                    elif self.annotation:
                         # Stage 0's checker names the whole path, and offers
                         # no fix.
                         let node = ref self.tree.nodes[n]
@@ -3210,3 +3317,9 @@ pure def and_list(names: list[String]) -> String:
             out.push(if i == len(names) - 1: " and " else: ", ")
         out.push(names[i])
     return out
+
+test "a member's attributes are read at compile time":
+    assert reads_attributes("comptime for f in reflect.fields_of(T):\n    let a = f.attributes\n")
+    assert reads_attributes("x = reflect.attributes_of(m)")
+    assert not reads_attributes("let n = self.attributes_count\n")
+    assert not reads_attributes("@route(\"/\")\ndef f():\n    pass\n")

@@ -1,0 +1,11 @@
+# A slice of a slice made in one expression views the list, as the first
+# slice does (decision 940), so it lives as long as the list's loan, not
+# the temporary first slice's (RULES.md, R172; the manual's chapter 12).
+def main():
+    let towels = ["blue", "green", "red", "white"]
+    let first_two = towels.as_slice()[:2]
+    print(len(first_two))
+    let middle = towels.as_slice()[1:][:2]
+    print("{middle[0]} {middle[1]}")
+    for t in towels.as_slice()[2:]:
+        print(t)

@@ -11672,3 +11672,53 @@ server"; D-085, D-086; 08, 10, 12, 22; decisions 188, 823, 864, 940, 941,
       on 1020 and 1021, whose widths each family that moves to the runtime
       in Sisu now reads with `value.int_at`. This changes no rule of the
       language.
+
+**Stage 1's twentieth round** (stage 1's RULES.md, R169 to R175; the language server's remaining queries and `check --holes` at 0.15.0, `build --for-run --emit-sir` served, `W0022` for member attributes, a slice of a slice, the evaluator's prelude intrinsics, the prelude's visible names and `E0278`)
+
+1000. `sisu1 query` also answers `rename FILE LINE COL NEW` (an edit per
+      reference, or `refused` with why), `actions` (each fix of the
+      diagnostics at the position with its edits), `inlay` (the type of a
+      local declared without one, an inferred error set, `mut` and `own`
+      at arguments), `selection` (the syntax ranges around a position,
+      innermost first), `format` (`fmt`'s change as runs of lines) and
+      `holes`, and a name in an import line is a reference of what it
+      imports, so that `sisu lsp` can answer every request from stage 1.
+      `sisu1 --version` is 0.15.0. Stage 1 decides it (RULES.md, R169).
+
+1001. `sisu1 build --for-run --emit-sir [PATH]` writes on standard output
+      the SIR `build --native --for-run` would hand its backend, with that
+      build's diagnostics, order and status, and `sir --repl-serve` serves
+      it, so that the driver can serve `sisu run` (decision 981). Stage 1
+      decides it (RULES.md, R170).
+
+1002. A member's `attributes` (`f.attributes`, `v.attributes`) is code
+      that reads attributes, as a call of `reflect.attributes_of` is, so
+      `W0022` does not warn of the attributes of a program that reads them
+      that way. Stage 1 decides it (RULES.md, R171).
+
+1003. What a call's result borrows through a shared reference to a
+      `Slice` is what the slice borrows, since a slice views its list in
+      place (decision 940): a slice of a slice made in one expression
+      borrows the list, not the temporary first slice, and is not
+      `E0406` when used on a later line. Stage 1 decides it (RULES.md,
+      R172).
+
+1004. The compile-time evaluator runs the prelude's `min`, `max`, `abs`,
+      `any`, `all`, `sorted`, `enumerate`, `zip`, `zip_shortest` and
+      `reversed` (and `max_of`, `min_of` through a derived `Ord`), as the
+      interpreter does, so a configuration's constants may call them.
+      Stage 1 decides it (RULES.md, R173).
+
+1005. `sisu1 check --holes FILE` lists each typed hole of the program
+      with its position, the type its place needs, its function, the
+      bindings in scope before it and those of its type (`D0170` to
+      `D0174`), and `query holes` answers the same; 10's types,
+      contracts, tests and fits to depth two wait. Stage 1 decides it
+      (RULES.md, R174).
+
+1006. The prelude marks `pub` the names 09's list and 11 give it, and a
+      program's module sees only those: a name of the prelude's own
+      helpers (`days_in_month`, `DrawState`, `max_of`, ...) is
+      `E0278`, with the import of a std module that has it as the fix
+      where one does, and completions offer the `pub` names. `Formatter`, `Spec` and `Hasher` stay visible: the traits
+      take them. Stage 1 decides it (RULES.md, R175).

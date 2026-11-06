@@ -1,0 +1,3 @@
+eval	config_prelude.sisu	--dir	cases/findings20
+eval	config_prelude.sisu	--to	toml	--dir	cases/findings20
+eval	config_prelude_refused.sisu	--dir	cases/findings20

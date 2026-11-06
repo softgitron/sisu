@@ -4,6 +4,6 @@ version = 1
 
 [[package]]
 name = "stage1"
-version = "0.14.0"
+version = "0.15.0"
 source = "path+."
 dependencies = []

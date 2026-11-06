@@ -229,6 +229,10 @@ E0276 error   resolve.dev-dependency      cannot import `{name}` here: `{package
 -     note    resolve.cfg-import-absent   `{name}` is imported under `@cfg({cfg})`, which this build leaves out: use it inside `if comptime {cfg}:`, a branch that is built only where the import is
 E0277 error   resolve.import-in-body      an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none
 -     fix     resolve.move-import         move it to the top of the module
+# Stage 1's (RULES.md, R175; 09, "Modules"): a name the prelude keeps for
+# the standard library's own code, which 09's fixed list leaves out.
+E0278 error   resolve.prelude-internal    `{name}` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
+-     fix     resolve.import-from-std     import it from `{module}`
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -1144,3 +1148,10 @@ D0148 cli     cli.explain-size-native     `--explain-size` explains the size of 
 # said only that it was for other code.
 D0149 cli     cli.token-module-run        the token is for the run of the tests of `{module}`; `sisu test --replay {token} {module}` replays it
 D0150 cli     cli.token-package-run       the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it
+# Stage 1's (RULES.md, R174; 10, "Holes", and D-061): `sisu check --holes`,
+# each typed hole with the type its place needs and the bindings in scope.
+D0170 cli     cli.hole                    {at}: the typed hole {hole} of type `{ty}`, in `{function}`
+D0171 cli     cli.hole-scope              in scope: {bindings}
+D0172 cli     cli.hole-scope-none         nothing is in scope
+D0173 cli     cli.hole-fits               of its type: {names}
+D0174 cli     cli.hole-fits-none          nothing in scope is of its type

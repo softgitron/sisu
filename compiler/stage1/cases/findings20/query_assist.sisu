@@ -1,0 +1,24 @@
+## The language server's other questions (RULES.md, R169): rename,
+## actions, inlay hints, selection ranges and formatting.
+
+error Empty:
+    NoItems
+
+## The sum of `xs`, or `NoItems` for none.
+def total(xs: list[int]) -> int !:
+    if xs.is_empty():
+        return Err(NoItems)
+    var sum = 0
+    for x in xs:
+        sum += x
+    return Ok(sum)
+
+def grow(mut xs: list[int], n: int):
+    xs.push(n)
+
+def main():
+    var counts = [1, 2, 3]
+    grow(counts, 4)
+    let doubled = counts.iter().map((c) -> c * 2).collect()
+    let first: int = doubled[ 0 ]
+    print(total(doubled) ?? first)

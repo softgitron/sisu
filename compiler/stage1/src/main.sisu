@@ -98,6 +98,7 @@ from stage1.diag import (
     Msg,
     Param,
     TextRange,
+    fix_text,
     quote,
     render_human,
     render_human_files,
@@ -146,7 +147,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.14.0"
+const VERSION: str = "0.15.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -507,6 +508,9 @@ def run_command(
             "files {n} check {ms(times.check)} ms lower {ms(times.lower)} ms ownership {ms(times.ownership)} ms ({counts})"
         )
         return Ok(())
+    if command == "check" and rest.contains("--holes"):
+        # `check --holes FILE` (10, "Holes"; RULES.md, R174).
+        return holes_command(sys, home, rest, catalog, mut o, served)
     if command == "check":
         # `--format=ids`: the conformance form on standard output; else
         # the human form on standard error, as `sisu check` prints them.
@@ -636,6 +640,11 @@ def run_command(
         # with the line that says it was not run (`D0006`, `D0021`), where a
         # build says it was not compiled (`D0132`; RULES.md, R57).
         let for_run = words.contains("--for-run")
+        # `--emit-sir` with `--for-run`: the SIR the build would hand its
+        # backend, on standard output, rather than built (RULES.md, R170).
+        let emit_sir = for_run and words.contains("--emit-sir")
+        if words.contains("--emit-sir") and not for_run:
+            return Err(Usage(text=usage()))
         let flags = [
             "--native",
             "--release",
@@ -643,6 +652,7 @@ def run_command(
             "--no-default-features",
             "--accept-unsafe",
             "--for-run",
+            "--emit-sir",
         ]
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
@@ -681,9 +691,11 @@ def run_command(
             return Err(Failed)
         let locked = words.contains("--locked")
         let accept = words.contains("--accept-unsafe")
-        let how = BuildHow(native=native, release=release, for_run=for_run)
+        let how = BuildHow(
+            native=native or emit_sir, release=release, for_run=for_run, emit_sir=emit_sir
+        )
         return build_command(
-            sys, home, path, how, (locked, accept), level, output, request, catalog
+            sys, home, path, how, (locked, accept), level, output, request, catalog, mut o, served
         )
     if command == "test":
         # `test [OPTIONS] [PATH]` (RULES.md, R27): the program checked and
@@ -2507,16 +2519,17 @@ def build_command(
     output: String?,
     request: FeatureRequest,
     catalog: Catalog,
+    mut o: Out,
+    served: Served,
 ) -> ! {IoError, CommandError}:
     # `--locked`, and `--accept-unsafe` (22).
     let (locked, accept) = lock
     var stopped = "cli.not-compiled"
     if how.for_run:
         stopped = "cli.errors-found"
-    var direct = Out.direct()
-    if not write_lockfile(sys, path, False, locked, accept, catalog, stopped, mut direct)?:
+    if not write_lockfile(sys, path, False, locked, accept, catalog, stopped, mut o)?:
         return Err(Failed)
-    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
     var env = base.environment()
     var programs: list[Input] = []
@@ -2526,7 +2539,7 @@ def build_command(
             for layout in layouts:
                 if layout.modules.is_empty():
                     # Manifests broken past reading a module: their problems.
-                    emit("", problems_report(layout, catalog).human(catalog))
+                    o.emit("", problems_report(layout, catalog).human(catalog))
                     failed = True
                     continue
                 programs.push(layout_input(sys, home, layout, False, mut env, catalog)?)
@@ -2535,7 +2548,7 @@ def build_command(
                 programs.push(input.copy())
     for input in programs:
         if not build_program(
-            sys, home, path, input, how, level, output, base, mut env, catalog, mut kept
+            sys, home, path, input, how, level, output, base, mut env, catalog, mut kept, mut o
         )?:
             failed = True
     if failed:
@@ -2548,6 +2561,8 @@ struct BuildHow:
     native: bool
     release: bool
     for_run: bool
+    ## The SIR written on standard output rather than built (R170).
+    emit_sir: bool
 
 ## A program built as stage 0's `sisu build` builds it, without its tests
 ## (decision 243): its diagnostics in the human form, and the build stopped
@@ -2573,6 +2588,7 @@ def build_program(
     mut env: Environment,
     catalog: Catalog,
     mut kept: Kept,
+    mut o: Out,
 ) -> bool ! IoError:
     let native = how.native
     let release = how.release
@@ -2599,7 +2615,7 @@ def build_program(
         let count = Param(name="count".to_string(), value="{errors}")
         errs.push(catalog.plain_error(stopped, [count]))
         errs.push(beyond)
-        emit("", errs)
+        o.emit("", errs)
         return Ok(False)
     # A release build rejects typed holes (D-061; RULES.md, R27): each is
     # an error where a debug build warns, and nothing is built.
@@ -2611,9 +2627,9 @@ def build_program(
             let count = Param(name="count".to_string(), value="{holes}")
             errs.push(catalog.plain_error(stopped, [count]))
             errs.push(beyond)
-            emit("", errs)
+            o.emit("", errs)
             return Ok(False)
-    emit("", warned.human(catalog))
+    o.emit("", warned.human(catalog))
     # A `comptime` expression that failed is an error of the program.
     let evaluation = r.evaluation()
     let failed = evaluation.errors(catalog)
@@ -2622,7 +2638,7 @@ def build_program(
         let count = Param(name="count".to_string(), value="{failed}")
         errs.push(catalog.plain_error(stopped, [count]))
         errs.push(beyond)
-        emit("", errs)
+        o.emit("", errs)
         return Ok(False)
     let ownership = r.ownership()
     let owned = ownership.errors(catalog)
@@ -2631,10 +2647,10 @@ def build_program(
         let count = Param(name="count".to_string(), value="{owned}")
         errs.push(catalog.plain_error(stopped_owned, [count]))
         errs.push(beyond)
-        emit("", errs)
+        o.emit("", errs)
         return Ok(False)
     if not beyond.is_empty():
-        emit("", beyond)
+        o.emit("", beyond)
         return Ok(False)
     var times = SirTimes(check=0, lower=0, ownership=0)
     let done = sir_of(sys, base, built, catalog, mut times, False, mut kept)
@@ -2642,8 +2658,14 @@ def build_program(
         var why = String.new()
         for b in done.beyond:
             why.push("beyond the slice: {b}\n")
-        emit("", why)
+        o.emit("", why)
         return Ok(False)
+    if how.emit_sir:
+        # What the backend would be handed, and nothing for a program
+        # without `main`, which the driver says it cannot run (R170).
+        if done.entry:
+            o.emit(done.sir, "")
+        return Ok(True)
     if not native or not done.entry:
         # The plain build: checked and lowered (a library has no `main` to
         # link).
@@ -2658,7 +2680,7 @@ def build_program(
                 Param(name="modules".to_string(), value="{built.own_modules}"),
             ]
             line = catalog.render("cli.built", params)
-        emit("{line}\n", "")
+        o.emit("{line}\n", "")
         return Ok(True)
     var exe = output_for(built.disk, built.package_name, built.build_root.copy(), release)
     if let Some(o) = output:
@@ -2675,11 +2697,11 @@ def build_program(
     let ran = sys.proc.run(sisu, backend)
     _ = sys.fs.remove(Path.new(sir_file))
     match ran:
-        case Ok(o):
-            emit(o.stdout, o.stderr)
-            return Ok(o.status == 0)
+        case Ok(ran_out):
+            o.emit(ran_out.stdout, ran_out.stderr)
+            return Ok(ran_out.status == 0)
         case Err(e):
-            emit("", "cannot run `{sisu}`: {e}\n")
+            o.emit("", "cannot run `{sisu}`: {e}\n")
             return Ok(False)
 
 ## A program held in memory, checked and lowered as `sisu run` builds it
@@ -2800,6 +2822,9 @@ def repl_serve(sys: System, given_home: str, catalog_file: str, given: Catalog) 
         var dir = cwd.copy()
         var words: list[String] = []
         var misused = not served_command(command) or args.contains("--repl-serve")
+        # A build is served when it hands its SIR back (RULES.md, R170).
+        if command == "build" and args.contains("--emit-sir") and args.contains("--for-run"):
+            misused = args.contains("--repl-serve")
         var k = 0
         while k < len(args):
             if not repl and args[k] == "--dir":
@@ -3126,12 +3151,19 @@ def query_command(
     if words.is_empty():
         return Err(Usage(text=usage()))
     let kind = words[0].copy()
-    let whole = kind == "diagnostics" or kind == "symbols"
+    let whole = kind == "diagnostics"
+        or kind == "symbols"
+        or kind == "inlay"
+        or kind == "format"
+        or kind == "holes"
     let at = kind == "hover"
         or kind == "definition"
         or kind == "references"
         or kind == "completions"
-    if not (whole and len(words) == 2) and not (at and len(words) == 4):
+        or kind == "selection"
+        or kind == "actions"
+    let renames = kind == "rename" and len(words) == 5
+    if not (whole and len(words) == 2) and not (at and len(words) == 4) and not renames:
         return Err(Usage(text=usage()))
     let file = words[1].copy()
     let text = sys.fs.read_to_string(Path.new(given ?? file.copy()))?
@@ -3139,19 +3171,123 @@ def query_command(
         o.emit(query.symbols(text, catalog), "")
         return Ok(())
     var offset = 0
-    if at:
+    if at or renames:
         let line = words[2].parse_int() else:
             return Err(Usage(text=usage()))
         let col = words[3].parse_int() else:
             return Err(Usage(text=usage()))
         offset = Lines.of(text).offset(text, line, col)
+    if kind == "selection":
+        o.emit(query.selection(text, offset, catalog), "")
+        return Ok(())
+    var new = String.new()
+    if renames:
+        new = words[4].copy()
+    if kind == "format":
+        # A base only where the file needs one, as `fmt` (RULES.md, R169).
+        let written = format.to_resolve(text, catalog)
+        var base = served.base.copy()
+        if base.is_none() and not written.is_empty():
+            base = Some(base_of(sys, home, std_texts(sys, home)?, catalog))
+        o.emit(query_format(base, text, written, catalog), "")
+        return Ok(())
     match served.base:
         case Some(b):
-            o.emit(query_answer(sys, home, kind, file, text, offset, b, catalog)?, "")
+            o.emit(query_answer(sys, home, kind, file, text, offset, new, b, catalog)?, "")
         case None:
             let base = base_of(sys, home, std_texts(sys, home)?, catalog)
-            o.emit(query_answer(sys, home, kind, file, text, offset, base, catalog)?, "")
+            o.emit(query_answer(sys, home, kind, file, text, offset, new, base, catalog)?, "")
     return Ok(())
+
+## `check --holes FILE` (10, "Holes"; D-061; RULES.md, R174): each typed
+## hole of the program that holds FILE (its package's, or the file's
+## alone), by module and position, with the type its place needs, the
+## function it is in, the bindings in scope before it and those of its
+## type, on standard output; a program with an error has its diagnostics
+## reported as `check` reports them instead, and fails.
+def holes_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> ! {IoError, UsageError, CommandError}:
+    var paths: list[String] = []
+    for k in range(1, len(rest)):
+        if rest[k] == "--holes":
+            continue
+        if rest[k].starts_with("--"):
+            let params = [
+                Param(name="option".to_string(), value=rest[k].copy()),
+                Param(name="command".to_string(), value="check".to_string()),
+            ]
+            o.emit("", catalog.plain_error("cli.unknown-option", params))
+            return Err(Failed)
+        paths.push(rest[k].copy())
+    if len(paths) != 1:
+        return Err(Usage(text=usage()))
+    let file = paths[0].copy()
+    let text = sys.fs.read_to_string(Path.new(file))?
+    var base = served.base.copy() ?? base_of(sys, home, std_texts(sys, home)?, catalog)
+    var env = base.environment()
+    let (input, at, _) = query_input(sys, home, file, text, mut env, catalog)?
+    let checked = check_input(base, input, catalog, True)
+    let typed = checked.typed else:
+        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o)
+    if checked.has_error:
+        return check_with(sys, home, file, False, build_request(sys), base, catalog, mut o)
+    var out = String.new()
+    for i in range(len(input.modules)):
+        let m = query_module(typed.prog, input, i)
+        if i > 0 and m == typed.prog.root:
+            continue
+        var name = input.modules[i].file.copy()
+        if i == at or name.is_empty():
+            name = file.copy()
+        let mtext = input.modules[i].text.copy()
+        let lines = Lines.of(mtext)
+        for h in query.holes(typed, [m]):
+            let (line, col) = lines.line_col(mtext, h.start)
+            var shown = "`todo()`".to_string()
+            if not h.name.is_empty():
+                shown = "`todo({quote(h.name)})`"
+            let params = [
+                Param(name="at".to_string(), value="{name}:{line}:{col}"),
+                Param(name="hole".to_string(), value=shown),
+                Param(name="ty".to_string(), value=h.ty.copy()),
+                Param(name="function".to_string(), value=h.function.copy()),
+            ]
+            out.push(catalog.render("cli.hole", params))
+            out.push("\n  ")
+            if h.scope.is_empty():
+                out.push(catalog.render("cli.hole-scope-none", []))
+            else:
+                var each: list[String] = []
+                for b in h.scope:
+                    each.push("`{b}`")
+                let ps = [Param(name="bindings".to_string(), value=each.join(", "))]
+                out.push(catalog.render("cli.hole-scope", ps))
+            out.push("\n  ")
+            if h.fits.is_empty():
+                out.push(catalog.render("cli.hole-fits-none", []))
+            else:
+                var each: list[String] = []
+                for b in h.fits:
+                    each.push("`{b}`")
+                let ps = [Param(name="names".to_string(), value=each.join(", "))]
+                out.push(catalog.render("cli.hole-fits", ps))
+            out.push("\n")
+    o.emit(out, "")
+    return Ok(())
+
+## `query format`: the edits that make `text` what `fmt` writes, one per
+## run of changed lines (`query.format_edits`), nothing for a text `fmt`
+## leaves as it is, and one line `refused\tsyntax` for a text with a
+## syntax error, `refused\tunstable` for one the formatter refuses as
+## changed (RULES.md, R169).
+pure def query_format(
+    base: typeck.Base?, text: str, written: list[String], catalog: Catalog
+) -> String:
+    return match format.format_file(base, text, written, catalog):
+        case Ok(out): query.format_edits(text, out)
+        case Err(Refusal.Syntax(_)): "refused\tsyntax\n".to_string()
+        case Err(Refusal.Changed(_)): "refused\tunstable\n".to_string()
 
 ## The answer of a `query` of `kind` at `offset` of `file`, whose text is
 ## `text`, checked against `base`.
@@ -3162,14 +3298,17 @@ def query_answer(
     file: str,
     text: str,
     offset: int,
+    new: str,
     base: typeck.Base,
     catalog: Catalog,
 ) -> String ! IoError:
     var env = base.environment()
     let (input, at, disks) = query_input(sys, home, file, text, mut env, catalog)?
-    if kind == "diagnostics":
+    if kind == "diagnostics" or kind == "actions":
         var kept = Kept.new()
         let r = report_of(base, input, file, catalog, mut kept)
+        if kind == "actions":
+            return Ok(query_actions(r, at, offset, catalog))
         return Ok(query_diagnostics(r, at, catalog))
     var program = input.copy()
     if kind == "completions":
@@ -3196,14 +3335,20 @@ def query_answer(
     let typed = checked.typed else:
         return Ok(String.new())
     let m = query_module(typed.prog, program, at)
+    if kind == "inlay":
+        return Ok(query.inlay(typed, m, text))
+    if kind == "holes":
+        return Ok(query.holes_answer(typed, m, text))
     let files = query_files(sys, home, typed.prog, program, disks, base)
     if kind == "hover":
-        return Ok(query.hover(typed, files, m, text, offset))
+        return Ok(query.hover(typed, files, m, text, offset, catalog))
     if kind == "definition":
-        return Ok(query.definition(typed, files, m, offset))
+        return Ok(query.definition(typed, files, m, offset, catalog))
     var programs: list[ModuleId] = []
     for i in range(len(program.modules)):
         programs.push(query_module(typed.prog, program, i))
+    if kind == "rename":
+        return Ok(query.rename(typed, files, programs, m, offset, catalog, new))
     return Ok(query.references(typed, files, programs, m, offset, catalog))
 
 ## The program that holds `file` (whose text is `text`, which stands for
@@ -3300,6 +3445,34 @@ pure def query_diagnostics(r: Report, at: int, catalog: Catalog) -> String:
         out.push(
             "{range}\t{catalog.code(d.msg)}\t{d.msg.id()}\t{severity}\t{query.field(message)}\n"
         )
+    return out
+
+## `query actions`: the fixes of the diagnostics `check` reports in the
+## program's file `at` whose range holds `offset`, in `check`'s order,
+## each with edits: a line `fix\tK\tTITLE\tRANGE\tCODE\tID` (K the fix's
+## index among its diagnostic's, 0 the one to prefer; TITLE the fix as the
+## human form writes it; RANGE, CODE and ID the diagnostic's), then a line
+## `edit\tRANGE\tTEXT` per edit, in the same file (RULES.md, R169).
+pure def query_actions(r: Report, at: int, offset: int, catalog: Catalog) -> String:
+    if at >= len(r.files):
+        return String.new()
+    let text = r.files[at].1.copy()
+    let lines = Lines.of(text)
+    var out = String.new()
+    for x in r.diags:
+        let d = ref x.diag
+        if x.file != at or offset < d.start or offset > d.end:
+            continue
+        let span = lines.span(text, d.start, d.end)
+        for k in range(len(d.fixes)):
+            let f = ref d.fixes[k]
+            if f.edits.is_empty():
+                continue
+            let title = query.field(fix_text(f, catalog))
+            out.push("fix\t{k}\t{title}\t{span}\t{catalog.code(d.msg)}\t{d.msg.id()}\n")
+            for e in f.edits:
+                let edited = lines.span(text, e.start, e.end)
+                out.push("edit\t{edited}\t{query.field(e.text)}\n")
     return out
 
 ## `eval FILE [--to json|toml|yaml]` (08, "Configuration files"; RULES.md,

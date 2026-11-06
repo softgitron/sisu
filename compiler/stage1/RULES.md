@@ -8637,3 +8637,422 @@ brought the case, and `check.sh` found what it changes.
 964. The conformance suite's `std/slices` differs from stage 0's front
      end, which has no `std.mem`, as `unsafe/cstring` does (R149). Stage 1
      decides it (RULES.md, R168).
+
+## R169. `query`'s other questions: rename, actions, inlay hints, selection ranges, formatting and holes, and the names of import lines (decision 1000)
+
+**The rule.** `sisu1 query` (R164) answers the rest of what the driver's
+language server answers from the Rust front end, so that `sisu lsp` can
+answer every request from stage 1: rename, code actions, inlay hints,
+selection ranges and formatting, and, for 10's "Holes", a file's typed
+holes. What the driver may rely on from 0.15.0, besides R164's forms,
+which keep their program, positions, fields, escapes, usage errors and
+serving:
+
+- `query rename FILE LINE COL NEW`: the edits that rename what the
+  position names to NEW, one line per line of `references` at the same
+  position (its declaration first, then its uses), `PATH\tRANGE\tNEW`;
+  or one line `refused\tREASON`: `refused\tnot-a-name` for a NEW that is
+  not a name (a keyword among them), `refused\tnot-renamable` where the
+  position names nothing the program's own packages declare (a name of
+  the standard library, a module, which a file names, or nothing). The
+  driver turns the lines into one workspace edit and the refusals into
+  its own messages (`LSP_NOT_A_NAME`, `LSP_CANNOT_RENAME`).
+- `query actions FILE LINE COL`: the fixes of the diagnostics `check`
+  reports in FILE whose range holds the position (its ends included), in
+  `check`'s order, each a line `fix\tK\tTITLE\tRANGE\tCODE\tID` (K the
+  fix's index among its diagnostic's, 0 the one to prefer; TITLE the fix
+  as the human form writes it after `= fix: `; RANGE, CODE and ID the
+  diagnostic's) followed by one line `edit\tRANGE\tTEXT` per edit, in
+  FILE. A fix without edits is left out. The driver asks it for the
+  start of the protocol's range.
+- `query inlay FILE`: the hints of FILE, by position, `POSITION\tKIND\tLABEL`:
+  `type`, `: T` after the name of a local whose declaration does not
+  write its type (a `let`'s, a `var`'s, a pattern's, a loop's, a
+  closure's parameter; not a function's parameter, nor a name starting
+  with `_`); `errors`, the error set a `T !` function infers, `{A, B}`,
+  after its return type; `mode`, `mut` or `own` before an argument given
+  to a parameter of that mode without the word, as the Rust front end's
+  `inlay_hints` gives them. The driver keeps those in the editor's range.
+- `query selection FILE LINE COL`: the ranges of the syntax around the
+  position, from the file's syntax tree alone (a file with a syntax error
+  has them too), innermost first, a line `RANGE` each, a node's range
+  without the blanks and line breaks it ends with, each range once, the
+  file's last (stage 0's `selection_ranges`).
+- `query format FILE`: what `fmt` would write, as edits of FILE's text
+  (`--text` for the buffer): one line per run of changed lines,
+  `RANGE\tTEXT`, the run's lines in the text as it is (a range that is
+  empty where lines are only inserted) and the lines that replace them,
+  from the longest common subsequence of the lines (stage 0's
+  `changed_runs`, so `rangeFormatting` keeps the runs inside its range);
+  nothing for a text `fmt` leaves as it is; `refused\tsyntax` for a text
+  with a syntax error and `refused\tunstable` for one the formatter
+  refuses as changed (`D0075`, `D0076` of `fmt`).
+- `query holes FILE`: FILE's typed holes, by position,
+  `RANGE\tNAME\tTYPE\tFUNCTION\tSCOPE\tFITS` (R174).
+- **The names of import lines** (R164's open item): a name of a `from`
+  line's imported names means the definition it imports (not the alias
+  after `as`, which declares a name of its own), and a name of an import
+  path the module it names, so `references` lists them, `rename` renames
+  them, and `hover` and `definition` answer at them. A module is declared
+  by its file: its `definition` is `PATH\t1:1-1:1`.
+
+```text
+$ sisu1 query actions query_assist.sisu 21 12
+fix	0	write `mut` before the argument: `mut `	21:10-21:16	E0339	type.mut-argument-missing
+edit	21:10-21:10	mut 
+$ sisu1 query rename query_assist.sisu 20 9 def
+refused	not-a-name
+```
+
+What the driver keeps: the protocol's JSON and its UTF-16 columns, the
+documents it holds, `prepareRename` (the `references` line at the
+position), the worksheets' inline values (`sir --worksheet`'s SIR, R95,
+run by stage 0's interpreter) and `sisu.explainBorrow`.
+
+**Why.** Item 1 of the round: decision 983 left selection ranges,
+formatting, rename, code actions and inlay hints to the Rust front end,
+and R164 left the names of import lines out of `references`.
+
+**In stage 1.** `query` (`target_of`, `in_import`, `path_names`,
+`module_by_path`, `module_def`, `import_meaning`, `is_name`, `rename`,
+`inlay`, `position`, `selection`, `split_lines`, `changed_runs`,
+`format_edits`; `references`, `hover` and `definition` through
+`target_of`; `declared` of a module), and `main` (`query_command`'s
+kinds, `query_format`, `query_actions`). `sisu1 --version` is 0.15.0.
+
+**What it changes.** No output of the corpus. The cases, asked through
+the server (class `served`): `cases/findings20/query_assist.requests`
+(`query_assist.sisu`, with its `.diag`: its hints, the fixes at two diagnostics and at a
+line without one, a selection, a rename, two refused, the formatting of
+the file and of `query_assist_broken.text`, and a usage error) and
+`cases/findings20/query_imports.requests` (the package
+`cases/packages/query_modules.pkg`: the references of `Bed` and
+`starting` with their import line, a rename from the import line, the
+hover there, the module `beds` of the import path, its refused rename).
+`cases/findings19/query_program.answers` is blessed again (the
+definition of `print` is at column 9 of the prelude's line, after R175's
+`pub`, and two completions no longer offer the prelude's `failing`), and `cases/findings19/query_modules.answers` (the references of
+`Bed` hold its import line's name). `query_assist.sisu`'s diagnostics
+differ from stage 0's by the fix `type.result-or` that stage 1 gives
+`E0371`.
+
+- Differs: `compiler/stage1/cases/findings20/query_assist.sisu`: ids, human, doc, doc-output
+
+**Decision 1000**, for docs/architecture.md:
+
+1000. `sisu1 query` also answers `rename FILE LINE COL NEW` (an edit per
+      reference, or `refused` with why), `actions` (each fix of the
+      diagnostics at the position with its edits), `inlay` (the type of a
+      local declared without one, an inferred error set, `mut` and `own`
+      at arguments), `selection` (the syntax ranges around a position,
+      innermost first), `format` (`fmt`'s change as runs of lines) and
+      `holes`, and a name in an import line is a reference of what it
+      imports, so that `sisu lsp` can answer every request from stage 1.
+      `sisu1 --version` is 0.15.0. Stage 1 decides it (RULES.md, R169).
+
+## R170. `build --for-run --emit-sir`: the SIR `sisu run` runs, served (decision 1001)
+
+**The rule.** `sisu1 build --for-run --emit-sir [--release]
+[--contracts=LEVEL] [--locked] [--features NAMES]
+[--no-default-features] [PATH]` is `build --native --for-run` up to the
+point where the build hands its backend the SIR, and writes that SIR on
+standard output instead of building it: the lockfile written as the
+build writes it, the program's diagnostics on standard error in the
+build's order (the front end's errors with `D0006`, a release build's
+holes, the warnings, a failed `comptime` expression's `D0006`, the
+ownership checker's `D0021`, and why a program is beyond the slice), and
+the status the build gives (1 at an error). A program without `main`
+writes nothing on standard output, with status 0, which the driver
+answers as it answers a SIR without an entry. `--native` is implied;
+`--emit-sir` without `--for-run` is a usage error, and `--output` has no
+file to name. `sir --repl-serve` serves this request (R158's frame, the
+words and `--dir` as any), and answers any other `build` as misused, as
+before. What the driver may rely on from 0.15.0: the request, its
+standard output, which is the text the backend run with `SISU_KEEP_SIR`
+would write (decision 268), and its standard error and status, which are
+`build --native --for-run`'s.
+
+```text
+$ printf 'build\t--for-run\t--emit-sir\thi.sisu\t--dir\t/work\n' | sisu1 sir --repl-serve
+answer 0 205 0
+```
+
+**Why.** Item 7 of the round: decision 981 left `sisu run` paying the
+base, because R158 answers a `build` as misused and the SIR comes from
+the backend's file.
+
+**In stage 1.** `main` (`build_command` and `build_program` print through
+the command's `Out`, take the served base, and stop at the SIR with
+`BuildHow.emit_sir`; the served check of the words).
+
+**What it changes.** No output of the corpus. The case:
+`cases/findings20/query_assist.requests` asks it of
+`slice_of_slice.sisu` (its SIR), of `prelude_internal.sisu` (its errors
+and `D0006`) and without `--for-run` (a usage error).
+
+**Decision 1001**, for docs/architecture.md:
+
+1001. `sisu1 build --for-run --emit-sir [PATH]` writes on standard output
+      the SIR `build --native --for-run` would hand its backend, with that
+      build's diagnostics, order and status, and `sir --repl-serve` serves
+      it, so that the driver can serve `sisu run` (decision 981). Stage 1
+      decides it (RULES.md, R170).
+
+## R171. `W0022` counts a member's `attributes` as code that reads attributes (decision 1002)
+
+**The rule.** A program whose compile-time code reads attributes is not
+warned with `W0022` of an attribute Sisu does not read (D-046): it is
+data that code may read. Such code is a call of `reflect.attributes_of`,
+and now also a member's `attributes`, `f.attributes` of a field and
+`v.attributes` of a variant (R161), written `.attributes` not followed by
+a letter, a digit or `_`. The message is as it was.
+
+**Why.** Item 3 of the round, the manual's eighteenth round: a program
+that reads attributes through `f.attributes` alone was warned of each
+attribute it reads, "it means nothing here" (R164's open item).
+
+**In stage 1.** `resolve` (`reads_attributes`, which `resolve` and
+`resolve_program` ask of each module's text).
+
+**What it changes.** The case `cases/findings20/member_attributes_read.sisu`
+(its `.out`: the columns and labels a template reads through
+`f.attributes` and `v.attributes`), which stage 0 refuses with `E0609` (a
+field has no `attributes` there, R161).
+
+- Differs: `compiler/stage1/cases/findings20/member_attributes_read.sisu`: ast, ids, human, doc, doc-output
+
+**Decision 1002**, for docs/architecture.md:
+
+1002. A member's `attributes` (`f.attributes`, `v.attributes`) is code
+      that reads attributes, as a call of `reflect.attributes_of` is, so
+      `W0022` does not warn of the attributes of a program that reads them
+      that way. Stage 1 decides it (RULES.md, R171).
+
+## R172. A slice of a slice made in one expression borrows the list (decision 1003)
+
+**The rule.** A shared reference to a `Slice` lends what the slice views,
+not the slice: a `Slice` holds no element of its own (decision 940: it
+views its list in place), so what a call's result borrows through such
+a reference (a slice of the slice, an element) is what the slice
+borrows. `let first_two = towels.as_slice()[:2]` borrows `towels`, not
+the temporary first slice, and lives as long as the loan of `towels`;
+`towels.as_slice()[1:][:2]` and `for t in towels.as_slice()[2:]` too.
+Where the first slice is a local, nothing changes. 04's rules ask that a
+borrow not outlive what it borrows; the temporary is not what the second
+slice borrows, so they allow it. A slice of a slice still cannot outlive
+the list (`E0407` when returned) nor let it change while it lives
+(`E0405`).
+
+**Why.** Item 4 of the round, the manual's eighteenth round (chapter 12:
+"`towels.as_slice()[:2]` is E0406 when used on a later line").
+
+**In stage 1.** `borrowck.loans` (`through_views`, `lends_view`, which
+`transfer` gives `call_result` for a call's operands).
+
+**What it changes.** The case `cases/findings20/slice_of_slice.sisu` (its
+`.out`), which stage 0 refuses with three `E0406`.
+
+- Differs: `compiler/stage1/cases/findings20/slice_of_slice.sisu`: ids, human
+
+**Decision 1003**, for docs/architecture.md:
+
+1003. What a call's result borrows through a shared reference to a
+      `Slice` is what the slice borrows, since a slice views its list in
+      place (decision 940): a slice of a slice made in one expression
+      borrows the list, not the temporary first slice, and is not
+      `E0406` when used on a later line. Stage 1 decides it (RULES.md,
+      R172).
+
+## R173. The compile-time evaluator runs the prelude's functions a constant reaches for (decision 1004)
+
+**The rule.** The compile-time evaluator (`interp`, which `eval`, a
+`comptime` expression and a constant's value use) runs, as stage 0's
+interpreter runs them:
+
+- `min` and `max` of two values (`@structural` in the prelude): numbers,
+  characters, text, tuples and lists, the first of two equal ones; NaN is
+  `R0017`'s panic. `max(xs)` and `min(xs)` of one collection go through
+  the prelude's `max_of` and `min_of` (R35), whose bodies now run with a
+  derived `Ord`'s `structural.cmp` and `list.remove`.
+- `abs` of an `int` (the least one overflows, `R0003`'s `abs(N)`), an
+  `f64` and an `f32`.
+- `any`, `all`, `sorted` (stable) and the prelude's `iterable_list`, of a
+  list, a set, a range or an iterator's items.
+- `enumerate`, `zip` (`R0012` for lengths that differ), `zip_shortest`
+  and `reversed`, as iterators of their items made up front, so that a
+  comprehension or a `for` takes them.
+
+A pass over the prelude's `@intrinsic` and `@structural` functions found
+no other one that a `const` or `comptime` expression of the corpus, the
+manual's examples or the proposal calls; `range`, `len` and `sum` the
+evaluator ran already. A template's compile-time code keeps R166's list.
+
+**Why.** Item 5 of the round, R165's open item: `max` and `min` in a
+constant that `eval` evaluates were beyond the slice.
+
+**In stage 1.** `interp` (`call_intrinsic`'s `min`, `max`, `abs`, `any`,
+`all`, `iterable_list`, `sorted`, `reversed`, `enumerate`, `zip`,
+`zip_shortest`, `structural.cmp` and `list.remove`; `items_of`;
+`InPlace.ListRemove`).
+
+**What it changes.** No output of the corpus. The cases, asked through the
+server: `cases/findings20/config_prelude.requests` (`eval` of
+`config_prelude.sisu`, a constant per group, in JSON and TOML, and of
+`config_prelude_refused.sisu`, `abs` of the least `int` and a `zip` of
+two lengths, each `E0602` at its constant); stage 0 refuses
+`max([4, 9, 2])` with `E0308`, a `max` of one list being R35's.
+
+- Differs: `compiler/stage1/cases/findings20/config_prelude.sisu`: ids, human, doc, doc-output
+
+**Decision 1004**, for docs/architecture.md:
+
+1004. The compile-time evaluator runs the prelude's `min`, `max`, `abs`,
+      `any`, `all`, `sorted`, `enumerate`, `zip`, `zip_shortest` and
+      `reversed` (and `max_of`, `min_of` through a derived `Ord`), as the
+      interpreter does, so a configuration's constants may call them.
+      Stage 1 decides it (RULES.md, R173).
+
+## R174. `sisu check --holes`: each typed hole with its type and the bindings that fit it (decision 1005)
+
+**The rule.** `sisu1 check --holes FILE` (10, "Holes"; D-061) checks the
+program that holds FILE (its package's, or the file alone, as `query`
+finds it, R164) with its tests, and prints on standard output each typed
+hole of the program's own modules, by module and position:
+
+```text
+holes.sisu:18:20: the typed hole `todo("risky")` of type `int`, in `Task.padded`
+  in scope: `self: ref Task`, `risky: bool`, `base: int`
+  of its type: `base`
+```
+
+the hole as `R0013` names it, the type its place needs, the function it
+is written in, the bindings of its body declared before it with their
+types (`D0172`, "nothing is in scope", for none) and those whose type,
+past a reference, is the hole's (`D0174`, "nothing in scope is of its
+type", for none). The new messages are `D0170` to `D0174` (`cli.hole`,
+`cli.hole-scope`, `cli.hole-scope-none`, `cli.hole-fits`,
+`cli.hole-fits-none`), numbered past stage 0's last so that the two
+rounds do not meet. A program with an error is reported as `check`
+reports it, status 1; another option is `D0009`, no path or more than
+one a usage error. `query holes FILE` answers the same, a line per hole
+(R169). `sir --repl-serve` serves both. What the driver may rely on from
+0.15.0: the command, its output and its status; the routing of `sisu
+check --holes` (`D0009` today) is stage 0's next round.
+
+**Decided against**, for the round, of 10's report: the definitions of
+the types the hole mentions, the `requires` and `ensures` around it, the
+tests that reach it with their values, the expressions that fit to depth
+two and the JSON form (the query's fields are the language server's).
+The tests' values need the tests run, which is `sisu test`'s; the rest
+is a round's work of its own over this report.
+
+**Why.** Item 6 of the round: the manual's "Tooling" finding lists `sisu
+check --holes` as `D0009`.
+
+**In stage 1.** `query` (`Hole`, `holes`, `hole_order`, `function_name`,
+`holes_answer`), `main` (`holes_command`, `query holes`) and the
+catalog.
+
+**What it changes.** No output of the corpus. The case
+`cases/findings20/holes.sisu`, asked through the server by
+`cases/findings20/query_assist.requests` (`query holes`, `check --holes`,
+and `check --holes` without a path).
+
+**Decision 1005**, for docs/architecture.md:
+
+1005. `sisu1 check --holes FILE` lists each typed hole of the program
+      with its position, the type its place needs, its function, the
+      bindings in scope before it and those of its type (`D0170` to
+      `D0174`), and `query holes` answers the same; 10's types,
+      contracts, tests and fits to depth two wait. Stage 1 decides it
+      (RULES.md, R174).
+
+## R175. The prelude's visible names: what it marks `pub` (decision 1006)
+
+**The rule.** 09 gives the prelude "a fixed, documented list of names, the
+same in every module", and 11's `std.core` row adds the traits, the error
+sets, the capability and task types and the functions; the manual's
+reference ("Names every module sees") lists them. The prelude now marks
+those declarations `pub`, 142 of them: the builtin and library types, the
+capabilities and their operations' traits and types (`FsOps`,
+`Metadata`, `Timer`, ...), the traits and the types their methods name
+(`Formatter` and `Spec` of `Display` and `Debug`, `Hasher` of `Hash`,
+`Draws` of `Arbitrary`), the error sets, the task and channel types, and
+the functions 11 lists with `todo`, `unreachable`, `channel`,
+`unbounded_channel`, `embed`, `arbitrary`, `exhaustive` and `check`, and
+`iterable_list`, which the conformance suite's `run/iterable_rest` calls
+(decision 235). The 43 others are its own, for the standard library's code: the calendar's
+and the clock's helpers (`days_in_month`, `days_from_civil`,
+`civil_from_days`, `time_digits`), the iterators' (`iter_from`,
+`iter_of`, `max_of`, `min_of`, `list.sort_by`'s
+`merge_runs`, `max_by`'s `ordered_keys`, `is_continuation`, `within_ulps`), the
+property tests' (`DrawState`, `Failure`, `Outcome`, `Panicked`, `catch`,
+`case_seed`, `replay_case`, `record_case`, `run_case`, `failing`,
+`without`, `replaced`, `simpler`, `shrink`, `next_prefix`, `shown`), the
+adapters' structs (`Take`, `Skip`, `Enumerate`), the host's objects
+(`HostFs` to `HostListener`) and the transcripts' world
+(`TranscriptWorld`, `transcript_world`, `transcript_system`).
+
+A program's module (the program's packages and its dependencies; not the
+standard library's, nor the modules the compiler writes) sees the
+prelude's `pub` names only. A name it writes that the prelude declares
+without `pub` is the new `E0278`, `resolve.prelude-internal`:
+"`days_in_month` is the prelude's own, for the standard library's code:
+a program sees only the names it marks `pub` (09)", where it was found
+before; where a std module has the helper as a `pub` item
+(`PRELUDE_HELPERS`), the fix imports it from there
+(`resolve.import-from-std`, "import it from `std.time`", an import
+before the module's first line of code). No std module has one yet: a
+`pub` `days_in_month` appended to `std.time` changes that module's page,
+which the conformance suite's `doc/std_pages` holds, so it waits for the
+suite's owner. A prelude that marks no declaration `pub` (the unit
+tests' small ones) shows them all, as before. Completions (R164) offer
+the prelude's `pub` names only, so `DrawState` is no longer offered.
+Lookups the compiler makes in the prelude by name (`iter_from`, `max_of`
+of `max(xs)`, `Lookup`, ...) are not a program's and are unchanged.
+
+**Decided against**: hiding `Formatter`, `Spec` and `Hasher`, which the
+finding names: `Display.fmt`, `Debug.fmt_debug` and `Hash.hash` take
+them, so a program that implements those traits writes them (13 cases of
+the conformance suite do), and `std.fmt` names them as the prelude's.
+And hiding `iterable_list`, whose conformance case would stop (the gate
+of the suite holds it); and, for the round, a std module's `pub` copy of
+a helper (above).
+
+**Why.** Item 2 of the round, the manual's finding under "Syntax and
+names" ("the prelude is wider than 09's fixed list") and R164's open
+item (completions offered every prelude name).
+
+**In stage 1.** `resolve` (`ModuleNames.internal`, `marks_pub` and
+`visible`, `Environment.for_programs`, which `resolve` and
+`resolve_program` resolve against, `internal_name`, `PRELUDE_HELPERS`,
+`import_offset`, `E0278` where a value or a type name was `E0200` or
+`E0201`), `query` (`scope`), `diag` and the catalog (`E0278` and its fix,
+after `E0277`), and `std/prelude.sisu`'s `pub` words.
+
+**What it changes.** The case `cases/findings20/prelude_internal.sisu`
+(its `.diag`: `days_in_month`, `DrawState` as a type and `max_of`), and
+what it broke in the corpus:
+
+- `compiler/conformance/cases/run/iterable_rest.sisu` calls `iterable_list`
+  itself to take what is left of an iterator given to an `Iterable[T]`
+  parameter (decision 235): hidden, it was `E0278` and the suite's run
+  of it failed, so `iterable_list` stays `pub` (above).
+- `proposal/examples/concurrency.sisu` writes `list[Outcome]` for its own
+  outcome type, which the example does not declare (its text names it),
+  and stage 0 took it for the prelude's `Outcome` of the property tests:
+  `E0278` there now, beside the example's `E0201`, `E0200` and `E0432`.
+- The manual's examples name none of the helpers; the manual's reference
+  ("Names every module sees", "Stage 0 differs") says what changed.
+
+- Differs: `compiler/stage1/cases/findings20/prelude_internal.sisu`: names, ids, human, doc, doc-output
+- Differs: `proposal/examples/concurrency.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1006**, for docs/architecture.md:
+
+1006. The prelude marks `pub` the names 09's list and 11 give it, and a
+      program's module sees only those: a name of the prelude's own
+      helpers (`days_in_month`, `DrawState`, `max_of`, ...) is
+      `E0278`, with the import of a std module that has it as the fix
+      where one does, and completions offer the `pub` names. `Formatter`, `Spec` and `Hasher` stay visible: the traits
+      take them. Stage 1 decides it (RULES.md, R175).

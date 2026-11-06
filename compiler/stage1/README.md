@@ -181,7 +181,8 @@ sisu run -- profile FILE                    # the time lexing, parsing and each 
 sisu run -- audit --unsafe [--std] [PATH]   # the program's unsafe code by package and module, with the lints (below, "Unsafe code")
 sisu run -- lint [--format=ids] [PATH]      # `sisu lint`: the program's lints, which `check` does not print (below, "The manual's findings")
 sisu run -- test [OPTIONS] [PATH]           # the tests, built by stage 1 and run by stage 0's runner, with R27's status (below, "The third round")
-sisu run -- query KIND FILE [LINE COL] [--text PATH]  # the language server's questions of a file and a position, as tab-separated lines (RULES.md, R164)
+sisu run -- query KIND FILE [LINE COL [NEW]] [--text PATH]  # the language server's questions of a file and a position, as tab-separated lines (RULES.md, R164, R169)
+sisu run -- check --holes FILE              # each typed hole with its type and the bindings in scope that fit it (R174)
 sisu run -- eval FILE [--to json|toml|yaml] # a configuration module's constants, evaluated at compile time and written as JSON, TOML or YAML (R165)
 ./sisu1 (check | sir | build | run | fmt | doc | audit | lint | test) [PATH] ...  # stage 1 as the compiler's front end, from anywhere
 ```
@@ -2778,6 +2779,48 @@ Stage 1's version is 0.14.0: the driver may rely on `query` and `eval`
 (R164, R165). The new cases are in `cases/findings19/` and
 `cases/packages/query_modules.pkg`.
 
+### The twentieth round: the language server's other answers, the prelude's names, `W0022`, a slice of a slice, the evaluator's prelude, `check --holes`, `sisu run` served
+
+This round took what the driver's language server still answered from
+the Rust front end, the manual's finding on the prelude's width and its
+eighteenth round's two, R165's and R164's open items, 10's `check
+--holes`, and decision 981's served `sisu run`. RULES.md has the rules
+(R169 to R175, decisions 1000 to 1006) and their decision texts:
+
+- **The language server's other answers** (R169): `query rename`,
+  `actions`, `inlay`, `selection`, `format` and `holes`, and the names
+  of import lines among a definition's references, so that `sisu lsp`
+  can answer every request but the worksheets' values from stage 1.
+- **`sisu run` served** (R170): `build --for-run --emit-sir` writes the
+  SIR the build would hand its backend on standard output, with the
+  build's diagnostics, and the server answers it.
+- **`W0022` and members' attributes** (R171): `f.attributes` and
+  `v.attributes` are code that reads attributes.
+- **A slice of a slice** (R172): what a call borrows through a reference
+  to a `Slice` is what the slice borrows, so `towels.as_slice()[:2]`
+  borrows `towels`.
+- **The evaluator's prelude** (R173): `min`, `max`, `abs`, `any`, `all`,
+  `sorted`, `enumerate`, `zip` and `reversed` in a constant.
+- **`check --holes`** (R174): each typed hole with its type, its
+  function, the bindings in scope and those of its type.
+- **The prelude's visible names** (R175): the prelude marks `pub` the
+  names 09 and 11 give it, a program that names one of its 43 helpers is
+  `E0278`, and completions offer the `pub` names.
+
+Decided against: hiding `Formatter`, `Spec` and `Hasher`, which the
+traits' methods take, and `iterable_list`, which a conformance case calls
+(R175), and 10's report of a hole beyond its type
+and bindings (R174). Open: the driver's routing of the new queries, of
+`check --holes` and of `sisu run` through R170, which is stage 0's; the
+worksheets' inline values and `sisu.explainBorrow`, which the driver
+keeps; a hole's types, contracts, tests and fits (R174); a keyword
+argument's name among a field's references; and compile-time types
+(R155).
+
+Stage 1's version is 0.15.0: the driver may rely on the queries of R169,
+the request of R170 and `check --holes` (R174). The new cases are in
+`cases/findings20/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2828,7 +2871,7 @@ Stage 1's version is 0.14.0: the driver may rely on `query` and `eval`
 | `mutants` | 204 | a seeded generator and the mutations of stage 0's robustness test; the files laid out otherwise that the formatters are compared on | `sisu-driver/src/tests.rs` |
 | `main` | 3761 | the command line, and the driver: `check` in both forms, the SIR of a whole program (with its tests, `--tests`), `build --native` through stage 0's backend, `fmt`, `doc`, `audit --unsafe`, `lint` (R11), the packages' `unsafe` levels (R6), and the cache of the base beside the native executable | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check`, `sir`, `build`, `fmt` and `doc` |
 | `session` | 188 | the programs of `sisu repl` and `sisu ws` (R79): an input wrapped to be shown, a loaded file's preamble, a worksheet's markers | `sisu-driver/src/repl.rs`'s `Entry`, `split_preamble` and `evaluate_sheet` |
-| `query` | 841 | the language server's questions (R164): what a position names, its hover text, declaration and uses, the completions there, and a file's declarations, as tab-separated lines | `sisu-driver/src/lsp.rs` and `assist.rs` |
+| `query` | 1333 | the language server's questions (R164, R169): what a position names (an import line's names among them), its hover text, declaration and uses, the completions there, a file's declarations, a rename's edits, the inlay hints, the selection ranges, the formatter's edits, and the typed holes (R174), as tab-separated lines | `sisu-driver/src/lsp.rs` and `assist.rs` |
 | `config` | 396 | `eval` (R165): a configuration module's constants as data, written as JSON, TOML or YAML | stage 1's own (08) |
 | `naming` | 107 | the case each kind of name is written in, and a name written so (R12) | stage 1's own (02) |
 | `audit` | 420 | `audit --unsafe` (R7): the unsafe code of a program by package and module, with the modules' hashes | stage 1's own (22) |
@@ -3611,6 +3654,14 @@ a `.` checks the program twice (with the `.` and without it), and a
 search of references parses each module of the program's own packages
 again for its names.
 
+The twentieth round's questions (R169) cost the same: served, a rename of
+a local in the 24-line `cases/findings20/query_assist.sisu` takes 0.014 s
+of wall time (the mean of 30 after the first request, which makes the
+base, 0.29 s), its inlay hints 0.009 s, at a load of 2 to 4 on four
+cores; a rename is a search of references, which parses each module of
+the program's own packages again and now each import line's module path
+too. `check --holes` as a process takes 0.29 s, a `check`'s cost.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3807,7 +3858,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     against for the round: UAX #29's rules beyond the tables (R167); left:
     compile-time types (R155), the sharing of instances with
     `--explain-size`, and `W0022` of an attribute read only through
-    `f.attributes`. The tenth round took a variant's
+    `f.attributes`. The twentieth round took `W0022` of members'
+    attributes (R171), a slice of a slice in one expression (R172), the
+    prelude's functions in a constant (R173), `sisu check --holes` (R174)
+    and the prelude's width (R175); decided against: hiding `Formatter`,
+    `Spec` and `Hasher`, which the traits take (R175); left: compile-time
+    types (R155), the sharing of instances with `--explain-size`, and 10's
+    report of a hole past its type and bindings (R174). The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

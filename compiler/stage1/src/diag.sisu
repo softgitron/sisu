@@ -129,6 +129,8 @@ pub enum Msg:
     ResolveCfgImportAbsent
     ResolveImportInBody
     ResolveMoveImport
+    ResolvePreludeInternal
+    ResolveImportFromStd
     ParseHigherKinded
     TypeTotalOrder
     TypeBinaryOperator
@@ -747,6 +749,8 @@ impl Msg:
             case ResolveCfgImportAbsent: "resolve.cfg-import-absent"
             case ResolveImportInBody: "resolve.import-in-body"
             case ResolveMoveImport: "resolve.move-import"
+            case ResolvePreludeInternal: "resolve.prelude-internal"
+            case ResolveImportFromStd: "resolve.import-from-std"
             case ParseHigherKinded: "parse.higher-kinded"
             case TypeTotalOrder: "type.total-order"
             case TypeBinaryOperator: "type.binary-operator"

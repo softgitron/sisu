@@ -1,0 +1,24 @@
+# `sisu check --holes` (RULES.md, R174; 10, "Holes"): each typed hole with
+# the type its place needs, the function it is in, the bindings in scope
+# before it, and those of them of its type.
+struct Task:
+    name: String
+    hours: int
+
+## The task a line of the plan names.
+def parse_task(line: str, default_hours: int) -> Task:
+    let name = line.trim().to_string()
+    return todo("parse_task")
+
+impl Task:
+    ## The task's hours, doubled for a risky one.
+    def padded(self, risky: bool) -> int:
+        let base = self.hours
+        if risky:
+            return todo("risky")
+        return base
+
+def main():
+    let t = parse_task("write", 2)
+    print(t.padded(False))
+    print(todo[str]())

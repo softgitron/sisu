@@ -1,0 +1,4 @@
+21:10-21:16 E0339 type.mut-argument-missing param="xs"
+  fix type.add-mut 21:10-21:10 "mut "
+24:11-24:25 E0371 type.coalesce ty="int ! Empty"
+  fix type.result-or 24:25-24:29 ".or(" 24:34-24:34 ")"

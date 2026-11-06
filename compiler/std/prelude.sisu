@@ -30,17 +30,17 @@
 ## ever hold a valid one (03, "Strings and text"; the methods of `str` read
 ## and cut them). Views as `str` wherever a `str` is expected.
 @builtin("String")
-struct String:
+pub struct String:
     pass
 
 ## A growable sequence, the type of `[a, b]`.
 @builtin("list")
-struct list[T]:
+pub struct list[T]:
     pass
 
 ## The integer types, `int` and the sized ones (03, "Numbers"): what
 ## `truncate_to` converts to.
-trait Integer:
+pub trait Integer:
     ## `n` reduced to the type's width, as two's complement wrapping does.
     pure def wrapping_from(n: int) -> Self
 
@@ -49,39 +49,39 @@ trait Integer:
 ## writes an element, checked against the length as a list's index is;
 ## nothing adds or removes one.
 @builtin("Array")
-struct Array[T, const N: int]:
+pub struct Array[T, const N: int]:
     pass
 
 ## A hash map iterating in insertion order (D-074), the type of `{k: v}`.
 @builtin("dict")
-struct dict[K, V]:
+pub struct dict[K, V]:
     pass
 
 ## A hash set iterating in insertion order, the type of `{a, b}`.
 @builtin("set")
-struct set[T]:
+pub struct set[T]:
     pass
 
 ## An iterator the host drives: over a collection, a range, the pieces of
 ## a string. Its adapters (`map`, `filter`, `take`, ...) are `Iterator`'s,
 ## written in Sisu below, and run their functions only as items are taken.
 @builtin("Iter")
-struct Iter[T]:
+pub struct Iter[T]:
     pass
 
 ## A slot of a dict, from `dict.entry`.
 @builtin("Entry")
-struct Entry[K, V]:
+pub struct Entry[K, V]:
     pass
 
 ## Anything a `for` loop can iterate whose items are `T` (a parameter type only).
 @builtin("Iterable")
-struct Iterable[T]:
+pub struct Iterable[T]:
     pass
 
 ## A file system path. A string literal becomes a `Path` where one is expected.
 @builtin("Path")
-struct Path:
+pub struct Path:
     pass
 
 ## The sized integers (03, "Numbers"), for layouts, protocols and FFI;
@@ -94,44 +94,44 @@ struct Path:
 ## conversions are methods (`int.to_u8`, `u8.to_int`), the narrowing ones
 ## giving `None` for a value that does not fit.
 @builtin("u8")
-struct u8:
+pub struct u8:
     pass
 
 @builtin("u16")
-struct u16:
+pub struct u16:
     pass
 
 @builtin("u32")
-struct u32:
+pub struct u32:
     pass
 
 @builtin("u64")
-struct u64:
+pub struct u64:
     pass
 
 @builtin("u128")
-struct u128:
+pub struct u128:
     pass
 
 @builtin("i8")
-struct i8:
+pub struct i8:
     pass
 
 @builtin("i16")
-struct i16:
+pub struct i16:
     pass
 
 @builtin("i32")
-struct i32:
+pub struct i32:
     pass
 
 @builtin("i128")
-struct i128:
+pub struct i128:
     pass
 
-type i64 = int
+pub type i64 = int
 
-type uint = u64
+pub type uint = u64
 
 ## IEEE 754 binary32 (03, "Numbers"), for layouts, graphics and audio;
 ## `f64` is the default float. Floating point is strict (D-074): each
@@ -142,14 +142,14 @@ type uint = u64
 ## `f64` where one is expected, which loses nothing; `x.to_f32()` rounds
 ## the other way. Like `f64` it is `PartialOrd` and not `Ord` or `Hash`.
 @builtin("f32")
-struct f32:
+pub struct f32:
     pass
 
 ## An immutable owned sequence of bytes (03, "Strings and text"): the type
 ## of `b"..."` and of what a connection reads. It views as `Slice[u8]`
 ## where one is expected; `b[i]` is a byte and `b[i:j]` a copy of a run.
 @builtin("bytes")
-struct bytes:
+pub struct bytes:
     pass
 
 ## A read-only view of a run of values (a `list[T]`, or `bytes` as
@@ -157,14 +157,14 @@ struct bytes:
 ## Unlike `str`, a `Slice` is not `Copy` in stage 0 (it is passed by
 ## reference, as a `list` is).
 @builtin("Slice")
-view struct Slice[T]:
+pub view struct Slice[T]:
     pass
 
 ## A point in civil time, in UTC, to the nanosecond (from 1677 to 2262).
 ## `t - u` is the `Duration` from `u` to `t`; `t + d` and `t - d` move a time
 ## by a `Duration`.
 @builtin("DateTime")
-struct DateTime:
+pub struct DateTime:
     pass
 
 ## The file system capability (06, "Capabilities"): a `Copy` handle on an
@@ -176,38 +176,38 @@ struct DateTime:
 ## (`Lent[Fs]`), being a view, never becomes a handle. The same holds for
 ## each capability below and its operations trait.
 @builtin("Fs")
-struct Fs:
+pub struct Fs:
     pass
 
 ## The network capability: TCP connections and listeners (`NetOps`).
 @builtin("Net")
-struct Net:
+pub struct Net:
     pass
 
 ## The clock capability: the time, and timers to wait for (`ClockOps`).
 @builtin("Clock")
-struct Clock:
+pub struct Clock:
     pass
 
 ## The randomness capability (`RandOps`).
 @builtin("Rand")
-struct Rand:
+pub struct Rand:
     pass
 
 ## The environment capability: arguments and variables (`EnvOps`).
 @builtin("Env")
-struct Env:
+pub struct Env:
     pass
 
 ## The process capability: running other programs (`ProcOps`).
 @builtin("Proc")
-struct Proc:
+pub struct Proc:
     pass
 
 ## The standard input capability: the lines the program is given
 ## (`StdinOps`).
 @builtin("Stdin")
-struct Stdin:
+pub struct Stdin:
     pass
 
 ## The root of all capabilities, constructed by the runtime only when
@@ -216,7 +216,7 @@ struct Stdin:
 ## 17). Its fields are the root objects of the host, which no code can
 ## make. `System.fake(seed)` is a set of fakes in the same shape.
 @builtin("System")
-struct System:
+pub struct System:
     fs: Fs
     net: Net
     clock: Clock
@@ -262,7 +262,7 @@ struct HostStdin:
 ## waits: then it moves to the earliest timer, as the other virtual clocks
 ## do. A `Copy` handle; it becomes a `Clock` where one is expected.
 @builtin("TestClock")
-struct TestClock:
+pub struct TestClock:
     pass
 
 ## A `Copy` handle on a value that every copy shares (06: "a fake's state
@@ -273,7 +273,7 @@ struct TestClock:
 ## must-consume, and changing it goes through a `Mutex` inside. A `Cap[T]`
 ## is `Send` and `Sync` when `T` is `Sync`.
 @builtin("Cap")
-struct Cap[T]:
+pub struct Cap[T]:
     pass
 
 ## A capability lent for the length of a call (06; Q-51): a view of the
@@ -283,13 +283,13 @@ struct Cap[T]:
 ## type `Fs`, which can be stored, does not. A `Copy` view, at no run-time
 ## cost: it is the handle.
 @builtin("Lent")
-view struct Lent[T]:
+pub view struct Lent[T]:
     pass
 
 ## An owned value on the heap (04, rule 7). Methods and fields of the value
 ## are reached through it (its own field, `boxed`, is the value), and a
 ## `Box[dyn Trait]` holds a value of any type that implements the trait.
-struct Box[T]:
+pub struct Box[T]:
     boxed: T
 
 ## Shared ownership (04, rule 5): a reference-counted pointer to a value
@@ -303,13 +303,13 @@ struct Box[T]:
 ## site whose values can reach another task counts atomically, the others
 ## do not (docs/architecture.md, "Shared atomicity").
 @builtin("Shared")
-struct Shared[T]:
+pub struct Shared[T]:
     pass
 
 ## A handle on a `Shared` value that does not keep it alive; it breaks the
 ## cycles a graph of `Shared` would leak (04, rule 5).
 @builtin("Weak")
-struct Weak[T]:
+pub struct Weak[T]:
     pass
 
 ## A value tasks share and change one step at a time (06; 11's sync
@@ -318,13 +318,13 @@ struct Weak[T]:
 ## that no other task interleaves with. `Shared(Atomic(0))` is a counter
 ## tasks share. An `Atomic` is `Send` and `Sync` when its value is `Send`.
 @builtin("Atomic")
-struct Atomic[T]:
+pub struct Atomic[T]:
     pass
 
 ## The memory orders of the C++11 model, which atomics follow (06). The
 ## runtime runs one task at a time, so every atomic operation is one step
 ## of the program and each order acts as `SeqCst`.
-enum MemoryOrder:
+pub enum MemoryOrder:
     Relaxed
     Acquire
     Release
@@ -335,7 +335,7 @@ enum MemoryOrder:
 ## no reference into it is ever given out, so replacing it invalidates none.
 ## A `Cell` is never `Sync`: tasks cannot share one.
 @builtin("Cell")
-struct Cell[T]:
+pub struct Cell[T]:
     pass
 
 ## Mutual exclusion over a value the mutex owns (06, "Send, Sync, and shared
@@ -348,12 +348,12 @@ struct Cell[T]:
 ## mutex is poisoned and every later `lock` panics; if it holds, or the type
 ## has none, the mutex unlocks.
 @builtin("Mutex")
-struct Mutex[T]:
+pub struct Mutex[T]:
     pass
 
 ## The lock on a `Mutex`, from `Mutex.lock`; `guard.value` is the value.
 @builtin("MutexGuard")
-struct MutexGuard[T]:
+pub struct MutexGuard[T]:
     pass
 
 ## A collection of `T` addressed by `Key[T]` handles (04, "What this
@@ -362,13 +362,13 @@ struct MutexGuard[T]:
 ## removed is stale: `get` gives `None` and `arena[key]` panics, so a stale
 ## handle is detected at use, never dangling.
 @builtin("Arena")
-struct Arena[T]:
+pub struct Arena[T]:
     pass
 
 ## A handle into an `Arena[T]`: the slot and its generation when the value
 ## was inserted.
 @derive(Copy, Eq, Hash)
-struct Key[T]:
+pub struct Key[T]:
     index: int
     generation: int
 
@@ -377,7 +377,7 @@ struct Key[T]:
 ## written at a greater `depth`, where the spec does not apply to them. A
 ## leaf value written at depth 0 applies the whole spec itself and clears
 ## it; what is left of it pads the whole text when the interpolation ends.
-struct Formatter:
+pub struct Formatter:
     out: String
     spec: String
     depth: int
@@ -416,7 +416,7 @@ impl Formatter:
 ## digits after the point of a float and the most characters of a text; the
 ## type is `d`, `x`, `X`, `o` or `b` for an integer, `f`, `F`, `e`, `E` or `%`
 ## for a number, and `?` for the `Debug` text.
-struct Spec:
+pub struct Spec:
     fill: char
     align: char?
     sign: char?
@@ -687,7 +687,7 @@ impl Spec:
     pure def strftime(t: DateTime, pattern: str) -> String
 
 ## What `Hash` feeds a value's parts into.
-struct Hasher:
+pub struct Hasher:
     state: int
 
 impl Hasher:
@@ -698,14 +698,14 @@ impl Hasher:
 # ------------------------------------------------------------------ traits
 
 ## Text for a program's users: what `print` and `"{x}"` write (03, "Strings").
-trait Display:
+pub trait Display:
     ## Writes the value's text to `f`.
     pure def fmt(self, mut f: Formatter)
 
 ## Text for programmers: what `"{x:?}"` writes, the value the way it is
 ## written. Every type has `Debug` (11): a struct or enum without its own
 ## impl gets the derived one.
-trait Debug:
+pub trait Debug:
     pure def fmt_debug(self, mut f: Formatter)
 
     ## The derived impl (08, "Derive"), which the compiler runs for a type:
@@ -743,7 +743,7 @@ trait Debug:
                                     f.write(")")
 
 ## Equality: `==` and `!=` (02, "Expressions").
-trait Eq:
+pub trait Eq:
     pure def eq(self, other: Self) -> bool
 
     ## The derived impl: equal when the variants are and the fields are.
@@ -771,7 +771,7 @@ trait Eq:
 
 ## A partial order: `<`, `<=`, `>` and `>=`. `f64` has only this one, since
 ## NaN is unordered (03, "Numbers").
-trait PartialOrd:
+pub trait PartialOrd:
     pure def partial_cmp(self, other: Self) -> Ordering?
 
     ## The derived impl: by variant in declaration order, then field by
@@ -808,7 +808,7 @@ trait PartialOrd:
                                                 return Some(Greater)
 
 ## A total order, for sorting, `min` and `max`.
-trait Ord(Eq, PartialOrd):
+pub trait Ord(Eq, PartialOrd):
     pure def cmp(self, other: Self) -> Ordering
 
     ## The derived impl: by variant in declaration order, then field by
@@ -845,7 +845,7 @@ trait Ord(Eq, PartialOrd):
                                                 return Greater
 
 ## Hashing, for `dict` keys and `set` elements.
-trait Hash(Eq):
+pub trait Hash(Eq):
     pure def hash(self, mut h: Hasher)
 
     ## The derived impl: the fields' hashes in order, after the variant's
@@ -867,7 +867,7 @@ trait Hash(Eq):
 ## A value to start from, `T.default()` (D-051: nothing is made without
 ## being given its value; a type that has a natural first value says so
 ## with this trait).
-trait Default:
+pub trait Default:
     pure def default() -> Self
 
     ## The derived impl (08, "Derive"): the struct with each field's own
@@ -887,19 +887,19 @@ trait Default:
                     )
 
 ## A number of items, `len(x)`.
-trait Len:
+pub trait Len:
     pure def len(self) -> int
 
 ## A collection that can tell whether it holds a value: `x in xs` is
 ## `xs.contains(x)` (02), for the builtin collections and for any type
 ## that implements it.
-trait Contains[T]:
+pub trait Contains[T]:
     pure def contains(self, x: T) -> bool
 
 ## Values that are copied rather than moved (04, rule 1); `@derive(Copy)`
 ## opts a type in when all its fields are `Copy`.
 @marker
-trait Copy:
+pub trait Copy:
     pass
 
 ## Values that may move to another task (06, "Send, Sync, and shared
@@ -910,30 +910,30 @@ trait Copy:
 ## one; a reference `ref T` is `Send` when `T` is `Sync`, `ref mut T` when
 ## `T` is `Send`.
 @marker
-trait Send:
+pub trait Send:
     pass
 
 ## Values that tasks may share through references: inferred like `Send`.
 ## A `Cell` is never `Sync`; a `Mutex[T]` and a channel half are when `T`
 ## is `Send`; a `Shared[T]` is `Send` and `Sync` when `T` is `Sync`.
 @marker
-trait Sync:
+pub trait Sync:
     pass
 
 ## Values that may leave the frame that made them: whatever holds no
 ## reference or view (04, "Views").
 @marker
-trait Escapable:
+pub trait Escapable:
     pass
 
 ## The numbers `sum` and `abs` work on.
 @sealed
-trait Num:
+pub trait Num:
     pass
 
 ## Runs when a value's owner goes out of scope, before its fields are
 ## dropped (04, rule 6).
-trait Drop:
+pub trait Drop:
     def drop(mut self)
 
 ## The items of a `for` loop (03, "Traits"). `Iter[T]` is the iterator the
@@ -942,7 +942,7 @@ trait Drop:
 ## look for). As in 03, `next` and the methods are not `pure`, and their
 ## functions may be any (`(Item) -> U`): an impl's `next` may be `pure`
 ## (the host iterators' is), and a `pure` function can loop over one.
-trait Iterator:
+pub trait Iterator:
     type Item
     ## The next item, or `None` at the end.
     def next(mut self) -> Item?
@@ -1063,34 +1063,34 @@ trait Iterator:
 
 ## `a + b` (D-022). The other operators are `Sub`, `Mul`, `Div`, `Rem` and
 ## `Neg` (`-a`).
-trait Add[Rhs = Self]:
+pub trait Add[Rhs = Self]:
     ## The type of the result, `Self` unless the impl says otherwise.
     type Output = Self
     pure def add(self, other: Rhs) -> Output
 
-trait Sub[Rhs = Self]:
+pub trait Sub[Rhs = Self]:
     type Output = Self
     pure def sub(self, other: Rhs) -> Output
 
-trait Mul[Rhs = Self]:
+pub trait Mul[Rhs = Self]:
     type Output = Self
     pure def mul(self, other: Rhs) -> Output
 
-trait Div[Rhs = Self]:
+pub trait Div[Rhs = Self]:
     type Output = Self
     pure def div(self, other: Rhs) -> Output
 
-trait Rem[Rhs = Self]:
+pub trait Rem[Rhs = Self]:
     type Output = Self
     pure def rem(self, other: Rhs) -> Output
 
-trait Neg:
+pub trait Neg:
     type Output = Self
     pure def neg(self) -> Output
 
 ## A conversion that loses nothing, `x.into()` (03, "Numbers"): each
 ## sized integer into every wider integer type that holds all its values.
-trait Into[T]:
+pub trait Into[T]:
     pure def into(self) -> T
 
 ## A type that literals can be written as (02, "Literals"; 03, "Numbers"):
@@ -1099,25 +1099,25 @@ trait Into[T]:
 ## `f64` for a float literal and `str` for a string literal without
 ## interpolation. It applies to literals only; it is not a conversion of
 ## values.
-trait FromLiteral[L]:
+pub trait FromLiteral[L]:
     pure def from_literal(literal: L) -> Self
 
 # ------------------------------------------------------------------ core enums and error sets
 
 ## `T?` is `Option[T]`.
 @derive(Eq, Ord, Hash)
-enum Option[T]:
+pub enum Option[T]:
     Some(T)
     None
 
 ## `T ! E` is `Result[T, E]`.
 @derive(Eq, Ord, Hash)
-enum Result[T, E]:
+pub enum Result[T, E]:
     Ok(T)
     Err(E)
 
 @derive(Copy, Eq, Ord, Hash)
-enum Ordering:
+pub enum Ordering:
     Less
     Equal
     Greater
@@ -1125,12 +1125,12 @@ enum Ordering:
 ## The error `Result.context` wraps another in (05, "Context and traces"):
 ## what the program was doing, and the error it met, rendered with
 ## `Display`. It displays as `message: cause`.
-error Contextual:
+pub error Contextual:
     Context(message: String, cause: String)
 
 ## The errors of the file system capability. `Revoked`: the capability is
 ## a caretaker whose revoker revoked it (`Fs.revocable`, Q-51).
-error IoError:
+pub error IoError:
     NotFound(path: Path)
     PermissionDenied(path: Path)
     AlreadyExists(path: Path)
@@ -1141,7 +1141,7 @@ error IoError:
 
 ## The errors of the network capability: nothing listens at `address`, an
 ## attenuation refuses it, the other end closed, the capability was revoked.
-error NetError:
+pub error NetError:
     Refused(address: String)
     NotAllowed(address: String)
     Closed
@@ -1154,14 +1154,14 @@ error NetError:
 ## speak HTTP/1.1 as the module reads it; a `get` was answered with a
 ## status that is not 2xx. In the prelude, so a program that imports `http`
 ## names it bare.
-error HttpError:
+pub error HttpError:
     Network(cause: NetError)
     Interrupted(cause: TaskError)
     Malformed(detail: String)
     Status(code: int)
 
 ## The errors of the process capability.
-error ProcError:
+pub error ProcError:
     NotFound(program: String)
     PermissionDenied(program: String)
     Revoked
@@ -1169,33 +1169,33 @@ error ProcError:
 
 ## The error of `X.try_from(v)` for a refinement type `X` (07): `v` does
 ## not satisfy the predicate of `X`, which is named with its arguments.
-error RefinementError:
+pub error RefinementError:
     Unsatisfied(ty: String, predicate: String)
 
 # ------------------------------------------------------------------ prelude functions
 
 ## Writes the `Display` rendering of `x` and a line break to standard output.
 @intrinsic("print")
-def print[T: Display](x: T)
+pub def print[T: Display](x: T)
 
 ## Writes the `Display` rendering of `x` and a line break to standard error.
 @intrinsic("print_err")
-def print_err[T: Display](x: T)
+pub def print_err[T: Display](x: T)
 
 ## The number of items: Unicode scalar values for `str` and `String`,
 ## elements for `list` and `set`, entries for `dict`.
 @intrinsic("len")
-pure def len[T: Len](x: T) -> int
+pub pure def len[T: Len](x: T) -> int
 
 ## `range(stop)` is `0, 1, ..., stop - 1`; `range(start, stop)` and
 ## `range(start, stop, step)` count by `step`, which must not be zero, and stop
 ## before reaching `stop`. With one argument the checker supplies `start = 0`.
 @intrinsic("range")
-pure def range(start: int, stop: int, step: int = 1) -> Iter[int]
+pub pure def range(start: int, stop: int, step: int = 1) -> Iter[int]
 
 ## Pairs each item with its index, from 0.
 @intrinsic("enumerate")
-pure def enumerate[T](xs: Iterable[T]) -> Iter[(int, T)]
+pub pure def enumerate[T](xs: Iterable[T]) -> Iter[(int, T)]
 
 ## Pairs the items of `a` and `b`; panics if they have different lengths (PEP 618).
 ## ```
@@ -1207,15 +1207,15 @@ pure def enumerate[T](xs: Iterable[T]) -> Iter[(int, T)]
 ## assert pairs == [(1, "one"), (2, "two")]
 ## ```
 @intrinsic("zip")
-pure def zip[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
+pub pure def zip[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
 
 ## Pairs the items of `a` and `b` until the shorter one ends.
 @intrinsic("zip_shortest")
-pure def zip_shortest[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
+pub pure def zip_shortest[A, B](a: Iterable[A], b: Iterable[B]) -> Iter[(A, B)]
 
 ## The items in reverse order.
 @intrinsic("reversed")
-pure def reversed[T](xs: Iterable[T]) -> Iter[T]
+pub pure def reversed[T](xs: Iterable[T]) -> Iter[T]
 
 ## A new list of the items in ascending order; the sort is stable. By the
 ## items' `Ord` (the host's structural order when it is the structural one).
@@ -1224,7 +1224,7 @@ pure def reversed[T](xs: Iterable[T]) -> Iter[T]
 ## assert sorted({"b", "a"}) == ["a", "b"]
 ## ```
 @structural("sorted")
-pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
+pub pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
     var out = iterable_list(xs)
     out.sort()
     return out
@@ -1232,7 +1232,7 @@ pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
 ## The items, in order, as a new list (of copies, unless the items are
 ## references).
 @intrinsic("iterable_list")
-pure def iterable_list[T](xs: Iterable[T]) -> list[T]
+pub pure def iterable_list[T](xs: Iterable[T]) -> list[T]
 
 ## The items of `it`, an iterator of a type that implements `Iterator`
 ## (`xs.iter().map(f)`, a program's own), as an `Iter` that takes each one
@@ -1248,7 +1248,7 @@ def iter_from[I: Iterator](own it: I) -> Iter[I.Item]:
 
 ## The smaller of `a` and `b` by their `Ord`; `a` when they are equal.
 @structural("min")
-pure def min[T: Ord](a: T, b: T) -> T:
+pub pure def min[T: Ord](a: T, b: T) -> T:
     if b.cmp(a) == Ordering.Less:
         return b.copy()
     return a.copy()
@@ -1259,7 +1259,7 @@ pure def min[T: Ord](a: T, b: T) -> T:
 ## assert min("pear", "apple") == "apple"
 ## ```
 @structural("max")
-pure def max[T: Ord](a: T, b: T) -> T:
+pub pure def max[T: Ord](a: T, b: T) -> T:
     if b.cmp(a) == Ordering.Greater:
         return b.copy()
     return a.copy()
@@ -1300,32 +1300,32 @@ pure def min_of[T: Ord](xs: Iterable[T]) -> T:
 ## The sum of the items, 0 for none; integer overflow panics. Floats are summed
 ## pairwise in a fixed shape (D-074).
 @intrinsic("sum")
-pure def sum[T: Num](xs: Iterable[T]) -> T
+pub pure def sum[T: Num](xs: Iterable[T]) -> T
 
 ## Whether any item is `True`; stops at the first.
 @intrinsic("any")
-pure def any(xs: Iterable[bool]) -> bool
+pub pure def any(xs: Iterable[bool]) -> bool
 
 ## Whether every item is `True`; stops at the first `False`.
 @intrinsic("all")
-pure def all(xs: Iterable[bool]) -> bool
+pub pure def all(xs: Iterable[bool]) -> bool
 
 ## The absolute value; `abs` of the smallest `int` panics with an overflow.
 @intrinsic("abs")
-pure def abs[T: Num](x: T) -> T
+pub pure def abs[T: Num](x: T) -> T
 
 ## Panics with `message`, unwinding the task (05, "Panics").
 @intrinsic("panic")
-pure def panic(message: str) -> Never
+pub pure def panic(message: str) -> Never
 
 ## Panics with "entered unreachable code".
 @intrinsic("unreachable")
-pure def unreachable(message: str = "") -> Never
+pub pure def unreachable(message: str = "") -> Never
 
 ## A typed hole (D-061): checks as the type its position expects; running it
 ## stops the program there.
 @intrinsic("todo")
-pure def todo[T](name: str = "") -> T
+pub pure def todo[T](name: str = "") -> T
 
 # ------------------------------------------------------------------ int, f64, bool, char
 
@@ -1461,7 +1461,7 @@ impl f64:
 ## An `f64` in a total order (`f64.total_order()`, 03): the numbers in
 ## order, `-0.0` before `0.0`, and NaN after every number.
 @derive(Copy, Debug)
-struct TotalF64:
+pub struct TotalF64:
     value: f64
 
 impl TotalF64:
@@ -2170,7 +2170,7 @@ impl[T] set[T]:
 ## assert dish.lookup_key() == "bun"
 ## assert prices.contains(dish.lookup_key())
 ## ```
-trait Lookup[K]:
+pub trait Lookup[K]:
     ## The key to look up.
     pure def lookup_key(self) -> K
 
@@ -2281,7 +2281,7 @@ impl[I: Iterator] Iterator for Skip[I]:
 
 ## `it.map(f)`: each item of `inner` passed through `f`. A view, since `f`
 ## may borrow what it captures.
-view struct Map[I: Iterator, U]:
+pub view struct Map[I: Iterator, U]:
     inner: I
     f: (I.Item) -> U
 
@@ -2295,7 +2295,7 @@ impl[I: Iterator, U] Iterator for Map[I, U]:
                 return None
 
 ## `it.filter(keep)`: the items of `inner` for which `keep` is `True`.
-view struct Filter[I: Iterator]:
+pub view struct Filter[I: Iterator]:
     inner: I
     keep: (ref I.Item) -> bool
 
@@ -2535,7 +2535,7 @@ impl Debug for Timer:
 # ------------------------------------------------------------------ tasks, channels and time (06)
 
 ## What every task operation can report (06, "Cancellation" and "Panics").
-error TaskError:
+pub error TaskError:
     ## The scope, or the task at its deadline, was cancelled: returned at a
     ## blocking point.
     Cancelled
@@ -2543,7 +2543,7 @@ error TaskError:
     TaskPanicked(message: String, trace: String)
 
 ## What a channel operation can report besides `TaskError`.
-error ChannelError:
+pub error ChannelError:
     ## The other end is gone: every sender was dropped or closed (for
     ## `recv`, once the values sent are drained), or the receiver was
     ## dropped (for `send`).
@@ -2555,7 +2555,7 @@ error ChannelError:
 ## the body's environment borrows. A `Copy` handle; spawning on a scope
 ## that has ended panics.
 @builtin("Scope")
-struct Scope:
+pub struct Scope:
     pass
 
 impl Scope:
@@ -2585,7 +2585,7 @@ impl Scope:
 
 ## A spawned task, from `Scope.spawn`.
 @builtin("Handle")
-struct Handle[T]:
+pub struct Handle[T]:
     pass
 
 impl[T] Handle[T]:
@@ -2601,7 +2601,7 @@ impl[T] Handle[T]:
 
 ## A scope's cancellation, to wait for in `select` (`Scope.cancelled`).
 @builtin("Cancellation")
-struct Cancellation:
+pub struct Cancellation:
     pass
 
 impl Cancellation:
@@ -2613,27 +2613,27 @@ impl Cancellation:
 ## makes another sender; the channel closes when every sender is closed or
 ## dropped.
 @builtin("Sender")
-struct Sender[T]:
+pub struct Sender[T]:
     pass
 
 ## The receiving half of a channel. A `for` loop over it receives until the
 ## channel is closed and drained (or the loop's task is cancelled).
 @builtin("Receiver")
-struct Receiver[T]:
+pub struct Receiver[T]:
     pass
 
 ## A bounded channel of `capacity` values, at least 1: `send` waits while
 ## it is full and `recv` while it is empty. What a channel carries can be
 ## neither a view nor must-consume.
 @intrinsic("channel")
-def channel[T](capacity: int) -> (Sender[T], Receiver[T])
+pub def channel[T](capacity: int) -> (Sender[T], Receiver[T])
 
 ## An unbounded channel (06: "unbounded is a separate constructor"):
 ## `send` never waits for room, and what is sent and not yet received is
 ## held, however much it is, so a producer faster than its consumer grows
 ## it without limit; `recv` waits while it is empty. Prefer `channel` with
 ## a capacity, which makes a slow consumer slow its producers down.
-def unbounded_channel[T: Send + Escapable]() -> (Sender[T], Receiver[T]):
+pub def unbounded_channel[T: Send + Escapable]() -> (Sender[T], Receiver[T]):
     return channel[T](9223372036854775807)
 
 impl[T] Sender[T]:
@@ -2660,7 +2660,7 @@ impl[T] Receiver[T]:
 
 ## A span of time, in nanoseconds.
 @derive(Copy, Eq, Ord, Hash)
-struct Duration:
+pub struct Duration:
     nanos: int
 
 impl Duration:
@@ -2710,7 +2710,7 @@ impl Display for Duration:
         f.write("{whole}.{digits}s")
 
 ## The error of `bytes.decode`: the bytes are not UTF-8 from index `at` on.
-error Utf8Error:
+pub error Utf8Error:
     InvalidUtf8(at: int)
 
 impl bytes:
@@ -2837,7 +2837,7 @@ impl[T] Debug for Slice[T]:
     pure def fmt_debug(self, mut f: Formatter)
 
 ## The error of `DateTime.parse`.
-error TimeError:
+pub error TimeError:
     InvalidTime(text: String)
 
 impl DateTime:
@@ -3030,7 +3030,7 @@ impl Sub[Duration] for DateTime:
 ## A moment on a clock that a task can wait for: `clock.after(d)`, the arm
 ## of a `select`, or a deadline for `Scope.spawn_with`.
 @builtin("Timer")
-struct Timer:
+pub struct Timer:
     pass
 
 impl Timer:
@@ -3153,7 +3153,7 @@ struct DrawState:
 ## an exhaustive search on the bounds. A `Copy` handle that every
 ## generator of the case shares.
 @derive(Copy)
-struct Draws:
+pub struct Draws:
     cell: Cap[Mutex[DrawState]]
 
 impl Draws:
@@ -3313,7 +3313,7 @@ impl Draws:
 ## lists every one whose collections hold at most `n` items and whose
 ## integers are within `n` of zero, or in their refinement's range (17,
 ## D-070).
-view struct Gen[T]:
+pub view struct Gen[T]:
     make: (Draws) -> T
     exhaustive: bool
     max_len: int
@@ -3340,13 +3340,13 @@ impl[T] Gen[T]:
 ## when the program is compiled (08): the one input a build reads besides
 ## its source, recorded with it, so the same inputs give the same program.
 @intrinsic("compiler.embed")
-def embed(path: str) -> str
+pub def embed(path: str) -> str
 
 ## The cases of `T` drawn at random, written `arbitrary[T]`: the compiler
 ## writes the generator of `T` (a refinement's values satisfy its
 ## predicate, a struct's its invariant).
 @intrinsic("test.arbitrary")
-def arbitrary[T]() -> Gen[T]
+pub def arbitrary[T]() -> Gen[T]
 
 ## A type whose cases a property test draws its own way (17,
 ## "Property-based testing"): `arbitrary[T]`, and the generator of every
@@ -3354,13 +3354,13 @@ def arbitrary[T]() -> Gen[T]
 ## builds a value from the draws (`d.draw(n)`, `Draws.gen_in(d, lo, hi)`,
 ## ...). `@derive(Arbitrary)` gives a struct or an enum the impl that draws
 ## its shape, the generator `arbitrary[T]` writes for any type.
-trait Arbitrary:
+pub trait Arbitrary:
     def arbitrary(d: Draws) -> Self
 
 ## Every case of `T` with at most `max_len` items in each collection, its
 ## integers bounded by their refinements (17, D-070).
 @intrinsic("test.exhaustive")
-def exhaustive[T](max_len: int = 3) -> Gen[T]
+pub def exhaustive[T](max_len: int = 3) -> Gen[T]
 
 ## A case that failed: its choices and why.
 struct Failure:
@@ -3534,7 +3534,7 @@ pure def next_prefix(choices: list[int], bounds: list[int]) -> list[int]?:
 ## case the test's replay token names. A case for which `prop` returns
 ## `False` or panics is shrunk to the smallest failing case found, and the
 ## test fails showing it; its choices go into the replay token.
-def check[T: Debug](gen: Gen[T], prop: (T) -> bool):
+pub def check[T: Debug](gen: Gen[T], prop: (T) -> bool):
     var found: Failure? = None
     var cases = 0
     var refused = 0
@@ -3611,7 +3611,7 @@ def shown[T: Debug](make: (Draws) -> T, d: Draws, steps: int) -> String:
 
 ## What `metadata` reports about a file or a directory.
 @derive(Copy, Eq)
-struct Metadata:
+pub struct Metadata:
     len: int
     modified: DateTime
     is_dir: bool
@@ -3621,7 +3621,7 @@ struct Metadata:
 ## so a parameter of type `Fs` accepts every form but the lent one, and a
 ## generic parameter `[F: FsOps]` accepts every form. A path is relative to
 ## the working directory of the root object.
-trait FsOps:
+pub trait FsOps:
     ## The whole file; `NotFound` or `PermissionDenied` on failure.
     def read(self, path: Path) -> bytes ! IoError
     ## Creates or replaces the file with `data`.
@@ -3763,7 +3763,7 @@ impl[T: FsOps + Copy] FsOps for Lent[T]:
 ## end of a fake network's in-process pipe. A read waits for data and gives
 ## at most `max` bytes, and none once the other end has closed its side; a
 ## write sends all of `data`. Both are blocking points.
-trait Stream(Send, Sync):
+pub trait Stream(Send, Sync):
     def read(mut self, max: int) -> bytes ! {NetError, TaskError}
     def write(mut self, data: bytes) -> ! {NetError, TaskError}
     ## Closes this end's side: the other end reads the end of the stream.
@@ -3771,7 +3771,7 @@ trait Stream(Send, Sync):
 
 ## A connection (`Net.connect`, `Listener.accept`): a stream and the
 ## address of the other end. Dropping it closes it.
-struct Conn:
+pub struct Conn:
     stream: Box[dyn Stream]
     peer: String
 
@@ -3795,12 +3795,12 @@ impl Conn:
         self.stream.close()
 
 ## Accepts the connections a listener receives.
-trait Accept(Send, Sync):
+pub trait Accept(Send, Sync):
     ## The next connection, waiting for one. A blocking point.
     def accept(self) -> Conn ! {NetError, TaskError}
 
 ## A listener (`Net.listen`) and the port it listens at.
-struct Listener:
+pub struct Listener:
     inner: Box[dyn Accept]
     port: int
 
@@ -3811,7 +3811,7 @@ impl Listener:
 
 ## The operations of the network capability: TCP connections and
 ## listeners, by host name and port.
-trait NetOps:
+pub trait NetOps:
     ## A connection to `host` at `port`; `Refused` when nothing listens
     ## there.
     def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}
@@ -3884,7 +3884,7 @@ impl[T: NetOps + Copy] NetOps for Lent[T]:
     def listen(self, port: int, host: str = "localhost") -> Listener ! NetError
 
 ## The operations of the clock capability.
-trait ClockOps:
+pub trait ClockOps:
     ## The current time on this clock.
     def now(self) -> DateTime
     ## A timer at `d` from now on this clock, to wait for.
@@ -3958,7 +3958,7 @@ impl[T: ClockOps + Copy] ClockOps for Lent[T]:
     def monotonic(self) -> Duration
 
 ## The operations of the randomness capability.
-trait RandOps:
+pub trait RandOps:
     ## 64 random bits as an `int`, every pattern equally likely.
     def bits(self) -> int
 
@@ -4008,7 +4008,7 @@ impl[T: RandOps + Copy] RandOps for Lent[T]:
     def bits(self) -> int
 
 ## The operations of the environment capability.
-trait EnvOps:
+pub trait EnvOps:
     ## The command-line arguments after the program's own name.
     def args(self) -> list[str]
     ## The variable `name`, or `None`.
@@ -4040,13 +4040,13 @@ impl[T: EnvOps + Copy] EnvOps for Lent[T]:
     def get(self, name: str) -> String?
 
 ## What a finished program left: its exit status and its output.
-struct ProcOutput:
+pub struct ProcOutput:
     status: int
     stdout: String
     stderr: String
 
 ## The operations of the process capability.
-trait ProcOps:
+pub trait ProcOps:
     ## Runs `program` with `args` to its end, with no input. A blocking point.
     def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
 
@@ -4071,7 +4071,7 @@ impl[T: ProcOps + Copy] ProcOps for Lent[T]:
     def run(self, program: str, args: list[str]) -> ProcOutput ! ProcError
 
 ## The operations of the standard input capability.
-trait StdinOps:
+pub trait StdinOps:
     ## The next line, without its line break; `None` at the end of the
     ## input. A blocking point.
     def read_line(self) -> String?
@@ -4175,7 +4175,7 @@ def transcript_system(
 ## The revoker of a caretaker (`Fs.revocable`): a `Copy` handle on the
 ## flag every copy of the caretaker checks.
 @derive(Copy)
-struct Revoker:
+pub struct Revoker:
     flag: Cap[Mutex[bool]]
 
 impl Revoker:
@@ -5763,15 +5763,15 @@ impl[I: Iterator, T, E] Map[I, Result[T, E]]:
 ## The signed integer as wide as an address, for foreign interfaces only
 ## (03: `int` is the index type everywhere else): on every target Sisu
 ## builds for now, an `i64`.
-type ptrsize = i64
+pub type ptrsize = i64
 
 ## The unsigned integer as wide as an address, for foreign interfaces only:
 ## on every target Sisu builds for now, a `u64`.
-type uptrsize = u64
+pub type uptrsize = u64
 
 ## Values whose size is known where they are held (03, "Auto traits"):
 ## every type but a `dyn` one, which is held behind `ref` or in a `Box`
 ## (`E0395`), so a bound `T: Sized` is met by every type argument.
 @marker
-trait Sized:
+pub trait Sized:
     pass
