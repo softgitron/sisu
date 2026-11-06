@@ -597,21 +597,23 @@ driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 role to replace before it can be deleted, when the flag and the Rust
 branches of `cli.rs` go with it:
 
-- **The language server's worksheets and `sisu.explainBorrow`**, and
-  **hot replacement** (`sisu run --watch`, and a run under it recorded,
-  whose log replays the saves). From `sisu1 0.15.0` every other request of
-  `sisu lsp` is answered by stage 1's queries (its R164 and R169,
-  decisions 983 and 1060), so the language server is no longer a role of
-  the Rust front end but for two features: a document's inline values
+- **The language server's worksheets**, and **hot replacement** (`sisu
+  run --watch`, and a run under it recorded, whose log replays the saves).
+  From `sisu1 0.15.0` every other request of `sisu lsp` is answered by
+  stage 1's queries (its R164 and R169, decisions 983 and 1060), and from
+  `sisu1 0.17.0` `sisu.explainBorrow` too (its `query explain`, R187,
+  decision 1104), so the language server is no longer a role of the Rust
+  front end but for one feature: a document's inline values
   (`textDocument/inlineValue`), the worksheet run by stage 0's interpreter
-  from the Rust front end's build of it, and `sisu.explainBorrow`, the
-  loans of the Rust ownership checker (the counterexample mode's, below).
-  Hot replacement needs the front end in the process, its queries kept
-  between edits (the memo), or the program as data. (The capability log
-  and replay of a plain run are stage 1's, the log holding the SIR that
-  ran, decision 303.) *Pay*: the worksheet's inline values from stage 1's
-  `sir --worksheet` (R95), which `sisu ws` already runs; the loans as a
-  query of stage 1; for hot replacement a program kept between edits. **The REPL** (`sisu repl`) and **worksheets**
+  from the Rust front end's build of it. Hot replacement needs the front
+  end in the process, its queries kept between edits (the memo), or the
+  program as data. (The capability log and replay of a plain run are
+  stage 1's, the log holding the SIR that ran, decision 303.) *Pay*: the
+  worksheet's inline values from stage 1 (a `query values`, which stage
+  1's twenty-third round is asked for), as `sisu ws` already runs its
+  `sir --worksheet` (R95); the ends of `query explain`'s loans, whose
+  ranges are their starts until then; for hot replacement a program kept
+  between edits. **The REPL** (`sisu repl`) and **worksheets**
   (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
   --worksheet` (`sisu1 0.8.0` and later, decisions 563 and 620), and
   `:why` reads the inputs' trees from its `parse --tree` (decision 621);
@@ -625,8 +627,8 @@ branches of `cli.rs` go with it:
   front end reads it from the working directory: stage 1 told the
   program's directory apart from its file's (a `--dir` of `sir`) would
   serve both.
-- **A program's transcripts, `sisu test --std`, `sisu test
-  --defer-borrow` and `--features`**: a program's tests and benchmarks run
+- **A program's transcripts, `sisu test --defer-borrow` and
+  `--features`**: a program's tests and benchmarks run
   from stage 1's SIR (decision 357), and so do those of a program with
   transcripts, but those of a run that asks for a package's features run on
   the Rust front end until stage 1's `sir` took `--features` and
@@ -635,19 +637,23 @@ branches of `cli.rs` go with it:
   the transcripts themselves run against a world of transcripts
   (`transcript_world`, `transcript_system`) that only the Rust front end's
   `sir_with` adds to the SIR, so they run on its build of the program,
-  which must check (`D0128` otherwise; decision 380); the standard
-  library's doc examples are the Rust front end's tests of `compiler/std`;
-  and the deferral is the Rust ownership checker's. Stage 1's own tests
-  run on the Rust front end too. *Pay*: stage 1's `sir --tests` writing
-  the world of transcripts (`--transcripts`, rooting the two functions)
-  and the standard library's examples (`--std`); the deferral as a command
-  of stage 1 (below).
-- **`sisu run --defer-borrow`** (the counterexample mode: the ownership
-  checker's findings beside the monitored run), **`sisu check --diary`**
-  (the diagnostics as data, with their bytes), **`sisu explain-borrow`**
-  (stage 1 has the checker but not `explain.rs`) and **`sisu audit`**.
-  (`sisu parse --shape` is stage 1's, decision 622.) *Pay*: each as a
-  command of stage 1, or its output in a form the driver reads.
+  which must check (`D0128` otherwise; decision 380). The standard
+  library's doc examples are stage 1's from `sisu1 0.17.0` (`sir --tests
+  --std`, its R185, decision 1102), but for `sisu test --std` without a
+  program, which the Rust front end still builds alone. A test run's
+  deferral is the Rust ownership checker's: stage 1 has `sir --tests
+  --defer-borrow` (its R189), but the counterexample mode's account of a
+  test run is made inside the runner of tests, which the SIR's path does
+  not reach yet (decision 1106). Stage 1's own tests run on the Rust front
+  end too. *Pay*: stage 1's `sir --tests` writing the world of transcripts
+  (`--transcripts`, rooting the two functions); the account of a test
+  run read from stage 1's deferred SIR, as `sisu run --defer-borrow`'s
+  is.
+- (Done: **`sisu run --defer-borrow`**, **`sisu check --diary`**,
+  **`sisu explain-borrow`** and **`sisu audit --ownership`** and
+  **`--caps`** are stage 1's from `sisu1 0.17.0`, its R186 to R189,
+  decisions 1103 to 1106; `sisu parse --shape` is stage 1's, decision
+  622. An older stage 1 and `--front-end=rust` keep the Rust front end's.)
 - **Building stage 1** the first time and after a source of it changed:
   `compiler/target/stage1/sisu1` is built by the Rust front end (`sisu
   build --native` in `compiler/stage1`), so stage 1's own sources must stay
@@ -771,13 +777,13 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   values and raw memory in the backend in Sisu (each part at its own
   width), when it replaces decision 188's.
 - **A pointer to a place, and a reference from a pointer, of a type whose
-  two layouts differ** (a tuple holding a narrow number, an option of a
-  raw pointer, a struct holding one) are `D0103`, since a place holds a
-  value's layout, where a tuple's parts take a word each. A narrow number
-  is its width and a struct its fields at C's offsets in both since
-  decisions 1020 and 1021, so a C struct of them is pointed to in place.
-  *Pay*: a tuple's parts at C's offsets too, and options of raw pointers
-  as nullable words, one layout.
+  two layouts differ** (an option of a raw pointer, a struct or a tuple
+  holding one) are `D0103`, since a place holds a value's layout, where
+  the option has a tag word. A narrow number is its width, and a struct
+  its fields and a tuple its parts at C's offsets, in both since decisions
+  1020, 1021 and 1100, so a C struct of them is pointed to in place.
+  *Pay*: options of raw pointers as nullable words, one layout, in
+  decision 1101's order.
 - **Foreign calls**: a C function's signature is taken from the call's
   operands and result, `@blocking` does not move a call off the task's
   thread, there is no header import (`import c`), and a struct is not

@@ -3375,14 +3375,16 @@ decisions 281 to 284).
 
 A sized integer narrower than 64 bits and an `f32` are their own width,
 read with the sign their type gives and written at that width wherever
-they are, and a declared struct lays its fields out at C's offsets, its
-size a multiple of its widest field's alignment (decisions 1020 and
-1021), so that a list, an array or a slice of `u8`s holds a byte to an
-element and a pointer to a `@repr(c)` struct of narrow fields points to
-what C reads. Every other value is a whole number of 8-byte words, and
-every part of one (an element of a tuple, a payload, a table's key or
-value) starts on a word and takes a word at least, a narrower one's bytes
-first (decision 188). Each concrete type of the program has a
+they are, and a declared struct lays its fields out, and a tuple its
+parts, at C's offsets, its size a multiple of its widest part's
+alignment (decisions 1020, 1021 and 1100), so that a list, an array or a
+slice of `u8`s holds a byte to an element and a pointer to a `@repr(c)`
+struct or a tuple of narrow parts points to what C reads. Every other
+value is a whole number of 8-byte words, and every part of one (a
+payload, a variant's field, what a cell or a mutex holds) starts on a
+word and takes a word at least, a narrower one's bytes first (decision
+188); a table's entry holds its key and value as their tuple lays them
+out, after the key's hash, padded to a word (decision 1100). Each concrete type of the program has a
 number and an entry in the type table, whose kinds (`abi::Kind`) say
 where the parts are:
 
@@ -3404,7 +3406,7 @@ where the parts are:
 | `Box[T]` | 1 | the address of a heap cell holding the value |
 | `T?` | 1 + T | a tag (0 `Some`, 1 `None`), then the payload |
 | `Result[T, E]` | 1 + the larger | a tag (0 `Ok`, 1 `Err`), then the payload |
-| a tuple | the sum | the parts in order, each a word at least |
+| a tuple | C's | the parts at C's offsets, as a struct's fields (decision 1100) |
 | a struct | C's | the fields at C's offsets, each aligned to its width (a narrow number's, a struct's widest field's, a word for the rest), the size a multiple of the widest (decision 1021) |
 | an enum | 1 + the largest variant | the tag (the variant's index), then the variant's fields |
 | an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
@@ -3880,9 +3882,9 @@ runtime computes each type's layout in raw memory from the type table when
 the program starts, the interpreter's rule ("The checked memory model"):
 a value whose layout in memory is its layout as a value (most types) is
 read and written as its bytes, a narrow number and a struct of them among
-them since decisions 1020 and 1021; another (an option of a raw pointer, a
-tuple holding a narrow number, a struct holding either) is converted part
-by part, each part at its C offset and width.
+them since decisions 1020, 1021 and 1100, and a tuple of them; another
+(an option of a raw pointer, or a struct or a tuple holding one) is
+converted part by part, each part at its C offset and width.
 `Global.acquire` is `posix_memalign` with the layout's alignment, counted
 among the program's allocations, and `Global.release` frees it;
 `drop_in_place` converts the value back and drops it by its type, its glue
@@ -3899,11 +3901,11 @@ A place of the program holds its value as a value is laid out, and a
 reference is read so, so a pointer to a place (`ptr.of`, `ptr.of_mut`, a
 slice's `as_ptr`) and a reference made from a pointer (`as_ref`,
 `as_mut`) are made only to a type that raw memory holds as a value is laid
-out, which since decisions 1020 and 1021 are a narrow number and a struct
-of them too (so a `CString`'s `as_ptr()`, `mem.slice.as_ptr` of its bytes'
+out, which since decisions 1020, 1021 and 1100 are a narrow number and a
+struct or a tuple of them too (so a `CString`'s `as_ptr()`, `mem.slice.as_ptr` of its bytes'
 slice, compiles, and so does `ptr.of` of a `@repr(c)` struct with `u8`
-and `i32` fields); another, a tuple with a narrow number among its parts
-or an option of a raw pointer, is `D0103` when the program is built,
+and `i32` fields, or of an `(int, u8)`); another, an option of a raw
+pointer or what holds one in place, is `D0103` when the program is built,
 naming the operation and the type, and the interpreter runs the program. A foreign call
 (`extern.LIBRARY.NAME`) is a call of the C function `NAME`, imported from
 the C library the executable is linked with, in C's convention: each
@@ -11967,3 +11969,130 @@ query layer and the driver"; D-061, D-086; 10, 12; decisions 980, 981, 983,
 1089. The sized integers narrow with `truncate_to[T]()` alone, with no
       `to_u8()` and its kin; a checked narrowing compares with the
       target's bounds first. Stage 1 decides it (RULES.md, R194).
+
+**Stage 0's twenty-first round: tuples at C's offsets, stage 1's commands
+of data routed, and what was left** (sections "Stage 2: the native
+backend", "Values", "Raw memory, foreign calls and the machine
+intrinsics", "The query layer and the driver", "The language server";
+D-085, D-086; 10, 12, 22; decisions 302, 904, 945, 1020, 1021, 1026, 1066
+and 1067; stage 1's R185 to R189)
+
+1100. A tuple lays its parts out at C's offsets natively, as a struct lays
+      its fields (decision 1021): each at the next offset its alignment
+      allows, the tuple's alignment its widest part's, its size a multiple
+      of it, in both lowerings' layout tables (`layout.rs`,
+      `layout.sisu`) and the type table, where each part took a word at
+      least; a tuple of words keeps its layout, and so does an `(int, T)`,
+      `enumerate`'s pair. A tuple of narrow numbers is then laid out in a
+      value as raw memory lays it out, so `ptr.of`, `ptr.of_mut` and
+      `as_ref` of an `(int, u8)` or a `(u8, u16, i32)` compile, where they
+      were `D0103` (decisions 1021 and 1066). The runtime in Sisu follows
+      in decision 1066's order: `Types.align` gives a type's alignment from
+      the table, `zip`'s pair puts its second item at the first's size up
+      to the second's alignment (kept in the iterator's second header word,
+      which compiled code reads only for a range or a list), the second
+      item's option written in a block of its own when that offset is not
+      a word's; a table's entry is its key's hash and then the key and the
+      value as the tuple of the two lays them out, padded to a word, the
+      header's key size the value's offset (a set's key's size) and its
+      value size the value's own, and a table's literal lays its entries
+      out so, without the hashes, in both lowerings (`entry_layout`); the
+      runtime in Rust walks a tuple by the table's offsets already. The
+      checked memory model of the interpreter is unchanged: its raw
+      layouts were C's already (decision 302). `unsafe/tuple_pointer`
+      (a function exported with a pointer to an `(int, u8)`, a write
+      through a pointer to a `(u8, u16, i32)`, `Layout.of`'s 16 and 8, 8
+      and 4, 2 and 1) and `std/narrow_tuples` (lists, options, structs,
+      closures' environments and other tuples of narrow tuples, `zip` and
+      `enumerate` of `u8`s, dicts of `u8`, `i32` and tuple keys and
+      values, their items, removals and copies, a set of `(u8, i16)`) hold
+      the interpreter's output in every native mode, their executables the
+      same bytes from the SIR and the LIR paths. A `dict[i32, i32]` of a
+      million entries, filled, walked and probed a million times, peaks at
+      35 348 kB where it peaked at 43 200 kB, its entries 16 bytes where
+      they were 24, in 1.13 s where it took 1.11 s; a `dict[int, int]`
+      keeps its 24-byte entries and its 43 MB (the release profile, the
+      median of 5 under a load of 20 to 40). SEEDLINE This changes no rule
+      of the language.
+
+1101. An `Option[ptr[T]]` as one nullable word in a value (decision
+      1066's second half, 12's foreign calls) is not this round's: a
+      foreign call already passes and returns one as a nullable pointer
+      (`c_argument`, decision 302), and what is left is the value's own
+      layout, which changes every construction, `discriminant`, downcast
+      and inline `==` of such an option in both lowerings, every result
+      of a generic intrinsic of an `Option[T]` the runtime writes with a
+      tag word (`list.get`, `pop`, `Iter.next` and their kin, in both
+      runtimes and the inline intrinsics, for a `T` that is a raw
+      pointer), and the walks of equality, the hash, `Debug` and the copy
+      of both runtimes, by a kind of its own in the type table. The round
+      spent its time on 1100 and 1102 to 1106. The round that does it
+      starts with the layout tables and a kind `Kind::NullablePtr` (the
+      tag the word's being 0), then the runtimes' walks, then the results
+      the runtime writes, each converted where its destination's type is
+      such an option; a pointer to one, or to a struct that holds one,
+      stays `D0103` until then. This changes no rule of the language.
+
+1102. `sisu test --std` runs the standard library's doc examples from
+      stage 1's `sir --tests --std` (its R185) when stage 1 is 0.17.0 or
+      later and there is a program to run them with (a file, or the
+      package of the working directory), served, natively too (`test
+      --native --std`); an older stage 1, `--front-end=rust` and `--std`
+      without a program keep the Rust front end's build. Stage 1 declares
+      each example once, where the Rust front end declares `std.net`'s two
+      once more when `std.http`'s import loads the module, so
+      `std/doc_examples.select` is blessed again with 197 tests where it
+      had 199. This changes no rule of the language.
+
+1103. `sisu check --diary PATH` runs stage 1's `check --diary` (its
+      R186) when stage 1 is 0.17.0 or later, served: the records are the
+      Rust front end's, the texts kept by their hashes in `PATH.d/`, and
+      the toolchain stage 1's version. This changes no rule of the
+      language.
+
+1104. `sisu explain-borrow FILE:LINE` runs stage 1's `explain-borrow`
+      (its R187) when stage 1 is 0.17.0 or later, served, and the language
+      server's `sisu.explainBorrow` answers from `query explain`: a loan a
+      line, its message the CLI's, each range the position the query gives
+      where it starts and where it is last used, since the query gives no
+      ends; a document with an error (`query diagnostics`) is
+      `LSP_HAS_ERRORS`, as before. An older stage 1 and `--front-end=rust`
+      keep the Rust ownership checker's loans. This changes no rule of the
+      language.
+
+1105. `sisu audit --ownership FILE...` and `sisu audit --caps [FILE...]`
+      run stage 1's `audit` (its R188) when stage 1 is 0.17.0 or later,
+      served, every form of `audit` then stage 1's, its messages and
+      statuses the Rust front end's (`D0009`, `D0022`, `D0004`). This
+      changes no rule of the language.
+
+1106. `sisu run --defer-borrow` gets its SIR from stage 1's `build
+      --for-run --emit-sir --defer-borrow` (its R189) when stage 1 is
+      0.17.0 or later: status 3 is a deferred error, and the counterexample
+      mode's account reads the diagnostics stage 1 writes in the
+      conformance form, each one at a statement of the SIR a finding of the
+      ownership checker of that statement's function, whose run the
+      interpreter counts, and any other a rule about a declaration; status
+      0 runs the program under the monitor without an account, and any
+      other status is the build's errors. `sisu test --defer-borrow` stays
+      the Rust front end's this round: the account of a test run is made
+      inside the runner of tests (`run_tests`), which the SIR's path does
+      not reach yet. The driver's test
+      `stage_1s_data_commands_answer_as_the_rust_front_end` holds
+      `explain-borrow`, `audit`, `check --diary` and `run --defer-borrow`
+      (a conflict reached, a finding not reached, a program without an
+      error) the same served, as a process and on the Rust front end, and
+      `explain_borrow_is_a_command` runs on both front ends. This changes
+      no rule of the language.
+
+1107. The formatting, characters', floats', texts' and bytes' families of
+      the intrinsics (decisions 945, 986, 1026 and 1067) are not this
+      round's either: the round spent its time on 1100 and 1102 to 1106,
+      and a family moved whole wants its own round's measurement (903's:
+      the suite's wall time and a program of formatting before and
+      after). This changes no rule of the language.
+
+1108. Tagged-pointer provenance in the debug build (decisions 686, 825,
+      904 and 1067) is not this round's: it waits for 1107's families,
+      whose texts and bytes are the raw memory the tags would mark first.
+      This changes no rule of the language.
