@@ -378,6 +378,9 @@ pub enum Msg:
     ComptimeInstanceFailed
     ## Stage 1's (RULES.md, R159).
     ComptimeFunctionFailed
+    ## Stage 1's (RULES.md, R165): `eval`'s constant that a form cannot
+    ## write.
+    EvalNoForm
     ComptimeInstancesUnbounded
     ComptimeIo
     ComptimeNotConstant
@@ -988,6 +991,7 @@ impl Msg:
             case ComptimeEmbedPath: "comptime.embed-path"
             case ComptimeInstanceFailed: "comptime.instance-failed"
             case ComptimeFunctionFailed: "comptime.function-failed"
+            case EvalNoForm: "eval.no-form"
             case ComptimeInstancesUnbounded: "comptime.instances-unbounded"
             case ComptimeIo: "comptime.io"
             case ComptimeNotConstant: "comptime.not-constant"

@@ -1,0 +1,7 @@
+# RULES.md, R164: the language server's questions of a module of a
+# package, asked by `cases/findings19/query_modules.requests`: a name
+# imported from another module is declared there, and its uses are found
+# in every module of the package.
+[package]
+name = "garden"
+version = "0.1.0"

@@ -603,6 +603,9 @@ E0615 error   comptime.unsafe-written     code that compile-time evaluation writ
 # words.
 E0616 error   comptime.function-failed    the compile-time code of `{name}` stopped: {reason}
 -     label   comptime.function-here      the compile-time code, where it stopped
+# Stage 1's (RULES.md, R165): a configuration module's constant that
+# `eval`'s form has no way to write.
+E0617 error   eval.no-form                `{name}` holds {what}, which {form} cannot write
 
 # ---------------------------------------------------------------- capabilities
 E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`

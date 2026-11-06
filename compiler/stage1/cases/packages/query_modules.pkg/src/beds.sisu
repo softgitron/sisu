@@ -1,0 +1,14 @@
+##! `garden.beds`: the beds of a garden.
+
+## A raised bed, its sides in metres.
+pub struct Bed:
+    pub width: int
+    pub length: int
+
+    ## The bed's area in square metres.
+    pub def area(self) -> int:
+        return self.width * self.length
+
+## The beds a garden starts with.
+pub def starting() -> list[Bed]:
+    return [Bed(width=1, length=2), Bed(width=2, length=3)]

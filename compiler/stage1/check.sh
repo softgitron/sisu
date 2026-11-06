@@ -1998,6 +1998,31 @@ total=$((total + n)); identical=$((identical + same))
 listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
 repl_summary="$repl_summary\n$(printf '  %-24s %4d worksheets, %4d identical, %3d differing as listed, %3d otherwise' ws "$n" "$same" "$class_listed" "$class_unlisted")"
 
+# The language server's questions and `eval`, served (RULES.md, R164 and
+# R165): each `.requests` file's lines sent to one `sir --repl-serve` run
+# here, its answers against the `.answers` beside it, with the compiler's
+# directory written `COMPILER` and each frame's lengths left out, which
+# its paths change.
+served_summary=""
+same=0; class_unlisted=0; n=0
+compiler_dir=$(cd "$here/.." && pwd -P)
+for f in "$here"/cases/*/*.requests; do
+    [ -f "$f" ] || continue
+    n=$((n + 1))
+    rel="${f#"$repo"/}"
+    base="$work/served.$(basename "$f" .requests)"
+    stage1 sir --repl-serve < "$f" 2>&1 > /dev/null |
+        sed -e "s|$compiler_dir|COMPILER|g" -e 's/^answer \([0-9]*\) [0-9]* [0-9]*$/answer \1/' > "$base.stage1"
+    if cmp -s "$base.stage1" "${f%.requests}.answers"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: served (expected ${f%.requests}.answers, stage 1 in $base.stage1)"
+    fi
+done
+total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+served_summary="$(printf '  %-24s %4d request files, %4d as expected, %3d otherwise' served "$n" "$same" "$class_unlisted")"
+
 echo "stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):"
 printf "%b\n" "${summary#\\n}"
 echo "stage 1's name resolution against stage 0's (names):"
@@ -2024,6 +2049,8 @@ echo "stage 1's documentation against stage 0's (doc: what \`sisu doc\` prints a
 printf "%b\n" "${doc_summary#\\n}"
 echo "stage 1's programs of \`sisu repl\` and \`sisu ws\` (repl against the cases' transcripts, ws against \`sisu ws\`):"
 printf "%b\n" "${repl_summary#\\n}"
+echo "stage 1's server's answers to the language server's questions and \`eval\` (served, against the cases' answers):"
+printf "%b\n" "$served_summary"
 if [ -n "$build_summary" ]; then
     echo "stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):"
     printf "%b\n" "$build_summary"

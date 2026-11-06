@@ -1,0 +1,9 @@
+eval	config_services.sisu	--to	json	--dir	cases/findings19
+eval	config_services.sisu	--to	toml	--dir	cases/findings19
+eval	config_services.sisu	--to	yaml	--dir	cases/findings19
+eval	config_services.sisu	--dir	cases/findings19
+eval	config_refused.sisu	--dir	cases/findings19
+eval	config_maybe.sisu	--to	json	--dir	cases/findings19
+eval	config_maybe.sisu	--to	toml	--dir	cases/findings19
+eval	config_maybe.sisu	--to	yaml	--dir	cases/findings19
+eval	config_maybe.sisu	--to	xml	--dir	cases/findings19

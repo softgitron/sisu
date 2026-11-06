@@ -1,0 +1,27 @@
+query	symbols	query_program.sisu	--dir	cases/findings19
+query	diagnostics	query_program.sisu	--dir	cases/findings19
+query	hover	query_program.sisu	27	14	--dir	cases/findings19
+query	hover	query_program.sisu	26	9	--dir	cases/findings19
+query	hover	query_program.sisu	28	22	--dir	cases/findings19
+query	hover	query_program.sisu	27	5	--dir	cases/findings19
+query	hover	query_program.sisu	21	18	--dir	cases/findings19
+query	hover	query_program.sisu	2	1	--dir	cases/findings19
+query	definition	query_program.sisu	27	14	--dir	cases/findings19
+query	definition	query_program.sisu	29	11	--dir	cases/findings19
+query	definition	query_program.sisu	27	5	--dir	cases/findings19
+query	references	query_program.sisu	20	6	--dir	cases/findings19
+query	references	query_program.sisu	11	5	--dir	cases/findings19
+query	references	query_program.sisu	9	9	--dir	cases/findings19
+query	references	query_program.sisu	25	10	--dir	cases/findings19
+query	completions	query_program.sisu	28	20	--dir	cases/findings19
+query	completions	query_program.sisu	28	19	--dir	cases/findings19
+query	completions	query_program.sisu	27	15	--dir	cases/findings19
+query	symbols	query_broken.sisu	--dir	cases/findings19
+query	diagnostics	query_broken.sisu	--dir	cases/findings19
+query	completions	query_broken.sisu	17	15	--dir	cases/findings19
+query	hover	query_broken.sisu	16	9	--dir	cases/findings19
+query	hover	query_broken.sisu	13	12	--dir	cases/findings19
+query	completions	query_broken.sisu	3	19	--text	query_buffer.text	--dir	cases/findings19
+query	hover	query_program.sisu	27	14
+query	hover	query_program.sisu	27	--dir	cases/findings19
+query	hover	missing.sisu	1	1	--dir	cases/findings19

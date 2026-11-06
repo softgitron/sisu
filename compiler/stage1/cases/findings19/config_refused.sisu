@@ -1,0 +1,16 @@
+# What `eval` refuses (RULES.md, R165): a constant whose evaluation stops
+# (an invariant that fails is the evaluation's panic, at the constant), a
+# constant that holds a function (`E0617`), and nothing (`None`) in a
+# list, which TOML cannot write; the others are rendered by no form while
+# one fails.
+struct Service:
+    name: String
+    replicas: int = 1
+    invariant self.replicas >= 1
+
+pure def none_left(n: int) -> int:
+    return n - n
+
+pub const WEB: Service = Service(name="web".to_string(), replicas=none_left(3))
+const SQUARE: (int) -> int = (x: int) -> x * x
+const MAYBE: list[int?] = [None, Some(2)]

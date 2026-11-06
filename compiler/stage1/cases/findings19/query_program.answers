@@ -1,0 +1,84 @@
+answer 0
+struct	Point	9:1-17:45	9:8-9:13	0
+field	x	11:5-11:11	11:5-11:6	1
+field	y	13:5-13:11	13:5-13:6	1
+method	moved	16:5-17:45	16:9-16:14	1
+function	norm	20:1-22:17	20:5-20:9	0
+function	main	24:1-29:18	24:5-24:9	0
+answer 0
+answer 0
+27:13-27:17	def norm(p: Point) -> int		The distance from the origin, squared.
+answer 0
+26:9-26:12	let far: Point		
+answer 0
+28:22-28:23	x: int		Across.
+answer 0
+27:5-27:10	def print(x: T) -> ()		Writes the `Display` rendering of `x` and a line break to standard output.
+answer 0
+21:17-21:18	Point		
+answer 0
+answer 0
+COMPILER/stage1/cases/findings19/query_program.sisu	20:5-20:9
+answer 0
+COMPILER/stage1/cases/findings19/query_program.sisu	28:9-28:15
+answer 0
+COMPILER/std/prelude.sisu	1179:5-1179:10
+answer 0
+COMPILER/stage1/cases/findings19/query_program.sisu	20:5-20:9	declaration
+COMPILER/stage1/cases/findings19/query_program.sisu	27:13-27:17	use
+COMPILER/stage1/cases/findings19/query_program.sisu	27:27-27:31	use
+answer 0
+COMPILER/stage1/cases/findings19/query_program.sisu	11:5-11:6	declaration
+COMPILER/stage1/cases/findings19/query_program.sisu	17:29-17:30	use
+COMPILER/stage1/cases/findings19/query_program.sisu	21:19-21:20	use
+COMPILER/stage1/cases/findings19/query_program.sisu	21:25-21:26	use
+COMPILER/stage1/cases/findings19/query_program.sisu	28:22-28:23	use
+answer 0
+COMPILER/stage1/cases/findings19/query_program.sisu	9:8-9:13	declaration
+COMPILER/stage1/cases/findings19/query_program.sisu	16:32-16:37	use
+COMPILER/stage1/cases/findings19/query_program.sisu	17:16-17:21	use
+COMPILER/stage1/cases/findings19/query_program.sisu	20:13-20:18	use
+COMPILER/stage1/cases/findings19/query_program.sisu	25:17-25:22	use
+answer 0
+COMPILER/stage1/cases/findings19/query_program.sisu	25:9-25:14	declaration
+COMPILER/stage1/cases/findings19/query_program.sisu	26:15-26:20	use
+COMPILER/stage1/cases/findings19/query_program.sisu	27:18-27:23	use
+answer 0
+function	failing	def failing(gen: Gen[T], prop: (T) -> bool, own prefix: list[int], size: int) -> Failure?	failing(${1:gen}, ${2:prop}, ${3:prefix}, ${4:size})
+variable	far	let far: Point	
+answer 0
+struct	f32	struct f32:	
+function	failing	def failing(gen: Gen[T], prop: (T) -> bool, own prefix: list[int], size: int) -> Failure?	failing(${1:gen}, ${2:prop}, ${3:prefix}, ${4:size})
+variable	far	let far: Point	
+keyword	for	keyword	
+keyword	from	keyword	
+answer 0
+function	norm	def norm(p: Point) -> int	norm(${1:p})
+keyword	not	keyword	
+answer 0
+struct	Pair	5:1-10:38	5:8-5:12	0
+field	left	6:5-6:14	6:5-6:9	1
+field	right	7:5-7:15	7:5-7:10	1
+method	total	9:5-10:38	9:9-9:14	1
+function	helper	12:1-13:17	12:5-12:11	0
+function	main	15:1-18:20	15:5-15:9	0
+answer 0
+17:15-17:15	E0100	parse.expected	error	expected a name, found the end of the line
+18:19-18:20	E0009	lex.unclosed-bracket	error	`(` is never closed
+answer 0
+method	fmt_debug	pure def Pair.fmt_debug(self, mut f: Formatter) -> ()	fmt_debug(${1:f})
+field	left	int	
+field	right	int	
+method	total	def Pair.total(self) -> int	total()
+answer 0
+16:9-16:10	let p: Pair		
+answer 0
+13:12-13:13	let n: int		
+answer 0
+variable	named	let named: int	
+answer 1
+error: NotFound(path="query_program.sisu")
+answer 1
+error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | parse (--tree [--trivia] | --print | --ast) FILE | batch OUT LIST | ast-batch OUT LIST | mutate SEED COUNT OUT LIST | names FILE | names-batch OUT LIST | types FILE | types-batch OUT LIST | sir FILE | ownership FILE | sir-batch OUT LIST")
+answer 1
+error: NotFound(path="missing.sisu")

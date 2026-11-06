@@ -1,0 +1,841 @@
+##! The language server's questions (10, "Language server"; RULES.md,
+##! R164), answered from stage 1's check of the program that holds a file,
+##! so that the driver's `sisu lsp` reads its answers from stage 1 rather
+##! than from the Rust front end: what a position names, its hover text, its
+##! declaration and its uses, the names that may be written there, and a
+##! file's declarations.
+##!
+##! Each answer is lines of fields separated by tabs, which the driver
+##! splits without a parser: a position is `LINE:COL` and a range
+##! `LINE:COL-LINE:COL`, 1-based, the column counting characters, as
+##! `check --format=ids` writes them; a field of text has its backslashes,
+##! tabs and line breaks written `\\`, `\t` and `\n` (`field`).
+
+import stage1.typeck
+from stage1.diag import Catalog, Lines, TextRange
+from stage1.parser import parse
+from stage1.syntax.ast import Mode
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Element, Tree
+from stage1.typeck.program import DefKind, ModuleId, Program
+from stage1.typeck.thir import Callee, TBody, TExprKind
+from stage1.typeck.ty import DefId, Ty, TyData, Types
+
+## The keywords a statement or a declaration starts with, which a
+## completion offers where a name may be written (stage 0's `KEYWORDS`).
+const KEYWORDS: list[str] = [
+    "def",
+    "let",
+    "var",
+    "if",
+    "elif",
+    "else",
+    "for",
+    "while",
+    "match",
+    "case",
+    "return",
+    "break",
+    "continue",
+    "pass",
+    "struct",
+    "enum",
+    "error",
+    "trait",
+    "impl",
+    "import",
+    "from",
+    "test",
+    "const",
+    "type",
+    "with",
+    "defer",
+    "assert",
+    "pure",
+    "own",
+    "mut",
+    "ref",
+    "and",
+    "or",
+    "not",
+    "in",
+    "comptime",
+]
+
+## The files of a checked program a question reads: for each module whose
+## text is known (the program's own, and the standard library's), its path
+## on disk and its text, by the module's index. A module the compiler
+## wrote has none.
+pub struct Files:
+    pub of: dict[int, (String, String)]
+
+impl Files:
+    pub pure def new() -> Files:
+        return Files(of={})
+
+    ## The path and text of module `m`, when it has a file.
+    pub pure def get(self, m: ModuleId) -> (String, String)?:
+        if let Some(found) = self.of.get(m.index):
+            return Some(found.copy())
+        return None
+
+## What a position names (stage 0's `Target`).
+@derive(Eq, Copy)
+pub enum Target:
+    Def(DefId)
+    ## A struct's field, by its index.
+    Field(DefId, int)
+    ## A local of the body at this index.
+    Local(int, int)
+    ## An expression that names nothing, by its body and its index.
+    Expr(int, int)
+
+## A field of an answer: its backslashes, tabs and line breaks written
+## `\\`, `\t` and `\n`, so that it holds neither.
+pub pure def field(text: str) -> String:
+    var out = String.new()
+    for c in text.chars():
+        if c == '\\':
+            out.push("\\\\")
+        elif c == '\t':
+            out.push("\\t")
+        elif c == '\n':
+            out.push("\\n")
+        else:
+            out.push("{c}")
+    return out
+
+## `LINE:COL-LINE:COL` of a range of `text`.
+pub pure def range_of(text: str, lines: Lines, start: int, end: int) -> String:
+    return lines.span(text, start, end)
+
+pure def within(r: TextRange, offset: int) -> bool:
+    return r.start <= offset and offset <= r.end
+
+pure def width(r: TextRange) -> int:
+    return r.end - r.start
+
+## Where a body is written: from its name to the end of its block (a
+## body's own range is its definition's name).
+pure def extent(b: TBody) -> TextRange:
+    let block = b.blocks[b.block.index].span
+    return TextRange.new(min(b.span.start, block.start), max(b.span.end, block.end))
+
+## The module of the body at `bi`: its definition's.
+pure def body_module(typed: typeck.Typed, bi: int) -> ModuleId:
+    return typed.prog.defs[typed.bodies[bi].def_.index].module
+
+## The innermost expression of a body of module `m` at `offset`: its body
+## and its index.
+pub pure def expr_at(typed: typeck.Typed, m: ModuleId, offset: int) -> (int, int)?:
+    var best: (int, int)? = None
+    var best_width = 0
+    for bi in range(len(typed.bodies)):
+        if body_module(typed, bi) != m:
+            continue
+        let body = ref typed.bodies[bi]
+        if not within(extent(body), offset):
+            continue
+        for ei in range(len(body.exprs)):
+            let r = body.exprs[ei].span
+            if within(r, offset) and (best.is_none() or width(r) <= best_width):
+                best = Some((bi, ei))
+                best_width = width(r)
+    return best
+
+## What position `offset` of module `m` names: a definition's own name, a
+## field's in its struct, a local's declaration, or what the innermost
+## expression there names (stage 0's `target_at`).
+pub pure def target_at(typed: typeck.Typed, m: ModuleId, offset: int) -> Target?:
+    let prog = ref typed.prog
+    var best: Target? = None
+    var best_width = 0
+    for i in range(len(prog.defs)):
+        let d = ref prog.defs[i]
+        if d.module != m or not within(d.span, offset):
+            continue
+        if let DefKind.Impl(_) = d.kind():
+            continue
+        if best.is_none() or width(d.span) < best_width:
+            best = Some(Target.Def(DefId(index=i)))
+            best_width = width(d.span)
+    for i in range(len(prog.defs)):
+        let d = ref prog.defs[i]
+        if d.module != m:
+            continue
+        if let DefKind.Struct(s) = d.kind():
+            for k in range(len(s.fields)):
+                if within(s.fields[k].span, offset):
+                    best = Some(Target.Field(DefId(index=i), k))
+    if let Some(t) = best:
+        return Some(t)
+    for bi in range(len(typed.bodies)):
+        if body_module(typed, bi) != m:
+            continue
+        let body = ref typed.bodies[bi]
+        for li in range(len(body.locals)):
+            let l = ref body.locals[li]
+            if within(l.span, offset) and named(l.name):
+                return Some(Target.Local(bi, li))
+    let (bi, ei) = expr_at(typed, m, offset) else:
+        return None
+    let e = ref typed.bodies[bi].exprs[ei]
+    match e.kind:
+        case TExprKind.Local(l):
+            return Some(Target.Local(bi, l))
+        case TExprKind.Const(d) | TExprKind.FnRef(d, _):
+            return Some(Target.Def(d))
+        case TExprKind.Call(Callee.Fn(d, _), _):
+            return Some(Target.Def(d))
+        case TExprKind.Struct(d, _) | TExprKind.Variant(d, _, _):
+            return Some(Target.Def(d))
+        case TExprKind.Field(base, index):
+            let t = typed.types.strip_ref(typed.bodies[bi].exprs[base.index].ty)
+            if let TyData.Adt(d, _) = typed.types.data(t):
+                if let DefKind.Struct(_) = prog.defs[d.index].kind():
+                    return Some(Target.Field(d, index))
+        case _:
+            pass
+    return Some(Target.Expr(bi, ei))
+
+## Whether a local's name is one the program wrote, not the compiler.
+pure def named(name: str) -> bool:
+    if name.is_empty() or name.starts_with("__") or name.contains("#"):
+        return False
+    let c = name.chars().next() ?? ' '
+    return c.is_alphabetic() or c == '_'
+
+## The `##` comment written above the declaration whose name starts at
+## `at` in `text`, its lines without `##` and the space after it, past the
+## attributes between them.
+pub pure def doc_above(text: str, at: int) -> String:
+    let lines = Lines.of(text)
+    var index = lines.index(at)
+    var found: list[String] = []
+    while index > 0:
+        index -= 1
+        let line = lines.text_of(text, index + 1)
+        let t = line.trim()
+        if t.starts_with("@"):
+            continue
+        if not t.starts_with("##") or t.starts_with("##!"):
+            break
+        var rest = t.byte_slice(2, t.byte_len()).to_string()
+        if rest.starts_with(" "):
+            rest = rest.byte_slice(1, rest.byte_len()).to_string()
+        found.push(rest)
+    found.reverse()
+    return found.join("\n")
+
+## The spelling of a type, with the generic parameters `names` names.
+pure def shown(prog: Program, types: Types, ty: Ty, names: list[String]) -> String:
+    return prog.display_in(types, ty, names)
+
+pure def generic_names(prog: Program, d: DefId) -> list[String]:
+    var names: list[String] = []
+    match prog.defs[d.index].kind():
+        case DefKind.Fn(f):
+            for g in f.generics:
+                names.push(g.name.copy())
+        case DefKind.Struct(s):
+            for g in s.generics:
+                names.push(g.name.copy())
+        case DefKind.Enum(e) | DefKind.ErrorSet(e):
+            for g in e.generics:
+                names.push(g.name.copy())
+        case _:
+            pass
+    return names
+
+## A definition's signature as it would be written (stage 0's
+## `signature`).
+pub pure def signature(prog: Program, types: Types, d: DefId) -> String:
+    let def_ = ref prog.defs[d.index]
+    let names = generic_names(prog, d)
+    match def_.kind():
+        case DefKind.Fn(f):
+            var owner = String.new()
+            if let Some(o) = f.owner:
+                owner = "{shown(prog, types, o, names)}."
+            var params: list[String] = []
+            match f.self_mode:
+                case Some(Mode.Own):
+                    params.push("own self".to_string())
+                case Some(Mode.Mut):
+                    params.push("mut self".to_string())
+                case Some(Mode.Borrow):
+                    params.push("self".to_string())
+                case None:
+                    pass
+            for p in f.params:
+                let mode = match p.mode:
+                    case Mode.Own: "own "
+                    case Mode.Mut: "mut "
+                    case Mode.Borrow: ""
+                params.push("{mode}{p.name}: {shown(prog, types, p.ty, names)}")
+            let pure_ = if f.pure: "pure " else: ""
+            let ret = shown(prog, types, f.ret, names)
+            return "{pure_}def {owner}{def_.name}({params.join(", ")}) -> {ret}"
+        case DefKind.Struct(s):
+            var out = "struct {def_.name}:"
+            for f in s.fields:
+                out.push("\n    {f.name}: {shown(prog, types, f.ty, names)}")
+            return out
+        case DefKind.Enum(e):
+            var out = "enum {def_.name}:"
+            for v in e.variants:
+                out.push("\n    {v.name}")
+            return out
+        case DefKind.ErrorSet(e):
+            var out = "error {def_.name}:"
+            for v in e.variants:
+                out.push("\n    {v.name}")
+            return out
+        case DefKind.Const(c):
+            return "const {def_.name}: {shown(prog, types, c.ty, [])}"
+        case DefKind.Trait(_):
+            return "trait {def_.name}"
+        case DefKind.Module(_):
+            return "module {prog.qualified_name(d)}"
+        case DefKind.TypeAlias(t):
+            return "type {def_.name} = {shown(prog, types, t, [])}"
+        case DefKind.Refinement(_):
+            return "type {def_.name}"
+        case _:
+            return def_.name.copy()
+
+## What the checker knows of a definition besides its signature: a `T !`
+## function's inferred error set.
+pure def notes_of(typed: typeck.Typed, d: DefId) -> String:
+    let f = typed.prog.fn_info(d) else:
+        return String.new()
+    if not f.err_inferred:
+        return String.new()
+    var set: list[String] = []
+    if let Some(members) = typed.inferred.get(d):
+        for e in members:
+            set.push(typed.prog.defs[e.index].name.copy())
+    if set.is_empty():
+        return "error set (inferred): none".to_string()
+    return "error set (inferred): `{{{set.join(", ")}}}`"
+
+## The `##` comment of a definition, from its module's file.
+pure def doc_of(typed: typeck.Typed, files: Files, d: DefId) -> String:
+    let def_ = ref typed.prog.defs[d.index]
+    let (_, text) = files.get(def_.module) else:
+        return String.new()
+    return doc_above(text, def_.span.start)
+
+## `query hover`: the range of what the position names, its signature (a
+## definition's, `let x: T` of a local, `x: T` of a field, or the type of
+## an expression), what the checker knows of it, and its `##` comment,
+## as one line `RANGE\tSIGNATURE\tNOTES\tDOC`; nothing where the position
+## names nothing.
+pub pure def hover(
+    typed: typeck.Typed, files: Files, m: ModuleId, text: str, offset: int
+) -> String:
+    let target = target_at(typed, m, offset) else:
+        return String.new()
+    let prog = ref typed.prog
+    let types = ref typed.types
+    let lines = Lines.of(text)
+    var range = TextRange.new(offset, offset)
+    var sig = String.new()
+    var notes = String.new()
+    var doc = String.new()
+    match target:
+        case Target.Def(d):
+            sig = signature(prog, types, d)
+            notes = notes_of(typed, d)
+            doc = doc_of(typed, files, d)
+            range = name_at(text, offset, prog.defs[d.index].name) ?? range_at(typed, m, offset)
+        case Target.Field(d, k):
+            let s = prog.struct_info(d) else:
+                return String.new()
+            let f = ref s.fields[k]
+            sig = "{f.name}: {shown(prog, types, f.ty, generic_names(prog, d))}"
+            doc = f.doc.copy()
+            range = name_at(text, offset, f.name) ?? range_at(typed, m, offset)
+        case Target.Local(bi, li):
+            let l = ref typed.bodies[bi].locals[li]
+            let kw = if l.mutable: "var" else: "let"
+            sig = "{kw} {l.name}: {shown(prog, types, l.ty, generic_names(prog, typed.bodies[bi].def_))}"
+            range = name_at(text, offset, l.name) ?? l.span
+        case Target.Expr(bi, ei):
+            let e = ref typed.bodies[bi].exprs[ei]
+            sig = shown(prog, types, e.ty, generic_names(prog, typed.bodies[bi].def_))
+            range = e.span
+    let at = range_of(text, lines, range.start, range.end)
+    return "{at}\t{field(sig)}\t{field(notes)}\t{field(doc)}\n"
+
+## The range of the name `name` written at `offset` of `text`, when the
+## name there is that one.
+pure def name_at(text: str, offset: int, name: str) -> TextRange?:
+    let start = word_start(text, offset)
+    var end = min(offset, text.byte_len())
+    while end < text.byte_len() and is_name_byte(text.byte_at(end)):
+        end += 1
+    if text.byte_slice(start, end) != name:
+        return None
+    return Some(TextRange.new(start, end))
+
+## The range of the innermost expression at `offset`, or the offset itself.
+pure def range_at(typed: typeck.Typed, m: ModuleId, offset: int) -> TextRange:
+    if let Some((bi, ei)) = expr_at(typed, m, offset):
+        return typed.bodies[bi].exprs[ei].span
+    return TextRange.new(offset, offset)
+
+## Where a definition, a field or a local is declared: its module and its
+## range there.
+pub pure def declared(typed: typeck.Typed, target: Target) -> (ModuleId, TextRange)?:
+    let prog = ref typed.prog
+    match target:
+        case Target.Def(d):
+            return Some((prog.defs[d.index].module, prog.defs[d.index].span))
+        case Target.Field(d, k):
+            let s = prog.struct_info(d) else:
+                return None
+            return Some((prog.defs[d.index].module, name_in(s.fields[k].span, s.fields[k].name)))
+        case Target.Local(bi, li):
+            return Some((body_module(typed, bi), typed.bodies[bi].locals[li].span))
+        case Target.Expr(_, _):
+            return None
+
+## The part of a field's range that is its name: the field is written
+## `name: T`, its name first.
+pure def name_in(r: TextRange, name: str) -> TextRange:
+    return TextRange.new(r.start, min(r.end, r.start + name.byte_len()))
+
+## `query definition`: the file and range of the declaration the position
+## names, `PATH\tRANGE`; nothing where it names none or none with a file.
+pub pure def definition(typed: typeck.Typed, files: Files, m: ModuleId, offset: int) -> String:
+    let target = target_at(typed, m, offset) else:
+        return String.new()
+    let (at, r) = declared(typed, target) else:
+        return String.new()
+    let (path, text) = files.get(at) else:
+        return String.new()
+    return "{field(path)}\t{range_of(text, Lines.of(text), r.start, r.end)}\n"
+
+## The name a target is written with.
+pure def target_name(typed: typeck.Typed, target: Target) -> String?:
+    let prog = ref typed.prog
+    match target:
+        case Target.Def(d):
+            return Some(prog.defs[d.index].name.copy())
+        case Target.Field(d, k):
+            let s = prog.struct_info(d) else:
+                return None
+            return Some(s.fields[k].name.copy())
+        case Target.Local(bi, li):
+            return Some(typed.bodies[bi].locals[li].name.copy())
+        case Target.Expr(_, _):
+            return None
+
+## `query references`: the declaration of what the position names and
+## every use of it in the program's own files (`programs`, the modules of the
+## program's packages that have files), each `PATH\tRANGE\tKIND`, the kind
+## `declaration` or `use`: the declaration first, then the uses by file
+## and position. A use is a name written as that one where it means it
+## (stage 0's `occurrences`): what is at the name is the target.
+pub pure def references(
+    typed: typeck.Typed,
+    files: Files,
+    programs: list[ModuleId],
+    m: ModuleId,
+    offset: int,
+    catalog: Catalog,
+) -> String:
+    let target = target_at(typed, m, offset) else:
+        return String.new()
+    let name = target_name(typed, target) else:
+        return String.new()
+    var out = String.new()
+    var decl: (ModuleId, TextRange)? = None
+    if let Some((at, r)) = declared(typed, target):
+        if let Some((path, text)) = files.get(at):
+            out.push(
+                "{field(path)}\t{range_of(text, Lines.of(text), r.start, r.end)}\tdeclaration\n"
+            )
+            decl = Some((at, r))
+    var typeish = False
+    if let Target.Def(d) = target:
+        typeish = is_type(typed.prog, d)
+    # A local is used in its own body only.
+    var modules = programs.copy()
+    if let Target.Local(bi, _) = target:
+        modules = [body_module(typed, bi)]
+    for module in modules:
+        let (path, text) = files.get(module) else:
+            continue
+        let lines = Lines.of(text)
+        let tree = parse(text, catalog).tree
+        for k in range(len(tree.tokens)):
+            let t = tree.tokens[k]
+            if t.kind != SyntaxKind.Ident:
+                continue
+            if text.byte_slice(t.start, t.end) != name:
+                continue
+            if let Some((dm, dr)) = decl:
+                if dm == module and dr.start <= t.start and t.end <= dr.end:
+                    continue
+            if let Target.Local(bi, _) = target:
+                if not within(extent(typed.bodies[bi]), t.start):
+                    continue
+            var means = False
+            if let Some(found) = target_at(typed, module, t.start):
+                means = found == target
+            # A type's name written in a type means the type.
+            if not means and typeish and k < len(tree.token_parents):
+                if let Some(n) = tree.token_parents[k]:
+                    means = in_type(tree, n)
+            if means:
+                out.push("{field(path)}\t{range_of(text, lines, t.start, t.end)}\tuse\n")
+    return out
+
+## Whether a definition is a type, whose name a type may be written with.
+pure def is_type(prog: Program, d: DefId) -> bool:
+    return match prog.defs[d.index].kind():
+        case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_) | DefKind.Trait(_): True
+        case DefKind.TypeAlias(_) | DefKind.Refinement(_): True
+        case _: False
+
+## Whether node `n` is written in a type, or is one.
+pure def in_type(tree: Tree, n: int) -> bool:
+    var at: int? = Some(n)
+    while let Some(k) = at:
+        let found = match tree.nodes[k].kind:
+            case SyntaxKind.PathType | SyntaxKind.OptionType | SyntaxKind.ResultType: True
+            case SyntaxKind.ErrorSetType | SyntaxKind.TupleType | SyntaxKind.ParenType: True
+            case SyntaxKind.FnType | SyntaxKind.RefType | SyntaxKind.DynType: True
+            case _: False
+        if found:
+            return True
+        at = tree.nodes[k].parent
+    return False
+
+## `query symbols`: the declarations of a file, from its syntax tree alone,
+## so that a file with a syntax error has them too: one line per
+## declaration, `KIND\tNAME\tRANGE\tNAME_RANGE\tDEPTH`, in the order
+## written, a member (a method, a field, a variant, an associated constant)
+## after its item with the depth 1 (stage 0's `symbol`). The kinds are
+## `function`, `method`, `struct`, `enum`, `error`, `trait`, `impl`,
+## `const`, `type`, `test`, `field` and `variant`.
+pub pure def symbols(text: str, catalog: Catalog) -> String:
+    let tree = parse(text, catalog).tree
+    let lines = Lines.of(text)
+    var out = String.new()
+    for e in tree.nodes[tree.root].children:
+        if let Element.Node(n) = e:
+            symbol(tree, text, lines, n, 0, mut out)
+    return out
+
+pure def symbol_kind(kind: SyntaxKind) -> str:
+    return match kind:
+        case SyntaxKind.FnDef: "function"
+        case SyntaxKind.StructDef: "struct"
+        case SyntaxKind.EnumDef: "enum"
+        case SyntaxKind.ErrorDef: "error"
+        case SyntaxKind.TraitDef: "trait"
+        case SyntaxKind.ImplDef: "impl"
+        case SyntaxKind.ConstDef: "const"
+        case SyntaxKind.TypeAlias: "type"
+        case SyntaxKind.TestDef | SyntaxKind.BenchDef | SyntaxKind.SuiteDef: "test"
+        case SyntaxKind.FieldDef: "field"
+        case SyntaxKind.VariantDef: "variant"
+        case _: ""
+
+pure def symbol(tree: Tree, text: str, lines: Lines, n: int, depth: int, mut out: String):
+    let node = ref tree.nodes[n]
+    var kind = symbol_kind(node.kind)
+    if kind.is_empty():
+        return
+    if depth > 0 and kind == "function":
+        kind = "method"
+    let raw = text.byte_slice(node.start, node.end)
+    let end = node.start + raw.trim_end().byte_len()
+    var name = String.new()
+    var sel = TextRange.new(node.start, node.start)
+    if kind == "test":
+        for c in node.children:
+            if let Element.Node(s) = c:
+                if tree.nodes[s].kind == SyntaxKind.StringExpr and name.is_empty():
+                    let sn = ref tree.nodes[s]
+                    name = text.byte_slice(sn.start, sn.end).to_string()
+                    sel = TextRange.new(sn.start, sn.end)
+    elif kind == "impl":
+        var header = String.new()
+        for c in node.children:
+            match c:
+                case Element.Leaf(t):
+                    if tree.tokens[t].kind == SyntaxKind.Colon:
+                        break
+                    header.push(text.byte_slice(tree.tokens[t].start, tree.tokens[t].end))
+                case Element.Node(k):
+                    header.push(text.byte_slice(tree.nodes[k].start, tree.nodes[k].end))
+        var words: list[String] = []
+        for w in header.split_whitespace():
+            words.push(w.to_string())
+        name = words.join(" ")
+        sel = TextRange.new(node.start, min(node.start + 4, end))
+    else:
+        # The name follows the keyword (`pure def area`: `pure` is a name
+        # to the lexer).
+        var after_keyword = False
+        var has_keyword = False
+        for c in node.children:
+            if let Element.Leaf(t) = c:
+                if is_declaring(tree.tokens[t].kind):
+                    has_keyword = True
+        for c in node.children:
+            if let Element.Leaf(t) = c:
+                let k = tree.tokens[t].kind
+                if is_declaring(k):
+                    after_keyword = True
+                elif k == SyntaxKind.Ident
+                        and (after_keyword or not has_keyword)
+                        and name.is_empty():
+                    name = text.byte_slice(tree.tokens[t].start, tree.tokens[t].end).to_string()
+                    sel = TextRange.new(tree.tokens[t].start, tree.tokens[t].end)
+    if name.is_empty():
+        return
+    let whole = range_of(text, lines, node.start, end)
+    let at = range_of(text, lines, sel.start, sel.end)
+    out.push("{kind}\t{field(name)}\t{whole}\t{at}\t{depth}\n")
+    if depth > 0:
+        return
+    # Members are items one level down: methods, fields, variants and
+    # associated constants, directly or in the item's block.
+    for c in node.children:
+        if let Element.Node(k) = c:
+            if is_member(tree.nodes[k].kind):
+                symbol(tree, text, lines, k, 1, mut out)
+            else:
+                for g in tree.nodes[k].children:
+                    if let Element.Node(j) = g:
+                        if is_member(tree.nodes[j].kind):
+                            symbol(tree, text, lines, j, 1, mut out)
+
+pure def is_declaring(k: SyntaxKind) -> bool:
+    return match k:
+        case SyntaxKind.DefKw | SyntaxKind.StructKw | SyntaxKind.EnumKw | SyntaxKind.ErrorKw: True
+        case SyntaxKind.TraitKw | SyntaxKind.ConstKw | SyntaxKind.TypeKw: True
+        case _: False
+
+pure def is_member(k: SyntaxKind) -> bool:
+    return match k:
+        case SyntaxKind.FnDef | SyntaxKind.FieldDef | SyntaxKind.VariantDef | SyntaxKind.ConstDef: True
+        case _: False
+
+# ---------------------------------------------------------------- completions
+
+## A completion: its kind, its label, its detail and the snippet that
+## writes it (empty for none), as one line.
+pure def item(kind: str, label: str, detail: str, snippet: str) -> String:
+    return "{kind}\t{field(label)}\t{field(detail)}\t{field(snippet)}\n"
+
+## A snippet calling `name` with a hole for each of `params`.
+pure def call_snippet(name: str, params: list[String]) -> String:
+    var holes: list[String] = []
+    for i in range(len(params)):
+        holes.push("${{{i + 1}:{params[i]}}}")
+    return "{name}({holes.join(", ")})"
+
+## The completion of a definition named `name`, when it is one.
+pure def def_item(prog: Program, types: Types, name: str, d: DefId) -> String?:
+    if name.is_empty() or name.starts_with("__") or name.contains("#") or name.contains("<"):
+        return None
+    let detail = signature(prog, types, d)
+    match prog.defs[d.index].kind():
+        case DefKind.Fn(f):
+            if f.comptime_ or f.internal:
+                return None
+            var required: list[String] = []
+            for p in f.params:
+                if p.default.is_none():
+                    required.push(p.name.copy())
+            return Some(item("function", name, detail, call_snippet(name, required)))
+        case DefKind.Struct(s):
+            var snippet = String.new()
+            if s.builtin.is_none():
+                var holes: list[String] = []
+                for f in s.fields:
+                    if f.default.is_none():
+                        holes.push("{f.name}=${{{len(holes) + 1}:{f.name}}}")
+                snippet = "{name}({holes.join(", ")})"
+            return Some(item("struct", name, detail, snippet))
+        case DefKind.Enum(_) | DefKind.ErrorSet(_):
+            return Some(item("enum", name, detail, ""))
+        case DefKind.Const(_):
+            return Some(item("const", name, detail, ""))
+        case DefKind.Module(_):
+            return Some(item("module", name, detail, ""))
+        case DefKind.Trait(_):
+            return Some(item("trait", name, detail, ""))
+        case DefKind.TypeAlias(_) | DefKind.Refinement(_):
+            return Some(item("type", name, detail, ""))
+        case _:
+            return None
+
+## The completions of a value of type `ty`: its struct's fields, then its
+## type's methods and those of the traits it implements, each once
+## (stage 0's `members`).
+pub pure def members(typed: typeck.Typed, ty: Ty) -> String:
+    let prog = ref typed.prog
+    var types = typed.types.copy()
+    let t = types.strip_ref(ty)
+    var found: dict[String, String] = {}
+    var order: list[String] = []
+    if let TyData.Adt(d, args) = types.data(t).copy():
+        if let Some(s) = prog.struct_info(d):
+            if s.builtin.is_none():
+                for f in s.fields:
+                    let fty = types.subst(f.ty, args)
+                    let line = item("field", f.name, prog.display(types, fty), "")
+                    if not found.contains(f.name.copy()):
+                        _ = found.insert(f.name.copy(), line)
+                        order.push(f.name.copy())
+    let key = types.key(t) else:
+        return joined(found, order)
+    var methods: list[(String, DefId)] = []
+    for ((k, n), d) in prog.methods.items():
+        if k == key:
+            methods.push((n.copy(), d))
+    for i in prog.impls:
+        let info = prog.impl_info(i) else:
+            continue
+        if types.key(types.strip_ref(info.self_ty)) == Some(key):
+            for (n, d) in info.methods:
+                methods.push((n.copy(), d))
+    for (n, d) in methods:
+        let f = prog.fn_info(d) else:
+            continue
+        if f.self_mode.is_none() or not named(n) or found.contains(n.copy()):
+            continue
+        var required: list[String] = []
+        for p in f.params:
+            if p.default.is_none():
+                required.push(p.name.copy())
+        let line = item("method", n, signature(prog, types, d), call_snippet(n, required))
+        _ = found.insert(n.copy(), line)
+        order.push(n.copy())
+    return joined(found, order)
+
+## The lines of `found` by their labels, sorted.
+pure def joined(found: dict[String, String], order: list[String]) -> String:
+    var labels = order.copy()
+    labels.sort()
+    var out = String.new()
+    for l in labels:
+        if let Some(line) = found.get(l.copy()):
+            out.push(line)
+    return out
+
+## The narrowest expression of module `m` that ends at `end`: the value
+## before a `.`, in a text whose `.` and the name after it are gone.
+pub pure def receiver_at(typed: typeck.Typed, m: ModuleId, end: int) -> Ty?:
+    var best: Ty? = None
+    var best_width = 0
+    for bi in range(len(typed.bodies)):
+        if body_module(typed, bi) != m:
+            continue
+        let body = ref typed.bodies[bi]
+        for e in body.exprs:
+            if e.span.end != end or typed.types.contains_error(e.ty):
+                continue
+            if best.is_none() or width(e.span) < best_width:
+                best = Some(e.ty)
+                best_width = width(e.span)
+    return best
+
+## The names that may be written at `offset` of module `m` (stage 0's
+## `scope_items`): the locals of the innermost body there declared before
+## it, the module's own names and those it imports, the prelude's names
+## (but the standard library's internal functions), the variants of the program's own enums by their bare names, and
+## the keywords.
+pub pure def scope(typed: typeck.Typed, m: ModuleId, offset: int) -> String:
+    let prog = ref typed.prog
+    let types = ref typed.types
+    var found: dict[String, String] = {}
+    var order: list[String] = []
+    var around: int? = None
+    var around_width = 0
+    for bi in range(len(typed.bodies)):
+        if body_module(typed, bi) != m or not within(extent(typed.bodies[bi]), offset):
+            continue
+        let w = width(extent(typed.bodies[bi]))
+        if around.is_none() or w < around_width:
+            around = Some(bi)
+            around_width = w
+    if let Some(bi) = around:
+        let body = ref typed.bodies[bi]
+        let names = generic_names(prog, body.def_)
+        for l in body.locals:
+            if l.span.end <= offset and named(l.name) and not found.contains(l.name.copy()):
+                let kw = if l.mutable: "var" else: "let"
+                let detail = "{kw} {l.name}: {shown(prog, types, l.ty, names)}"
+                _ = found.insert(l.name.copy(), item("variable", l.name, detail, ""))
+                order.push(l.name.copy())
+    for module in [m, prog.prelude]:
+        for (n, d) in prog.modules[module.index].items.items():
+            if found.contains(n.copy()):
+                continue
+            if let Some(line) = def_item(prog, types, n, d):
+                _ = found.insert(n.copy(), line)
+                order.push(n.copy())
+    for (n, ds) in prog.variants.items():
+        let (d, _) = ds.first() else:
+            continue
+        if prog.modules[prog.defs[d.index].module.index].is_std or found.contains(n.copy()):
+            continue
+        _ = found.insert(n.copy(), item("variant", n, prog.defs[d.index].name, ""))
+        order.push(n.copy())
+    for k in KEYWORDS:
+        if not found.contains(k.to_string()):
+            _ = found.insert(k.to_string(), item("keyword", k, "keyword", ""))
+            order.push(k.to_string())
+    return joined(found, order)
+
+## The lines of `answer` whose label starts with `prefix`.
+pub pure def with_prefix(answer: str, prefix: str) -> String:
+    if prefix.is_empty():
+        return answer.to_string()
+    var out = String.new()
+    for line in answer.lines():
+        var k = 0
+        for part in line.split("\t"):
+            if k == 1 and part.starts_with(prefix):
+                out.push(line)
+                out.push("\n")
+            k += 1
+    return out
+
+## Whether byte `b` may be part of a name.
+pub pure def is_name_byte(b: u8) -> bool:
+    let n = b.to_int()
+    return (n >= 48 and n <= 57)
+        or (n >= 65 and n <= 90)
+        or (n >= 97 and n <= 122)
+        or n == 95
+        or n >= 128
+
+## Where the name being written at `offset` starts.
+pub pure def word_start(text: str, offset: int) -> int:
+    var start = min(offset, text.byte_len())
+    while start > 0 and is_name_byte(text.byte_at(start - 1)):
+        start -= 1
+    return start
+
+test "a field holds no tab and no line break":
+    assert field("a\tb\nc\\d") == "a\\tb\\nc\\\\d"
+    assert field("plain") == "plain"
+
+test "a declaration's comment is the `##` lines above it":
+    let text = "## One.\n## Two.\n@inline\ndef f():\n    pass\n"
+    assert doc_above(text, text.find("f(") ?? 0) == "One.\nTwo."
+    assert doc_above("def g():\n    pass\n", 4) == ""
+
+test "the name being written":
+    assert word_start("let x = foo", 11) == 8
+    assert word_start("p.na", 4) == 2
+    assert with_prefix("a\tname\tx\t\nb\tother\ty\t\n", "na") == "a\tname\tx\t\n"

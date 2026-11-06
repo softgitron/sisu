@@ -1,0 +1,35 @@
+# A configuration module (08, "Configuration files"; RULES.md, R165),
+# rendered by `eval` in `config.requests`: its `const` items, evaluated at
+# compile time, written as JSON, TOML and YAML, the types the module
+# declares being the schema.
+type Port = int where 1 <= self <= 65535
+
+enum Tier:
+    Free
+    Paid(seats: int)
+
+struct Service:
+    name: String
+    port: Port
+    replicas: int = 1
+    tier: Tier = Tier.Free
+    owner: String? = None
+    invariant self.replicas >= 1
+
+## The replicas of a service that takes `load` requests a second.
+pure def replicas_for(load: int) -> int:
+    if load <= 0:
+        return 1
+    return (load + 999) // 1000
+
+pub const SERVICES: list[Service] = [
+    Service(name="web".to_string(), port=8080, replicas=replicas_for(2500)),
+    Service(
+        name="api".to_string(), port=9000, tier=Tier.Paid(seats=5), owner=Some("ops".to_string())
+    ),
+]
+pub const REGION: str = "eu-north"
+const RATIO: f64 = 0.25
+const LIMITS: dict[String, int] = {"cpu".to_string(): 4, "memory".to_string(): 16}
+const ZONES: list[str] = ["a", "b\tc"]
+const EMPTY: list[int] = []

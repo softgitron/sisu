@@ -11489,3 +11489,35 @@ R158, R164 and R165)
      the intrinsics (decision 945) and tagged-pointer provenance (decision
      904) are not this round's either: the round spent its time on 980,
      983, 984 and 985. This changes no rule of the language.
+
+**Stage 1's nineteenth round** (stage 1's RULES.md, R164 to R168; the language server's queries served by stage 1 at 0.14.0, `eval` for configuration modules, the template evaluator's builtins, UAX #29's remaining rules decided against, the `std/slices` case's differences)
+
+960. `sisu1 query KIND FILE [LINE COL] [--text PATH]` answers the
+     language server's questions from stage 1's check of the program that
+     holds FILE: `diagnostics`, `symbols`, `hover`, `definition`,
+     `references` and `completions`, one line per item of tab-separated
+     fields, positions as `check --format=ids` writes them; `sir
+     --repl-serve` serves it, a hover in 0.009 s. `sisu1 --version` is
+     0.14.0. Stage 1 decides it (RULES.md, R164).
+
+961. `sisu1 eval FILE [--to json|toml|yaml]` evaluates a module's `const`
+     items with the compile-time evaluator and writes them as JSON (the
+     default), TOML or YAML; a constant whose evaluation stops is that
+     error at its name, and one the form cannot write is `E0617`. Stage 1
+     decides it (RULES.md, R165).
+
+962. A template's compile-time code may call `range`, `zip`, `reversed`,
+     `sorted`, `min`, `max` and `sum` of lists and numbers and the methods
+     `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of text,
+     besides `reflect`, `enumerate` and `len`; `E0609`'s reason lists them.
+     Stage 1 decides it (RULES.md, R166).
+
+963. `graphemes()` keeps R162's rules: UAX #29's `Prepend`, conjunct
+     (GB9c) and pictograph (GB11) rules need Unicode's
+     `GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt` and
+     `emoji-data.txt`, which Python's `unicodedata` does not carry; they
+     wait for those files. Stage 1 decides it (RULES.md, R167).
+
+964. The conformance suite's `std/slices` differs from stage 0's front
+     end, which has no `std.mem`, as `unsafe/cstring` does (R149). Stage 1
+     decides it (RULES.md, R168).
