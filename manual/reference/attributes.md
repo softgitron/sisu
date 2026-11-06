@@ -355,35 +355,17 @@ def main():
 <!-- output: examples/reference-attributes/members.console -->
 ```console
 $ sisu run members.sisu
-warning[W0022]: `@column` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
-  --> members.sisu:3:6
-  |
-3 |     @column("guest")
-  |      ^^^^^^
-
-warning[W0022]: `@label` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
-  --> members.sisu:8:6
-  |
-8 |     @label("cold")
-  |      ^^^^^
-
-warning[W0022]: `@label` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
-  --> members.sisu:10:6
-   |
-10 |     @label("ready for löyly")
-   |      ^^^^^
-
 name is stored as guest
 hour is stored as hour
 Cold: cold
 Ready: ready for löyly
 ```
 
-The program reads the attributes and prints what they say, but warns
-of each first, W0022, since the warning looks for a call of
-`reflect.attributes_of` and finds none: a program that reads only
-`f.attributes` and `v.attributes` gets the warning it does not need, a
-finding for the compiler's maintainers. A method's attributes route a
+The program reads the attributes and prints what they say, with no
+W0022: reading `f.attributes` or `v.attributes` counts as code that
+reads attributes, as a call of `reflect.attributes_of` does, so an
+attribute of the program's own is data that code may read
+([Attributes are data](#attributes-are-data)). A method's attributes route a
 call to it, `s.[m]()`, as [chapter
 25](../tutorial/25-compile-time.md#attributes-of-methods-and-fields)
 does.
@@ -391,8 +373,7 @@ does.
 **Stage 0 differs.** `reflect.attributes_of` takes a struct, an enum,
 an error set, a method that `reflect.methods_of` gives or a function
 that `reflect.functions_of` gives, and gives an empty list for a type
-of the standard library and its declarations. W0022 counts only calls
-of `reflect.attributes_of` as reading attributes.
+of the standard library and its declarations.
 
 **Status.** In stage 0 (D-046, D-018), with the differences noted.
 
@@ -1026,16 +1007,16 @@ C passes:
 <!-- file: examples/reference-attributes/export_pointer.sisu -->
 ```sisu
 # An exported function takes a `@repr(c)` struct by a pointer to it.
-from std.mem import ptr
+from std.mem import Layout, ptr
 
 @repr(c)
 struct Reading:
-    celsius: int
-    minutes: int
-    humidity: f64
+    celsius: i32
+    minutes: u8
+    humidity: f32
 
 @export("sauna_load")
-def load(reading: ptr[Reading]) -> int:
+def load(reading: ptr[Reading]) -> i32:
     # safety: valid, aligned: `reading` points to a live `Reading` that
     #   nothing changes while the reference lives.
     let r = unsafe reading.as_ref()
@@ -1044,6 +1025,8 @@ def load(reading: ptr[Reading]) -> int:
 def main():
     let reading = Reading(celsius=80, minutes=10, humidity=0.2)
     print(load(ptr.of(ref reading)))
+    let layout = Layout.of[Reading]()
+    print("{layout.size} bytes, aligned to {layout.align}")
 ```
 
 <!-- output: examples/reference-attributes/export_pointer.console -->

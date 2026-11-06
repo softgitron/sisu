@@ -24,8 +24,8 @@ answers each obligation, and gives the caller ordinary values:
 <!-- file: examples/guide-c-library/ffi.pkg/cenv/src/lib.sisu -->
 ```sisu
 ##! C's `getenv`, behind a safe function that takes an `Env`.
-from std.ffi import CStr, c_char
-from std.mem import Global, Layout, ptr
+from std.ffi import CStr, CString, c_char
+from std.mem import ptr
 
 # safety: the signature as <stdlib.h> declares it; it returns promptly.
 extern "C":
@@ -34,23 +34,15 @@ extern "C":
 ## The value of the environment variable `name`, if it is set and is
 ## text. `env` is the authority to read the environment.
 pub def lookup(env: Env, name: str) -> String?:
-    let layout = Layout(size=len(name) + 1, align=1)
-    let block = Global().acquire(layout) else:
+    let c_name = CString.new(name) else:
         return None
     var found: String? = None
-    # safety: writable, in_bounds: the block has room for the name and
-    #   its NUL; valid: getenv reads only the bytes written first;
-    #   terminated, stable: its result ends with a NUL and stays put
-    #   while it is read; once: the block is released once.
+    # safety: valid: `c_name` lives across the call and ends with its
+    #   NUL, and getenv keeps no pointer to it; terminated, stable: the
+    #   result ends with a NUL and stays put while it is read.
     unsafe:
-        var at = 0
-        for b in name.bytes():
-            block.offset(at).write(b)
-            at += 1
-        block.offset(at).write(0u8)
-        if let Some(value) = getenv(block.cast[c_char]().as_const()):
+        if let Some(value) = getenv(c_name.as_ptr()):
             found = CStr.from_ptr(value).to_text().ok()
-        Global().release(block, layout)
     return found
 ```
 
@@ -185,9 +177,9 @@ $ sisu audit --unsafe
 greeter 0.1.0   no `unsafe`   the root package
   no unsafe code
 cenv 0.1.0   unsafe = "extern"   trusted in sisu.toml:10
-  cenv (cenv/src/lib.sisu)   1 block, 1 extern block, module hash 681dc5521d3043d4
+  cenv (cenv/src/lib.sisu)   1 block, 1 extern block, module hash 68e1a0bbbd9410b3
     cenv/src/lib.sisu:6   extern block   # safety: the signature as <stdlib.h> declares it; it returns promptly.
-    cenv/src/lib.sisu:20   unsafe block in lookup   # safety: writable, in_bounds: the block has room for the name and its NUL; valid: getenv reads only the bytes...
+    cenv/src/lib.sisu:18   unsafe block in lookup   # safety: valid: `c_name` lives across the call and ends with its NUL, and getenv keeps no pointer to it; term...
   foreign functions: getenv (called by lookup (takes `Env`))
 std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`
 ```

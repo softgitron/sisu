@@ -690,7 +690,9 @@ for each method with a `@route`, and the method's own attribute says
 which path calls it. A field's and a variant's attributes are
 `f.attributes` and `v.attributes`, in the same form, so a column can
 take its name from a `@column` on its field
-([R14](../reference/attributes.md#attributes-are-data)).
+([R14](../reference/attributes.md#attributes-are-data)). Either way of
+reading them tells the compiler that the program's own attributes are
+data, so it warns of none of them.
 
 ## A file in the program
 

@@ -1,0 +1,7 @@
+# A configuration's constants may call the prelude's functions.
+const BENCHES: list[int] = [4, 9, 2]
+const HIGHEST: int = max(BENCHES)
+const LOWEST: int = min(4, 9)
+const ORDER: list[int] = sorted(BENCHES)
+const ALL_WARM: bool = all([b > 1 for b in BENCHES])
+const PAIRS: list[(int, int)] = [(i, b) for i, b in enumerate(BENCHES)]

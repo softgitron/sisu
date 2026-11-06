@@ -46,6 +46,9 @@ def main():
 - Use `int` for counts, lengths and indices, and a sized type where a
   file format, a protocol or a foreign function fixes the size. `uint`
   is for bits and for sizes that come from foreign code.
+- A sized type takes its width in memory, a `u8` one byte and a `u32`
+  four, so a `list[u8]` of a million bytes takes a megabyte, in a run
+  and in a native build alike.
 
 > **From Python.** Python has one integer type, and meets fixed sizes
 > only in modules such as `struct`, `array` and NumPy's types. In Sisu

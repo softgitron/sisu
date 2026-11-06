@@ -1,0 +1,6 @@
+$ sisu run widths.sisu
+1 2 4
+4 8 8
+$ sisu run --native widths.sisu
+1 2 4
+4 8 8

@@ -11,8 +11,7 @@ def count(towels: Slice[Towel]) -> int:
 
 def main():
     let towels = [Towel("Aino's"), Towel("Eero's"), Towel("Roni's")]
-    let all = towels.as_slice()
     for _ in range(2):
-        let first_two = all[:2]
+        let first_two = towels.as_slice()[:2]
         print("{count(first_two)} towels in view")
     print("the list ends")

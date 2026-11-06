@@ -308,14 +308,18 @@ A native build makes an exported function a global symbol under its C
 name, whether or not the program calls it, called with C's own
 convention over plain values: the integers and floats at their width,
 a `bool` a byte, a `char` a 32-bit code, a raw pointer an address, and
-a `@repr(c)` struct by a pointer to it. A panic that leaves an exported
+a `@repr(c)` struct by a pointer to it, its fields at C's offsets. A
+number takes its width in memory too, a `u8` one byte and an `i32` four
+([R2](types.md#integers)), so a `list[u8]` or a `bytes` hands C its
+bytes in place. A panic that leaves an exported
 function ends the program with status 134, since C cannot unwind
 ([R14](attributes.md#exported-functions)).
 
 **Stage 0 differs.** A `@repr(c)` struct passed by value is D0103 in a
-native build ([R17](diagnostics.md#d0103)), and so is one by a pointer
-when a field is narrower than a word, an `i32` or a `u8`; a struct of
-`int`, `f64` and raw pointers goes by a pointer.
+native build ([R17](diagnostics.md#d0103)). A tuple keeps a word for
+each of its parts natively, so a pointer to a tuple with a part
+narrower than a word is D0103 too, and so is a pointer to an option of
+a raw pointer ([R14](attributes.md#exported-functions)).
 
 **Status.** Decided (D-039, Q-31), with the difference noted.
 

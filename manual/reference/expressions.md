@@ -305,6 +305,10 @@ the byte before the last, and `values[1:^1]` a view of all but the two
 ends. Slicing a `Slice` copies nothing: the new slice views the same
 list in place, and when a slice ends it drops none of the values it
 views, which stay the list's ([chapter 12](../tutorial/12-views.md#a-view-of-part-of-a-list)).
+So a slice of a slice borrows the list, not the slice it was cut from:
+`let firsts = readings.as_slice()[:2]` may be used on later lines,
+though the first slice ends with its line
+([R7](ownership.md#views)).
 Slicing a list or `bytes` makes a new one of copies. The base is evaluated once, so a call before the brackets runs
 once:
 

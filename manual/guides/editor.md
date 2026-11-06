@@ -147,8 +147,10 @@ changes.
 **Status.** In stage 0, with stage 1 and the Rust front end sharing
 the answers: rename, code actions, inlay hints, selection ranges,
 formatting, a script's values and `sisu.explainBorrow` still come from
-the Rust front end. Stage 1's completion offers every name of the
-prelude, its internal helpers too, and its references leave out the
-names in import lines. The structural editing with a typed palette
+the Rust front end. Stage 1 answers the first five as well from `sisu1
+0.15.0`, and the driver routes them in a later round, which leaves a
+script's values and `sisu.explainBorrow` to the Rust front end. Stage
+1's completion offers only the names a program sees, and its references
+count the names in import lines. The structural editing with a typed palette
 and the stepper of the teaching profile, which
 [10](../../proposal/10-tooling.md) describes for editors, are designed.

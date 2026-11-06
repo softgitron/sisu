@@ -1590,7 +1590,7 @@ Shown in [chapter 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
 
 ## Names and declarations
 
-Codes E0200 to E0277. Name resolution finds what each name means and
+Codes E0200 to E0278. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -3807,6 +3807,64 @@ def main():
 ```
 
 [R13](modules.md#imports) states the rule.
+
+### E0278
+
+`resolve.prelude-internal`: `{name}` is the prelude's own, for the
+standard library's code: a program sees only the names it marks `pub`
+(09).
+
+Every module sees the prelude's fixed list of names
+([R13](modules.md#names-every-module-sees)). The prelude declares more,
+helpers that the standard library's own code calls, such as
+`days_in_month` of the calendar or `DrawState` of the property tests,
+and a program that names one is refused, where an unknown name would
+be E0200 or E0201:
+
+<!-- file: examples/reference-diagnostics/e0278_prelude_internal.sisu -->
+```sisu
+# A name that the prelude keeps for the standard library's own code.
+def main():
+    print(days_in_month(2028, 2))
+```
+
+<!-- output: examples/reference-diagnostics/e0278_prelude_internal.console -->
+```console
+$ sisu run e0278_prelude_internal.sisu
+error[E0278]: `days_in_month` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
+  --> e0278_prelude_internal.sisu:3:11
+  |
+3 |     print(days_in_month(2028, 2))
+  |           ^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Where a module of the standard library has the helper as a `pub` item,
+the fix, `resolve.import-from-std`, imports it from there; no module
+has one of them yet, so E0278 has no fix today. Declare the function
+the program needs:
+
+<!-- file: examples/reference-diagnostics/e0278_prelude_internal_fixed.sisu -->
+```sisu
+# The program declares the function it needs.
+def days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        let leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+        return if leap: 29 else: 28
+    return if month in [4, 6, 9, 11]: 30 else: 31
+
+def main():
+    print(days_in_month(2028, 2))
+```
+
+<!-- output: examples/reference-diagnostics/e0278_prelude_internal_fixed.out -->
+```text
+29
+```
+
+E0278 is stage 1's; the Rust front end still lets a program name the
+prelude's helpers.
 
 ## Types
 
@@ -10456,9 +10514,8 @@ and no compile-time code of the program reads attributes
 An attribute is data ([R14](attributes.md#attributes-are-data)). One
 whose name Sisu does not read means something only to compile-time code
 that reads it, and a program with no such code cannot read it at all.
-Stage 0 counts only a call of `reflect.attributes_of` as such code, so
-a program that reads a field's or a variant's attributes through
-`f.attributes` alone still gets the warning
+Such code is a call of `reflect.attributes_of`, or a read of a field's
+or a variant's `attributes`, `f.attributes` and `v.attributes`
 ([R14](attributes.md#attributes-are-data) shows one).
 
 <!-- file: examples/reference-diagnostics/w0022_unknown_attribute.sisu -->
@@ -10487,8 +10544,8 @@ Kotiharju 80
 ```
 
 Remove the attribute, or read it: a program whose compile-time code
-calls `reflect.attributes_of` keeps its own attributes as data, without
-a word.
+calls `reflect.attributes_of`, or reads a member's `attributes`, keeps
+its own attributes as data, without a word.
 
 <!-- file: examples/reference-diagnostics/w0022_unknown_attribute_fixed.sisu -->
 ```sisu
@@ -11863,7 +11920,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0150. The messages of the `sisu` command itself
+Codes D0001 to D0174. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -12168,20 +12225,19 @@ The program is valid, and the interpreter runs it, but the native
 backend has no lowering yet for a part of it, which the message names,
 with the function it is in: a `@repr(c)` struct passed by value to an
 exported function, "a `Reading` by value (a parameter of the exported
-function `sauna_load`)", a raw pointer to a struct with a field
-narrower than a word, such as an `i32` or a `u8`, or the pointer of a
-`CString`, `as_ptr`, which the interpreter gives. The native backend
-keeps each field of a value, and each `u8` that a slice holds, in a
-word of its own, where C packs a narrow field and a byte at its width,
-so these wait for layouts chosen for each type (D-086).
+function `sauna_load`)", or a raw pointer to a tuple with a part
+narrower than a word, "`mem.ptr.of` of a `(int, u8)`", or to an option
+of a raw pointer. A native build lays a declared struct's fields out at
+C's offsets and a number at its width, but keeps each part of a tuple
+in a word of its own, as the runtime's iterators lay their pairs out,
+so a pointer to such a tuple would not see what C sees (D-086).
 
 Run the program without `--native`, or change it to what the backend
-compiles: pass a struct to an exported function by a pointer, and give
-a struct that goes by a pointer fields of words, `int`, `f64` and raw
-pointers, as [R14](attributes.md#exported-functions) shows.
+compiles: pass a struct to an exported function by a pointer, and hand
+C a `@repr(c)` struct rather than a tuple, as
+[R14](attributes.md#exported-functions) shows.
 
-Example: [R14](attributes.md#exported-functions), [chapter
-27](../tutorial/27-systems.md#no-authority-without-a-capability).
+Example: [R14](attributes.md#exported-functions).
 
 ### D0111
 
@@ -12659,6 +12715,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0275](#e0275) | `resolve.dependency-excluded` | cannot import `{name}`: the dependency `{package}` of `{this}` is not built for this target, which its `when` in that package's `sisu.toml` excludes |
 | [E0276](#e0276) | `resolve.dev-dependency` | cannot import `{name}` here: `{package}` is a dev-dependency of `{this}`, which its tests import and its code does not |
 | [E0277](#e0277) | `resolve.import-in-body` | an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none |
+| [E0278](#e0278) | `resolve.prelude-internal` | `{name}` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09) |
 
 ### Types, every code
 
@@ -13247,4 +13304,9 @@ it. `sisu explain CODE` prints the same line.
 | [D0148](#d0148) | `cli.explain-size-native` | `--explain-size` explains the size of a native executable: it goes with `--native` |
 | [D0149](#d0149) | `cli.token-module-run` | the token is for the run of the tests of `{module}`; `sisu test --replay {token} {module}` replays it |
 | [D0150](#d0150) | `cli.token-package-run` | the token is for the run of the package's tests, not of `{module}`'s; `sisu test --replay {token} {package}` replays it |
+| D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
+| D0171 | `cli.hole-scope` | in scope: {bindings} |
+| D0172 | `cli.hole-scope-none` | nothing is in scope |
+| D0173 | `cli.hole-fits` | of its type: {names} |
+| D0174 | `cli.hole-fits-none` | nothing in scope is of its type |
 

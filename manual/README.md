@@ -976,6 +976,7 @@ solutions and passing checks.
 | 29 | Stage 1's seventeenth round (R150 to R157, decisions 880 to 887) and the stage 0 round's decisions 900 to 904 in the manual: the features they made teachable, every changed session reviewed, the findings checked again | done (1): no code added to the catalog, R0010's entry at the index and E0220's at a module's tests, 6 sessions blessed (3 changed by the rounds: the attribute's argument as a value in R12's `functions`, R0010's panic at `4:11`, and the standard library's two new doc examples in `sisu test --std`'s count; 1 given a command more, chapter 17's `workspace` with `sisu test wordcount/src/text.sisu`; 2 new) and 12 conformance expectations (4 changed by the rounds: R14's `data`, R17's `w0022_unknown_attribute_fixed` and `r0010_missing_key`, R12's `functions`; 3 with their examples; 5 new, among them a package's failing test); attribute arguments as values with `keys` (R14 with `values`, R12, chapter 25), a table of function values made with `comptime [...]` (chapter 25's `routes`, R12), `ptrsize`, `uptrsize` and `Sized` (R2), the `Array` literal (chapter 5 with `arrays_length`, R2), the `Url` literal (chapter 6 with `urls`, R2, G10), `sisu test src/MODULE.sisu` with its replay line and D0033 (R15 with its package `gauge`, R16, R13, R17's E0220, chapter 17), `try_collect`'s spelling after another adapter (chapter 16, R8), compile-time types and Q-81 (R12, R14, chapter 25), the missing key's one position (R4, R17), `Decimal`'s `/` waiting for a `Ratio` of `BigInt`s (R2, G31, chapter 24), the slice that must view a `CString` in place (chapter 27, G19) and `sum` in the runtime in Sisu (X9) taught with checked examples; the findings at 45 (4 settled, 4 narrowed, 2 new), every check passing |
 | 30 | Stage 1's eighteenth round (R158 to R163, decisions 920 to 925) and the stage 0 round's decisions 940 to 945 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 11 codes in R17's tables (E0616, D0139 to D0148), 2 entries added (E0616 with its label `comptime.function-here`, D0148), E0604's entry rewritten for the closures kept and its note `comptime.kept-functions`, E0609's narrowed to templates, W0022's and D0103's texts brought up to date, 8 sessions blessed (4 changed by the rounds: R12's `not_a_type` as E0616, R12's `limits` and R17's `e0604_not_kept`, whose closures are kept now and which capture a tuple instead, and the standard library's four new doc examples in `sisu test --std`'s count; 4 new; G31's `divide.console` retired, its quotient now a run) and 18 conformance expectations (3 changed by the rounds, 1 with its example, 14 new, 1 retired); slices as views that drop nothing (chapter 12 with `towels`, R4), `sisu bench src/MODULE.sisu` (G27 with the package `letters`, R16, R15), `--explain-size` and its seven parts (R16 with D0148, G20, R22, chapter 27, R2, chapter 15), `E0616` and a template's syntax error reported once (R12 with `syntax_once`, R17), closures kept in compile-time results and what they may capture (chapter 25 with `kept_closures`, R12, R17's E0604), the attributes of fields, variants and methods and a call routed by a method's attribute (chapter 25 with `handlers`, R14 with `members`, R12), `Graphemes` and `Normalize` with the rules they leave out (chapter 6 with `graphemes` and `normal_forms`, R2), and `BigRatio` with `Decimal`'s exact quotient and Q-82 (chapter 24 with `quotient`, R2 with `exact`, G31 with `divide`) taught with checked examples; the findings at 44 (3 settled, 3 narrowed, 2 new), every check passing |
 | 31 | Stage 1's nineteenth round (R164 to R168, decisions 960 to 964) and the stage 0 round's decisions 980 to 986 in the manual: the codes they added to R17, the features they made teachable, the waiting guide G22, every changed session reviewed, the findings checked again | done (1): G22 Generate configuration written (`guides/config.md`, four sessions), 3 codes in R17's tables, each with an entry (E0617, D0149, D0150), and D0033's entry pointing at them, 11 sessions blessed (2 changed by the rounds: R16's `designed`, whose `sisu eval` now runs and leaves the session, and R15's `gauge`, whose module token is D0149, given two commands more for the package's run and D0150; 9 new) and 3 conformance expectations, all new; the server of stage 1 with `SISU_STAGE1_SERVE=0` and its timings (R16's new section, `sisu check`), the editor's answers from stage 1 and the Rust front end's rest (G1, R16's `sisu lsp`), `sisu eval` with its three forms, E0602 and E0617 (chapter 25 with `settings`, G22, R12, R16 with `eval`, R17), the module's and the package's tokens (R15, R16, R17), the templates' builtins and E0609's list (R12 with `template_builtins` and `template_calls`, R14 with `positions`) and the graphemes' wait for Unicode's data files (R2) taught with checked examples; the findings at 48 (3 settled, 2 narrowed, 6 new), every check passing |
+| 32 | Stage 1's twentieth round (R169 to R175, decisions 1000 to 1006) and the stage 0 round's decisions 1020 to 1026 in the manual: the codes they added to R17, the features they made teachable, every changed session reviewed, the findings checked again | done (1): 6 codes in R17's tables (E0278, D0170 to D0174), 1 entry added (E0278) and the entries of D0103 (a tuple's parts now, not a struct's fields or `CString.as_ptr`) and W0022 (a member's `attributes` read) rewritten, 9 sessions blessed (3 changed by the rounds: chapter 27's `cstring`, native now, R14's `members`, without W0022, and R16's `help`, which lists `eval`; 2 changed with their examples: R14's `export_pointer`, now a struct of an `i32`, a `u8` and an `f32`, and G19's `ffi`, whose wrapper passes a `CString`; 4 new) and 6 conformance expectations (2 changed by the rounds, 1 with its example, 3 new); the native widths and `CString.as_ptr` (chapter 27, G19, R22, R2 with `widths`), structs at C's offsets and the tuple limit (R14 with `export_pointer` and `export_tuple`, G19, R22, R17's D0103), `sisu eval` in the help (R16), the editor's answers from stage 1 and the five the driver does not route yet (G1, R16), stage 1's `check --holes` and its routing to come (R16, G26, chapters 3 and 28, X13), the prelude's visible names and E0278 (R13, R17 with `e0278_prelude_internal`, chapter 17, R16's `sisu lsp`), a member's `attributes` read without W0022 (R14, R17, chapter 25), a slice of a slice made in one expression (chapter 12 with `towels`, R4) and the prelude's functions in constants (R12 with `benches`, G22) taught with checked examples; the findings at 47 (3 settled, 6 narrowed, 1 split off, 1 new), every check passing |
 | | Total | about 160 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -990,8 +991,8 @@ and later pages do not rediscover them. Each item is one finding: what
 stage 0 does, and in parentheses the page whose writing found it (a
 chapter by its number, a reference page, guide or explanation by its
 letter and number, "the maintenance round" for step 13). A finding that
-the rounds R10 to R168 of [stage 1's rules](../compiler/stage1/RULES.md),
-or the decisions 354 to 986 of the driver, the runtime and the test
+the rounds R10 to R175 of [stage 1's rules](../compiler/stage1/RULES.md),
+or the decisions 354 to 1026 of the driver, the runtime and the test
 runner in the [architecture notes](../compiler/docs/architecture.md),
 settled is no longer listed; each was checked against the compiler
 before it went. An item marked "assigned to stage 1" or "assigned to
@@ -999,7 +1000,7 @@ stage 0" is one that the compiler's rounds in progress have taken on.
 The last group holds the diagnostics that lack a fix or mislead,
 whatever their area.
 
-The list holds 48 findings in ten groups. The rounds R11 to R26
+The list holds 47 findings in ten groups. The rounds R11 to R26
 settled 41 that the writers recorded (R24 alone 14, R25 9, R16 5),
 stage 1's third round, R27 to R36, with the decisions 354 to 360,
 settled 22 more (R33 alone 4, decision 357 3), and its fourth round,
@@ -1069,7 +1070,11 @@ round's decisions 940 to 945, settled 3 (R159 2, R161 1) and narrowed
 three more (R162 with R163, and the decisions 941 and 944), and its
 nineteenth round, R164 to R168, with the stage 0 round's decisions 980
 to 986, settled 3 (R166, and the decisions 984 and 985 one each) and
-narrowed one more (R167); 12 were
+narrowed one more (R167), and its twentieth round, R169 to R175, with
+the stage 0 round's decisions 1020 to 1026, settled 3 (R171, R172 and
+decision 1020 one each) and narrowed six more (R169, R170, R174, R175,
+and the decisions 1021 and 1022), and the narrowing of R174 made
+`sisu check --holes` an item of its own; 12 were
 corrections to this
 plan, its conventions or its tools, now made where they belong, and a
 finding that several pages recorded is one item that names each page;
@@ -1091,22 +1096,23 @@ checked it against the fifteenth and the decisions 820 to 828, and 3
 from step 28, which checked it against the sixteenth and the decisions
 860 to 866, 2 from step 29, which checked it against the
 seventeenth and the decisions 900 to 904, 2 from step 30, which
-checked it against the eighteenth and the decisions 940 to 945, and 6
+checked it against the eighteenth and the decisions 940 to 945, 6
 from step 31, which checked it against the nineteenth and the decisions
-980 to 986.
+980 to 986, and 1 from step 32, which checked it against the twentieth
+and the decisions 1020 to 1026.
 
 ### Syntax and names
 
 - [14](../proposal/14-non-goals.md) lists "variadic functions" among what Sisu does not have, where [02](../proposal/02-syntax.md#declarations) gives `*xs: T` (X1).
 - `for i, d in enumerate(own drafts)` is E0100 ("expected `->`"), so consuming a list with its positions takes a counter (chapter 13).
 - The lints of D-048 read their tables from Python's Unicode data (15.1): a letter's script comes from its character name, an approximation of Unicode's `Scripts.txt`, and the confusables are a subset of `confusables.txt`, so some look-alikes go unreported (R136; R1).
-- The prelude is wider than 09's fixed list: helpers such as `days_in_month` and `Formatter` are visible to every program, and the language server's completion from stage 1 offers each of them (R164; R13, G1; assigned to stage 1).
+- E0278, which a program gets for naming one of the prelude's 43 helpers, such as `days_in_month`, has no fix: its fix imports the helper from a module of the standard library that has it as a `pub` item, and no module has one, since a `pub` `days_in_month` in `std.time` would change that module's page, which the conformance suite's `doc/std_pages` holds, so a program that needs the helper writes its own (R175; R13, R17; a home for `days_in_month` assigned to stage 1).
 - D-055 keeps two silent differences from Python, a default argument computed at each call and a loop variable bound anew in each iteration, and neither is a row of the false-friend table that the model arm of [20](../proposal/20-pre-registration.md) measures (section 6.9, FF-1 to FF-6), so the experiment cannot see them (X8).
 
 ### Types and traits
 
 - D-060's allocator parameter, `list[T, A]` with `Global` in the prelude, is missing (E0208, E0201), so the chapter shows a defaulted parameter on a type of its own (chapter 15).
-- `@derive(Plain)` accepts a `@repr(c)` struct with padding, whose `as_bytes` would read it, though 22 allows no padding in a plain type; R108 left it open, since the derive's template has no compile-time size of a field until the layouts are lowered (chapter 27, R14).
+- `@derive(Plain)` accepts a `@repr(c)` struct with padding, whose `as_bytes` would read it, though 22 allows no padding in a plain type; R108 left it open, since the derive's template has no compile-time size of a field until the layouts are lowered (chapter 27, R14; assigned to stage 1).
 - Missing beside 03: the sharing of instances and their count per package in `--explain-size`, which reports the parts of the executable instead; R108 left the rest to the runtime, the design or the owner, and `@derive(Into, From)`, which R148 left for the owner since the prelude has no `From`, is the owner's question Q-80. `graphemes()` and the normalisation forms are a trait's methods, imported from `std.string`, where 03 has `graphemes` on `str`, and R162 left three rules of UAX #29 out (`Prepend`, the Indic conjuncts of GB9c, and GB11's join after U+200D of pictographs only, so `"a\u{200d}b"` is one grapheme and `"\u{915}\u{94d}\u{937}"` two), which R167 found to need Unicode's own data files, `GraphemeBreakProperty.txt`, `DerivedCoreProperties.txt` and `emoji-data.txt`, since Python's `unicodedata`, the tables' one source, does not carry the properties, so they wait for those files; `Decimal`'s `/` gives a `BigRatio`, not 03's `Ratio`, which R163 left as the owner's question Q-82 (R2, R14, chapters 6, 14 and 24).
 - [14](../proposal/14-non-goals.md) lists "implicit conversions" among what Sisu does not have, where D-016 keeps implicit lossless widening and the proposal's README says "implicit lossy conversions" (X1).
 - A method that takes `own self`, changes a copy of its value and returns it, is no exit that checks the invariant, so `Gauge(level=4).filled(20)` gives a level of 24 under `invariant 0 <= self.level <= 10`; 07 checks construction and `mut self` methods only, so the gap is the design's, now the owner's question Q-78 (R11).
@@ -1116,10 +1122,9 @@ from step 31, which checked it against the nineteenth and the decisions
 ### Ownership
 
 - A `Weak` is not `Copy`, so a `Cell[list[Weak[T]]]` is read by `replace` and set back (chapter 13).
-- A slice of a slice made in the same expression, `let first_two = towels.as_slice()[:2]`, is E0406 ("`towels.as_slice()` does not live long enough") when the view is used on a later line, though since decision 940 both slices view the list itself, which lives on; the fix binds the first slice with `let` (chapter 12).
-- Natively a `CString`'s `as_ptr()` does not compile (D0103, "`mem.slice.as_ptr` of a `u8`"): since decision 940 a native `Slice` views its list in place, but a `bytes` holds a byte for each element and a `Slice[u8]` a word, so `bytes.as_slice()`, which `as_ptr` calls, still copies; decision 941 found that a `u8` must be laid out as one byte wherever it is reached in memory, the reads and writes through references included, which is D-086's per-type layout together with the narrow fields, and left it for a round of its own (chapter 27, G19; assigned to stage 0).
+
 - A native debug build checks a pointer by its address, not by its provenance, the borrow it came from: a write through a pointer made from a shared borrow passes when a `mut` borrow also made a pointer to an overlapping place, a pointer into a frame that has returned passes when a later call of the same depth covers its stack, and a reference read after a drop through the pointer goes unchecked, where the interpreter stops each; decision 626 made the checks faster and left provenance out, and decision 686 measured what tagged pointers would change, every inline use of a pointer's word in both lowerings and the C calls, and left them for a round of their own (chapter 27; pointer provenance assigned to stage 0).
-- A raw pointer to a struct with a field narrower than a word does not compile natively: `ptr.of`, `ptr.of_mut` and `as_ref` of a `@repr(c)` `Reading` of `i32`s are D0103, since a place holds each field in a word where C packs it at its width, so a program hands its own export a pointer only to a struct of `int`, `f64` and raw pointers until the layouts are per type (decision 864, D-086; R14, chapter 27, G19; assigned to stage 0).
+- A raw pointer to a tuple with a part narrower than a word, `ptr.of` of a `(int, u8)`, or to an option of a raw pointer does not compile natively (D0103): decision 1021 laid a declared struct's fields out at C's offsets, but a tuple keeps a word for each part, as the runtime's iterators lay their pairs and an entry's key and value out, so a program hands C a `@repr(c)` struct instead (decision 1021, D-086; R14, R22, R17; assigned to stage 0).
 - The allocators are missing: `list.with_allocator` is E0351 and `try_push` E0304, so a program says that a function allocates nothing with `@no_alloc`, which nothing checks yet (W0030) (chapter 27).
 
 ### Errors
@@ -1142,8 +1147,7 @@ from step 31, which checked it against the nineteenth and the decisions
 
 - `@diagnostic_name(f)` is E0900 until compile-time code can make types, whose first step R155 planned (a `comptime def` returning a `type` and a type position that calls it) and whose syntax is the owner's question Q-81 (chapter 25, R12, R14).
 - `@fix_inline` compiles without a word and does nothing, and `@preview` marks an item whose uses warn (W0028), where D-072 has it ask for a feature of the language, of which there are none yet (chapter 28, X11, R14).
-- A constant is computed when the program first reads it, not while it compiles, though R3 says that its value is computed at compile time: a `const` whose invariant fails passes `sisu check`, and `sisu run` panics where `main` reads it, "at WEB", so only `sisu eval` reports such a configuration before it runs (G22, R3).
-- W0022 counts only a call of `reflect.attributes_of` as code that reads attributes, so a program that reads a field's or a variant's attributes through `f.attributes` and `v.attributes` alone, as R161 has it, is warned of each attribute it reads, "it means nothing here" (R14, R17).
+- A constant is computed when the program first reads it, not while it compiles, though R3 says that its value is computed at compile time: a `const` whose invariant fails passes `sisu check`, and `sisu run` panics where `main` reads it, "at WEB", so only `sisu eval` reports such a configuration before it runs (G22, R3; assigned to stage 1).
 
 ### The standard library
 
@@ -1154,12 +1158,14 @@ from step 31, which checked it against the nineteenth and the decisions
 ### Tooling and the driver
 
 - `sisu explain CODE` prints the code's message alone, without the long form with an example that 10 describes, whose text is Q-66 (chapter 1, R17).
-- `sisu run --profile`, `sisu check --holes` and `--target` are D0009, and `sisu fix`, `why`, `review`, `publish`, `add` and `update` are D0003, as planned, with the registry of D-031 they wait for (chapters 25 and 28, G20, G26, G27).
+- `sisu run --profile` and `--target` are D0009, and `sisu fix`, `why`, `review`, `publish`, `add` and `update` are D0003, as planned, with the registry of D-031 they wait for (chapters 25 and 28, G20, G27; `sisu fix` assigned to stages 1 and 0).
+- `sisu check --holes` is D0009, though stage 1 answers it from 0.15.0 with each hole's type, function, bindings in scope and those of its type (R174), since the driver does not route it yet; 10's types, contracts, tests, fits to depth two and JSON form are left for a later round of stage 1 (G26, R16, chapters 3 and 28, X13; the routing assigned to stage 0, the whole report to stage 1).
 - The native executable of a ten-line program is 6.25 MB in both profiles (21 MB when the driver is a debug build), 1.74 MB stripped: the link drops what nothing reaches, and what remains is the runtime's code, Rust's standard library, 3.8 MB of debug information and 0.4 MB of symbols, with the C library and `libgcc_s` linked dynamically, where [12](../proposal/12-interop-and-targets.md#binary-size-and-startup) links statically and plans a `release-size` profile (chapter 27, G20, R22).
-- `sisu lsp` answers the diagnostics, hover, definition, references, completion and symbols from stage 1 (decision 983), and selection ranges, rename, code actions, inlay hints and formatting still from the Rust front end, as it does every question when stage 1 is not built; stage 1's references leave out the names in import lines (R164; G1, R16; assigned to stage 1's twentieth round).
-- `sisu run` is not served by the server of stage 1, since its SIR comes from `build --for-run`, which the server does not answer, so a run starts stage 1 as a process of its own (decision 981; R16; assigned to stage 1's twentieth round).
-- `sisu eval` is missing from `sisu help`'s list (D0002), and `sisu eval` without a file, or with `--to xml`, prints stage 1's own usage in its `Debug` form, `error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | ...")`, which names stage 1's commands and none of `eval`'s (G22, R16; the list assigned to stage 0).
-- `sisu eval --to toml` writes a list of structs as one line of inline tables however long it grows, 150 columns for two services, where TOML's `[[SERVICES]]` tables would keep one line to a field (G22).
+- `sisu lsp` answers selection ranges, rename, code actions, inlay hints and formatting from the Rust front end, though stage 1 answers each from 0.15.0 (R169), since the driver does not route them yet (decision 1024; G1, R16; assigned to stage 0).
+- `sisu run` and `sisu build` are not served by the server of stage 1, which answers `build --for-run --emit-sir` from 0.15.0 (R170), since the driver does not send it that request yet, so a run starts stage 1 as a process of its own (decision 1025; R16; assigned to stage 0).
+- `sisu eval` without a file, or with `--to xml`, prints stage 1's own usage in its `Debug` form, `error: Usage(text="usage: sisu run -- tokens [--trivia] FILE | ...")`, which names stage 1's commands and none of `eval`'s (G22, R16; assigned to stage 0).
+- `sisu eval --to toml` writes a list of structs as one line of inline tables however long it grows, 150 columns for two services, where TOML's `[[SERVICES]]` tables would keep one line to a field (G22; assigned to stage 1).
+- The Rust front end, the oracle, trails stage 1's twentieth round: under `--front-end=rust` a program may name the prelude's helpers, `days_in_month(2028, 2)` printing 29 where stage 1 gives E0278, and a slice of a slice made in one expression, `towels.as_slice()[:2]`, is still E0406 when used on a later line (R172, R175; chapter 12, R13, R17).
 - `sisu run --stats` prints scheduling latencies that differ between runs, so only `--stats stack-depth` can be shown (chapter 19, G27).
 - A worksheet's expression statement that shows an optional value or a result, `line.find("M")`, is E0318 under `sisu run` of the same file, so since R103 such a worksheet is no longer a script, though it starts with `#!/usr/bin/env sisu`, and the conformance runner records its E0318 (chapter 6, R16).
 - The interval that `sisu bench` reports is one run's, so on a busy machine two runs of one benchmark gave 100.3 to 110.2 µs and 134.1 to 184.7 µs (G27).
@@ -1171,7 +1177,7 @@ from step 31, which checked it against the nineteenth and the decisions
 - E0333 is the ownership checker's, so a run ends with D0021, which offers `--defer-borrow`; under it the Rust front end refuses `print` in a `pure` function with D0006, and runs `Atomic.load` as if it were pure (chapter 26).
 - E0241 for a trait with a constant used as `dyn Shape` calls the constant a method: "its method `SIDES` cannot be called through it, because it is a constant" (R3).
 - In a `pure` function, the consumer after an adapter, the `count()` of `split_whitespace().filter(...).count()`, is a second E0333 of the same chain, without the note `type.pure-adapter` that the adapter's has (chapter 18).
-- E0617 for a struct whose field holds what a form cannot write names the constant, "`LIMITS` holds an infinite or not-a-number float", and not the field, `timeout`, so in a large configuration the reader looks for it (G22, R17).
+- E0617 for a struct whose field holds what a form cannot write names the constant, "`LIMITS` holds an infinite or not-a-number float", and not the field, `timeout`, so in a large configuration the reader looks for it (G22, R17; assigned to stage 1).
 
 ## Open questions
 

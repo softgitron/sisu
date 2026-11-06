@@ -147,9 +147,8 @@ def count(towels: Slice[Towel]) -> int:
 
 def main():
     let towels = [Towel("Aino's"), Towel("Eero's"), Towel("Roni's")]
-    let all = towels.as_slice()
     for _ in range(2):
-        let first_two = all[:2]
+        let first_two = towels.as_slice()[:2]
         print("{count(first_two)} towels in view")
     print("the list ends")
 ```
@@ -166,7 +165,10 @@ Roni's put away
 
 Each turn of the loop makes a slice of two towels and ends it, and no
 towel is put away until `towels` itself ends, after the last line of
-`main`.
+`main`. `towels.as_slice()[:2]` slices a slice that has no name and
+ends with the line, and `first_two` is still used on the next line:
+since a slice views the list itself, the slice of it borrows `towels`,
+not the slice it was cut from, and lives as long as the list may lend.
 
 ## Structs that borrow
 

@@ -1,0 +1,7 @@
+$ sisu eval benches.sisu --to toml
+BENCHES = [4, 9, 2]
+HIGHEST = 9
+LOWEST = 4
+ORDER = [2, 4, 9]
+ALL_WARM = true
+PAIRS = [[0, 4], [1, 9], [2, 2]]

@@ -239,10 +239,20 @@ sets differ. The standard library's modules other than the four in the
 last row are imported, as `import std.math`; in stage 0 some also have a
 short name, `import json` for `import std.json`.
 
-**Stage 0 differs.** Stage 0's prelude is wider than the list of 09: it
-also holds the library's helpers and types that its own code uses, such
-as `Formatter`, `Hasher` and `days_in_month`, which a program can name
-too, while those marked internal to the library are E0701.
+**Stage 0 differs.** Stage 0's prelude marks `pub` the names a program
+sees, 142 of them: the list of 09 and, beside it, the types that the
+traits' methods take (`Formatter` and `Spec` of `Display` and `Debug`,
+`Hasher` of `Hash`, `Draws` of `Arbitrary`), the traits and types of
+the capabilities' operations, such as `FsOps` and `Metadata`, the
+channel and task types, and `iterable_list`. Its 43 other declarations
+are helpers for the standard library's own code, such as
+`days_in_month` and `DrawState`, and a program that names one is E0278
+(`resolve.prelude-internal`, [R17](diagnostics.md#e0278)), whose fix
+imports the helper from a module of the standard library that has it as
+a `pub` item; no module has one yet. The language server's completions
+offer the `pub` names only. E0278 is stage 1's: the Rust front end
+still lets a program name the helpers. A name marked internal to the
+library, the capabilities' own machinery, is E0701.
 
 **Status.** In stage 0, with the difference noted.
 
@@ -884,7 +894,7 @@ C++ interop (Q-24).
 |---|---|---|
 | E1008, E1009, E1012 | `package.no-root-module`, `package.two-root-modules`, `package.module-name` | [The module tree](#the-module-tree) |
 | [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), [E0223](diagnostics.md#e0223), E0260, [E0277](diagnostics.md#e0277), [W0027](diagnostics.md#w0027) | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-module`, `resolve.not-a-dependency`, `resolve.import-in-body`, `lint.unused-import` | [Imports](#imports) |
-| W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
+| W0016, E0701, [E0278](diagnostics.md#e0278) | `resolve.shadow-prelude-set`, `cap.internal`, `resolve.prelude-internal` | [Names every module sees](#names-every-module-sees) |
 | [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
 | E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [E1023](diagnostics.md#e1023), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.freestanding`, `package.unknown-key` | [The manifest](#the-manifest) |

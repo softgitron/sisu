@@ -50,7 +50,10 @@ const SERVICES: list[Service] = [
 ```
 
 The defaults of a struct's fields are the configuration's defaults, so
-the `api` service writes only what differs.
+the `api` service writes only what differs. A constant may call the
+prelude's functions too, such as `max`, `min`, `sorted`, `any` and
+`zip`, as [R12](../reference/compile-time.md#configuration-files)
+lists them.
 
 ## 2. Render it as JSON
 
@@ -206,7 +209,4 @@ large number of seconds for JSON, or the form that has it.
 the values through each type's `Encode` (leaning, D-063); `sisu eval`
 writes a value's own structure, which is what `@derive(Encode)` would
 write of it, whether or not the type derives it. `sisu eval` is stage
-1's, so `--front-end=rust` answers it with D0003, and `sisu help` does
-not list it yet. A constant that calls the prelude's `max` or `min` is
-beyond what stage 1's evaluator runs, which `sisu eval` says on
-standard error, with status 1.
+1's, so `--front-end=rust` answers it with D0003.

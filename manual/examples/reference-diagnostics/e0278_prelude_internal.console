@@ -1,0 +1,8 @@
+$ sisu run e0278_prelude_internal.sisu
+error[E0278]: `days_in_month` is the prelude's own, for the standard library's code: a program sees only the names it marks `pub` (09)
+  --> e0278_prelude_internal.sisu:3:11
+  |
+3 |     print(days_in_month(2028, 2))
+  |           ^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

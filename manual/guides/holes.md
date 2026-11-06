@@ -253,5 +253,9 @@ error[D0132]: the program was not compiled: errors found (2)
 status 3, and the release build's E0445 are in stage 0 (D-061).
 `sisu check --holes`, which lists each hole with the bindings in scope,
 the `requires` around it and the tests that reach it, is designed in
-[10](../../proposal/10-tooling.md), and stage 0 answers it with D0009;
-so is a `sisu publish` that refuses a program with a hole.
+[10](../../proposal/10-tooling.md), and stage 0 answers it with D0009.
+Stage 1 has a first part of it from `sisu1 0.15.0`, each hole with the
+type its place needs, its function, the bindings in scope and those of
+its type, which the driver routes in a later round
+([R16](../reference/sisu-command.md#sisu-check---holes)). A `sisu
+publish` that refuses a program with a hole is designed too.

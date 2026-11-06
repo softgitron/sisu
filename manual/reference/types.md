@@ -145,6 +145,33 @@ the library's reference documents them all.
 - `int` is 64 bits on every target, also on a 32-bit one, and it is
   the type of every index and length (D-035). `i64` is another name
   for `int`, and `uint` for `u64`.
+- In memory each sized type takes its width: a `u8` and an `i8` one
+  byte, a `u16` and an `i16` two, a `u32`, an `i32` and an `f32` four,
+  in the interpreter and in a native build alike. So a `list[u8]`, a
+  `Slice[u8]` and a `bytes` hold a byte to an element, and a
+  `@repr(c)` struct of them is laid out as C lays it out
+  ([R14](attributes.md#exported-functions)):
+
+<!-- file: examples/reference-types/widths.sisu -->
+```sisu
+# Each sized number takes its own width in memory, as in C.
+from std.mem import size_of
+
+def main():
+    print("{size_of[u8]()} {size_of[i16]()} {size_of[u32]()}")
+    print("{size_of[f32]()} {size_of[int]()} {size_of[f64]()}")
+```
+
+<!-- output: examples/reference-types/widths.console -->
+```console
+$ sisu run widths.sisu
+1 2 4
+4 8 8
+$ sisu run --native widths.sisu
+1 2 4
+4 8 8
+```
+
 - An integer literal takes the integer type expected where it stands,
   or the one its suffix names (`0xFFu16`); without either it is an
   `int` ([R1](lexical-structure.md#integer-literals)).

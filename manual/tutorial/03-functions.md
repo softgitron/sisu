@@ -560,8 +560,8 @@ that reaches a hole prints the same closure and is reported as blocked
 rather than failed, as in the exercises, where the closure comes in the
 blocked test's own block after the list. A report of every hole of a
 program at once, with its bindings and the tests that reach it, `sisu check
---holes`, is designed in [10](../../proposal/10-tooling.md) and is not
-in the compiler yet.
+--holes`, is designed in [10](../../proposal/10-tooling.md); its first
+part is in stage 1, and `sisu` does not run it yet.
 
 ## Exercise 3.1: predict the calls
 

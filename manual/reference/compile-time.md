@@ -993,15 +993,44 @@ of steps applies, since a configuration module is ordinary code
   float in JSON or a `None` in a list in TOML, is E0617
   (`eval.no-form`, [R17](diagnostics.md#e0617)).
 
+A constant may call the prelude's functions as code that runs does:
+`min` and `max`, of two values or of a collection, `abs`, `any`, `all`,
+`sorted`, `enumerate`, `zip`, `zip_shortest` and `reversed`, besides
+`range`, `len` and `sum`:
+
+<!-- file: examples/reference-compile-time/benches.sisu -->
+```sisu
+# A configuration's constants may call the prelude's functions.
+const BENCHES: list[int] = [4, 9, 2]
+const HIGHEST: int = max(BENCHES)
+const LOWEST: int = min(4, 9)
+const ORDER: list[int] = sorted(BENCHES)
+const ALL_WARM: bool = all([b > 1 for b in BENCHES])
+const PAIRS: list[(int, int)] = [(i, b) for i, b in enumerate(BENCHES)]
+```
+
+<!-- output: examples/reference-compile-time/benches.console -->
+```console
+$ sisu eval benches.sisu --to toml
+BENCHES = [4, 9, 2]
+HIGHEST = 9
+LOWEST = 4
+ORDER = [2, 4, 9]
+ALL_WARM = true
+PAIRS = [[0, 4], [1, 9], [2, 2]]
+```
+
+A call that panics when the program runs stops the evaluation in the
+same way: `abs` of the least `int` overflows, and `zip` of two lists of
+different lengths is refused, each an error at its constant's name.
+
 [Chapter 25](../tutorial/25-compile-time.md#configuration-as-constants)
 shows a first module, and [Generate configuration](../guides/config.md)
 each form and each refusal.
 
 **Stage 0 differs.** 08 renders the values through `Encode`; stage 0
 writes a value's own structure, which is what `@derive(Encode)` writes
-of it, whether or not the type derives it. A constant that calls the
-prelude's `max` or `min` is beyond what stage 1's evaluator runs, said
-on standard error with status 1. `sisu eval` is stage 1's, so the Rust
+of it, whether or not the type derives it. `sisu eval` is stage 1's, so the Rust
 front end answers it with D0003 ([R16](sisu-command.md#sisu-eval)).
 
 **Status.** In stage 0, with the differences noted; rendering through

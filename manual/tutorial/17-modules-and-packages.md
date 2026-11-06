@@ -139,7 +139,11 @@ module of the standard library by `std` and its name, as in `import
 std.json` or `from std.collections import Deque`. A few names need no
 import at all: the prelude's fixed list, which holds `print`, `len`,
 `range`, `sorted`, the basic types and collections, `Option`, `Result`
-and the core traits such as `Display` and `Iterator`. Anything else is
+and the core traits such as `Display` and `Iterator`
+([R13](../reference/modules.md#names-every-module-sees) lists them).
+The prelude declares helpers of its own too, for the standard library's
+code, and a program that names one, such as `days_in_month`, is E0278
+(`resolve.prelude-internal`). Anything else is
 imported by name, so each file says where its names come from. An
 import that the file does not use is no error, and `sisu fmt` keeps
 it; `sisu lint` names it, W0027 (`lint.unused-import`), with a fix that

@@ -535,7 +535,8 @@ This is how a library's next version can grow beside its old one: the
 new functions start as holes with tests, while the old ones keep their
 callers working. `sisu check --holes`, which will list every hole of a
 package with the functions that reach it, is designed in
-[10](../../proposal/10-tooling.md) and not in the compiler yet.
+[10](../../proposal/10-tooling.md); its first part is in stage 1, and
+`sisu` does not run it yet.
 
 ## What is still to come
 

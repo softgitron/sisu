@@ -113,10 +113,11 @@ commands:
   audit --caps [<file>...]  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more (without a file, of the package's program)
   audit --unsafe [--std] [<path>]  every `unsafe` block and function of a program by module, with its `# safety:` reason, and its package's level
   lint [<path>]          the lints beyond the compiler's warnings, with their fixes
+  eval <file>            the constants of a configuration module, as JSON (`--to toml` or `--to yaml` for TOML or YAML), from stage 1's compile-time evaluator
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 
-The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl` and `ws`; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
+The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`, `parse` (`--shape` too), `repl`, `ws` and `eval`, which only it has; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
 ```
 
 </details>
@@ -300,8 +301,8 @@ The front end reads, checks and lowers a program; the rest of `sisu`
 runs, tests and compiles what it produces. Stage 0 has two: stage 1,
 written in Sisu and compiled natively, which is the default for
 `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`,
-`parse` (`--shape` too), `repl` and `ws`, as `sisu help` says, and the
-Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
+`parse` (`--shape` too), `repl` and `ws`, and the only one for `eval`,
+as `sisu help` says, and the Rust front end, the oracle that stage 1 is checked against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
 lint`, `sisu audit --unsafe` and `sisu eval` are stage 1's alone, and
 the Rust front end refuses them; `sisu lsp` answers from both
@@ -353,8 +354,8 @@ where it takes 0.244 as a process of its own.
 Served are `check`, `sir`, `parse`, `fmt`, `lint`, `doc`, `tokens`,
 the builds of `test` and `bench`, `eval`, and the language server's
 questions ([sisu lsp](#sisu-lsp)). `sisu run` and `sisu build` are not
-served yet: their SIR comes from a build that the server does not
-answer. Whatever goes wrong with the server, the command runs stage 1
+served yet: their SIR comes from a build that stage 1 serves from
+`sisu1 0.15.0`, which the driver does not ask the server for yet. Whatever goes wrong with the server, the command runs stage 1
 as a process of its own, and `SISU_STAGE1_SERVE=0` makes it do so every
 time. What a command prints is the same either way.
 
@@ -1089,7 +1090,7 @@ STOVE:
 **Stage 0 differs.** `sisu eval` is stage 1's, from `sisu1 0.14.0`,
 and served as `sisu check` is ([The server of stage
 1](#the-server-of-stage-1)); the Rust front end answers it with D0003.
-`sisu help` does not list it yet. 08 renders the values through
+08 renders the values through
 `Encode`, where stage 0 writes each value's own structure.
 
 **Status.** In stage 0, with the differences noted; rendering through
@@ -1762,13 +1763,18 @@ go-to-definition, references, completion and document symbols, each a
 query of its own sent to [the server of
 stage 1](#the-server-of-stage-1), a hover in about 9 ms; a file with a
 syntax error still answers what its tree allows, such as its whole
-items' symbols. The Rust front end answers the rest, selection ranges,
-formatting, rename, code actions, inlay hints, a worksheet's values and
-`sisu.explainBorrow`, and every question when stage 1 is not built (the
-server does not build it under an editor) or `--front-end=rust` is
-given. Stage 1's completion offers every name of the prelude, its
-internal helpers too, and its references leave out the names in import
-lines.
+items' symbols. Stage 1's completion offers the prelude's `pub` names
+only ([R13](modules.md#names-every-module-sees)), and its references
+count the names in import lines, where hover and go-to-definition
+answer too. The Rust front end answers the rest,
+selection ranges, formatting, rename, code actions, inlay hints, a
+worksheet's values and `sisu.explainBorrow`, and every question when
+stage 1 is not built (the server does not build it under an editor) or
+`--front-end=rust` is given. From `sisu1 0.15.0` stage 1 has a query
+for each of rename, code actions, inlay hints, selection ranges and
+formatting too, but the driver does not route them yet; once it does,
+only a worksheet's values and `sisu.explainBorrow` stay with the Rust
+front end.
 
 **Status.** In stage 0, with the differences noted. The proposal's
 always-on evaluation, structural editing and stepper come after 0.1
@@ -2190,9 +2196,21 @@ expressions that fit it, in a human form and a JSON form. `sisu build
 --release` and `sisu publish` reject holes, `sisu audit` lists them and
 `sisu doc` marks the functions that contain one.
 
+**Stage 0 differs.** Stage 1 answers `check --holes FILE` from `sisu1
+0.15.0`, but the driver does not route it yet, so `sisu check --holes`
+is D0009, as [Commands that are designed](#commands-that-are-designed)
+shows. Stage 1's report is a part of 10's: for each hole of the
+program's own modules, by module and position, the hole, the type its
+place needs and the function it is in, then the bindings declared
+before it in its body, with their types (D0170 to D0172), and those of
+the hole's type (D0173, D0174). The definitions of the types, the
+`requires` and `ensures` around it, the tests that reach it, the
+expressions that fit to depth two and the JSON form wait. Until the
+driver routes it, stage 0 reports each hole as warning W0001, and `sisu
+test` reports a test that reaches one as blocked.
+
 **Status.** Designed (D-061; [10](../../proposal/10-tooling.md),
-"AI-assisted development"). Stage 0 reports each hole as warning W0001,
-and `sisu test` reports a test that reaches one as blocked.
+"AI-assisted development"), with the differences noted.
 
 ### sisu add and sisu remove
 
@@ -2309,7 +2327,7 @@ open as Q-63.
 
 ## Diagnostics of the command line
 
-The driver's messages have codes D0001 to D0135. These are the ones that
+The driver's messages have codes D0001 to D0174. These are the ones that
 a command line can produce, by what they report:
 
 | Codes | Report |
@@ -2332,6 +2350,7 @@ a command line can produce, by what they report:
 | D0064 to D0067, D0112 | Packages, lockfiles, workspaces and features. |
 | D0070 to [D0073](diagnostics.md#d0073) | `sisu build` and `sisu new`. |
 | D0139 to D0147, [D0148](diagnostics.md#d0148) | `sisu build --native --explain-size`. |
+| D0170 to D0174 | The lines of stage 1's `check --holes`, which `sisu check --holes` does not route yet ([sisu check --holes](#sisu-check---holes)). |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |

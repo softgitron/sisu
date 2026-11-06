@@ -151,7 +151,10 @@ expected type and the definitions of the types it mentions, the bindings
 in scope with their conventions and capabilities, the enclosing
 `requires` as facts and `ensures` as obligations, the tests that reach
 it with the closures they reached it with, and the expressions in scope
-that fit, to a depth of two, as GHC lists them. It is meant for people,
+that fit, to a depth of two, as GHC lists them. Stage 1, the compiler
+written in Sisu, has its first part, each hole with its type, its
+function, the bindings in scope and those of its type, and the driver
+does not run it yet. It is meant for people,
 as a language-server query, and for programs that write code, in JSON. The last audience is not an
 afterthought: in a study of filling holes in Hazel, giving a
 code-writing model what the checker knew about a hole helped it far more
@@ -206,7 +209,8 @@ answer.
 - **The report is partial.** A closure leaves out a local that holds a
   borrow or a view, a value whose type writes its own `Debug`, and one
   that holds a capability, so it can miss the value that matters, and
-  `sisu check --holes`, the report of every hole at once, waits.
+  `sisu check --holes`, the report of every hole at once, waits for
+  the driver to run stage 1's first part of it.
 - **`todo` looks like a call.** It is less visible in a page of code
   than Idris's `?name`, which is the price of not adding a lexical form.
 - **A fill engine can make overfitting cheap.** The safeguards in "The
