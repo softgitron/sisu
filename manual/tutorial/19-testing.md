@@ -1294,6 +1294,13 @@ test "a warm sauna":
 
 <!-- output: examples/19-testing/steam.console -->
 ```console
+$ sisu test --cover steam.sisu
+test "a cold sauna" ... ok
+test "a warm sauna" ... ok
+2 passed, 0 failed, 0 blocked
+steam.sisu:10:9: no test reaches this branch
+steam.sisu:10:9: no test reaches this statement
+regions: 7, 5 reached by the tests and 2 not
 ```
 
 No test is at 90 degrees or more, so the `else` and its `return` never

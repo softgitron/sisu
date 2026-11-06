@@ -1149,6 +1149,16 @@ test "an empty bill":
 
 <!-- output: examples/reference-testing/cover.console -->
 ```console
+$ sisu test --cover cover.sisu
+test "a bill without a discount" ... ok
+test "an empty bill" ... ok
+2 passed, 0 failed, 0 blocked
+cover.sisu:8:13: no test reaches this branch
+cover.sisu:8:13: no test reaches this statement
+cover.sisu:15:5: no test reaches this statement
+regions: 10, 7 reached by the tests and 3 not
+$ sisu test --cover --mutate cover.sisu
+error[D0163]: `--cover` counts the regions the tests reach in the interpreter; it does not combine with `--mutate`
 ```
 
 No test gives a discount on a price, so the branch at line 8 and its
@@ -1168,8 +1178,10 @@ own, and the test cache is not read, so every test runs.
 
 **Stage 0 differs.** 17 takes the regions from the compiler's own
 instrumentation, in any build; stage 0 counts them in the interpreter
-only, and for the program's own tests, not for the files of `tests/`
-beside a package ([Black-box tests](#black-box-tests)).
+only, and for the program's own tests: not for the files of `tests/`
+beside a package ([Black-box tests](#black-box-tests)), nor for the
+runs of its transcripts, so a program that only a transcript tests has
+every region reported unreached though the transcript passes.
 
 **Status.** In stage 0 (17, "Coverage and mutation"), with the
 difference noted.

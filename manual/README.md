@@ -266,11 +266,10 @@ clock that advances only when every task waits, property tests (`check`,
 `arbitrary[T]`, shrinking, the failure database), `exhaustive[T]`,
 snapshots and transcripts with `--update`, doc examples, replay tokens,
 `@refines`, fakes of your own traits (`Fake[T]`), benchmarks and their
-statistics, tests run natively, mutation testing (`--mutate`), and the JSON output and cache. Exercises: turn three example-based tests into
+statistics, tests run natively, coverage (`--cover`) and mutation testing (`--mutate`), and the JSON output and cache. Exercises: turn three example-based tests into
 one property, fix a program against its transcript (a transcript the
 learner wrote would be its own judge). Stage 0 runs all of it except
-`Expectation`, the failure database, the JSON output, `--fuzz` and
-`--cover`.
+`Expectation`, the failure database, the JSON output and `--fuzz`.
 
 **20. Concurrency** ([written](tutorial/20-concurrency.md)). `task.scope` and `spawn`, `join` and how error sets
 flatten, the scope's result, tasks that borrow from the frame, `Send`
@@ -999,8 +998,8 @@ and later pages do not rediscover them. Each item is one finding: what
 stage 0 does, and in parentheses the page whose writing found it (a
 chapter by its number, a reference page, guide or explanation by its
 letter and number, "the maintenance round" for step 13). A finding that
-the rounds R10 to R219 of [stage 1's rules](../compiler/stage1/RULES.md),
-or the decisions 354 to 1208 of the driver, the runtime and the test
+the rounds R10 to R226 of [stage 1's rules](../compiler/stage1/RULES.md),
+or the decisions 354 to 1248 of the driver, the runtime and the test
 runner in the [architecture notes](../compiler/docs/architecture.md),
 settled is no longer listed; each was checked against the compiler
 before it went. An item marked "assigned to stage 1" or "assigned to
@@ -1008,7 +1007,7 @@ stage 0" is one that the compiler's rounds in progress have taken on.
 The last group holds the diagnostics that lack a fix or mislead,
 whatever their area.
 
-The list holds 38 findings in ten groups. An item leaves it when a
+The list holds 37 findings in ten groups. An item leaves it when a
 round of the compiler settles it, decides against what it asks, or
 finds it stale or intended, each checked against the compiler before
 the item goes; an item that a round narrows stays, rewritten to what is
@@ -1047,7 +1046,8 @@ added, and the size of the list after the step.
 | 36 | R195 to R203; the stage 0 round's decisions 1100 to 1108 | 3 (R197, R198 and R199 one each) | | 6 (R195 with decision 1120, R200, R201, R202, decision 1100 with 1101, and decision 1106, which routed `--defer-borrow` and left E0333's D0021 offering it) | | 1 | 37 |
 | 37 | R204 to R210; the stage 0 round's decisions 1140 to 1148 | 6 (R204, R205 two, decision 1140, decision 1145, and the decisions 1141, 1143 and 1144 together, the Rust front end's last three default commands but `run --watch`; two of the six, R205's grapheme rules and the three commands, parts of items that stay) | | 3 (R206, R208 with decision 1147, and decision 1142, which counted the sites of `Option[ptr[T]]` and left it again) | | 1 | 34 |
 | 38 | R211 to R219; the stage 0 round's decisions 1200 to 1208 | 2 (R212's words of E0702, and decision 1205's usage with `check --holes [<path>]`) | | 4 (R214 with decision 1204, the grammar printed and offered, which leaves the architecture notes' sketch; R215, `@no_alloc` checked, which leaves the allocators; decision 1200, `run --watch` on stage 1, which leaves the Rust front end `test --std --defer-borrow` and building stage 1; and the decisions 1201 and 1202 with R216 and R219, `--mutate` and a module's fixture made once, which leave `--cover`'s runner) | | 6 | 38 |
-| | Total | 301 | 4 | 83 | 3 stale, 1 intended | 95 | 38 |
+| 39 | R220 to R226; the stage 0 round's decisions 1240 to 1248 | 3 (decision 1240, an option of a raw pointer one nullable word natively; decision 1245, after which the port-debt notes no longer list a program's transcripts; and decision 1246, the notes' grammar the one `sisu grammar` prints) | | 4 (decision 1245 with R221 and R223, which leaves the Rust front end building stage 1; the decisions 1241 and 1247, `--cover`'s runner and the smallest forms of the failure database and the JSON stream; and R225 two, with R222, the allocators planned in five steps and their first decided against for its round) | | 2 | 37 |
+| | Total | 304 | 4 | 87 | 3 stale, 1 intended | 97 | 37 |
 
 ### Syntax and names
 
@@ -1057,7 +1057,7 @@ added, and the size of the list after the step.
 
 ### Types and traits
 
-- D-060's allocator parameter, `list[T, A]` with `Global` in the prelude, is missing (E0208, E0201), so the chapter shows a defaulted parameter on a type of its own (chapter 15).
+- D-060's allocator parameter, `list[T, A]` with `Global` in the prelude, is missing (E0208, E0201), so the chapter shows a defaulted parameter on a type of its own; R225 made it the first of the allocators' five steps, the parameter on `list`, `dict`, `set` and `String` interned away at `Global` so that the SIR stays, and decided against it for its round, since it changes the arity of the prelude's collections and every impl over them in the prelude shared with stage 0, so a round of its own takes it (chapter 15, R7).
 - Missing beside 03: the sharing of instances and their count per package in `--explain-size`, which reports the parts of the executable instead, and which R201 decided against for its round, since it needs the SIR to name the packages that request each instance, a budget in the manifest and sharing by layout in the lowerings; R108 left the rest to the runtime, the design or the owner, and `@derive(Into, From)`, which R148 left for the owner since the prelude has no `From`, is the owner's question Q-80. `graphemes()` and the normalisation forms are a trait's methods, imported from `std.string`, where 03 has `graphemes` on `str`; `Decimal`'s `/` gives a `BigRatio`, not 03's `Ratio`, which R163 left as the owner's question Q-82 (R2, R14, chapters 6, 14 and 24).
 - [14](../proposal/14-non-goals.md) lists "implicit conversions" among what Sisu does not have, where D-016 keeps implicit lossless widening and the proposal's README says "implicit lossy conversions" (X1).
 - A method that takes `own self`, changes a copy of its value and returns it, is no exit that checks the invariant, so `Gauge(level=4).filled(20)` gives a level of 24 under `invariant 0 <= self.level <= 10`; 07 checks construction and `mut self` methods only, so the gap is the design's, now the owner's question Q-78 (R11).
@@ -1069,8 +1069,7 @@ added, and the size of the list after the step.
 - A `Weak` is not `Copy`, so a `Cell[list[Weak[T]]]` is read by `replace` and set back (chapter 13).
 
 - A native debug build checks a pointer by its address, not by its provenance, the borrow it came from: a write through a pointer made from a shared borrow passes when a `mut` borrow also made a pointer to an overlapping place, a pointer into a frame that has returned passes when a later call of the same depth covers its stack, and a reference read after a drop through the pointer goes unchecked, where the interpreter stops each; decision 626 made the checks faster and left provenance out, and decision 686 measured what tagged pointers would change, every inline use of a pointer's word in both lowerings and the C calls, and left them for a round of their own (chapter 27; pointer provenance assigned to stage 0).
-- A raw pointer to an option of a raw pointer, `ptr.of` of a `ptr[u8]?`, does not compile natively (D0103), since a native build gives such an option a tag word where C has one nullable word, so a program hands C an optional pointer through a foreign call's own `ptr[T]?` parameter instead; decision 1100 laid a tuple's parts out at C's offsets, which settled the tuples of the item, and decision 1101 left the option for a round of its own, which starts with the layout tables and a kind of the type table for the nullable word, then the runtimes' walks, then the results the runtime writes; decision 1142 counted every site the change touches (the layout tables and the option's construction, tests, downcasts and equality in both lowerings, the runtimes' results of an `Option[T]`, whose tag word is 0 for `Some` where the nullable word's is the reverse, and the walks of both runtimes) and left it for a round of its own again decision 1206 made it the first item of stage 0's twenty-fourth round, at 1142's count of sites and both lowerings at once (decisions 1066, 1100, 1101, 1142 and 1206, D-086; R14, R22, R17; assigned to stage 0).
-- The allocators are missing: `list.with_allocator` is E0351 and `try_push` E0304, so no collection is free of allocation by its allocator, and `@no_alloc`, which stage 1 checks through the call graph since R215, refuses every `list` a function makes (chapter 27, R14).
+- The allocators are missing: `list.with_allocator` is E0351 and `try_push` E0304, so no collection is free of allocation by its allocator, and `@no_alloc`, which stage 1 checks through the call graph since R215 and at each instance of a generic function since R222, refuses every `list` a function makes; R225 planned them in five steps, the defaulted parameter, the runtime in Sisu allocating through the collection's allocator value, `with_allocator` and `try_push`, `@no_alloc` passing a region's growth, and `freestanding`'s explicit allocator, and left the first for a round of its own (chapter 27, R14, R7).
 
 ### Errors
 
@@ -1085,8 +1084,9 @@ added, and the size of the list after the step.
 
 ### Testing
 
-- The failure database of property tests, `--fuzz`, `--cover` and the JSON output of `sisu test` are missing, as planned; of `--cover`, stage 1 prints the program's regions with `sir --tests --cover` (R216), and the runner's half, which counts the statements each test runs and reports the regions none reached, waits for stage 0, so `sisu test --mutate` (decision 1201) runs every selected test against each mutant, where 17 runs the tests that cover its line; a module's fixture is made once for its tests (decision 1202, R219) except in a native run, which makes it for each test; and 17's `Expectation` waits for compile-time expressions, which R200 decided it needs (chapter 19, R15, R14, G11).
+- The failure database of property tests, `--fuzz` and the JSON output of `sisu test` are missing, as planned; decision 1247 left the database and the stream for a later round and wrote down their smallest forms, a file beside the test cache keyed by the test's name with the choices of its last failing case, and a line of JSON for each test's start and end with its result and replay token. `sisu test --cover` (decision 1241) counts in the interpreter only (D0163) and not for the files of `tests/` beside a package; a module's fixture is made once for its tests (decision 1202, R219) except in a native run, which makes it for each test; and 17's `Expectation` waits for compile-time expressions, which R200 decided it needs (chapter 19, R15, R14, R16, G11).
 - A replay token of a test that shares a module's fixture runs the test alone, with the fixture made before it and dropped after it (decision 1202), so what the replay prints holds the fixture's output and its drop's, where the run printed them under the first and the last of the tests that share it; the replay does not print what the failure did, and the conformance runner, which checks that it does, fails such a case, so chapter 19 shows its failing run as a session only (chapter 19).
+- `sisu test --cover` does not count what a program's transcripts run, so a program that only its transcript tests, chapter 19's `sauna`, has its 26 regions reported unreached, "regions: 26, 0 reached by the tests and 26 not", though the transcript passes (decision 1241; R15, R16).
 - A test's output is captured and shown only with its failure (decision 466), and a test cannot read it, so a test cannot check what a `Drop` printed, and chapter 10's drop-order exercise predicts the order of `defer`s instead (chapter 10).
 
 ### Metaprogramming
@@ -1103,13 +1103,12 @@ added, and the size of the list after the step.
 - `sisu explain CODE` prints the code's message alone, without the long form with an example that 10 describes, whose text is Q-66 (chapter 1, R17).
 - `sisu run --profile` and `--target` are D0009, and `sisu why`, `review`, `publish`, `add` and `update` are D0003, as planned, with the registry of D-031 they wait for; `sisu fix` of a file is in stage 0 (decision 1064), and its `--edition` and `--deps` are D0009 (chapters 17 and 28, G20, G25, G27).
 - The native executable of a ten-line program is 6.25 MB in both profiles (21 MB when the driver is a debug build), 1.74 MB stripped: the link drops what nothing reaches, and what remains is the runtime's code, Rust's standard library, 3.8 MB of debug information and 0.4 MB of symbols, with the C library and `libgcc_s` linked dynamically, where [12](../proposal/12-interop-and-targets.md#binary-size-and-startup) links statically and plans a `release-size` profile (chapter 27, G20, R22).
-- The Rust front end, the oracle, trails stage 1's rounds: under `--front-end=rust` a program may name the prelude's helpers, `days_in_month(2028, 2)` printing 29 where stage 1 gives E0278, and a slice of a slice made in one expression, `towels.as_slice()[:2]`, is still E0406 when used on a later line, and `let s = f"n is {n}"` is still E0117's "unexpected a string" there, without the fix; since decision 1200 took `run --watch`, its replay and a run recorded under it, what it still does by default is `sisu test --std --defer-borrow` and building stage 1 itself, the first time and after a source of stage 1 changed, so stage 1's sources stay within the rules it knows (R172, R175, R191, decisions 1102 to 1106, 1141 to 1144 and 1200; chapter 12, R13, R17, R19, R16, X9).
-- The port-debt notes list a program's transcripts among what the Rust front end has left of `sisu test`, since only its build adds the world of transcripts to the SIR, where decision 722 runs them from stage 1's SIR, which keeps that world from `sisu1 0.11.0`, and R16 and X9 say so (R16, X9).
+- The Rust front end, the oracle, trails stage 1's rounds: under `--front-end=rust` a program may name the prelude's helpers, `days_in_month(2028, 2)` printing 29 where stage 1 gives E0278, and a slice of a slice made in one expression, `towels.as_slice()[:2]`, is still E0406 when used on a later line, and `let s = f"n is {n}"` is still E0117's "unexpected a string" there, without the fix; since decision 1245 took `sisu test --std --defer-borrow` and the last fallback of a program's transcripts, its one role left by default is building stage 1 itself, the first time and after a source of stage 1 changed, so stage 1's sources stay within the rules it knows until a seed executable retires the role (R172, R175, R191, decisions 1102 to 1106, 1141 to 1144, 1200 and 1245; chapter 12, R13, R17, R19, R16, X9).
 - `sisu run --stats` prints scheduling latencies that differ between runs, so only `--stats stack-depth` can be shown (G27).
 - A worksheet's expression statement that shows an optional value or a result, `line.find("M")`, is E0318 under `sisu run` of the same file, so since R103 such a worksheet is no longer a script, though it starts with `#!/usr/bin/env sisu`, and the conformance runner records its E0318 (chapter 6, R16).
 - The interval that `sisu bench` reports is one run's, so on a busy machine two runs of one benchmark gave 100.3 to 110.2 µs and 134.1 to 184.7 µs (G27).
+- `sisu help` does not name `--cover` among the options of `sisu test`, whose line names `--mutate` and `--since REV` beside the others, so the one place that lists a command's options leaves out what decision 1241 added (R16).
 - `sisu test --mutate --since REV` outside a git repository is D0158 with git's whole usage text, about 100 lines of the options of `git diff`, as its reason, where one line would say that the directory is not in a repository (R15, R16).
-- The architecture notes' grammar, in "Parsing and the syntax tree", is older than what `sisu grammar` prints since R214 and decision 1204: it gives an attribute without its dotted name, an error set without generic parameters, an enum's and an impl's members as methods alone, `dyn` of a path only and none of `ptr`, `impl`, tuples and labelled parts among the types, and no trait, `extern` block, `bench` or `suite`, so it disagrees with R20 and with the printed text (R20, R16).
 
 ### Diagnostics without fixes
 

@@ -308,8 +308,8 @@ and `grammar`, as `sisu help` says, and the Rust front end, the oracle
 that stage 1 is checked against. `--front-end=rust` among a command's
 options, or `SISU_FRONT_END=rust` in the environment, chooses the Rust
 one. `sisu lint`, `sisu audit --unsafe`, `sisu eval`, `sisu fix`, `sisu
-grammar`, `sisu check --holes` and `sisu test --mutate` are stage 1's
-alone, and the Rust front end refuses them; `sisu lsp` answers from
+grammar`, `sisu check --holes`, `sisu test --mutate` and `--cover` are
+stage 1's alone, and the Rust front end refuses them; `sisu lsp` answers from
 stage 1, and from the Rust front end only where stage 1 is not built
 ([sisu lsp](#sisu-lsp)). From `sisu1 0.17.0` stage 1 also answers
 `check --diary`, `test --std`, `run --defer-borrow`, `test
@@ -1466,8 +1466,8 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   that no test reached (D0161), then the counts (D0162); the status is
   the tests' own ([R15](testing.md#coverage)). It does not combine with
   `--native`, `--release`, `--defer-borrow`, `--mutate`, `--replay` or
-  `--from-sir` (D0163), and the files of `tests/` beside a package are
-  not counted.
+  `--from-sir` (D0163), and neither the files of `tests/` beside a
+  package nor the transcripts are counted.
 - `--mutate` runs the tests, then runs against each mutant of the
   program, a copy with one small change, the selected tests that reach
   its line, and prints each
@@ -2713,8 +2713,8 @@ $ sisu fill hello.sisu
 error[D0003]: unknown command `fill`; run `sisu help`
 $ sisu run --profile hello.sisu
 error[D0009]: unknown option `--profile` for `sisu run`
-$ sisu test --cover hello.sisu
-error[D0009]: unknown option `--cover` for `sisu test`
+$ sisu test --fuzz hello.sisu
+error[D0009]: unknown option `--fuzz` for `sisu test`
 $ sisu build --target wasm32-wasi hello.sisu
 error[D0009]: unknown option `--target` for `sisu build`
 $ sisu learn

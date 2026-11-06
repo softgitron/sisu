@@ -1,1 +1,5 @@
 $ sisu test --cover d0161_cover_unreached_fixed.sisu
+test "open in the evening" ... ok
+test "closed in the morning" ... ok
+2 passed, 0 failed, 0 blocked
+regions: 4, 4 reached by the tests and 0 not

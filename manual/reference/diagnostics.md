@@ -13135,6 +13135,12 @@ test "open in the evening":
 
 <!-- output: examples/reference-diagnostics/d0161_cover_unreached.console -->
 ```console
+$ sisu test --cover d0161_cover_unreached.sisu
+test "open in the evening" ... ok
+1 passed, 0 failed, 0 blocked
+d0161_cover_unreached.sisu:6:9: no test reaches this branch
+d0161_cover_unreached.sisu:6:9: no test reaches this statement
+regions: 4, 2 reached by the tests and 2 not
 ```
 
 The branch and the statement in it start at the same place, so both
@@ -13160,6 +13166,11 @@ test "closed in the morning":
 
 <!-- output: examples/reference-diagnostics/d0161_cover_unreached_fixed.console -->
 ```console
+$ sisu test --cover d0161_cover_unreached_fixed.sisu
+test "open in the evening" ... ok
+test "closed in the morning" ... ok
+2 passed, 0 failed, 0 blocked
+regions: 4, 4 reached by the tests and 0 not
 ```
 
 `--cover` counts in the interpreter, so it does not combine with

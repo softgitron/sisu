@@ -275,6 +275,13 @@ its size; a `Copy` type, such as a number or a struct that derives it,
 is copied instead of moved. [Chapter 10](../tutorial/10-ownership.md);
 [R7](ownership.md#copy-types-and-explicit-copies).
 
+### Coverage
+
+The regions of a program, its statements and the bodies of its
+branches, that the tests run; `sisu test --cover` names each region
+that no test reaches. [Chapter 19](../tutorial/19-testing.md#testing-the-tests);
+[R15](testing.md#coverage).
+
 ## D
 
 ### Deadline

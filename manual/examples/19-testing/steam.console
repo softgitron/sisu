@@ -1,1 +1,7 @@
 $ sisu test --cover steam.sisu
+test "a cold sauna" ... ok
+test "a warm sauna" ... ok
+2 passed, 0 failed, 0 blocked
+steam.sisu:10:9: no test reaches this branch
+steam.sisu:10:9: no test reaches this statement
+regions: 7, 5 reached by the tests and 2 not

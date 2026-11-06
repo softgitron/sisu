@@ -1,4 +1,4 @@
 $ sisu run export_option.sisu
 True
 $ sisu run --native export_option.sisu
-error[D0103]: the native backend does not compile `mem.ptr.of` of a `Option[ptr[u8]]`, which raw memory holds otherwise than a value of it yet (in `main`); `sisu run` without `--native` runs the program
+True

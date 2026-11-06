@@ -1,2 +1,10 @@
 $ sisu test --cover cover.sisu
+test "a bill without a discount" ... ok
+test "an empty bill" ... ok
+2 passed, 0 failed, 0 blocked
+cover.sisu:8:13: no test reaches this branch
+cover.sisu:8:13: no test reaches this statement
+cover.sisu:15:5: no test reaches this statement
+regions: 10, 7 reached by the tests and 3 not
 $ sisu test --cover --mutate cover.sisu
+error[D0163]: `--cover` counts the regions the tests reach in the interpreter; it does not combine with `--mutate`

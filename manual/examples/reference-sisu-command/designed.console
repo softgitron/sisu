@@ -17,7 +17,7 @@ error[D0003]: unknown command `fill`; run `sisu help`
 $ sisu run --profile hello.sisu
 error[D0009]: unknown option `--profile` for `sisu run`
 $ sisu test --fuzz hello.sisu
-error[D0009]: unknown option `--cover` for `sisu test`
+error[D0009]: unknown option `--fuzz` for `sisu test`
 $ sisu build --target wasm32-wasi hello.sisu
 error[D0009]: unknown option `--target` for `sisu build`
 $ sisu learn

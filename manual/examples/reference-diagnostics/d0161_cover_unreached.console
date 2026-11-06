@@ -1,1 +1,6 @@
 $ sisu test --cover d0161_cover_unreached.sisu
+test "open in the evening" ... ok
+1 passed, 0 failed, 0 blocked
+d0161_cover_unreached.sisu:6:9: no test reaches this branch
+d0161_cover_unreached.sisu:6:9: no test reaches this statement
+regions: 4, 2 reached by the tests and 2 not

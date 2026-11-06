@@ -1129,7 +1129,7 @@ def main():
 $ sisu run export_option.sisu
 True
 $ sisu run --native export_option.sisu
-error[D0103]: the native backend does not compile `mem.ptr.of` of a `Option[ptr[u8]]`, which raw memory holds otherwise than a value of it yet (in `main`); `sisu run` without `--native` runs the program
+True
 ```
 
 A foreign call's parameter or result of type `ptr[T]?` passes the same
@@ -1299,6 +1299,16 @@ def main():
 
 <!-- output: examples/reference-attributes/no_alloc_generic.console -->
 ```console
+$ sisu run no_alloc_generic.sisu
+error[E0282]: `highest[Logged]` is `@no_alloc`, but `Logged.Reading.celsius` may allocate
+  --> no_alloc_generic.sisu:25:24
+   |
+25 |         top = max(top, readings[i].celsius())
+   |                        ^^^^^^^^^^^^^^^^^^^^^
+  = note: `Logged.Reading.celsius` calls `fmt.new`, at no_alloc_generic.sisu:17:15
+  = note: in this instance, which the program makes at no_alloc_generic.sisu:30:11
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 `highest[Plain]` checks; `highest[Logged]` prints, which formats a
