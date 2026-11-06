@@ -39,6 +39,48 @@ pub(crate) fn plain_error(id: MsgId, params: &[(&str, String)]) -> String {
     format!("error[{code}]: {}\n", text(id, params))
 }
 
+thread_local! {
+    /// The driver's command this thread runs, which a usage error of stage
+    /// 1 is shown as the usage of (decision 1065).
+    static COMMAND: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// The usage of the driver's command `cmd` (`D0151`): for each of its
+/// lines in `D0002`'s list of commands, its form and what it does; the
+/// whole usage for a command the list does not name.
+pub(crate) fn command_usage(cmd: &str) -> String {
+    let all = text(msg::CLI_USAGE, &[]);
+    let mut out = String::new();
+    for line in all.lines() {
+        let Some(rest) = line.strip_prefix("  ") else { continue };
+        if !rest.strip_prefix(cmd).is_some_and(|r| r.starts_with(' ')) {
+            continue;
+        }
+        let (form, about) = rest.split_once("  ").map_or((rest, ""), |(f, a)| (f.trim_end(), a.trim()));
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&text_line(msg::CLI_COMMAND_USAGE, &[("form", form.into()), ("about", about.into())]));
+    }
+    if out.is_empty() { format!("{all}\n") } else { out }
+}
+
+/// A run of stage 1 that ended with its own usage error (its `main`'s
+/// `error: Usage(text=...)`, which names stage 1's commands), shown as the
+/// usage of the driver's command that ran it, with the usage's status 2
+/// (the manual's nineteenth round; decision 1065).
+pub(crate) fn usage_as_the_drivers(ran: &mut crate::front::Ran) {
+    let body = ran.stderr.strip_suffix('\n').unwrap_or(&ran.stderr);
+    let start = body.rfind('\n').map_or(0, |i| i + 1);
+    if ran.status != exit::ERROR || !body[start..].starts_with("error: Usage(") {
+        return;
+    }
+    let cmd = COMMAND.with(|c| c.borrow().clone());
+    ran.stderr.truncate(start);
+    ran.stderr.push_str(&command_usage(&cmd));
+    ran.status = EXIT_USAGE;
+}
+
 /// Delegates to a host, with the program's own arguments.
 pub(crate) struct WithArgs<'a> {
     pub(crate) inner: &'a mut dyn Host,
@@ -658,6 +700,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         return EXIT_USAGE;
     };
     let rest = &args[1..];
+    COMMAND.with(|c| *c.borrow_mut() = cmd.clone());
     match cmd.as_str() {
         "help" | "--help" | "-h" => {
             host.stdout(&format!("{}\n", text(msg::CLI_USAGE, &[])));
@@ -714,6 +757,21 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         // command (`D0003`).
         "eval" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
             Ok(stage1) if stage1.evaluates() => stage1_as_is(cmd, rest, host),
+            Ok(_) => {
+                host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", cmd.to_string())]));
+                EXIT_USAGE
+            }
+            Err(code) => code,
+        },
+        // `sisu check --holes FILE` (10, "Holes"; D-061): stage 1's (its
+        // R174) from `sisu1 0.15.0` (decision 1063); before it, and on the
+        // Rust front end, `--holes` is an unknown option (`D0009`).
+        "check" if front == FrontEnd::Stage1 && rest.iter().any(|a| a == "--holes") => holes(rest, host),
+        // `sisu fix FILE [--dry-run] [--all]`: stage 1's `fix` from `sisu1
+        // 0.16.0` (decision 1064); an older stage 1 and the Rust front end
+        // have no such command (`D0003`).
+        "fix" if front == FrontEnd::Stage1 => match crate::front::Stage1::ready(host) {
+            Ok(stage1) if stage1.fixes() => stage1_as_is(cmd, rest, host),
             Ok(_) => {
                 host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", cmd.to_string())]));
                 EXIT_USAGE
@@ -1773,6 +1831,42 @@ fn errors_line(errors: &str, lowered: bool) -> Option<String> {
     Some(plain_error(id, &[("count", codes.len().to_string())]))
 }
 
+/// `sisu check --holes FILE` (decision 1063): stage 1's, which lists each
+/// typed hole of the program that holds the file (its R174), when it has
+/// it; `D0009` before `sisu1 0.15.0`. One readable file is the command's
+/// path; none, a directory or more than one is its usage (`D0151`).
+fn holes(rest: &[String], host: &mut dyn Host) -> i32 {
+    let stage1 = match crate::front::Stage1::ready(host) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    if !stage1.assists() {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", "--holes".into()), ("command", "check".into())],
+        ));
+        return EXIT_USAGE;
+    }
+    let paths: Vec<&String> = rest.iter().filter(|a| !a.starts_with("--")).collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    match paths.as_slice() {
+        [file] if !cwd.join(file).is_dir() => {
+            if let Err(e) = std::fs::read(cwd.join(file)) {
+                host.stderr(&plain_error(
+                    msg::CLI_CANNOT_READ,
+                    &[("path", file.to_string()), ("reason", e.to_string())],
+                ));
+                return exit::ERROR;
+            }
+            stage1_as_is("check", rest, host)
+        }
+        _ => {
+            host.stderr(&command_usage("check"));
+            EXIT_USAGE
+        }
+    }
+}
+
 /// `sisu fmt` and `sisu doc` with stage 1: its command with the same
 /// arguments, which it checks as `sisu` does.
 fn stage1_as_is(cmd: &str, rest: &[String], host: &mut dyn Host) -> i32 {
@@ -2211,17 +2305,36 @@ fn stage1_command(
         _ => {
             // `sisu run`: the SIR stage 1's build hands its backend, kept
             // rather than compiled, run by the interpreter.
-            let dir = std::env::temp_dir().join(format!("sisu-sir-{}", std::process::id()));
-            let _ = std::fs::create_dir_all(&dir);
-            let sir_file = dir.join("program.sir");
-            let mut words = vec!["build".to_string(), "--native".to_string(), "--for-run".to_string()];
-            words.extend(contracts);
-            program(&mut words);
-            words.push("--output".into());
-            words.push(sir_file.display().to_string());
-            let r = run(host, &words, Backend::KeepSir);
-            let text = std::fs::read_to_string(&sir_file).ok();
-            let _ = std::fs::remove_dir_all(&dir);
+            // From `sisu1 0.15.0` the build writes that SIR on its standard
+            // output, `build --for-run --emit-sir` (its R170), which the
+            // driver's server of stage 1 answers, so a run no longer pays
+            // the standard library's base (decision 1061); an empty one is a
+            // program without `main`.
+            let (r, text) = if stage1.assists() {
+                let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                words.extend(contracts);
+                program(&mut words);
+                match run(host, &words, Backend::Unused) {
+                    Ok(mut r) => {
+                        let text = (r.status == exit::OK && !r.stdout.is_empty()).then(|| std::mem::take(&mut r.stdout));
+                        (Ok(r), text)
+                    }
+                    Err(code) => (Err(code), None),
+                }
+            } else {
+                let dir = std::env::temp_dir().join(format!("sisu-sir-{}", std::process::id()));
+                let _ = std::fs::create_dir_all(&dir);
+                let sir_file = dir.join("program.sir");
+                let mut words = vec!["build".to_string(), "--native".to_string(), "--for-run".to_string()];
+                words.extend(contracts);
+                program(&mut words);
+                words.push("--output".into());
+                words.push(sir_file.display().to_string());
+                let r = run(host, &words, Backend::KeepSir);
+                let text = std::fs::read_to_string(&sir_file).ok();
+                let _ = std::fs::remove_dir_all(&dir);
+                (r, text)
+            };
             let r = match r {
                 Ok(r) => r,
                 Err(code) => return code,

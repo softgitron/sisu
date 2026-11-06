@@ -582,6 +582,20 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= QUERY_SINCE)
     }
 
+    /// Whether this stage 1's `query` answers selection ranges, rename,
+    /// code actions, inlay hints and formatting, its `check --holes` lists
+    /// the typed holes, and `build --for-run --emit-sir` writes the SIR a
+    /// run runs, served (its R169, R170 and R174): `sisu1 0.15.0` and later.
+    pub fn assists(&self) -> bool {
+        self.version().is_some_and(|v| v >= ASSISTS_SINCE)
+    }
+
+    /// Whether this stage 1 has `fix` (decision 1064): `sisu1 0.16.0` and
+    /// later.
+    pub fn fixes(&self) -> bool {
+        self.version().is_some_and(|v| v >= FIX_SINCE)
+    }
+
     /// The environment a run of stage 1 gets: none of the runtime's or the
     /// driver's own switches, the lowering and backend the command chose,
     /// and the working directory as the shell's `PWD`.
@@ -686,15 +700,18 @@ impl Stage1 {
         // (decision 980); a process of its own when it cannot be.
         if backend == Backend::Unused
             && (crate::serve::served(args)
-                || (matches!(args.first().map(String::as_str), Some("eval" | "query")) && self.evaluates()))
+                || (matches!(args.first().map(String::as_str), Some("eval" | "query")) && self.evaluates())
+                || (emits_sir(args) && self.assists()))
             && self.serves_every_command()
             && let Some((stdout, stderr, status)) = crate::serve::ask(&self.compiler, &self.exe, args)
         {
-            return Ok(settle(
+            let mut ran = settle(
                 String::from_utf8_lossy(&stdout).into_owned(),
                 String::from_utf8_lossy(&stderr).into_owned(),
                 status,
-            ));
+            );
+            crate::cli::usage_as_the_drivers(&mut ran);
+            return Ok(ran);
         }
         let home = match backend {
             Backend::Unused => None,
@@ -733,7 +750,9 @@ impl Stage1 {
             ));
             return Err(crate::cli::EXIT_ICE);
         }
-        Ok(settle(stdout, stderr, status))
+        let mut ran = settle(stdout, stderr, status);
+        crate::cli::usage_as_the_drivers(&mut ran);
+        Ok(ran)
     }
 }
 
@@ -807,6 +826,14 @@ impl Drop for Server {
         }
         let _ = self.child.wait();
     }
+}
+
+/// Whether `args` are stage 1's `build --for-run --emit-sir` (its R170),
+/// which its `sir --repl-serve` serves from `sisu1 0.15.0` (decision 1061).
+fn emits_sir(args: &[String]) -> bool {
+    args.first().is_some_and(|a| a == "build")
+        && args.iter().any(|a| a == "--for-run")
+        && args.iter().any(|a| a == "--emit-sir")
 }
 
 /// The line that starts an answer of `sir --repl-serve`, `answer STATUS
@@ -1296,6 +1323,15 @@ const SERVE_SINCE: (u32, u32, u32) = (0, 13, 0);
 /// The first stage 1 with `query` and `eval` (its R164 and R165;
 /// decisions 983 and 984).
 const QUERY_SINCE: (u32, u32, u32) = (0, 14, 0);
+
+/// The first stage 1 whose `query` answers the language server's other
+/// requests, whose `check --holes` lists a program's typed holes and whose
+/// `build --for-run --emit-sir` is served (its R169, R170 and R174;
+/// decisions 1060, 1061 and 1063).
+const ASSISTS_SINCE: (u32, u32, u32) = (0, 15, 0);
+
+/// The first stage 1 with `fix` (its twenty-first round; decision 1064).
+const FIX_SINCE: (u32, u32, u32) = (0, 16, 0);
 
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.
