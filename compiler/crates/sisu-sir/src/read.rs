@@ -519,10 +519,20 @@ fn split_loc(line: &str) -> (&str, Option<Loc>) {
 /// --modules` writes on each `test` line after its function (its R142;
 /// decision 900), none where the line has none.
 pub fn test_files(text: &str) -> Vec<Option<String>> {
+    files_of(text, "test ")
+}
+
+/// The file of each `bench` line of `text`, in order, as [`test_files`]
+/// gives each test's (decision 943).
+pub fn bench_files(text: &str) -> Vec<Option<String>> {
+    files_of(text, "bench ")
+}
+
+fn files_of(text: &str, word: &str) -> Vec<Option<String>> {
     let mut out = Vec::new();
     for line in text.lines() {
         let mut c = Cur::new(line.trim_end());
-        if !line.starts_with("test ") || !c.eat("test ") {
+        if !line.starts_with(word) || !c.eat(word) {
             continue;
         }
         let file = (|| -> R<Option<String>> {
@@ -629,6 +639,10 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
             } else if c.eat("bench ") {
                 let name = c.string()?;
                 let f = c.name()?;
+                // Its module, as a test's (decision 943): `bench_files` reads it.
+                if c.eat("in ") {
+                    c.string()?;
+                }
                 p.benches.push((name, f));
             } else if c.eat("intrinsic ") || c.eat("method ") {
                 let method = line.trim_start().starts_with("method ");

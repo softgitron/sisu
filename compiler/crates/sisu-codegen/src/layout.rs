@@ -351,9 +351,14 @@ impl<'p> Types<'p> {
             c if abi::CAPABILITIES.iter().any(|(h, o)| *h == c || *o == c) => {
                 return simple(Kind::Opaque(c.to_string()), w);
             }
-            "list" | "Array" | "Slice" => {
+            "list" | "Array" => {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::List(e), 3 * w);
+            }
+            // A slice views its list in place (decision 940).
+            "Slice" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Slice(e), 3 * w);
             }
             "Iter" => {
                 let e = self.id(&arg(0))?;
@@ -571,6 +576,7 @@ impl<'p> Types<'p> {
             | Kind::Path
             | Kind::Bytes
             | Kind::List(_)
+            | Kind::Slice(_)
             | Kind::Iter(_)
             | Kind::Box(_)
             | Kind::Dict(..)

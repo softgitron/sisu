@@ -55,6 +55,7 @@ pub const DATETIME: int = 43
 pub const RW_LOCK: int = 44
 pub const READ_GUARD: int = 45
 pub const PTR: int = 46
+pub const SLICE: int = 47
 
 ## A type's flags: a drop of a value of it can do something; a copy is a
 ## copy of its bytes; an error value, whose first word is its own type's

@@ -207,6 +207,7 @@ pub(crate) fn set_up(
         match &t.kind {
             Kind::Ref(x)
             | Kind::List(x)
+            | Kind::Slice(x)
             | Kind::Iter(x)
             | Kind::Option(x)
             | Kind::Box(x)

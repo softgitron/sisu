@@ -476,6 +476,12 @@ pub enum Kind {
     /// `list[T]` (and `Array[T, N]`): a pointer to a heap buffer of
     /// elements, the length and the capacity, in elements.
     List(u32),
+    /// `Slice[T]`: a list's three words, viewing in place (decision 940):
+    /// the address of the first element it views, their number, and the
+    /// capacity of a buffer the slice owns, 0 for a view of a list (a
+    /// slice of `bytes` holds copies of them, a word each, in a buffer of
+    /// its own).
+    Slice(u32),
     /// `Iter[T]`: one word, a runtime object yielding `T`s.
     Iter(u32),
     /// `T?`: a tag word (0 `Some`, 1 `None`) and the payload.
@@ -722,6 +728,7 @@ const K_DATETIME: u8 = 43;
 const K_RW_LOCK: u8 = 44;
 const K_READ_GUARD: u8 = 45;
 const K_PTR: u8 = 46;
+const K_SLICE: u8 = 47;
 
 struct Writer(Vec<u8>);
 
@@ -778,6 +785,7 @@ impl Kind {
             Kind::DateTime => K_DATETIME,
             Kind::Ref(_) => K_REF,
             Kind::List(_) => K_LIST,
+            Kind::Slice(_) => K_SLICE,
             Kind::Iter(_) => K_ITER,
             Kind::Option(_) => K_OPTION,
             Kind::Result(..) => K_RESULT,
@@ -843,6 +851,7 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
             Kind::Sized(n) | Kind::Opaque(n) => w.text(n),
             Kind::Ref(t)
             | Kind::List(t)
+            | Kind::Slice(t)
             | Kind::Iter(t)
             | Kind::Option(t)
             | Kind::Box(t)
@@ -969,6 +978,7 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_DATETIME => Kind::DateTime,
             K_REF => Kind::Ref(r.u32()?),
             K_LIST => Kind::List(r.u32()?),
+            K_SLICE => Kind::Slice(r.u32()?),
             K_ITER => Kind::Iter(r.u32()?),
             K_OPTION => Kind::Option(r.u32()?),
             K_RESULT => Kind::Result(r.u32()?, r.u32()?),

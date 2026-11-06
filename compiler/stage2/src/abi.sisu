@@ -295,6 +295,7 @@ pub enum Kind:
     DateTime
     Ref(int)
     List(int)
+    Slice(int)
     Iter(int)
     Option(int)
     Result(int, int)
@@ -422,6 +423,8 @@ pub pure def encode(table: list[TypeEntry]) -> list[int]:
                 w.code(11, [x])
             case List(x):
                 w.code(12, [x])
+            case Slice(x):
+                w.code(47, [x])
             case Iter(x):
                 w.code(13, [x])
             case Option(x):

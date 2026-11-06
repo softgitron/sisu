@@ -277,6 +277,7 @@ fn needs_drop_table(types: &[TypeEntry]) -> Vec<bool> {
                 | Kind::Path
                 | Kind::Bytes
                 | Kind::List(_)
+                | Kind::Slice(_)
                 | Kind::Iter(_)
                 | Kind::Box(_)
                 | Kind::Dict(..)

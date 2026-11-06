@@ -29,6 +29,7 @@ from rt.types import LIST
 from rt.types import RECEIVER
 from rt.types import REF
 from rt.types import SET
+from rt.types import SLICE
 from rt.types import Types
 from std.mem import ptr
 
@@ -492,7 +493,7 @@ pub(package) def iterable(ts: Types, p: ptr mut u8, arg: int, item: int) -> ptr 
                 inner = target
         if inner >= 0:
             let ik = ts.kind(inner)
-            if ik == LIST:
+            if ik == LIST or ik == SLICE:
                 elem = ts.a(inner)
                 base = make(S_LIST_REF, 8)
                 set(base, KIND, LIST_KIND)

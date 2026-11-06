@@ -188,7 +188,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         let b = value::text(p, t).unwrap_or(&[]);
                         String::from_utf8_lossy(b).chars().count() as u64
                     }
-                    Kind::List(_) => mem::at::<List>(p).len,
+                    Kind::List(_) | Kind::Slice(_) => mem::at::<List>(p).len,
                     Kind::Bytes => mem::at::<Text>(p).len,
                     Kind::Dict(..) | Kind::Set(_) => crate::dict::table(p).len(),
                     Kind::Arena(_) => crate::cells::arena_len(p),

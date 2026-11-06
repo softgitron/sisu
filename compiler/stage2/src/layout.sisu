@@ -433,8 +433,10 @@ impl Types:
         if abi.is_capability(n):
             return Ok(TypeEntry(size=w, kind=Kind.Opaque(n.to_string())))
         match n:
-            case "list" | "Array" | "Slice":
+            case "list" | "Array":
                 return Ok(TypeEntry(size=3 * w, kind=Kind.List(self.id(arg(args, 0))?)))
+            case "Slice":
+                return Ok(TypeEntry(size=3 * w, kind=Kind.Slice(self.id(arg(args, 0))?)))
             case "Iter":
                 return Ok(TypeEntry(size=w, kind=Kind.Iter(self.id(arg(args, 0))?)))
             case "dict":
@@ -596,6 +598,8 @@ impl Types:
         var parts: list[int] = []
         match e.kind:
             case Kind.String | Kind.Path | Kind.Bytes | Kind.List(_) | Kind.Iter(_) | Kind.Box(_):
+                return Ok(True)
+            case Kind.Slice(_):
                 return Ok(True)
             case Kind.Dict(_, _) | Kind.Set(_) | Kind.Dyn | Kind.Sender(_) | Kind.Receiver(_):
                 return Ok(True)

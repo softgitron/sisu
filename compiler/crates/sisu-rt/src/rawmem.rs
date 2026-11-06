@@ -336,7 +336,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::MemSliceAsPtr => {
                 let (p, t) = c.place(0);
                 let e = match &ty(t).kind {
-                    Kind::List(e) => *e,
+                    Kind::List(e) | Kind::Slice(e) => *e,
                     _ => rt::internal("`as_ptr` of something that is not a slice"),
                 };
                 let list = mem::at::<List>(p);

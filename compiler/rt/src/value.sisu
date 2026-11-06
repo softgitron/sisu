@@ -77,6 +77,7 @@ from rt.types import SET
 from rt.types import SHARED
 from rt.types import SIZE
 from rt.types import SIZED
+from rt.types import SLICE
 from rt.types import STR
 from rt.types import STRING
 from rt.types import STRUCT
@@ -271,7 +272,7 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
             return ts.words.offset(fa).read() == ts.words.offset(fb).read()
                 and fields_equal(ts, a, fa, b, fb)
-        if k == LIST:
+        if k == LIST or k == SLICE:
             let n = aw.offset(1).read()
             if n != bw.offset(1).read():
                 return False
@@ -504,7 +505,7 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             if o != EQUAL:
                 return o
             return signed_order(ts.words.offset(fa).read(), ts.words.offset(fb).read())
-        if k == LIST:
+        if k == LIST or k == SLICE:
             let (na, nb) = (aw.offset(1).read(), bw.offset(1).read())
             let (ea, eb) = (x.offset(A).read(), y.offset(A).read())
             let (sa, sb) = (
@@ -650,7 +651,7 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
             return (((state ^ w.read()) *% PRIME) ^ w.offset(1).read()) *% PRIME
         if k == TUPLE or k == STRUCT:
             return hash_fields(ts, state, p, h.offset(PARTS).read())
-        if k == LIST:
+        if k == LIST or k == SLICE:
             let n = w.offset(1).read()
             let e = h.offset(A).read()
             let size = ts.words.offset(e * WORDS + SIZE).read()
@@ -792,7 +793,7 @@ def new_buffer(dst: ptr mut u8, src: ptr[u8], n: int, room: int, len: int, count
 ##
 ## Requires:
 ## - `typed`: `src` holds a live list of `e`s, and `dst` has room for one
-def copy_list(ts: Types, dst: ptr mut u8, src: ptr mut u8, e: int):
+pub(package) def copy_list(ts: Types, dst: ptr mut u8, src: ptr mut u8, e: int):
     # safety: typed, inside, in_bounds, valid, aligned, writable: a list is
     #   its elements' address, their number and its capacity, and each element
     #   is a value of type `e`.
@@ -860,8 +861,11 @@ pub(package) def copy(ts: Types, dst: ptr mut u8, src: ptr mut u8, t: int):
             let n = sw.offset(1).read()
             let room = if n > 16: n else: 16
             new_buffer(dst, src.cast[ptr[u8]]().read(), n, room, n, room)
-        elif k == LIST:
+        elif k == LIST or (k == SLICE and sw.offset(2).read() != 0):
             copy_list(ts, dst, src, h.offset(A).read())
+        elif k == SLICE:
+            # A view's copy views the same elements (decision 940).
+            move_bytes(dst, src, 24)
         elif k == OPTION:
             let tag = sw.read()
             dw.write(tag)
@@ -1124,7 +1128,10 @@ pub(package) def drop(ts: Types, p: ptr mut u8, t: int, mode: int) -> int:
             free_buffer(p)
             return OK
         let w = p.cast[int]()
-        if k == LIST:
+        # A slice's view drops nothing it views (decision 940).
+        if k == SLICE and w.offset(2).read() == 0:
+            return OK
+        if k == LIST or k == SLICE:
             var status = OK
             let e = h.offset(A).read()
             if (ts.words.offset(e * WORDS + FLAGS).read() & NEEDS_DROP) != 0:

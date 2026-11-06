@@ -163,6 +163,11 @@ impl<'p> Interp<'p, '_> {
                 self.queue_drops(items);
             }
             Value::List(xs) => {
+                // A slice views what it was made from (decision 940): its
+                // drop drops nothing, as natively.
+                if matches!(&ty, Some(Type::Named(n, _)) if n == "Slice") {
+                    return Ok(());
+                }
                 let t = arg(&ty, 0);
                 self.queue_drops(xs.into_iter().map(|x| (x, t.clone())).collect());
             }

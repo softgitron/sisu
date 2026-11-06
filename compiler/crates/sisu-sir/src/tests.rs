@@ -513,4 +513,5 @@ fn a_tests_module_is_read_before_its_tags() {
         read::test_files(text),
         vec![Some("src/main.sisu".to_string()), Some("src/heat.sisu".to_string()), None]
     );
+    assert_eq!(read::bench_files(text), vec![Some("src/heat.sisu".to_string())]);
 }

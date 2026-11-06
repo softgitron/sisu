@@ -1278,6 +1278,18 @@ fn keep_module_tests(prog: &mut sisu_sir::Program, text: &str, file: &str) {
         .collect();
 }
 
+/// Keeps the benchmarks of the module `file` alone, by the ` in "FILE"` on
+/// each `bench` line of `text`, as [`keep_module_tests`] keeps its tests
+/// (decision 943).
+fn keep_module_benches(prog: &mut sisu_sir::Program, text: &str, file: &str) {
+    let files = sisu_sir::read::bench_files(text);
+    let mut k = 0;
+    prog.benches.retain(|_| {
+        k += 1;
+        files.get(k - 1).is_some_and(|f| f.as_deref() == Some(file))
+    });
+}
+
 pub(crate) fn black_box_files(dir: &str) -> Vec<String> {
     let tests = std::path::Path::new(dir).join("tests");
     let Ok(entries) = std::fs::read_dir(&tests) else { return Vec::new() };
@@ -1830,11 +1842,12 @@ fn stage1_command(
             // 828 and 900): the package's program, compiled as the package,
             // and the tests its module declares, which a stage 1 that names
             // each test's module tells (`sisu1 0.12.0`, its R142); an older
-            // one runs the file alone, as before.
+            // one runs the file alone, as before. `sisu bench` of one runs
+            // its benchmarks so (decision 943).
             let module = target
                 .path
                 .as_deref()
-                .filter(|_| cmd == "test" && once)
+                .filter(|_| once)
                 .and_then(package_module)
                 .filter(|_| stage1.names_test_modules());
             let program_path = match &module {
@@ -1914,7 +1927,12 @@ fn stage1_command(
                         r.status.max(exit::ERROR)
                     } else {
                         match read_sir(&r.stdout, host) {
-                            Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
+                            Ok(mut prog) if cmd == "bench" => {
+                                if let Some((_, file)) = &module {
+                                    keep_module_benches(&mut prog, &r.stdout, file);
+                                }
+                                bench_from_sir(&prog, opts, host)
+                            }
                             Ok(mut prog) => {
                                 if let Some((_, file)) = &module {
                                     keep_module_tests(&mut prog, &r.stdout, file);

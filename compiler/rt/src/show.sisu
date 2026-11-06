@@ -66,6 +66,7 @@ from rt.types import SHARED
 from rt.types import SHOWN
 from rt.types import SIZE
 from rt.types import SIZED
+from rt.types import SLICE
 from rt.types import STR
 from rt.types import STRING
 from rt.types import STRUCT
@@ -237,7 +238,7 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
             if n == 1:
                 text.put(out, 44)
             text.put(out, 41)
-        elif k == LIST:
+        elif k == LIST or k == SLICE:
             let e = h.offset(A).read()
             let size = ts.words.offset(e * WORDS + SIZE).read()
             let items = p.cast[ptr[u8]]().read().cast_mut()
