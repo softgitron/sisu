@@ -1620,3 +1620,16 @@ conformance diff.
 **Current lean.** The first, with the third's alias allowed as well, since an alias is where a made type is usually given a name.
 
 **What would settle it.** The owner's decision; the work is R155's three steps (the parser's type grammar, the resolver's order and the template engine), then `@diagnostic_name` and `sisu eval`.
+
+### Q-82. Is `Ratio` one type of any size, or two?
+
+**Question.** [03](proposal/03-types-and-generics.md) says that `Decimal / Decimal` yields a `Ratio`, exact. `std.num`'s `Ratio` holds `int` parts, so it cannot hold every quotient of two `Decimal`s, whose parts are `BigInt`s of any size; stage 1's eighteenth round added `BigRatio`, an exact fraction of `BigInt`s, and made `Decimal`'s `/` give it (R163, decision 925), since changing `Ratio`'s parts would not have been additive. The library now has two fraction types where 03 names one.
+
+**Options.**
+- *One `Ratio` of any size* (lean): `Ratio`'s parts become `BigInt`s, `BigRatio` goes, and a `Ratio` of small parts costs an allocation a `Ratio` of `int`s did not; the fractions of 03 are exact at any size, as `Decimal` is.
+- *Two types*: `Ratio` of `int`s for the common case and `BigRatio` beside it, with `Decimal`'s `/` giving the latter, as now; 03's sentence names which.
+- *`Ratio` of `int`s with `Decimal`'s `/` as an error on overflow*: no new type; a quotient whose parts do not fit is `Err`, which 05 allows and 03's "exact" does not promise.
+
+**Current lean.** One `Ratio` of any size, since 03 and 11 describe one fraction type and the exactness of `Decimal` is the point of having it; the cost of a `BigInt` part is the cost `Decimal` already pays.
+
+**What would settle it.** The owner's decision; the change is `std.num`'s `Ratio`, a sentence of 03 and 11, and the manual's money guide.
