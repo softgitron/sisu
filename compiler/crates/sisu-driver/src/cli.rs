@@ -2445,7 +2445,7 @@ fn stage1_command(
                 if defer {
                     words.push("--defer-borrow".into());
                 }
-                words.extend(contracts);
+                words.extend(contracts.clone());
                 program(&mut words);
                 match run(host, &words, Backend::Unused) {
                     Ok(mut r) => {
@@ -2460,7 +2460,7 @@ fn stage1_command(
                 let _ = std::fs::create_dir_all(&dir);
                 let sir_file = dir.join("program.sir");
                 let mut words = vec!["build".to_string(), "--native".to_string(), "--for-run".to_string()];
-                words.extend(contracts);
+                words.extend(contracts.clone());
                 program(&mut words);
                 words.push("--output".into());
                 words.push(sir_file.display().to_string());
@@ -2474,8 +2474,27 @@ fn stage1_command(
                 Err(code) => return code,
             };
             let deferring = defer && r.status == DEFERRED;
+            // A program with an error not deferred: `sisu1 0.17.0` writes
+            // its errors in the conformance form, so the build without the
+            // option says them as a run says them (its R170).
+            if defer && r.status != exit::OK && !deferring {
+                let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                words.extend(contracts);
+                program(&mut words);
+                return match run(host, &words, Backend::Unused) {
+                    Ok(plain) if plain.status != exit::OK => {
+                        host.stderr(&plain.stderr);
+                        plain.status
+                    }
+                    Ok(_) => {
+                        host.stderr(&r.stderr);
+                        r.status
+                    }
+                    Err(code) => code,
+                };
+            }
             // The deferred run's diagnostics are its account's, not shown.
-            if !(defer && (r.status == exit::OK || deferring)) {
+            if !defer {
                 host.stderr(&r.stderr);
             }
             if r.status != exit::OK && !deferring {

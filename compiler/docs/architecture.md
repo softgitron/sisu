@@ -12012,8 +12012,12 @@ and 1067; stage 1's R185 to R189)
       35 348 kB where it peaked at 43 200 kB, its entries 16 bytes where
       they were 24, in 1.13 s where it took 1.11 s; a `dict[int, int]`
       keeps its 24-byte entries and its 43 MB (the release profile, the
-      median of 5 under a load of 20 to 40). SEEDLINE This changes no rule
-      of the language.
+      median of 5 under a load of 20 to 40). The runtime in Sisu's seed is
+      793 152 bytes where it was 782 919, its object as the fixed point
+      builds it 1 583 680 where it was 1 559 880, and the fixed point holds
+      (sisu2-A and sisu2-B the same 31 198 088 bytes, where they were
+      31 148 680, stage1-A and stage1-B 68 539 496, where they were
+      68 518 224). This changes no rule of the language.
 
 1101. An `Option[ptr[T]]` as one nullable word in a value (decision
       1066's second half, 12's foreign calls) is not this round's: a
@@ -12074,7 +12078,12 @@ and 1067; stage 1's R185 to R189)
       ownership checker of that statement's function, whose run the
       interpreter counts, and any other a rule about a declaration; status
       0 runs the program under the monitor without an account, and any
-      other status is the build's errors. `sisu test --defer-borrow` stays
+      other status is an error not deferred, which the build without the
+      option then reports as a run's, since stage 1 writes it in the
+      conformance form too where R189 gives the human one
+      (`ownership/rustc/overloaded_index_move.defer` is blessed again with
+      the note stage 1's `E0338` adds, as its plain run prints it). `sisu
+      test --defer-borrow` stays
       the Rust front end's this round: the account of a test run is made
       inside the runner of tests (`run_tests`), which the SIR's path does
       not reach yet. The driver's test
