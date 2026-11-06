@@ -67,6 +67,12 @@
 #   sisu1 query values FILE                      a worksheet's values and output by line, from
 #                                                stage 1's evaluator (RULES.md, R196)
 #   sisu1 grammar                                the parser's grammar, from its `##!` comments (R202)
+#   sisu1 doc [--std] --digest [PATH] [--output DIR]
+#                                                the API as one plain text, as `sisu doc --digest`
+#                                                writes it (RULES.md, R207)
+#   sisu1 sir --tests (--mutants | --mutant=K) [PATH]
+#                                                each mutant's SIR after a line `# mutant K:
+#                                                FILE:LINE:COL: WHAT`, for `sisu test --mutate` (R208)
 #   sisu1 --version                              stage 1's version, `sisu1 VERSION` (RULES.md, R56)
 #   sisu1 test [OPTIONS] [PATH]                  the tests, built by stage 1 and run by stage 0's
 #                                                runner (`sisu test --from-sir`), exiting 1 when

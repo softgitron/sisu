@@ -253,9 +253,16 @@ while [ $# -gt 0 ]; do
 done
 
 # The Unicode tables of names are what `tools/unicode_tables.py` writes from
-# Python's `unicodedata` (RULES.md, R136): a stale file fails the run.
+# Python's `unicodedata` and Unicode's own files (RULES.md, R136, R205): a
+# stale file fails the run.
 if ! python3 -I "$here/tools/unicode_tables.py" --check; then
     echo "check.sh: src/unicode_tables.sisu is stale (python3 tools/unicode_tables.py)" >&2
+    exit 1
+fi
+# And the zones' history is what `tools/tzdata.py` writes from the system's
+# tz database, when it is the table's version (RULES.md, R206).
+if ! python3 -I "$here/tools/tzdata.py" --check; then
+    echo "check.sh: std/time.sisu's zone history is stale (python3 tools/tzdata.py)" >&2
     exit 1
 fi
 

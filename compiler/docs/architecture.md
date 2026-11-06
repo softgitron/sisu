@@ -12317,3 +12317,50 @@ D-085, D-086; 10, 12, 17; decisions 242, 1060, 1062, 1101, 1102, 1106 to
       (decision 1108) are not this round's: the round spent its time on
       1140, 1141 and 1143 to 1146, and each family wants 903's
       measurement of its own. This changes no rule of the language.
+
+**Stage 1's twenty-fourth round** (stage 1's RULES.md, R204 to R210; `@derive(Decode)` through a field type's own impl, every rule of UAX #29 and the name lints from Unicode 15.1.0's own data files, the tz database's history in `std.time`, `sisu doc --digest`, `sir --tests --mutants` for `sisu test --mutate`, `@fixture(scope="module")` left to the runner, the merge's differences; `sisu1 --version` 0.19.0)
+
+1160. `@derive(Decode)` of a struct with a field that holds an enum is
+      `E0608` only when the enum has no `impl Decode` of its own; with one,
+      the derived decoder calls it, as `json.from_json` does for any type
+      that implements `Decode`. `@derive(Encode)` already writes such a
+      field with the enum's own `impl Encode`. Stage 1 decides it
+      (RULES.md, R204).
+
+1161. `graphemes()` follows every rule of UAX #29 (GB9b's `Prepend`,
+      GB9c's conjuncts, GB11's pictographs, GB12 and GB13 by the run),
+      and `W0031` and `W0032` read `Scripts.txt` and UTS #39's
+      `confusables.txt` and skeleton, from tables `tools/unicode_tables.py`
+      writes from Unicode 15.1.0's own files, fetched by pinned URLs;
+      `GraphemeBreakTest.txt` passes whole (1,187 lines). Stage 1
+      decides it (RULES.md, R205).
+
+1162. `Zone.named` gives each of its zones' history from the tz database
+      (the system's TZif files, written into `std.time` by
+      `tools/tzdata.py` with the database's version), and today's rules
+      from the change after which they give every later one; the
+      whole database and `std.x.tzdata` are left out. Stage 1 decides it
+      (RULES.md, R206).
+
+1163. `sisu1 doc --digest` and `doc --std --digest` write a program's or
+      the standard library's API as one plain text, each item's
+      declaration with its inferred set and contracts after `##` lines
+      of its first paragraph, capabilities, holes and first example;
+      `--open` is the driver's. Stage 1 decides it (RULES.md, R207).
+
+1164. `sisu1 sir --tests --mutants` prints each mutant of the program's
+      own code (a boundary moved, an operator flipped, a negation or a
+      statement removed; calls that only report left alone) as a line
+      `# mutant K: FILE:LINE:COL: WHAT` and its SIR, and `--mutant=K`
+      one; running the tests against each, in the changed region, is
+      the runner's. Stage 1 decides it (RULES.md, R208).
+
+1165. `@fixture(scope="module")` keeps R200's lowering, a value per
+      test: the SIR has no module-level state and only the runner knows
+      the first and last of a module's tests it runs, so a value shared
+      by them is the runner's to keep. Stage 1 decides it (RULES.md,
+      R209).
+
+1166. Stage 1's twenty-fourth round brought no difference from the
+      merge: every difference `check.sh` reports is a rule's. Stage 1
+      decides it (RULES.md, R210).

@@ -81,6 +81,7 @@ import stage1.fmt
 import stage1.format
 import stage1.interp
 import stage1.lower
+import stage1.mutation
 import stage1.package
 import stage1.query
 import stage1.session
@@ -151,7 +152,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.18.0"
+const VERSION: str = "0.19.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -392,6 +393,7 @@ def run_command(
         let (request, given) = feature_request(rest, target_runtime(sys))
         var level = CONTRACTS_ALL
         var words: list[String] = []
+        var mutant: String? = None
         for w in given:
             if w.starts_with("--contracts="):
                 let chosen = w.byte_slice(12, w.byte_len())
@@ -400,6 +402,10 @@ def run_command(
                     o.emit("", catalog.plain_error("cli.bad-contract-level", params))
                     return Err(Failed)
                 level = l
+            elif w.starts_with("--mutant="):
+                # One mutant, by its number (RULES.md, R208), set aside
+                # until the path is found.
+                mutant = Some(w.copy())
             else:
                 words.push(w.copy())
         let flags = [
@@ -407,6 +413,7 @@ def run_command(
             "--accept-unsafe",
             "--tests",
             "--modules",
+            "--mutants",
             "--std",
             "--defer-borrow",
             "--locked",
@@ -429,6 +436,8 @@ def run_command(
         if let Some(e) = unknown_feature(sys, path, request):
             o.emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
+        if let Some(m) = mutant:
+            words.push(m.copy())
         let accept = words.contains("--accept-unsafe")
         if not write_lockfile(
             sys, path, True, words.contains("--locked"), accept, catalog, "cli.errors-found", mut o
@@ -991,6 +1000,15 @@ def sir_with(
         var warned = r.human(catalog)
         if ids:
             warned = r.ids(catalog)
+        # `--mutants` and `--mutant=K`: each mutant's SIR after the line
+        # that says what it changes (RULES.md, R208).
+        var only: int? = None
+        for w in words:
+            if w.starts_with("--mutant="):
+                only = w.byte_slice(9, w.byte_len()).parse_int()
+        if words.contains("--mutants") or only.is_some():
+            o.emit(mutant_sirs(base, built, path, only, catalog, mut kept, modules), warned)
+            return Ok(())
         o.emit(sir, warned)
         return Ok(())
     let done = lowering_of(
@@ -1013,6 +1031,49 @@ def sir_with(
         errs.push("beyond the slice: {b}\n")
     o.emit(done.sir, errs)
     return Ok(())
+
+## The mutants of the program `input` (RULES.md, R208), or with `only`
+## the `only`th: for each, in the order of the root package's modules and
+## of their places, a line `# mutant K: FILE:LINE:COL: WHAT`, then the SIR
+## of the program with its tests and that change. A mutant that does not
+## check has its line, ` (it does not check)` after it, and no SIR.
+pure def mutant_sirs(
+    base: typeck.Base,
+    input: Input,
+    path: str,
+    only: int?,
+    catalog: Catalog,
+    mut kept: Kept,
+    modules: bool,
+) -> String:
+    var out = String.new()
+    var k = 0
+    for m in range(len(input.modules)):
+        let module = ref input.modules[m]
+        if module.package != 0:
+            continue
+        let text = module.text.copy()
+        let parsed = build.module(parse(text, catalog).tree)
+        var shown = module.file.copy()
+        if input.package_name.is_empty():
+            shown = path.to_string()
+        for site in mutation.sites(text, parsed):
+            let n = k
+            k += 1
+            if let Some(o) = only:
+                if o != n:
+                    continue
+            let (line, col) = mutation.place(text, site.start)
+            out.push("# mutant {n}: {shown}:{line}:{col}: {site.what}")
+            var changed = input.copy()
+            changed.modules[m].text = mutation.mutated(text, site)
+            let (r, sir) = report_with(base, changed, path, catalog, mut kept, True, modules)
+            if refusal(r, catalog, True).is_some() or sir.is_empty():
+                out.push(" (it does not check)\n")
+                continue
+            out.push("\n")
+            out.push(sir)
+    return out
 
 ## `check` of the program at `path` with the base `base`, in the form
 ## `ids` asks for.
@@ -6220,6 +6281,8 @@ struct DocArgs:
     targets: list[String]
     output: String?
     std_lib: bool
+    # `--digest`: one plain text of the pages (RULES.md, R207).
+    digest: bool
     locked: bool
     accept_unsafe: bool
     request: FeatureRequest
@@ -6248,6 +6311,7 @@ pure def doc_args(rest: list[String], catalog: Catalog) -> (DocArgs, String):
         targets=[],
         output=None,
         std_lib=False,
+        digest=False,
         locked=False,
         accept_unsafe=False,
         request=FeatureRequest.none(),
@@ -6257,6 +6321,8 @@ pure def doc_args(rest: list[String], catalog: Catalog) -> (DocArgs, String):
         let a = rest[i].copy()
         if a == "--std":
             args.std_lib = True
+        elif a == "--digest":
+            args.digest = True
         elif a == "--locked":
             args.locked = True
         elif a == "--accept-unsafe":
@@ -6355,14 +6421,41 @@ def doc_with(
     if report.status != 0:
         o.emit(report.out, report.err)
         return Ok(report.status)
+    var pages = report.pages.copy()
+    # `--digest`: the pages as one plain text, `NAME.txt` in `DIR`
+    # (RULES.md, R207).
+    if args.digest:
+        let name = digest_name(sys, args)
+        let text = doc.digest("{name}: the API as `sisu doc --digest` writes it", pages)
+        let Some(_) = args.output else:
+            o.emit(text, "")
+            return Ok(0)
+        pages = [doc.Page(file="{name}.txt", text=text)]
     let dir = args.output.copy() else:
-        o.emit(doc.printed(report.pages), "")
+        o.emit(doc.printed(pages), "")
         return Ok(0)
-    let failed = write_pages(sys, dir, report.pages, catalog)
+    let failed = write_pages(sys, dir, pages, catalog)
     if not failed.is_empty():
         o.emit("", failed)
         return Ok(1)
     return Ok(0)
+
+## The name of a digest (RULES.md, R207): `std` for the standard
+## library's, a package's directory's for a package's (the working
+## directory's nearest package when no path is given), a file's stem for
+## a file's.
+def digest_name(sys: System, args: DocArgs) -> String:
+    if args.std_lib:
+        return "std".to_string()
+    var dir = absolute(sys, ".")
+    if let Some(t) = args.targets.first():
+        dir = absolute(sys, t)
+        if not package.is_dir(sys.fs, dir):
+            return file_stem(dir)
+    else:
+        while not package.is_file(sys.fs, package.join(dir, package.MANIFEST)) and dir != "/":
+            dir = package.parent(dir)
+    return package.file_name(dir.strip_suffix("/"))
 
 ## What `doc` makes of what it was asked (stage 0's `doc` and `doc_pages`):
 ## the pages of the program the path names, or of the standard library, or
@@ -6383,7 +6476,8 @@ def doc_report(
         # The standard library: a program that imports each module, so that
         # each is loaded.
         let input = file_input(sys, home, "std.sisu", std_root(), False, mut env, catalog)?
-        return Ok(doc_program(base, input, "std.sisu", Some(args.targets.copy()), texts, catalog))
+        let only = Some(args.targets.copy())
+        return Ok(doc_program(base, input, "std.sisu", only, args.digest, texts, catalog))
     # The program's path, or the package of the working directory or the
     # nearest one above it, as `sisu doc` finds it.
     var path = String.new()
@@ -6426,7 +6520,7 @@ def doc_report(
         named = n.copy()
     var pages: list[doc.Page] = []
     for input in inputs:
-        let done = doc_program(base, input, named, None, texts, catalog)
+        let done = doc_program(base, input, named, None, False, texts, catalog)
         if done.status != 0:
             return Ok(done)
         for p in done.pages:
@@ -6450,6 +6544,7 @@ pure def doc_program(
     input: Input,
     name: str,
     only: list[String]?,
+    public: bool,
     texts: dict[String, String],
     catalog: Catalog,
 ) -> DocReport:
@@ -6472,7 +6567,7 @@ pure def doc_program(
     var pages: list[doc.Page] = []
     match only:
         case Some(paths):
-            pages = std_pages(typed, paths, texts, catalog)
+            pages = std_pages(typed, paths, public, texts, catalog)
         case None:
             pages = program_pages(input, typed, catalog)
     return DocReport(out=String.new(), err=String.new(), status=0, pages=pages)
@@ -6522,9 +6617,14 @@ pure def program_pages(input: Input, typed: typeck.Typed, catalog: Catalog) -> l
 
 ## The pages of the standard library: the prelude's (`std.core`) and those
 ## of the modules of 11 (not `target`, whose facts are the host's), or of
-## those `only` names when it names some, each read from its text.
+## those `only` names when it names some, each read from its text; with
+## `public` (a digest's, RULES.md, R207), only what is written `pub`.
 pure def std_pages(
-    typed: typeck.Typed, only: list[String], texts: dict[String, String], catalog: Catalog
+    typed: typeck.Typed,
+    only: list[String],
+    public: bool,
+    texts: dict[String, String],
+    catalog: Catalog,
 ) -> list[doc.Page]:
     let prog = ref typed.prog
     var names = ["prelude"]
@@ -6559,7 +6659,7 @@ pure def std_pages(
         prog=ref typed.prog,
         types=ref typed.types,
         inferred=ref typed.inferred,
-        public_only=False,
+        public_only=public,
     )
     return doc.pages(docs)
 

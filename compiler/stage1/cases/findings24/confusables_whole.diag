@@ -1,0 +1,7 @@
+12:9-12:12 W0031 resolve.mixed-script name="гun" scripts="Cyrillic and Latin"
+12:9-12:12 W0032 resolve.confusable name="гun" other="run"
+  label 5:5-5:8 resolve.confusable-here other="run"
+13:9-13:16 W0031 resolve.mixed-script name="rnоdern" scripts="Latin and Cyrillic"
+13:9-13:16 W0032 resolve.confusable name="rnоdern" other="modern"
+  label 8:5-8:11 resolve.confusable-here other="modern"
+14:9-14:11 W0031 resolve.mixed-script name="αʰ" scripts="Greek and Latin"

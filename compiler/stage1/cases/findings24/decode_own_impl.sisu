@@ -1,0 +1,47 @@
+# `@derive(Decode)` of a struct through a field type's own impl (RULES.md,
+# R204): a field of an enum with an `impl Decode` written for it decodes
+# with that impl, as a list's element and an option's too, and `@derive
+# (Encode)` writes the field with the enum's own `impl Encode`.
+import std.json
+from std.json import Decode, Encode, Json, JsonError
+
+@derive(Debug)
+enum Mood:
+    Happy
+    Sad
+
+impl Decode for Mood:
+    def decode_json(j: Json, path: str) -> Mood ! JsonError:
+        if let Json.Str(s) = j:
+            if s == "happy":
+                return Ok(Mood.Happy)
+            if s == "sad":
+                return Ok(Mood.Sad)
+        return Err(JsonError.Mismatch(path=String.new(path), expected=String.new("a mood")))
+
+impl Encode for Mood:
+    def encode_json(self) -> String:
+        return match self:
+            case Mood.Happy: "\"happy\"".to_string()
+            case Mood.Sad: "\"sad\"".to_string()
+
+@derive(Encode, Decode, Debug)
+struct Day:
+    name: String
+    mood: Mood
+    later: list[Mood]
+    maybe: Mood?
+
+def main():
+    let text = "{{\"name\": \"sauna\", \"mood\": \"happy\", \"later\": [\"sad\", \"happy\"], \"maybe\": null}}"
+    match json.decode[Day](text):
+        case Ok(d):
+            print("{d:?}")
+            print(json.encode(d))
+        case Err(e):
+            print("{e}")
+    match json.decode[Day]("{{\"name\": \"x\", \"mood\": \"cross\", \"later\": []}}"):
+        case Ok(d):
+            print("{d:?}")
+        case Err(e):
+            print("{e}")

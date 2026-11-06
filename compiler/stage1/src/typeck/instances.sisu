@@ -405,13 +405,16 @@ impl Resolver:
                         # A struct whose field holds an enum of the program,
                         # which `json.from_json` cannot make (its `comptime
                         # panic`), stops the derive too, rather than leaving
-                        # an instance that lowering drops (RULES.md, R193).
+                        # an instance that lowering drops (RULES.md, R193);
+                        # an enum with an `impl Decode` of its own, which
+                        # `from_json` calls, decodes (R204).
                         if is_struct and t == "Decode" and template_module == "json":
                             var bad: (String, String)? = None
                             for k in range(min(len(field_types), len(field_names))):
                                 if bad.is_none():
                                     if let Some(e) = undecodable(field_types[k]):
-                                        bad = Some((field_names[k].copy(), e))
+                                        if not self.has_impl(module, items, "Decode", e):
+                                            bad = Some((field_names[k].copy(), e))
                             if let Some((f, e)) = bad:
                                 let why = "its field `{f}` holds `{e}`, an enum, whose variants `json.decode` cannot make (an enum implements `Decode` with an `impl Decode` of its own)"
                                 var d = Diagnostic.new(

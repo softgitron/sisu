@@ -1,0 +1,309 @@
+##! The mutants of `sisu test --mutate` (17, "Coverage and mutation";
+##! RULES.md, R208): the small changes to a program's code that its tests
+##! should notice, each a place in a module's text and what is written
+##! there instead. A comparison's boundary is moved (`<` and `<=`, `>` and
+##! `>=`), an operator flipped (`==` and `!=`, `+` and `-`, `and` and
+##! `or`, `True` and `False`), a negation removed (`not x` is `x`), and a
+##! statement of one line that calls or assigns removed (it is `pass`).
+##! Only the code a run executes is mutated: the bodies of the program's
+##! functions and methods, not its tests, benchmarks, fixtures, compile-time
+##! code or declarations; and the arid nodes are left alone, the calls that
+##! only report (`print`, `eprint`, `log.*`), whose mutants no test is
+##! meant to kill.
+
+from stage1.diag import Catalog
+from stage1.lexer import lex
+from stage1.parser import parse
+from stage1.syntax.ast import (
+    Ast,
+    BinOp,
+    Block,
+    CmpOp,
+    ExprId,
+    ExprKind,
+    FnDef,
+    ItemId,
+    ItemKind,
+    Module,
+    StmtId,
+    StmtKind,
+    UnOp,
+)
+from stage1.syntax.ast import build, visit
+from stage1.syntax.tree import Token
+
+## One mutant: the bytes `start..end` of its module's text written
+## `replacement`, and what it changes (`the boundary changed: `<` to
+## `<=``).
+@derive(Eq, Debug)
+pub struct Site:
+    pub start: int
+    pub end: int
+    pub replacement: String
+    pub what: String
+
+## The mutants of a module, `module` parsed from `text`, in the order of
+## their places.
+pub pure def sites(text: str, module: Module) -> list[Site]:
+    let tokens = lex(text).tokens
+    var out: list[Site] = []
+    for it in module.items:
+        item_sites(text, module.ast, tokens, it, mut out)
+    out.sort_by((a, b) -> a.start.cmp(b.start))
+    var kept: list[Site] = []
+    for s in out:
+        if let Some(last) = kept.last():
+            if last.start == s.start and last.end == s.end:
+                continue
+        kept.push(s.copy())
+    return kept
+
+## `text` with the mutant `site`.
+pub pure def mutated(text: str, site: Site) -> String:
+    var out = text.byte_slice(0, site.start).to_string()
+    out.push(site.replacement)
+    out.push(text.byte_slice(site.end, text.byte_len()))
+    return out
+
+## The 1-based line and column (in characters) of byte `at` of `text`.
+pub pure def place(text: str, at: int) -> (int, int):
+    var line = 1
+    var col = 1
+    var i = 0
+    for c in text.chars():
+        if i >= at:
+            break
+        if c == '\n':
+            line += 1
+            col = 1
+        else:
+            col += 1
+        i += c.len_utf8()
+    return (line, col)
+
+pure def item_sites(text: str, ast: Ast, tokens: list[Token], it: ItemId, mut out: list[Site]):
+    let node = ast.item(it)
+    match node.kind:
+        case ItemKind.Fn(f):
+            fn_sites(text, ast, tokens, f, mut out)
+        case ItemKind.Struct(s):
+            for m in s.methods:
+                fn_sites(text, ast, tokens, m, mut out)
+        case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+            for m in e.methods:
+                fn_sites(text, ast, tokens, m, mut out)
+        case ItemKind.Impl(i):
+            for m in i.methods:
+                fn_sites(text, ast, tokens, m, mut out)
+        case ItemKind.Trait(t):
+            for m in t.methods:
+                fn_sites(text, ast, tokens, m, mut out)
+        case _:
+            pass
+
+## The mutants of a function's body: none for compile-time code and for a
+## fixture, which is the tests' own.
+pure def fn_sites(text: str, ast: Ast, tokens: list[Token], f: FnDef, mut out: list[Site]):
+    if f.is_comptime:
+        return
+    for a in f.attrs:
+        if a.name == "fixture" or a.name == "cfg":
+            return
+    let Some(body) = ref f.body else:
+        return
+    let exprs = visit.exprs_in_block(ast, body)
+    # The arid calls, whose insides are left alone.
+    var arid: list[(int, int)] = []
+    for e in exprs:
+        if is_arid(ast, e):
+            let r = ast.expr(e).range
+            arid.push((r.start, r.end))
+    var found: list[Site] = []
+    for e in exprs:
+        expr_sites(text, ast, tokens, e, mut found)
+    stmt_sites(text, ast, body, mut found)
+    for s in found:
+        var dry = False
+        for (a, b) in arid:
+            if a <= s.start and s.start < b:
+                dry = True
+        if not dry:
+            out.push(s.copy())
+
+## Whether `e` is a call that only reports: `print`, `eprint` or a
+## function of `log`.
+pure def is_arid(ast: Ast, e: ExprId) -> bool:
+    let ExprKind.Call(callee, _, _) = ast.expr(e).kind else:
+        return False
+    match ast.expr(callee).kind:
+        case ExprKind.Name(n):
+            return n == "print" or n == "eprint"
+        case ExprKind.Field(base, _):
+            if let ExprKind.Name(n) = ast.expr(base).kind:
+                return n == "log"
+            return False
+        case _:
+            return False
+
+pure def expr_sites(text: str, ast: Ast, tokens: list[Token], e: ExprId, mut out: list[Site]):
+    let node = ast.expr(e)
+    match node.kind:
+        case ExprKind.Compare(first, rest):
+            var before = ast.expr(first).range.end
+            for (op, operand) in rest:
+                if let Some((wanted, what)) = compare_mutant(op):
+                    if let Some(t) = operator_after(tokens, before, op.text(), text):
+                        out.push(
+                            Site(
+                                start=t.start,
+                                end=t.end,
+                                replacement=wanted.to_string(),
+                                what="{what}: `{op.text()}` to `{wanted}`",
+                            )
+                        )
+                before = ast.expr(operand).range.end
+        case ExprKind.Binary(op, lhs, _):
+            if let Some(wanted) = binary_mutant(op):
+                let at = ast.expr(lhs).range.end
+                if let Some(t) = operator_after(tokens, at, op.text(), text):
+                    out.push(
+                        Site(
+                            start=t.start,
+                            end=t.end,
+                            replacement=wanted.to_string(),
+                            what="the operator flipped: `{op.text()}` to `{wanted}`",
+                        )
+                    )
+        case ExprKind.Unary(UnOp.Not, inner):
+            let r = ast.expr(inner).range
+            let written = text.byte_slice(node.range.start, node.range.end)
+            let kept = text.byte_slice(r.start, r.end)
+            if not written.contains("\n"):
+                out.push(
+                    Site(
+                        start=node.range.start,
+                        end=node.range.end,
+                        replacement=kept.to_string(),
+                        what="the negation removed: `{written}` to `{kept}`",
+                    )
+                )
+        case ExprKind.Name(n):
+            if n == "True" or n == "False":
+                let wanted = if n == "True": "False" else: "True"
+                out.push(
+                    Site(
+                        start=node.range.start,
+                        end=node.range.end,
+                        replacement=wanted.to_string(),
+                        what="the operator flipped: `{n}` to `{wanted}`",
+                    )
+                )
+        case _:
+            pass
+
+## What a comparison is mutated into, and how: the boundary moved, or the
+## equality flipped.
+pure def compare_mutant(op: CmpOp) -> (str, str)?:
+    return match op:
+        case CmpOp.Lt: Some(("<=", "the boundary changed"))
+        case CmpOp.Le: Some(("<", "the boundary changed"))
+        case CmpOp.Gt: Some((">=", "the boundary changed"))
+        case CmpOp.Ge: Some((">", "the boundary changed"))
+        case CmpOp.Eq: Some(("!=", "the operator flipped"))
+        case CmpOp.Ne: Some(("==", "the operator flipped"))
+        case _: None
+
+## The operator a binary operator is flipped into.
+pure def binary_mutant(op: BinOp) -> str?:
+    return match op:
+        case BinOp.Add: Some("-")
+        case BinOp.Sub: Some("+")
+        case BinOp.And: Some("or")
+        case BinOp.Or: Some("and")
+        case _: None
+
+## The first token after byte `at` that is not trivia, when it is the
+## operator `op`.
+pure def operator_after(tokens: list[Token], at: int, op: str, text: str) -> Token?:
+    var lo = 0
+    var hi = len(tokens)
+    while lo < hi:
+        let mid = (lo + hi) // 2
+        if tokens[mid].start < at:
+            lo = mid + 1
+        else:
+            hi = mid
+    var k = lo
+    while k < len(tokens) and tokens[k].kind.is_trivia():
+        k += 1
+    if k >= len(tokens):
+        return None
+    let t = tokens[k]
+    if text.byte_slice(t.start, t.end) != op:
+        return None
+    return Some(t)
+
+## The statements of a block that can be removed, and those of the blocks
+## inside them: a call or an assignment on one line, which becomes `pass`.
+pure def stmt_sites(text: str, ast: Ast, b: Block, mut out: list[Site]):
+    for s in b.stmts:
+        one_stmt(text, ast, s, mut out)
+
+pure def one_stmt(text: str, ast: Ast, s: StmtId, mut out: list[Site]):
+    let node = ast.stmt(s)
+    match node.kind:
+        case StmtKind.Expr(e):
+            if is_arid(ast, e):
+                return
+            if let ExprKind.Call(_, _, _) = ast.expr(e).kind:
+                removal(text, node.range.start, node.range.end, mut out)
+        case StmtKind.Assign(_, _, _):
+            removal(text, node.range.start, node.range.end, mut out)
+        case StmtKind.If(branches, else_block):
+            for (_, body) in branches:
+                stmt_sites(text, ast, body, mut out)
+            if let Some(e) = else_block:
+                stmt_sites(text, ast, e, mut out)
+        case StmtKind.While(_, body):
+            stmt_sites(text, ast, body, mut out)
+        case StmtKind.For(_, _, _, body):
+            stmt_sites(text, ast, body, mut out)
+        case StmtKind.Defer(body) | StmtKind.Unsafe(body):
+            stmt_sites(text, ast, body, mut out)
+        case StmtKind.With(_, _, body):
+            stmt_sites(text, ast, body, mut out)
+        case _:
+            pass
+
+## The statement at `start..end` removed, when it is one line.
+pure def removal(text: str, start: int, end: int, mut out: list[Site]):
+    let written = text.byte_slice(start, end).trim_end()
+    if written.contains("\n") or written.is_empty():
+        return
+    out.push(
+        Site(
+            start=start,
+            end=start + written.byte_len(),
+            replacement="pass".to_string(),
+            what="the statement removed: `{written}`",
+        )
+    )
+
+test "a module's mutants, and the arid calls left alone":
+    let text = "def f(a: int, b: int) -> bool:\n    print(a < b)\n    var n = a + b\n    n -= 1\n    return n < 3 and not (a == b)\n\ntest \"t\":\n    assert f(1, 2)\n"
+    let module = build.module(parse(text, Catalog.parse("")).tree)
+    var shown: list[String] = []
+    for s in sites(text, module):
+        let (line, col) = place(text, s.start)
+        shown.push("{line}:{col} {s.what}")
+    assert shown
+        == [
+            "3:15 the operator flipped: `+` to `-`",
+            "4:5 the statement removed: `n -= 1`",
+            "5:14 the boundary changed: `<` to `<=`",
+            "5:18 the operator flipped: `and` to `or`",
+            "5:22 the negation removed: `not (a == b)` to `(a == b)`",
+            "5:29 the operator flipped: `==` to `!=`",
+        ]
+    let site = Site(start=2, end=3, replacement="-".to_string(), what=String.new())
+    assert mutated("a + b", site) == "a - b"

@@ -1,0 +1,5 @@
+doc	--digest	digest.sisu	--dir	cases/findings24
+doc	--std	--digest	std.time	--dir	cases/findings24
+doc	--digest	--dir	cases/packages/doc_pages.pkg/shop
+sir	--tests	--mutants	mutants.sisu	--dir	cases/findings24
+sir	--tests	--mutant=6	mutants.sisu	--dir	cases/findings24
