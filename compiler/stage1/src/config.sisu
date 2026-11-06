@@ -1,0 +1,392 @@
+##! `eval`: a configuration module rendered (08, "Configuration files";
+##! RULES.md, R165). The module's `const` items, each evaluated as a
+##! `comptime` expression is, are written as one JSON object, one TOML
+##! table or one YAML mapping, by their names in the order written: a
+##! struct is a mapping of its fields, an enum's variant its name (with its
+##! fields, a mapping of its name to them), `None` nothing (`null`; a
+##! struct's field or a constant left out in TOML, which has no null),
+##! `Some(x)` `x`, a list, a set or a tuple a sequence, and a dict whose
+##! keys are text or integers a mapping.
+
+import stage1.interp
+from stage1.diag import Catalog
+from stage1.parser import parse
+from stage1.sir import Program, TypeDecl
+from stage1.syntax.kinds import SyntaxKind
+from stage1.syntax.tree import Element
+
+## The forms 08 renders a configuration in.
+@derive(Eq, Copy)
+pub enum Form:
+    Json
+    Toml
+    Yaml
+
+impl Form:
+    ## The form `--to NAME` names.
+    pub pure def named(name: str) -> Form?:
+        return match name:
+            case "json": Some(Form.Json)
+            case "toml": Some(Form.Toml)
+            case "yaml": Some(Form.Yaml)
+            case _: None
+
+    pub pure def name(self) -> str:
+        return match self:
+            case Form.Json: "JSON"
+            case Form.Toml: "TOML"
+            case Form.Yaml: "YAML"
+
+## What a constant holds that a form cannot write, and the constant's
+## index among those rendered (0 from `data_of`).
+pub error Unwritable:
+    Holds(what: String, at: int)
+
+## A value as a configuration holds it.
+pub enum Data:
+    Null
+    Bool(bool)
+    Int(int)
+    Float(f64)
+    Text(String)
+    List(list[Data])
+    Map(list[(String, Data)])
+
+## The `const` items of a module's text, in the order written: each name
+## and where it is written.
+pub pure def constants(text: str, catalog: Catalog) -> list[(String, int, int)]:
+    let tree = parse(text, catalog).tree
+    var out: list[(String, int, int)] = []
+    for e in tree.nodes[tree.root].children:
+        let Element.Node(n) = e else:
+            continue
+        if tree.nodes[n].kind != SyntaxKind.ConstDef:
+            continue
+        var after = False
+        var found = False
+        for c in tree.nodes[n].children:
+            if let Element.Leaf(t) = c:
+                let tok = tree.tokens[t]
+                if tok.kind == SyntaxKind.ConstKw:
+                    after = True
+                elif tok.kind == SyntaxKind.Ident and after and not found:
+                    out.push((text.byte_slice(tok.start, tok.end).to_string(), tok.start, tok.end))
+                    found = True
+    return out
+
+## The data of an evaluated value, or what it holds that has none (`a
+## function`, `a reference`, ...).
+pub pure def data_of(prog: Program, v: interp.Value) -> Data ! Unwritable:
+    match v:
+        case interp.Value.Unit:
+            return Ok(Data.Null)
+        case interp.Value.Int(i):
+            return Ok(Data.Int(i))
+        case interp.Value.Float(x):
+            return Ok(Data.Float(x))
+        case interp.Value.F32(x):
+            return Ok(Data.Float(x.to_f64()))
+        case interp.Value.Bool(b):
+            return Ok(Data.Bool(b))
+        case interp.Value.Char(c):
+            return Ok(Data.Text("{c}"))
+        case interp.Value.Str(s) | interp.Value.String(s):
+            return Ok(Data.Text(s.copy()))
+        case interp.Value.List(xs) | interp.Value.Tuple(xs) | interp.Value.Set(xs):
+            var out: list[Data] = []
+            for x in xs:
+                out.push(data_of(prog, x)?)
+            return Ok(Data.List(out))
+        case interp.Value.Dict(es):
+            var out: list[(String, Data)] = []
+            for (k, x) in es:
+                var key = String.new()
+                match k:
+                    case interp.Value.Str(s) | interp.Value.String(s):
+                        key = s.copy()
+                    case interp.Value.Int(i):
+                        key = "{i}"
+                    case _:
+                        return Err(Holds(what="a dict whose keys are not text or integers".to_string(), at=0))
+                out.push((key, data_of(prog, x)?))
+            return Ok(Data.Map(out))
+        case interp.Value.Adt(ty, variant, fields):
+            if ty == "<shared>" and len(fields) == 1:
+                return data_of(prog, fields[0])
+            if ty == "Option":
+                if variant == 0 and len(fields) == 1:
+                    return data_of(prog, fields[0])
+                return Ok(Data.Null)
+            if let Some(TypeDecl.Struct(_, _, decls, _, _, _)) = prog.type_decl(ty):
+                var out: list[(String, Data)] = []
+                for i in range(min(len(decls), len(fields))):
+                    out.push((decls[i].name.copy(), data_of(prog, fields[i])?))
+                return Ok(Data.Map(out))
+            let (name, names) = interp.variant_info(prog, ty, variant)
+            if fields.is_empty():
+                return Ok(Data.Text(name))
+            var named = len(names) == len(fields)
+            for n in names:
+                if n.is_none():
+                    named = False
+            var inner = Data.Null
+            if named:
+                var out: list[(String, Data)] = []
+                for i in range(len(fields)):
+                    out.push((names[i].copy() ?? String.new(), data_of(prog, fields[i])?))
+                inner = Data.Map(out)
+            elif len(fields) == 1:
+                inner = data_of(prog, fields[0])?
+            else:
+                var out: list[Data] = []
+                for f in fields:
+                    out.push(data_of(prog, f)?)
+                inner = Data.List(out)
+            return Ok(Data.Map([(name, inner)]))
+        case interp.Value.Fn(_) | interp.Value.Closure(_, _, _):
+            return Err(Holds(what="a function".to_string(), at=0))
+        case interp.Value.Ref(_):
+            return Err(Holds(what="a reference".to_string(), at=0))
+        case _:
+            return Err(Holds(what="an iterator".to_string(), at=0))
+
+## The constants `entries` written in `form`, or what one of them holds
+## that the form cannot write, with its index.
+pub pure def render(form: Form, entries: list[(String, Data)]) -> String ! Unwritable:
+    var out = String.new()
+    match form:
+        case Form.Json:
+            if entries.is_empty():
+                return Ok("{{}}\n".to_string())
+            var parts: list[String] = []
+            for i in range(len(entries)):
+                let (n, d) = entries[i].copy()
+                match json(d, 1):
+                    case Ok(text):
+                        parts.push("  {quoted(n)}: {text}")
+                    case Err(Holds(what, _)):
+                        return Err(Holds(what=what, at=i))
+            out.push("{{\n{parts.join(",\n")}\n}}\n")
+        case Form.Toml:
+            for i in range(len(entries)):
+                let (n, d) = entries[i].copy()
+                if let Data.Null = d:
+                    continue
+                match toml(d):
+                    case Ok(text):
+                        out.push("{key(n)} = {text}\n")
+                    case Err(Holds(what, _)):
+                        return Err(Holds(what=what, at=i))
+        case Form.Yaml:
+            if entries.is_empty():
+                out.push("{{}}\n")
+            for (n, d) in entries:
+                out.push(yaml_entry(key_text(n), d, 0))
+    return Ok(out)
+
+## Text in double quotes, as JSON writes it (and YAML and TOML read it).
+pub pure def quoted(s: str) -> String:
+    var out = String.new("\"")
+    for c in s.chars():
+        let n = c.code()
+        if c == '"':
+            out.push("\\\"")
+        elif c == '\\':
+            out.push("\\\\")
+        elif c == '\n':
+            out.push("\\n")
+        elif c == '\t':
+            out.push("\\t")
+        elif c == '\r':
+            out.push("\\r")
+        elif n < 32 or n == 127:
+            out.push("\\u")
+            out.push(hex4(n))
+        else:
+            out.push("{c}")
+    out.push("\"")
+    return out
+
+pure def hex4(n: int) -> String:
+    let digits = "0123456789abcdef"
+    var out = String.new()
+    var shift = 12
+    while shift >= 0:
+        let d = (n >> shift) & 15
+        out.push(digits.byte_slice(d, d + 1))
+        shift -= 4
+    return out
+
+## A float as JSON, TOML and YAML write a finite one: with a point or an
+## exponent, so that it reads back as a float.
+pure def float_text(x: f64) -> String:
+    let t = "{x}"
+    if t.contains(".") or t.contains("e") or t.contains("E"):
+        return t
+    return "{t}.0"
+
+## The JSON of `d` at nesting `depth`, two spaces a level.
+pure def json(d: Data, depth: int) -> String ! Unwritable:
+    let pad = "  ".repeat(depth + 1)
+    let end = "  ".repeat(depth)
+    match d:
+        case Data.Null:
+            return Ok("null".to_string())
+        case Data.Bool(b):
+            return Ok((if b: "true" else: "false").to_string())
+        case Data.Int(i):
+            return Ok("{i}")
+        case Data.Float(x):
+            if x - x != 0.0:
+                return Err(Holds(what="an infinite or not-a-number float".to_string(), at=0))
+            return Ok(float_text(x))
+        case Data.Text(s):
+            return Ok(quoted(s))
+        case Data.List(xs):
+            if xs.is_empty():
+                return Ok("[]".to_string())
+            var parts: list[String] = []
+            for x in xs:
+                parts.push("{pad}{json(x, depth + 1)?}")
+            return Ok("[\n{parts.join(",\n")}\n{end}]")
+        case Data.Map(fs):
+            if fs.is_empty():
+                return Ok("{{}}".to_string())
+            var parts: list[String] = []
+            for (k, x) in fs:
+                parts.push("{pad}{quoted(k)}: {json(x, depth + 1)?}")
+            return Ok("{{\n{parts.join(",\n")}\n{end}}}")
+
+## A key as TOML writes it: bare when it is letters, digits, `_` and `-`.
+pure def key(k: str) -> String:
+    if k.is_empty():
+        return quoted(k)
+    for c in k.chars():
+        if not ((c.code() < 128 and (c.is_alphabetic() or c.is_digit())) or c == '_' or c == '-'):
+            return quoted(k)
+    return k.to_string()
+
+## A TOML value, inline: a mapping is an inline table, whose fields that
+## hold nothing are left out.
+pure def toml(d: Data) -> String ! Unwritable:
+    match d:
+        case Data.Null:
+            return Err(Holds(what="nothing (`None`) in a list".to_string(), at=0))
+        case Data.Bool(b):
+            return Ok((if b: "true" else: "false").to_string())
+        case Data.Int(i):
+            return Ok("{i}")
+        case Data.Float(x):
+            if x != x:
+                return Ok("nan".to_string())
+            if x - x != 0.0:
+                return Ok((if x > 0.0: "inf" else: "-inf").to_string())
+            return Ok(float_text(x))
+        case Data.Text(s):
+            return Ok(quoted(s))
+        case Data.List(xs):
+            var parts: list[String] = []
+            for x in xs:
+                parts.push(toml(x)?)
+            return Ok("[{parts.join(", ")}]")
+        case Data.Map(fs):
+            var parts: list[String] = []
+            for (k, x) in fs:
+                if let Data.Null = x:
+                    continue
+                parts.push("{key(k)} = {toml(x)?}")
+            if parts.is_empty():
+                return Ok("{{}}".to_string())
+            return Ok("{{ {parts.join(", ")} }}")
+
+## A key as YAML writes it: plain when it is letters, digits and `_`.
+pure def key_text(k: str) -> String:
+    if k.is_empty():
+        return quoted(k)
+    for c in k.chars():
+        if not ((c.code() < 128 and (c.is_alphabetic() or c.is_digit())) or c == '_'):
+            return quoted(k)
+    return k.to_string()
+
+## A YAML scalar, or the empty sequence or mapping.
+pure def yaml_scalar(d: Data) -> String?:
+    match d:
+        case Data.Null:
+            return Some("null".to_string())
+        case Data.Bool(b):
+            return Some((if b: "true" else: "false").to_string())
+        case Data.Int(i):
+            return Some("{i}")
+        case Data.Float(x):
+            if x != x:
+                return Some(".nan".to_string())
+            if x - x != 0.0:
+                return Some((if x > 0.0: ".inf" else: "-.inf").to_string())
+            return Some(float_text(x))
+        case Data.Text(s):
+            return Some(quoted(s))
+        case Data.List(xs):
+            if xs.is_empty():
+                return Some("[]".to_string())
+            return None
+        case Data.Map(fs):
+            if fs.is_empty():
+                return Some("{{}}".to_string())
+            return None
+
+## `key: value` of a YAML mapping at `indent` spaces, in block style.
+pure def yaml_entry(k: str, d: Data, indent: int) -> String:
+    let pad = " ".repeat(indent)
+    if let Some(s) = yaml_scalar(d):
+        return "{pad}{k}: {s}\n"
+    return "{pad}{k}:\n{yaml_block(d, indent + 2)}"
+
+## A sequence or a mapping in YAML's block style at `indent` spaces.
+pure def yaml_block(d: Data, indent: int) -> String:
+    let pad = " ".repeat(indent)
+    var out = String.new()
+    match d:
+        case Data.List(xs):
+            for x in xs:
+                if let Some(s) = yaml_scalar(x):
+                    out.push("{pad}- {s}\n")
+                else:
+                    # The item's first line follows its `- `, the rest
+                    # line up under it.
+                    let inner = yaml_block(x, indent + 2)
+                    out.push("{pad}- {inner.byte_slice(indent + 2, inner.byte_len())}")
+        case Data.Map(fs):
+            for (k, x) in fs:
+                out.push(yaml_entry(key_text(k), x, indent))
+        case _:
+            pass
+    return out
+
+test "a configuration's text is quoted as JSON writes it":
+    assert quoted("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\""
+    assert quoted("\u{1}") == "\"\\u0001\""
+    assert float_text(2.0) == "2.0"
+    assert float_text(0.5) == "0.5"
+
+test "the forms write the same constants":
+    let entries = [
+        ("PORT".to_string(), Data.Int(8080)),
+        ("TAGS".to_string(), Data.List([Data.Text("a".to_string()), Data.Text("b".to_string())])),
+        ("NONE".to_string(), Data.Null),
+    ]
+    match render(Form.Toml, entries):
+        case Ok(t):
+            assert t == "PORT = 8080\nTAGS = [\"a\", \"b\"]\n"
+        case Err(_):
+            assert False
+    match render(Form.Yaml, entries):
+        case Ok(t):
+            assert t == "PORT: 8080\nTAGS:\n  - \"a\"\n  - \"b\"\nNONE: null\n"
+        case Err(_):
+            assert False
+    match render(Form.Json, entries):
+        case Ok(t):
+            assert t.starts_with("{{\n  \"PORT\": 8080,\n  \"TAGS\": [\n    \"a\",")
+        case Err(_):
+            assert False
+    assert render(Form.Toml, [("XS".to_string(), Data.List([Data.Null]))]).is_err()

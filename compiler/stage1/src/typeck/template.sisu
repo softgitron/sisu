@@ -41,7 +41,10 @@
 ##! variant's field is reachable only inside an arm `case V(..)` that
 ##! `comptime for V in reflect.variants_of(T)` made for a `match x`, where
 ##! it is the arm's binding. Compile-time code may also use `enumerate`,
-##! `len`, integer arithmetic, comparisons, `and`, `or` and `not`.
+##! `len`, `range`, `zip`, `reversed`, `sorted`, `min`, `max` and `sum`, the
+##! methods `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of
+##! text (RULES.md, R166), integer arithmetic, comparisons, `and`, `or` and
+##! `not`.
 ##!
 ##! Where the Rust holds a type's shape in a `Box`, this one holds it in a
 ##! list of at most one; the syntax is stage 1's arenas, read through
@@ -1046,6 +1049,129 @@ pure def describe(v: Value) -> str:
         case Value.List(_): "a list"
         case Value.Tuple(_): "a tuple"
 
+## The prelude's functions compile-time code of a template may call
+## (RULES.md, R166): `enumerate` and `len`, and those of lists and numbers.
+pure def is_builtin(n: str) -> bool:
+    return match n:
+        case "enumerate" | "len" | "range" | "zip" | "reversed" | "sorted": True
+        case "min" | "max" | "sum": True
+        case _: False
+
+## The methods of text compile-time code of a template may call: those the
+## compile-time evaluator has (RULES.md, R166).
+pure def is_text_method(n: str) -> bool:
+    return match n:
+        case "to_lowercase" | "to_uppercase" | "to_string" | "byte_len": True
+        case _: False
+
+## The most numbers `range` makes at compile time: a template unrolls a
+## loop over them.
+const RANGE_LIMIT: int = 100000
+
+## `range`, `zip`, `reversed`, `sorted`, `min`, `max` and `sum` of values
+## known at compile time, as the prelude's are of run-time ones: `min` and
+## `max` of one list or of two or more values, of integers or of text.
+pure def builtin(here: TextRange, n: str, vals: list[Value]) -> Value ! Unfolding:
+    if n == "range":
+        var ints: list[int] = []
+        for v in vals:
+            let Value.Int(i) = v else:
+                return fail(here, "`range` of {describe(v)}")
+            ints.push(i)
+        if len(ints) < 1 or len(ints) > 3:
+            return fail(here, "`range` takes one, two or three integers")
+        var start = 0
+        var stop = ints[0]
+        var step = 1
+        if len(ints) >= 2:
+            start = ints[0]
+            stop = ints[1]
+        if len(ints) == 3:
+            step = ints[2]
+        if step == 0:
+            return fail(here, "`range` with a step of 0")
+        var out: list[Value] = []
+        var i = start
+        while (step > 0 and i < stop) or (step < 0 and i > stop):
+            if len(out) >= RANGE_LIMIT:
+                return fail(here, "`range` of more than {RANGE_LIMIT} numbers")
+            out.push(Value.Int(i))
+            i += step
+        return Ok(Value.List(out))
+    if n == "zip":
+        if len(vals) != 2:
+            return fail(here, "`zip` takes two lists")
+        let Value.List(xs) = vals[0].copy() else:
+            return fail(here, "`zip` of {describe(vals[0])}")
+        let Value.List(ys) = vals[1].copy() else:
+            return fail(here, "`zip` of {describe(vals[1])}")
+        if len(xs) != len(ys):
+            return fail(here, "`zip` of lists of {len(xs)} and {len(ys)} items")
+        var out: list[Value] = []
+        for i in range(len(xs)):
+            out.push(Value.Tuple([xs[i].copy(), ys[i].copy()]))
+        return Ok(Value.List(out))
+    var items: list[Value] = []
+    if len(vals) == 1:
+        let Value.List(xs) = vals[0].copy() else:
+            return fail(here, "`{n}` of {describe(vals[0])}")
+        items = xs
+    elif (n == "min" or n == "max") and len(vals) >= 2:
+        items = vals.copy()
+    else:
+        return fail(here, "`{n}` takes one list")
+    if n == "reversed":
+        items.reverse()
+        return Ok(Value.List(items))
+    if n == "sum":
+        var total = 0
+        for v in items:
+            let Value.Int(i) = v else:
+                return fail(here, "`sum` of {describe(v)}")
+            let next = checked(BinOp.Add, total, i) else:
+                return fail(here, "overflow")
+            total = next
+        return Ok(Value.Int(total))
+    # `sorted`, `min` and `max`: of integers, or of text, in order.
+    var ints: list[int] = []
+    var texts: list[String] = []
+    for v in items:
+        match v:
+            case Value.Int(i):
+                ints.push(i)
+            case Value.Str(t):
+                texts.push(t.copy())
+            case _:
+                return fail(here, "`{n}` of {describe(v)}")
+    if not ints.is_empty() and not texts.is_empty():
+        return fail(here, "`{n}` of integers and text")
+    ints.sort()
+    texts.sort()
+    if n == "sorted":
+        var out: list[Value] = []
+        for i in ints:
+            out.push(Value.Int(i))
+        for t in texts:
+            out.push(Value.Str(t.copy()))
+        return Ok(Value.List(out))
+    if ints.is_empty() and texts.is_empty():
+        return fail(here, "`{n}` of an empty list")
+    if not ints.is_empty():
+        return Ok(Value.Int(if n == "min": ints[0] else: ints[len(ints) - 1]))
+    return Ok(Value.Str(if n == "min": texts[0].copy() else: texts[len(texts) - 1].copy()))
+
+## A method of text called on `v` with the arguments `vals`.
+pure def text_method(here: TextRange, n: str, v: Value, vals: list[Value]) -> Value ! Unfolding:
+    let Value.Str(s) = v else:
+        return fail(here, "`{n}` of {describe(v)}")
+    if not vals.is_empty():
+        return fail(here, "`{n}` takes no argument")
+    return match n:
+        case "to_lowercase": Ok(Value.Str(s.to_lowercase()))
+        case "to_uppercase": Ok(Value.Str(s.to_uppercase()))
+        case "byte_len": Ok(Value.Int(s.byte_len()))
+        case _: Ok(Value.Str(s.copy()))
+
 ## `x + y`, `x - y` and `x * y` on `int`s, when the result is one.
 pure def checked(op: BinOp, x: int, y: int) -> int?:
     let a: i128 = x
@@ -1189,8 +1315,12 @@ impl Unfold:
                     case ExprKind.Field(base, name):
                         if let ExprKind.Name(n) = src.ast.expr(base).kind:
                             known = n == "reflect" and not is_code_maker(name.text)
+                        # A method of text the evaluator has, of text known
+                        # at compile time (RULES.md, R166).
+                        if not known and is_text_method(name.text):
+                            known = self.is_static(src, base)
                     case ExprKind.Name(n):
-                        known = (n == "enumerate" or n == "len") and not self.bound(n)
+                        known = is_builtin(n) and not self.bound(n)
                     case _:
                         pass
                 if not known:
@@ -1465,6 +1595,14 @@ impl Unfold:
                 var vals: list[Value] = []
                 for a in args:
                     vals.push(self.eval(src, a.value)?)
+                # A method of text (RULES.md, R166).
+                if let ExprKind.Field(receiver, name) = src.ast.expr(callee).kind:
+                    var reflecting = False
+                    if let ExprKind.Name(n) = src.ast.expr(receiver).kind:
+                        reflecting = n == "reflect"
+                    if not reflecting and is_text_method(name.text):
+                        let v = self.eval(src, receiver)?
+                        return text_method(here, name.text, v, vals)
                 match src.ast.expr(callee).kind:
                     case ExprKind.Field(_, name):
                         # A method's, a field's and a variant's name and
@@ -1560,10 +1698,14 @@ impl Unfold:
                                 return Ok(Value.Int(count))
                             case other:
                                 return fail(here, "`len` of {describe(other)}")
+                    # The prelude's functions of lists and numbers
+                    # (RULES.md, R166).
+                    case ExprKind.Name(n) if is_builtin(n):
+                        return builtin(here, n, vals)
                     case _:
                         return fail(
                             here,
-                            "only `reflect`, `enumerate` and `len` can be called at compile time here",
+                            "only `reflect`, `enumerate`, `len`, `range`, `zip`, `reversed`, `sorted`, `min`, `max`, `sum` and the methods `to_lowercase`, `to_uppercase`, `to_string` and `byte_len` of text can be called at compile time here",
                         )
             case ExprKind.Unary(op, x):
                 let v = self.eval(src, x)?

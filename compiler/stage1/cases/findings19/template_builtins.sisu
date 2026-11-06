@@ -1,0 +1,66 @@
+# The prelude's functions of lists and numbers, and the methods of text
+# the compile-time evaluator has, in a template's `comptime for` and
+# conditions (RULES.md, R166; the manual's seventeenth round): an
+# attribute's arguments counted with `range(len(a.args))`, fields paired
+# with `zip`, taken in reverse and in order, and their numbers summed.
+@table("orders")
+struct Order:
+    @check("positive", "small")
+    amount: int
+    @check("named")
+    customer: String
+    @weight(3, 1, 2)
+    priority: int
+
+## Each check of each field, numbered from 1 by `range`.
+def checks[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for f in reflect.fields_of(T):
+        comptime for a in f.attributes:
+            comptime if a.name == "check":
+                comptime for i in range(len(a.args)):
+                    out.push("{f.name} check {i + 1}: {a.args[i]}")
+    return out
+
+## The fields with their positions from the end, by `zip` and `reversed`.
+def from_end[T]() -> list[String]:
+    var out: list[String] = []
+    comptime for (f, k) in zip(reversed(reflect.fields_of(T)), range(1, len(reflect.fields_of(T)) + 1)):
+        out.push("{k}: {f.name}")
+    return out
+
+## The fields' names in order, the shortest and the longest, in capitals.
+def names[T]() -> String:
+    var out = String.new()
+    comptime for n in sorted([reflect.fields_of(T)[0].name, reflect.fields_of(T)[1].name]):
+        out.push("{n.to_uppercase()} ")
+    comptime if min(3, len(reflect.fields_of(T))) == 3 and max([1, 4, 2]) == 4:
+        out.push("three or more")
+    return out
+
+## A field's weights, summed at compile time.
+def weight[T]() -> int:
+    var total = 0
+    comptime for f in reflect.fields_of(T):
+        comptime for a in f.attributes:
+            comptime if a.name == "weight" and sum([1, 2, 3]) == 6:
+                comptime for i in range(len(a.args) - 1, -1, -1):
+                    total = total * 10 + a.args[i]
+    return total
+
+## The type's table, from its own attribute.
+def table[T]() -> String:
+    var out = String.new()
+    comptime for a in reflect.attributes_of(T):
+        comptime if a.name == "table":
+            out.push("table {a.args[0].to_uppercase()} of {a.args[0].byte_len()} bytes")
+    return out
+
+def main():
+    print(table[Order]())
+    for line in checks[Order]():
+        print(line)
+    for line in from_end[Order]():
+        print(line)
+    print(names[Order]())
+    print(weight[Order]())

@@ -340,6 +340,25 @@ pure def run(
     b.build(decls, v, ret, Place.local(LocalId(index=0)))?
     return Ok((b.locals, b.stmts, b.intrinsics))
 
+## The value of the program's function `name`, a function of nothing (a
+## constant's), run as a `comptime` expression is, with a budget of
+## `budget` steps and nothing reaching the world: what `eval` renders of a
+## configuration module's constant (08, "Configuration files"; RULES.md,
+## R165). `None` when the program has no such function.
+pub pure def value_of(prog: Program, name: str, budget: int, catalog: Catalog) -> Value? ! Stop:
+    var at = -1
+    for i in range(len(prog.functions)):
+        if prog.functions[i].name == name and at < 0:
+            at = i
+    if at < 0:
+        return Ok(None)
+    var funcs: dict[String, int] = {}
+    for i in range(len(prog.functions)):
+        if not funcs.contains(prog.functions[i].name.copy()):
+            _ = funcs.insert(prog.functions[i].name.copy(), i)
+    var it = Interp(frames=[], fuel=budget, funcs=funcs, catalog=catalog.copy())
+    return Ok(Some(it.call(prog, at, [])?))
+
 ## Declares an intrinsic the baked statements call, unless the program
 ## does: pure, borrowing and keeping nothing.
 pure def declare_intrinsic(mut prog: Program, name: str):
@@ -2206,7 +2225,7 @@ impl Interp:
         return Ok(())
 
 ## A variant's name and field names (stage 0's `variant_info`).
-pure def variant_info(prog: Program, ty: str, variant: int) -> (String, list[String?]):
+pub pure def variant_info(prog: Program, ty: str, variant: int) -> (String, list[String?]):
     if ty == "Option":
         return ((if variant == 0: "Some" else: "None").to_string(), [])
     if ty == "Result":

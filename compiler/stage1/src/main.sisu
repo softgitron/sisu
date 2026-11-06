@@ -73,6 +73,7 @@
 import stage1.borrowck
 import stage1.borrowck.holes
 import stage1.cfg
+import stage1.config
 import stage1.diff
 import stage1.doc
 import stage1.fmt
@@ -80,6 +81,7 @@ import stage1.format
 import stage1.interp
 import stage1.lower
 import stage1.package
+import stage1.query
 import stage1.session
 import stage1.sir
 import stage1.sir.simplify
@@ -107,6 +109,7 @@ from stage1.diag import (
 )
 from stage1.fmt import Refusal
 from stage1.lexer import Lexed, lex
+from stage1.lower.func import DEFAULT_COMPTIME_BUDGET
 from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF, CONTRACTS_PRECONDITIONS
 from stage1.manifest import read as manifest_read
 from stage1.mutants import Rng, joined, mutate, spread
@@ -143,7 +146,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.13.0"
+const VERSION: str = "0.14.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -700,6 +703,14 @@ def run_command(
         if status != 0:
             return Err(Exit(status=status))
         return Ok(())
+    if command == "eval":
+        # `eval FILE [--to json|toml|yaml]`: a configuration module's
+        # constants, rendered (08; RULES.md, R165).
+        return eval_command(sys, home, rest, catalog, mut o, served)
+    if command == "query":
+        # `query KIND FILE [LINE COL] [--text PATH]`: the language server's
+        # questions about a position of a file (RULES.md, R164).
+        return query_command(sys, home, rest, catalog, mut o, served)
     if command == "doc-batch" and len(rest) == 3:
         # For the `n`th line of LIST, the arguments of a `doc` (a program's
         # path, or `--std` and the paths of std modules): what it prints
@@ -2194,21 +2205,43 @@ pure def report_with(
     sir: bool,
     modules: bool,
 ) -> (Report, String):
+    let (report, evaluated) = report_program(base, input, name, catalog, mut kept)
+    var text = String.new()
+    if not sir:
+        return (report, text)
+    let ready = evaluated else:
+        return (report, text)
+    var done = ready
+    # Each typed hole prints its closure where a run reaches it
+    # (RULES.md, R27), once the checker is done with the program.
+    let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
+    holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
+    if not input.regions.is_empty():
+        session.name_regions(mut done.program, input.regions)
+    text = write.write_as(done.program, modules)
+    return (report, text)
+
+## `report_of`'s report, and the program it checked, its `comptime` values
+## evaluated, when it has no error and is within the slice (`eval`,
+## RULES.md, R165; `report_with`'s SIR).
+pure def report_program(
+    base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept
+) -> (Report, borrowck.Checked?):
     let checked = check_input(base, input, catalog, True)
     var report = front_report(input, checked, name, catalog)
     if report.has_error:
-        return (report, String.new())
+        return (report, None)
     # The ownership checker runs when the front end found no error.
     let program = program_files(input, checked)
     var consuming: dict[String, String] = {}
     if let Some(typed) = checked.typed:
         consuming = consuming_methods(typed.prog)
     let lowered = lower_of(checked, base, input, catalog, mut kept) else:
-        return (report, String.new())
+        return (report, None)
     if not lowered.beyond.is_empty():
         for b in lowered.beyond:
             report.beyond.push("beyond the slice of lowering: {b}")
-        return (report, String.new())
+        return (report, None)
     var done = borrowck.check_with(lowered.program, True, mut kept.placed)
     let by_source = files_by_source(lowered, program)
     match borrowck.diagnostics_by_file(done.findings, by_source, len(program), catalog):
@@ -2249,16 +2282,9 @@ pure def report_with(
         if catalog.is_error(x.diag.msg):
             report.has_error = True
     sort_filed(mut report.diags, catalog, True)
-    var text = String.new()
-    if sir and evaluated_all and not report.has_error and report.beyond.is_empty():
-        # Each typed hole prints its closure where a run reaches it
-        # (RULES.md, R27), once the checker is done with the program.
-        let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
-        holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
-        if not input.regions.is_empty():
-            session.name_regions(mut done.program, input.regions)
-        text = write.write_as(done.program, modules)
-    return (report, text)
+    if evaluated_all and not report.has_error and report.beyond.is_empty():
+        return (report, Some(done))
+    return (report, None)
 
 ## The front end's part of what `check` prints of a checked program
 ## (stage 0's `Db::checked`): the syntax diagnostics of each module, the
@@ -2863,7 +2889,7 @@ def serve_one(
 ## REPL's (RULES.md, R158).
 pure def served_command(command: str) -> bool:
     return match command:
-        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens": True
+        case "sir" | "check" | "parse" | "fmt" | "lint" | "doc" | "tokens" | "query" | "eval": True
         case _: False
 
 ## What the run time prints of an I/O error that stops `main`, without the
@@ -3075,6 +3101,310 @@ impl Served:
 def bindings_answer(sys: System, path: str, catalog: Catalog) -> Answer ! IoError:
     let text = sys.fs.read_to_string(Path.new(path))?
     return Ok(Answer.done(session.bindings(text, catalog)))
+
+## `query KIND FILE [LINE COL] [--text PATH]` (RULES.md, R164): the
+## language server's questions, each answered as lines of tab-separated
+## fields (`query`): `diagnostics FILE` and `symbols FILE` of the file,
+## `hover`, `definition`, `references` and `completions` of its position
+## LINE and COL (1-based, the column counting characters). The file is
+## checked in the program that holds it: the package whose module it is,
+## or the file alone; with `--text PATH` the file's text is PATH's, the
+## editor's unsaved one.
+def query_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> ! {IoError, UsageError, CommandError}:
+    var words: list[String] = []
+    var given: String? = None
+    var k = 1
+    while k < len(rest):
+        if rest[k] == "--text" and k + 1 < len(rest):
+            given = Some(rest[k + 1].copy())
+            k += 2
+            continue
+        words.push(rest[k].copy())
+        k += 1
+    if words.is_empty():
+        return Err(Usage(text=usage()))
+    let kind = words[0].copy()
+    let whole = kind == "diagnostics" or kind == "symbols"
+    let at = kind == "hover" or kind == "definition" or kind == "references" or kind == "completions"
+    if not (whole and len(words) == 2) and not (at and len(words) == 4):
+        return Err(Usage(text=usage()))
+    let file = words[1].copy()
+    let text = sys.fs.read_to_string(Path.new(given ?? file.copy()))?
+    if kind == "symbols":
+        o.emit(query.symbols(text, catalog), "")
+        return Ok(())
+    var offset = 0
+    if at:
+        let line = words[2].parse_int() else:
+            return Err(Usage(text=usage()))
+        let col = words[3].parse_int() else:
+            return Err(Usage(text=usage()))
+        offset = Lines.of(text).offset(text, line, col)
+    match served.base:
+        case Some(b):
+            o.emit(query_answer(sys, home, kind, file, text, offset, b, catalog)?, "")
+        case None:
+            let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+            o.emit(query_answer(sys, home, kind, file, text, offset, base, catalog)?, "")
+    return Ok(())
+
+## The answer of a `query` of `kind` at `offset` of `file`, whose text is
+## `text`, checked against `base`.
+def query_answer(
+    sys: System,
+    home: str,
+    kind: str,
+    file: str,
+    text: str,
+    offset: int,
+    base: typeck.Base,
+    catalog: Catalog,
+) -> String ! IoError:
+    var env = base.environment()
+    let (input, at, disks) = query_input(sys, home, file, text, mut env, catalog)?
+    if kind == "diagnostics":
+        var kept = Kept.new()
+        let r = report_of(base, input, file, catalog, mut kept)
+        return Ok(query_diagnostics(r, at, catalog))
+    var program = input.copy()
+    if kind == "completions":
+        # After a `.`, the program without it and the name being written,
+        # so that the value before it is an expression of its own
+        # (stage 0's `completion`).
+        let start = query.word_start(text, offset)
+        let prefix = text.byte_slice(start, offset).to_string()
+        if start > 0 and text.byte_at(start - 1) == 46:
+            let edited = "{text.byte_slice(0, start - 1)}{text.byte_slice(offset, text.byte_len())}"
+            let (cut, _, _) = query_input(sys, home, file, edited, mut env, catalog)?
+            let checked = check_input(base, cut, catalog, True)
+            let typed = checked.typed else:
+                return Ok(String.new())
+            let ty = query.receiver_at(typed, query_module(typed.prog, cut, at), start - 1) else:
+                return Ok(String.new())
+            return Ok(query.with_prefix(query.members(typed, ty), prefix))
+        let checked = check_input(base, program, catalog, True)
+        let typed = checked.typed else:
+            return Ok(String.new())
+        let m = query_module(typed.prog, program, at)
+        return Ok(query.with_prefix(query.scope(typed, m, offset), prefix))
+    let checked = check_input(base, program, catalog, True)
+    let typed = checked.typed else:
+        return Ok(String.new())
+    let m = query_module(typed.prog, program, at)
+    let files = query_files(sys, home, typed.prog, program, disks, base)
+    if kind == "hover":
+        return Ok(query.hover(typed, files, m, text, offset))
+    if kind == "definition":
+        return Ok(query.definition(typed, files, m, offset))
+    var programs: list[ModuleId] = []
+    for i in range(len(program.modules)):
+        programs.push(query_module(typed.prog, program, i))
+    return Ok(query.references(typed, files, programs, m, offset, catalog))
+
+## The program that holds `file` (whose text is `text`, which stands for
+## the file's), checked with its tests as `check` checks it: the package
+## of which it is a module, or the file alone (with the dependencies its
+## inline metadata names); with the index of the file's module among the
+## program's and each module's path on disk.
+def query_input(
+    sys: System, home: str, file: str, text: str, mut env: Environment, catalog: Catalog
+) -> (Input, int, list[String]) ! IoError:
+    let disk = absolute(sys, file)
+    var dir = package.parent(disk)
+    while True:
+        if package.is_file(sys.fs, package.join(dir, package.MANIFEST)):
+            for layout in package.load_target(sys.fs, Target.Package(dir.copy()), False, build_request(sys)):
+                for i in range(len(layout.modules)):
+                    if package.canonical(layout.modules[i].disk) == disk:
+                        var held: dict[String, String] = {}
+                        _ = held.insert(layout.modules[i].disk.copy(), text.to_string())
+                        let input = held_layout_input(sys, home, layout, True, mut env, catalog, held)?
+                        var disks: list[String] = []
+                        for m in layout.modules:
+                            disks.push(package.canonical(m.disk))
+                        return Ok((input, i, disks))
+            break
+        if dir == "/" or dir.is_empty():
+            break
+        dir = package.parent(dir)
+    let layout = package.load_file_with(sys.fs, file, disk, text, build_request(sys))
+    if (len(layout.packages) == 1 and layout.problems.is_empty()) or layout.modules.is_empty():
+        return Ok((file_input(sys, home, file, text, True, mut env, catalog)?, 0, [disk]))
+    var held: dict[String, String] = {}
+    _ = held.insert(disk.copy(), text.to_string())
+    let input = held_layout_input(sys, home, layout, True, mut env, catalog, held)?
+    var disks: list[String] = []
+    for m in layout.modules:
+        disks.push(package.canonical(m.disk))
+    return Ok((input, 0, disks))
+
+## The module of the program that is the input's `i`th: the root module
+## for the first, else the one of the program's whose file is its.
+pure def query_module(prog: Program, input: Input, i: int) -> ModuleId:
+    if i == 0 or i >= len(input.modules):
+        return prog.root
+    for k in range(len(prog.modules)):
+        let m = ref prog.modules[k]
+        if not m.is_std and m.file == input.modules[i].file:
+            return ModuleId(index=k)
+    return prog.root
+
+## The path on disk and the text of each module of the checked program
+## that has a file: the input's modules, and the standard library's.
+def query_files(
+    sys: System,
+    home: str,
+    prog: Program,
+    input: Input,
+    disks: list[String],
+    base: typeck.Base,
+) -> query.Files:
+    var files = query.Files.new()
+    for i in range(min(len(input.modules), len(disks))):
+        let m = query_module(prog, input, i)
+        if i == 0 or m != prog.root:
+            _ = files.of.insert(m.index, (disks[i].copy(), input.modules[i].text.copy()))
+    for k in range(len(prog.modules)):
+        let m = ref prog.modules[k]
+        if not m.is_std or m.name.contains("<") or m.name.contains("/"):
+            continue
+        if let Some(t) = base.texts.get(m.name.copy()):
+            _ = files.of.insert(k, (absolute(sys, std_file(home, m.name)), t.copy()))
+    return files
+
+## `query diagnostics`: what `check` reports in the program's file `at`,
+## one line per diagnostic, `RANGE\tCODE\tID\tSEVERITY\tMESSAGE`, in
+## `check`'s order.
+pure def query_diagnostics(r: Report, at: int, catalog: Catalog) -> String:
+    if at >= len(r.files):
+        return String.new()
+    let text = r.files[at].1.copy()
+    let lines = Lines.of(text)
+    var out = String.new()
+    for x in r.diags:
+        if x.file != at:
+            continue
+        let d = ref x.diag
+        let range = lines.span(text, d.start, d.end)
+        let message = catalog.render(d.msg.id(), d.params)
+        let severity = catalog.severity(d.msg)
+        out.push("{range}\t{catalog.code(d.msg)}\t{d.msg.id()}\t{severity}\t{query.field(message)}\n")
+    return out
+
+## `eval FILE [--to json|toml|yaml]` (08, "Configuration files"; RULES.md,
+## R165): the module's `const` items, each evaluated by the compile-time
+## evaluator, written in the form `--to` names (JSON without it) on
+## standard output; the program's diagnostics, and one at each constant
+## that fails or that the form cannot write, on standard error, as `check`
+## prints them, a failure with status 1.
+def eval_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog, mut o: Out, served: Served
+) -> ! {IoError, UsageError, CommandError}:
+    var form = config.Form.Json
+    var paths: list[String] = []
+    var k = 1
+    while k < len(rest):
+        if rest[k] == "--to" and k + 1 < len(rest):
+            let named = config.Form.named(rest[k + 1]) else:
+                return Err(Usage(text=usage()))
+            form = named
+            k += 2
+            continue
+        paths.push(rest[k].copy())
+        k += 1
+    if len(paths) != 1 or paths[0].starts_with("--"):
+        return Err(Usage(text=usage()))
+    match served.base:
+        case Some(b):
+            return eval_with(sys, home, paths[0], form, b, catalog, mut o)
+        case None:
+            let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+            return eval_with(sys, home, paths[0], form, base, catalog, mut o)
+
+## `eval` of the module `file` in `form`, checked against `base`.
+def eval_with(
+    sys: System,
+    home: str,
+    file: str,
+    form: config.Form,
+    base: typeck.Base,
+    catalog: Catalog,
+    mut o: Out,
+) -> ! {IoError, UsageError, CommandError}:
+    var env = base.environment()
+    var kept = Kept.new()
+    let inputs = inputs_of(sys, home, file, False, False, build_request(sys), mut env, catalog)?
+    let input = inputs.first() else:
+        return Err(Failed)
+    let (r, evaluated) = report_program(base, input, file, catalog, mut kept)
+    if r.has_error or r.errors(catalog) > 0 or not r.beyond.is_empty():
+        var errs = r.human(catalog)
+        for b in r.beyond:
+            errs.push("beyond the slice: {b}\n")
+        o.emit("", errs)
+        return Err(Failed)
+    let done = evaluated else:
+        return Err(Failed)
+    var failed: list[Filed] = []
+    var beyond = String.new()
+    var entries: list[(String, config.Data)] = []
+    var places: list[(int, int)] = []
+    for (name, start, end) in config.constants(input.modules[0].text, catalog):
+        var d: Diagnostic? = None
+        match interp.value_of(done.program, name, DEFAULT_COMPTIME_BUDGET, catalog):
+            case Ok(Some(v)):
+                match config.data_of(done.program, v):
+                    case Ok(data):
+                        entries.push((name.copy(), data))
+                        places.push((start, end))
+                    case Err(config.Unwritable.Holds(what, _)):
+                        d = Some(no_form(name, what, form, start, end))
+            case Ok(None):
+                pass
+            case Err(stop):
+                match stop:
+                    case interp.Stop.Panicked(m) | interp.Stop.Hole(m):
+                        d = Some(Diagnostic.new(Msg.ComptimePanicked, start, end).with("message", m))
+                    case interp.Stop.Refinement(ty, value, predicate):
+                        var x = Diagnostic.new(Msg.RefineNotSatisfied, start, end)
+                        d = Some(x.with("value", value).with("ty", ty).with("predicate", predicate))
+                    case interp.Stop.Budget:
+                        let x = Diagnostic.new(Msg.ComptimeBudget, start, end).with("item", name)
+                        d = Some(x.with("steps", "{DEFAULT_COMPTIME_BUDGET}"))
+                    case interp.Stop.World(what):
+                        d = Some(Diagnostic.new(Msg.ComptimeIo, start, end).with("what", what))
+                    case interp.Stop.NotKept(what):
+                        d = Some(no_form(name, what, form, start, end))
+                    case interp.Stop.Beyond(why):
+                        beyond.push(
+                            "beyond the slice: the constant `{name}` needs {why}, which stage 1's evaluator does not run\n"
+                        )
+        if let Some(x) = d:
+            failed.push(Filed(file=0, diag=x.copy(), label_files=[]))
+    if failed.is_empty() and beyond.is_empty():
+        match config.render(form, entries):
+            case Ok(text):
+                o.emit(text, r.human(catalog))
+                return Ok(())
+            case Err(config.Unwritable.Holds(what, i)):
+                let (start, end) = places[i]
+                let x = no_form(entries[i].0, what, form, start, end)
+                failed.push(Filed(file=0, diag=x, label_files=[]))
+    var shown = r.copy()
+    for x in failed:
+        shown.diags.push(x.copy())
+    sort_filed(mut shown.diags, catalog, True)
+    var errs = shown.human(catalog)
+    errs.push(beyond)
+    o.emit("", errs)
+    return Err(Failed)
+
+## `E0617`: the constant `name` holds `what`, which `form` cannot write.
+pure def no_form(name: str, what: str, form: config.Form, start: int, end: int) -> Diagnostic:
+    let d = Diagnostic.new(Msg.EvalNoForm, start, end).with("name", name).with("what", what)
+    return d.with("form", form.name())
 
 ## The program `text`, held as the file `disk` (whose directory its inline
 ## metadata's paths are relative to) and named `name` in its diagnostics,
