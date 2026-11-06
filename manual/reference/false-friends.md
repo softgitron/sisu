@@ -208,7 +208,7 @@ maintainers.
 | `a < b > c` | one direction | [E0113](diagnostics.md#e0113) | yes, in the message |
 | `x is None` | `x.is_none()`, `if let` | [E0100](diagnostics.md#e0100) | yes, as a fix |
 | `lambda x: e` | `x -> e` | [E0117](diagnostics.md#e0117) | yes, as a fix |
-| `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | in a call only |
+| `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | yes, as a fix |
 | `class`, `__init__` | `struct` | [E0107](diagnostics.md#e0107), [E0215](diagnostics.md#e0215) | `struct`, as a fix |
 | `try:` `except:` | `T ! E`, `?`, `else` | [E0117](diagnostics.md#e0117) | yes, in a note |
 | `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | yes, in a note |
@@ -534,8 +534,7 @@ error[E0117]: unexpected `n` after the end of the statement
 
 Every string literal interpolates, so there is no prefix
 ([R1](lexical-structure.md#string-literals)). E0100, whose fix writes
-the string without the `f`. After `=`, `let s = f"n is {n}"`, it is
-E0117, with the same fix.
+the string without the `f`. After `=`, it is E0117, with the same fix.
 
 <!-- file: examples/reference-false-friends/f_string.sisu -->
 ```sisu
@@ -553,6 +552,27 @@ error[E0100]: expected `)`, found a string
   |
 4 |     print(f"n is {n}")
   |            ^
+  = fix: Sisu writes it so: `"n is {n}"`
+
+```
+
+<!-- file: examples/reference-false-friends/f_string_let.sisu -->
+```sisu
+# Python's f-string prefix after `=`.
+def main():
+    let n = 3
+    let line = f"n is {n}"
+    print(line)
+```
+
+<!-- output: examples/reference-false-friends/f_string_let.console -->
+```console
+$ sisu check f_string_let.sisu
+error[E0117]: unexpected string after the end of the statement
+  --> f_string_let.sisu:4:17
+  |
+4 |     let line = f"n is {n}"
+  |                 ^
   = fix: Sisu writes it so: `"n is {n}"`
 
 ```

@@ -281,6 +281,28 @@ panic: cannot convert 1e30 to `int`
   rounded value a `u8` as `truncate_to[u8]()` does, keeping its lowest
   bits.
 
+`to_u8()` and its siblings are `int`'s. A sized integer has
+`truncate_to` alone, the one spelling of a narrowing, so a function
+that must not lose bits compares the value with the target's bounds
+first and says what a value that does not fit means:
+
+<!-- file: examples/24-numbers/narrow.sisu -->
+```sisu
+# A sized integer narrows with `truncate_to`, after checking it fits.
+def to_byte(reading: u32) -> u8?:
+    if reading.to_int() <= u8.MAX.to_int():
+        return Some(reading.truncate_to[u8]())
+    return None
+
+def main():
+    print("{to_byte(200)} {to_byte(300)}")
+```
+
+<!-- output: examples/24-numbers/narrow.out -->
+```text
+Some(200) None
+```
+
 > **From Python.** Python's `int(x)` of a float grows to any size, and
 > `x & 0xFF` is how a Python program keeps a byte. In Sisu a float
 > beyond `int` cannot become one, and the name of each method says what

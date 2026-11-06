@@ -513,6 +513,10 @@ does not compile: move the change after the `print`, or copy the first
 name. The check refuses what it cannot prove safe, and the monitor
 shows you whether a refusal is about your program or about the limits
 of the check. The same monitor watches every run of `sisu test`.
+Both commands take the borrows from the compiler's Rust front end for
+now; stage 1, the front end written in Sisu, answers them too, and
+`sisu` will ask it once the driver routes them
+([R16](../reference/sisu-command.md#sisu-explain-borrow)).
 
 ## Exercise 11.1: a shopping list
 

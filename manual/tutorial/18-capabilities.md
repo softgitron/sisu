@@ -563,22 +563,14 @@ error[E0333]: `filter` is not pure, so the pure function `long_words` cannot cal
   |          ---------- `long_words` is declared `pure` here
   = note: `filter` takes any function, which its iterator calls, so it is not pure, whatever the function given: a `pure` function folds the items with a `pure` function, `fold(0, (total, x) -> total + f(x))`, or loops over them
 
-error[E0333]: `count` is not pure, so the pure function `long_words` cannot call it
-  --> pure_filter.sisu:6:12
-  |
-6 |     return text.split_whitespace().filter(w -> is_long(w)).count()
-  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-5 | pure def long_words(text: str) -> int:
-  |          ---------- `long_words` is declared `pure` here
-
 ```
 
 E0333 (`type.impure-call`) stands at the call of `filter`, and its
-note says why and what to write instead. The `count()` after it is
-E0333 too, since counting a filtered iterator calls the filter's
-function for each item. A `pure` function folds the items with a
-`pure` function, or loops over them:
+note says why and what to write instead; the `count()` after it is
+part of the same chain. The closure is needed anyway: `filter` hands
+its function a reference to each item, so `filter(is_long)` is E0300,
+whose fix writes `x -> is_long(x)`. A `pure` function folds the items
+with a `pure` function, or loops over them:
 
 <!-- file: examples/18-capabilities/pure_count.sisu -->
 ```sisu

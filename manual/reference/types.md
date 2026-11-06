@@ -258,9 +258,12 @@ Rust's names. Every integer type has its limits, `u8.MAX` and
 `i128.MIN`, and `truncate_to[T]()`, which keeps the bits that fit,
 read as `T`'s, also for a type of 128 bits
 (`u64.MAX.truncate_to[i128]()` is 18446744073709551615,
-`u128.MAX.truncate_to[i128]()` is -1). The narrowing methods of 03 other than
-`truncate_to` are missing on the sized types, which narrow with
-`to_int()` and `int`'s `to_u8()` and its siblings.
+`u128.MAX.truncate_to[i128]()` is -1). `to_u8()` and its
+siblings are `int`'s: a sized integer narrows with `truncate_to`
+alone, 01's one spelling, which stage 1's twenty-second round kept
+(its R194), and a checked narrowing compares with the target's bounds
+first, `if x.to_int() <= u8.MAX.to_int(): x.truncate_to[u8]()`, or goes
+through `to_int()` and `int`'s `to_u8()`.
 
 **Status.** In stage 0 (D-035).
 
@@ -376,7 +379,7 @@ Every other conversion is a method, whose name says what it may lose:
 | Method | From | Gives |
 |---|---|---|
 | `x.into()` | an integer | the wider integer type expected; loses nothing |
-| `n.to_u8()`, `n.to_i32()`, ... | an integer | the narrower type, or `None` when the value does not fit |
+| `n.to_u8()`, `n.to_i32()`, ... | an `int` | the narrower type, or `None` when the value does not fit |
 | `x.to_int()` | a sized integer | an `int`; for a `u64`, `u128` or `i128`, an `int?` that is `None` beyond `int`'s range |
 | `n.truncate_to[T]()` | an integer | the low bits of `n` in `T`, as two's complement wraps |
 | `n.to_f64()`, `n.to_f32()` | an `int` | the nearest float |
@@ -1501,8 +1504,9 @@ T` or a `Box[T]` becomes one where it is expected.
 
 - A trait can be `dyn` when every method takes `self` or `mut self`,
   has no type parameters of its own and mentions `Self` nowhere but its
-  receiver. Using another trait as `dyn` is E0241, which names the
-  method and the reason (D-017).
+  receiver, and when it has no constant. Using another trait as `dyn`
+  is E0241, which names the member, a method or a constant, and the
+  reason (D-017).
 - A `dyn Trait` implements the trait's supertraits.
 - A `dyn` owns its value, so a view cannot become one (E0396).
 - A trait used as a type without `dyn` is E0231
@@ -1566,7 +1570,7 @@ def main():
 <!-- output: examples/reference-types/not_object_safe.console -->
 ```console
 $ sisu run not_object_safe.sisu
-error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `larger` cannot be called through it, because its signature mentions `Self` besides `self`
+error[E0241]: `Shape` cannot be used as `dyn Shape`: its member `larger` cannot be used through it, because its signature mentions `Self` besides `self`
   --> not_object_safe.sisu:6:21
   |
 6 | def show(shape: ref dyn Shape) -> f64:

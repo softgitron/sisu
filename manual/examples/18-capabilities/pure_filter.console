@@ -9,12 +9,3 @@ error[E0333]: `filter` is not pure, so the pure function `long_words` cannot cal
   |          ---------- `long_words` is declared `pure` here
   = note: `filter` takes any function, which its iterator calls, so it is not pure, whatever the function given: a `pure` function folds the items with a `pure` function, `fold(0, (total, x) -> total + f(x))`, or loops over them
 
-error[E0333]: `count` is not pure, so the pure function `long_words` cannot call it
-  --> pure_filter.sisu:6:12
-  |
-6 |     return text.split_whitespace().filter(w -> is_long(w)).count()
-  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-5 | pure def long_words(text: str) -> int:
-  |          ---------- `long_words` is declared `pure` here
-

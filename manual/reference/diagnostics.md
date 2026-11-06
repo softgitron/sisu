@@ -2671,11 +2671,12 @@ Shown in [chapter 14](../tutorial/14-traits.md).
 ### E0241
 
 `resolve.not-object-safe`: `{trait}` cannot be used as `dyn {trait}`:
-its method `{method}` cannot be called through it, because {reason}.
+its member `{method}` cannot be used through it, because {reason}.
 
-A trait can be a `dyn` type only when every method can be called through
-it: each takes `self` or `mut self`, and none names `Self` elsewhere
-(D-017).
+A trait can be a `dyn` type only when every member can be used through
+it: each method takes `self` or `mut self`, and none names `Self`
+elsewhere (D-017), and the trait has no constant, which each impl gives
+its own value. The member it names is a method or such a constant.
 
 <!-- file: examples/reference-diagnostics/e0241_object_safety.sisu -->
 ```sisu
@@ -2704,7 +2705,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0241_object_safety.console -->
 ```console
 $ sisu run e0241_object_safety.sisu
-error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `unit` cannot be called through it, because it does not take `self` or `mut self`
+error[E0241]: `Shape` cannot be used as `dyn Shape`: its member `unit` cannot be used through it, because it does not take `self` or `mut self`
   --> e0241_object_safety.sisu:16:28
    |
 16 | def total(shapes: list[Box[dyn Shape]]) -> f64:
@@ -5004,8 +5005,9 @@ but its construction observes the schedule, which a note then says
 iterator that takes a function, `map` or `filter`, is not `pure`,
 whatever the function given, and E0333 at one has the note
 `type.pure-adapter`, which names `fold` with a `pure` function and the
-loop ([chapter 18](../tutorial/18-capabilities.md#code-that-takes-no-capability)).
-The ownership checker reports it, so the run ends with D0021.
+loop ([chapter 18](../tutorial/18-capabilities.md#code-that-takes-no-capability));
+the calls after it in the same chain, the `count()` of
+`filter(...).count()`, are no error of their own. The ownership checker reports it, so the run ends with D0021.
 
 <!-- file: examples/reference-diagnostics/e0333_impure_call.sisu -->
 ```sisu
@@ -8207,7 +8209,10 @@ a struct's fields, and an enum has none. Derive it for a type it
 handles, or write the impl by hand. E0608 is the derive stopping; an
 error in the impl it went on to write is that error's own code, placed
 at the same `@derive` with a note that quotes the impl's line, as
-[E0347](#e0347) is.
+[E0347](#e0347) is. `std.json`'s `@derive(Decode)` stops so for an
+enum and for a struct with a field that holds one, directly or as a
+list's or an option's element, its reason naming the field, since
+`decode` cannot make an enum's variants yet.
 
 <!-- file: examples/reference-diagnostics/e0608_derive_failed_fixed.sisu -->
 ```sisu
@@ -8239,7 +8244,8 @@ def main():
 kind,celsius
 ```
 
-Shown in the guide [Write a derive](../guides/derive.md).
+Shown in the guides [Write a derive](../guides/derive.md) and [Read
+and write JSON](../guides/json.md).
 
 ### E0609
 
@@ -12921,7 +12927,7 @@ it. `sisu explain CODE` prints the same line.
 | E0238 | `resolve.unknown-assoc-type` | `{trait}` has no associated type `{name}` |
 | E0239 | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
 | E0240 | `resolve.sealed-trait` | `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it |
-| [E0241](#e0241) | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason} |
+| [E0241](#e0241) | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its member `{method}` cannot be used through it, because {reason} |
 | [E0242](#e0242) | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
 | [E0243](#e0243) | `resolve.not-derivable` | `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one |
 | [E0244](#e0244) | `resolve.derive-field` | `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}` |

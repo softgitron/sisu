@@ -1,0 +1,17 @@
+# A struct whose field holds an enum, which `decode` cannot make.
+import std.json
+from std.json import Decode
+
+enum Heater:
+    Wood
+    Electric
+
+@derive(Decode)
+struct Sauna:
+    name: String
+    heater: Heater
+
+def main() -> ! json.JsonError:
+    let s = json.decode[Sauna](r"""{"name": "Kota", "heater": "Wood"}""")?
+    print(s.name)
+    return Ok(())

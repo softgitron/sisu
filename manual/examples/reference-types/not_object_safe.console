@@ -1,5 +1,5 @@
 $ sisu run not_object_safe.sisu
-error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `larger` cannot be called through it, because its signature mentions `Self` besides `self`
+error[E0241]: `Shape` cannot be used as `dyn Shape`: its member `larger` cannot be used through it, because its signature mentions `Self` besides `self`
   --> not_object_safe.sisu:6:21
   |
 6 | def show(shape: ref dyn Shape) -> f64:

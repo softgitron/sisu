@@ -467,7 +467,7 @@ def main():
 <!-- output: examples/15-generics/make.console -->
 ```console
 $ sisu run make.sisu
-error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `unit` cannot be called through it, because it does not take `self` or `mut self`
+error[E0241]: `Shape` cannot be used as `dyn Shape`: its member `unit` cannot be used through it, because it does not take `self` or `mut self`
   --> make.sisu:16:28
    |
 16 | def total(shapes: list[Box[dyn Shape]]) -> f64:
@@ -476,7 +476,8 @@ error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `unit` cannot be
 error[D0006]: the program was not run: errors found (1)
 ```
 
-E0241 (`resolve.not-object-safe`) names the method and the reason.
+E0241 (`resolve.not-object-safe`) names the member, here a method,
+and the reason.
 `Shape.unit()` would need to know which type to make, and a
 `dyn Shape` cannot say. A trait can be a `dyn` when each method takes
 `self` or `mut self`, has no type parameters of its own, and mentions

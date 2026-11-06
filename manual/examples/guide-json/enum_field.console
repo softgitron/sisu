@@ -1,0 +1,13 @@
+$ sisu check enum_field.sisu
+error[E0608]: deriving `Decode` for `Sauna` stopped at compile time: its field `heater` holds `Heater`, an enum, whose variants `json.decode` cannot make (an enum implements `Decode` with an `impl Decode` of its own)
+  --> enum_field.sisu:9:9
+  |
+9 | @derive(Decode)
+  |         ^^^^^^
+
+error[E0609]: making `from_json[Heater]` stopped at compile time: json.decode: no JSON form for `Heater` (an enum's variants are not made by reflection yet)
+  --> enum_field.sisu:15:13
+   |
+15 |     let s = json.decode[Sauna](r"""{"name": "Kota", "heater": "Wood"}""")?
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+

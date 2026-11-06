@@ -1,0 +1,2 @@
+9:9-9:15 E0608 comptime.derive-failed trait="Decode" ty="Sauna" reason="its field `heater` holds `Heater`, an enum, whose variants `json.decode` cannot make (an enum implements `Decode` with an `impl Decode` of its own)"
+15:13-15:74 E0609 comptime.instance-failed name="from_json[Heater]" reason="json.decode: no JSON form for `Heater` (an enum's variants are not made by reflection yet)"

@@ -242,6 +242,53 @@ Booking(name="Aino", hour=18)
 `Decode` written by hand, `decode_json(j: Json, path: str) -> Self !
 JsonError`, reads such a form back.
 
+An enum has no derived `Decode` yet, so a struct that derives one with
+a field holding an enum stops at compile time, and `sisu check` says
+which field:
+
+<!-- file: examples/guide-json/enum_field.sisu -->
+```sisu
+# A struct whose field holds an enum, which `decode` cannot make.
+import std.json
+from std.json import Decode
+
+enum Heater:
+    Wood
+    Electric
+
+@derive(Decode)
+struct Sauna:
+    name: String
+    heater: Heater
+
+def main() -> ! json.JsonError:
+    let s = json.decode[Sauna](r"""{"name": "Kota", "heater": "Wood"}""")?
+    print(s.name)
+    return Ok(())
+```
+
+<!-- output: examples/guide-json/enum_field.console -->
+```console
+$ sisu check enum_field.sisu
+error[E0608]: deriving `Decode` for `Sauna` stopped at compile time: its field `heater` holds `Heater`, an enum, whose variants `json.decode` cannot make (an enum implements `Decode` with an `impl Decode` of its own)
+  --> enum_field.sisu:9:9
+  |
+9 | @derive(Decode)
+  |         ^^^^^^
+
+error[E0609]: making `from_json[Heater]` stopped at compile time: json.decode: no JSON form for `Heater` (an enum's variants are not made by reflection yet)
+  --> enum_field.sisu:15:13
+   |
+15 |     let s = json.decode[Sauna](r"""{"name": "Kota", "heater": "Wood"}""")?
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+```
+
+E0608 (`comptime.derive-failed`) names the field, and E0609 the
+`decode` that needs it. An enum with a `Decode` written by hand decodes
+alone, but the derive refuses a field of it all the same, so the
+struct's `Decode` is then written by hand too.
+
 ## 6. Read JSON of an unknown shape
 
 `json.parse(text)` reads any JSON into a `Json` value, whose variants
@@ -284,8 +331,6 @@ does the checking that a `match` on `Json` does by hand.
 
 **Status.** In stage 0 (11), with two differences: an enum is encoded
 and not decoded, since `decode` makes no enum's variants yet (E0609),
-and `@derive(Decode)`, which 11 gives a struct, is E0608 on an enum; a
-struct that derives `Decode` and has a field of an enum passes
-`sisu check`, and `sisu run` stops it at E0501, an error of the
-compiler's own. Without `from std.json import Decode, Encode`, the
+and `@derive(Decode)`, which 11 gives a struct, is E0608 on an enum and
+on a struct with a field that holds one ([step 5](#5-give-a-type-a-json-form-of-its-own)). Without `from std.json import Decode, Encode`, the
 derive is E0243, whose note names the import.

@@ -1,4 +1,2 @@
 6:12-6:59 E0333 type.impure-call callee="filter" name="long_words"
   label 5:10-5:20 type.declared-pure-here name="long_words"
-6:12-6:67 E0333 type.impure-call callee="count" name="long_words"
-  label 5:10-5:20 type.declared-pure-here name="long_words"

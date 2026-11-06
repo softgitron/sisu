@@ -1,0 +1,8 @@
+# A sized integer narrows with `truncate_to`, after checking it fits.
+def to_byte(reading: u32) -> u8?:
+    if reading.to_int() <= u8.MAX.to_int():
+        return Some(reading.truncate_to[u8]())
+    return None
+
+def main():
+    print("{to_byte(200)} {to_byte(300)}")

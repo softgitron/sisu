@@ -1,1 +1,8 @@
 $ sisu check f_string_let.sisu
+error[E0117]: unexpected string after the end of the statement
+  --> f_string_let.sisu:4:17
+  |
+4 |     let line = f"n is {n}"
+  |                 ^
+  = fix: Sisu writes it so: `"n is {n}"`
+
