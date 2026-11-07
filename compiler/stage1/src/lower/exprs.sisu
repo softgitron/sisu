@@ -690,6 +690,30 @@ impl FnLower:
                         c = Callee.Value(self.operand(cx, f))
                         for _ in args:
                             owned.push(True)
+                # A collection's allocator intrinsic on `Global` is the
+                # collection's own operation (RULES.md, R234): `new` for
+                # `with_allocator`, and `push`, `insert` or `add` for a `try_` growth, whose
+                # result is put in `Ok`.
+                var on_global: GlobalForm? = None
+                if let Callee.Intrinsic(n, _) = c.copy():
+                    if let TCallee.Fn(def_, type_args) = callee:
+                        on_global = self.global_form(cx, n, def_, type_args)
+                if let Some(g) = on_global.copy():
+                    c = Callee.Intrinsic(name=g.name.copy(), args=g.args.copy())
+                    if g.made:
+                        # `Global()` is a value of nothing; another
+                        # expression is evaluated for what it does.
+                        for a in args:
+                            if let TExprKind.Struct(_, _) = cx.body.exprs[a.expr.index].kind:
+                                continue
+                            let t = self.temp(cx, self.ty_of(cx, a.expr))
+                            let v = self.operand(cx, a.expr)
+                            self.assign(cx, Place.local(t), Rvalue.Use(v), loc)
+                        var made: list[Operand] = []
+                        if g.name == "String.new":
+                            made.push(Operand.Const(Const.Str(String.new())))
+                        self.emit(cx, StatementKind.Call(dest=dest, callee=c, args=made), loc)
+                        return
                 # A lookup by a `str` of `String` keys passes the `str`
                 # itself to the intrinsic that takes it (RULES.md, R134).
                 var by_str: TExprId? = None
@@ -720,6 +744,9 @@ impl FnLower:
                         self.hold(cx, o, mark, self.ty_of(cx, args[i].expr), mut held)
                     ops.push(o)
                 self.release(cx, held)
+                if on_global.is_some():
+                    self.emit_in_ok(cx, dest, c, ops, x.ty, loc)
+                    return
                 self.emit(cx, StatementKind.Call(dest=dest, callee=c, args=ops), loc)
                 if x.ty == Ty.never():
                     self.terminate(Terminator.Unreachable, loc)
@@ -1717,6 +1744,75 @@ impl FnLower:
             return True
         return False
 
+    ## The operation an allocator intrinsic of a collection is on `Global`
+    ## (RULES.md, R234), when the call's allocator, the last of its impl's
+    ## parameters, is `Global`: the collection's `new` with its element types
+    ## for `with_allocator` (`made`), its growth for a `try_` method.
+    pure def global_form(
+        mut self, cx: Cx, name: str, def_: DefId, type_args: list[Ty]
+    ) -> GlobalForm?:
+        let (plain, made) = match name:
+            case "list.with_allocator": ("list.new", True)
+            case "dict.with_allocator": ("dict.new", True)
+            case "set.with_allocator": ("set.new", True)
+            case "String.with_allocator": ("String.new", True)
+            case "list.try_push": ("list.push", False)
+            case "dict.try_insert": ("dict.insert", False)
+            case "set.try_add": ("set.add", False)
+            case "String.try_push": ("String.push", False)
+            case _: ("", False)
+        if plain.is_empty():
+            return None
+        let f = cx.prog.fn_info(def_) else:
+            return None
+        let collection = cx.prog.wk.list else:
+            return None
+        let global = self.types.left_default(collection) else:
+            return None
+        if f.impl_generics == 0 or f.impl_generics > len(type_args):
+            return None
+        let a = cx.prog.normalize(mut self.types, type_args[f.impl_generics - 1], self.bounds)
+        if a != global:
+            return None
+        var args: list[Type] = []
+        if made and plain != "String.new":
+            for i in range(f.impl_generics - 1):
+                args.push(self.ty(cx, type_args[i]))
+        return Some(GlobalForm(name=plain.to_string(), args=args, made=made))
+
+    ## The call of `callee` with `ops` into a temporary, and `dest` its result
+    ## in `Ok`: a `try_` growth on `Global` (RULES.md, R234), whose type
+    ## `ty` is `Result[R, OutOfMemory]`.
+    pure def emit_in_ok(
+        mut self,
+        cx: Cx,
+        own dest: Place,
+        own callee: Callee,
+        own ops: list[Operand],
+        ty: Ty,
+        loc: Loc?,
+    ):
+        var inner = Ty.unit()
+        if let TyData.Adt(_, args) = self.types.data(ty):
+            if not args.is_empty():
+                inner = args[0]
+        if inner == Ty.unit():
+            let u = self.unit()
+            self.emit(cx, StatementKind.Call(dest=u, callee=callee, args=ops), loc)
+            let ok = Rvalue.Aggregate(
+                kind=Aggregate.Variant("Result".to_string(), "Ok".to_string()),
+                operands=[Operand.Const(Const.Unit)],
+            )
+            self.assign(cx, dest, ok, loc)
+            return
+        let t = self.temp(cx, inner)
+        self.emit(cx, StatementKind.Call(dest=Place.local(t), callee=callee, args=ops), loc)
+        let ok = Rvalue.Aggregate(
+            kind=Aggregate.Variant("Result".to_string(), "Ok".to_string()),
+            operands=[Operand.Move(Place.local(t))],
+        )
+        self.assign(cx, dest, ok, loc)
+
     ## Whether an intrinsic needs its type arguments at run time: one of its
     ## generic parameters appears in its result but in no parameter, one of
     ## its own appears in no parameter, in its result or nowhere (RULES.md,
@@ -1870,3 +1966,12 @@ pub pure def str_lookup(name: str) -> String?:
         case "set.contains": Some("set.contains_str".to_string())
         case "set.remove": Some("set.remove_str".to_string())
         case _: None
+
+## What an allocator intrinsic of a collection lowers to on `Global`
+## (RULES.md, R234): the intrinsic, its type arguments, and whether it makes
+## the collection (`with_allocator`, its arguments left out) rather than
+## growing it (a `try_` method, its result put in `Ok`).
+struct GlobalForm:
+    name: String
+    args: list[Type]
+    made: bool

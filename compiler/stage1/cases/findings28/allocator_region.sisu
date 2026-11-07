@@ -1,0 +1,16 @@
+# A list on a borrowed `Region` (04, "Allocators"; RULES.md, R234): its
+# SIR names the allocator, `list.with_allocator[int, ref mem.Region]` and
+# `list.try_push`, the intrinsics the runtime's half of the step runs.
+from std.mem import Region
+
+def squares(r: ref Region, n: int) -> list[int, ref Region] ! OutOfMemory:
+    var xs: list[int, ref Region] = list.with_allocator(r)
+    for i in range(n):
+        xs.try_push(i * i)?
+    return Ok(xs)
+
+def main():
+    let region = Region.bump(capacity=1024)
+    let xs = squares(ref region, 4).expect("room in the region")
+    print("{region.in_use() > 0}")
+    _ = xs

@@ -162,7 +162,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.21.0"
+const VERSION: str = "0.22.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -1036,11 +1036,14 @@ def sir_kept(
         built.roots = world_roots(sys, built.disk, words, tests and not path.is_empty())
         built.std_tests = tests and words.contains("--std")
         let d = deferred_program(base, built, path, catalog, mut kept, words.contains("--modules"))
-        let (sir, errs, status) = deferred_answer(d, catalog, words.contains("--format=ids"))
-        o.emit(sir, errs)
-        if status != 0:
-            return Err(Exit(status=status))
-        return Ok(())
+        # A program `@no_alloc`'s `E0282` stops is answered as without the
+        # option (RULES.md, R233): with its tests, as `sisu test` refuses it.
+        if not (d.allocates and tests):
+            let (sir, errs, status) = deferred_answer(d, catalog, words.contains("--format=ids"))
+            o.emit(sir, errs)
+            if status != 0:
+                return Err(Exit(status=status))
+            return Ok(())
     if tests and not partial:
         # What `sisu test` runs (decision 357), from one check of the
         # program: a program with an error of a phase is not run, as
@@ -1082,7 +1085,13 @@ def sir_kept(
         # `sisu test --cover` (RULES.md, R216).
         if words.contains("--cover") and not sir.is_empty():
             var shown = sir.copy()
-            shown.push(cover_table(built, path, sir, catalog))
+            # A black-box test file's map has the package it tests too
+            # (RULES.md, R233).
+            var tested: int? = None
+            if package.tested_package(sys.fs, built.disk).is_some():
+                if len(built.packages) > 0 and len(built.packages[0].deps) > 0:
+                    tested = Some(built.packages[0].deps[0].1)
+            shown.push(cover_table(built, path, sir, tested, catalog))
             o.emit(shown, warned)
             return Ok(())
         o.emit(sir, warned)
@@ -1112,17 +1121,22 @@ def sir_kept(
 ## (RULES.md, R216): after a line `# regions`, a line `# region
 ## FILE:LINE:COL-LINE:COL KIND FUNCTION bbB:S` for each, its module's
 ## file as `--mutants` names it, against the statements of the SIR `sir`.
-pure def cover_table(input: Input, path: str, sir: str, catalog: Catalog) -> String:
+## A black-box test file's program has after its own the regions of the
+## package it tests (`tested`), each module named from the package's
+## directory and each function as the program's SIR names it, `PKG.F`, and
+## `none` for a function the file does not reach (R233).
+pure def cover_table(input: Input, path: str, sir: str, tested: int?, catalog: Catalog) -> String:
     let (sources, places) = coverage.sir_places(sir)
     var out = "# regions\n".to_string()
     for m in range(len(input.modules)):
         let module = ref input.modules[m]
-        if module.package != 0:
+        let theirs = tested == Some(module.package)
+        if module.package != 0 and not theirs:
             continue
         let text = module.text.copy()
         let parsed = build.module(parse(text, catalog).tree)
         var shown = module.file.copy()
-        if input.package_name.is_empty():
+        if input.package_name.is_empty() and not theirs:
             shown = path.to_string()
         var source = -1
         for k in range(len(sources)):
@@ -2806,6 +2820,17 @@ impl Report:
         r.diags = self.owned.copy()
         return r
 
+    ## Whether the ownership checker's errors hold one that is no ownership
+    ## rule's, `@no_alloc`'s `E0282` (RULES.md, R233), which the monitor of
+    ## `--defer-borrow` does not observe: a run's build then ends with
+    ## `D0006`, as at the front end's errors, where it ends with `D0021`
+    ## after the ownership rules' alone.
+    pure def allocates(self, catalog: Catalog) -> bool:
+        for x in self.owned:
+            if not_an_ownership_rule(x, catalog):
+                return True
+        return False
+
     ## The report of the failed `comptime` expressions only.
     pure def evaluation(self) -> Report:
         var r = self.copy()
@@ -3007,6 +3032,15 @@ struct Deferred:
     ## Where each finding of the ownership checker is and the SIR function
     ## it was found in (`borrowck.finding_functions`; RULES.md, R211).
     functions: list[(int, int, int, String, String)]
+    ## Whether an error that stops it is `@no_alloc`'s `E0282`, which is no
+    ## ownership rule's (RULES.md, R233): the command then answers as it
+    ## does without `--defer-borrow`.
+    allocates: bool
+
+## An error among the ownership checker's findings that is no ownership
+## rule's: `@no_alloc`'s `E0282` (RULES.md, R215, R233).
+pure def not_an_ownership_rule(x: Filed, catalog: Catalog) -> bool:
+    return catalog.is_error(x.diag.msg) and catalog.code(x.diag.msg) == "E0282"
 
 ## The purity rules and a `let` assigned twice, which the monitor does not
 ## observe, so that `--defer-borrow` does not defer them.
@@ -3032,6 +3066,7 @@ pure def deferred_program(
         deferred=False,
         entry=False,
         functions=[],
+        allocates=False,
     )
     # The front end's errors but the ownership rules' stop it.
     var stopping: list[Filed] = []
@@ -3075,6 +3110,25 @@ pure def deferred_program(
             out.stopping.diags = []
             return out
     sort_filed(mut owned, catalog, True)
+    # `@no_alloc`'s `E0282` is no ownership rule's, and the monitor does not
+    # observe it: it is not deferred, and with it the ownership rules' errors
+    # stop the program too, as they do without the option (RULES.md, R233).
+    var allocating: list[Filed] = []
+    for x in owned:
+        if catalog.is_error(x.diag.msg):
+            allocating.push(x.copy())
+            if not_an_ownership_rule(x, catalog):
+                out.allocates = True
+    if out.allocates:
+        # The front end's errors first, as the build without the option
+        # stops at them.
+        var front: list[Filed] = []
+        for x in report.diags:
+            if catalog.is_error(x.diag.msg):
+                front.push(x.copy())
+        out.deferred = False
+        out.stopping.diags = if front.is_empty(): allocating else: front
+        return out
     var impure: list[Filed] = []
     for x in owned:
         if catalog.is_error(x.diag.msg):
@@ -3515,6 +3569,10 @@ def build_with(
             var built = input.copy()
             built.contracts = level ?? CONTRACTS_ALL
             let d = deferred_program(base, built, path, catalog, mut kept, False)
+            # A program `@no_alloc`'s `E0282` stops is built as without the
+            # option, which says its errors and `D0006` (RULES.md, R233).
+            if d.allocates:
+                break
             # The errors that stop it in the human form, which `build` writes
             # (RULES.md, R189 and R211); the deferred ones in the
             # conformance form, which the counterexample mode reads.
@@ -3643,7 +3701,12 @@ def build_program(
     if owned > 0:
         var errs = ownership.human(catalog)
         let count = Param(name="count".to_string(), value="{owned}")
-        errs.push(catalog.plain_error(stopped_owned, [count]))
+        # `@no_alloc`'s `E0282` is no ownership rule's: the build says the
+        # program's errors as the front end's (RULES.md, R233).
+        if r.allocates(catalog):
+            errs.push(catalog.plain_error(stopped, [count]))
+        else:
+            errs.push(catalog.plain_error(stopped_owned, [count]))
         errs.push(beyond)
         o.emit("", errs)
         return Ok(False)
@@ -5656,7 +5719,11 @@ pure def refusal(r: Report, catalog: Catalog, ids: bool) -> String?:
     if owned > 0:
         errs.push(shown_report(ownership, catalog, ids))
         let count = Param(name="count".to_string(), value="{owned}")
-        errs.push(catalog.plain_error("cli.ownership-errors", [count]))
+        # `D0006` when one is `@no_alloc`'s, no ownership rule's (R233).
+        if r.allocates(catalog):
+            errs.push(catalog.plain_error("cli.errors-found", [count]))
+        else:
+            errs.push(catalog.plain_error("cli.ownership-errors", [count]))
         return Some(errs)
     if not beyond.is_empty():
         errs.push(beyond)

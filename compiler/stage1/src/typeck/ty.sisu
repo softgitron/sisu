@@ -242,6 +242,13 @@ impl Types:
                 out.push(default)
         return out
 
+    ## The default a collection's types leave out, `Global` (RULES.md, R227,
+    ## R234); none for a type that leaves none out.
+    pub pure def left_default(self, d: DefId) -> Ty?:
+        if let Some((_, default)) = self.interned.get(d.index):
+            return Some(default)
+        return None
+
     ## Whether the argument `i` of a type of `d` with `n` arguments is a
     ## collection's allocator (RULES.md, R227): what the collection allocates
     ## from, not a value it holds.

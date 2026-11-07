@@ -1,0 +1,15 @@
+# The regions of a black-box test file's `sir --tests --cover` (RULES.md,
+# R233): after the file's own, the package's, each function named as the
+# file's SIR names it (`steps.clamp`), `none` where the file reaches none.
+pub def clamp(n: int) -> int:
+    if n < 0:
+        return 0
+    elif n > 9:
+        pass
+    return n
+
+pub def unused(n: int) -> int:
+    return n + 1
+
+test "clamps a negative number":
+    expect clamp(-1) == 0

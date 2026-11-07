@@ -1,0 +1,15 @@
+# `@no_alloc`'s `E0282` beside an ownership rule's error (RULES.md, R233):
+# a run's build ends with `D0006`, which counts both, and `--defer-borrow`
+# defers neither, answering as the build without it does.
+@no_alloc
+def doubled(xs: list[int]) -> list[int]:
+    return [x * 2 for x in xs]
+
+def main():
+    let xs = [1, 2]
+    let ys = xs
+    print(doubled(xs))
+    print(ys)
+
+test "doubles":
+    expect doubled([1]) == [2]

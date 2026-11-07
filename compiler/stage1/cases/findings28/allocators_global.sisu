@@ -1,0 +1,33 @@
+# D-060's allocators, the second step (RULES.md, R234): `with_allocator`
+# on `Global` is the collection's `new`, and a `try_` growth on `Global` is
+# `push`, `insert` or `add` with its result in `Ok`, so this runs where the
+# runtime already runs.
+
+def filled(n: int) -> list[int] ! OutOfMemory:
+    var xs: list[int] = list.with_allocator(Global())
+    for i in range(n):
+        xs.try_push(i * i)?
+    return Ok(xs)
+
+def counted(words: list[str]) -> dict[String, int] ! OutOfMemory:
+    var counts: dict[String, int] = dict.with_allocator(Global())
+    for w in words:
+        let before = counts.get(w.to_string()).copied() ?? 0
+        _ = counts.try_insert(w.to_string(), before + 1)?
+    return Ok(counts)
+
+def main():
+    match filled(4):
+        case Ok(xs):
+            print("filled: {xs}")
+        case Err(e):
+            print("no room: {e}")
+    let counts = counted(["a", "b", "a"]).expect("room for the counts")
+    print("a: {counts["a"]}, b: {counts["b"]}")
+    var seen: set[int] = set.with_allocator(Global())
+    let first = seen.try_add(7).expect("room")
+    let again = seen.try_add(7).expect("room")
+    print("new: {first}, again: {again}")
+    var text: String = String.with_allocator(Global())
+    text.try_push("on Global").expect("room")
+    print(text)

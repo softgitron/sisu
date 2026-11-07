@@ -1,0 +1,5 @@
+6:12-6:31 E0282 type.no-alloc name="doubled" what="`[x * 2 for x in xs]`"
+  fix type.no-alloc-pass-in
+  fix type.no-alloc-remove 4:1-5:1 ""
+11:19-11:21 E0400 borrow.use-after-move name="xs" line="10"
+  label 10:14-10:16 borrow.moved-here name="xs"

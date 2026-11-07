@@ -1,0 +1,7 @@
+from steps import clamp
+
+def twice(n: int) -> int:
+    return clamp(clamp(n))
+
+test "keeps a small number":
+    expect twice(3) == 3

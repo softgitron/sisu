@@ -1257,7 +1257,8 @@ fn mutate_since_outside_git_says_so_in_a_line() {
 /// A run's build that stops at `@no_alloc`'s `E0282`, which stage 1 finds
 /// among the ownership checker's findings, ends with `D0006`, not `D0021`,
 /// whose `--defer-borrow` the monitor could not stand in for (decision
-/// 1282); `--defer-borrow` refuses it the same way.
+/// 1282); `--defer-borrow` refuses it the same way. The comprehension is one
+/// error (stage 1's R229), and stage 1 says the line itself (its R233).
 #[test]
 fn an_allocation_error_is_not_an_ownership_rules() {
     let dir = std::env::temp_dir().join(format!("sisu-no-alloc-run-{}", std::process::id()));
@@ -1279,7 +1280,7 @@ fn an_allocation_error_is_not_an_ownership_rules() {
             .expect("sisu runs");
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(
-            stderr.ends_with("error[D0006]: the program was not run: errors found (2)\n"),
+            stderr.ends_with("error[D0006]: the program was not run: errors found (1)\n"),
             "{args:?}: {stderr}"
         );
         assert!(out.stdout.is_empty(), "{args:?}");

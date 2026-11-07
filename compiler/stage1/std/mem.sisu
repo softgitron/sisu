@@ -339,6 +339,76 @@ unsafe impl Allocator for Global:
 pub pure def alloc_raw(layout: Layout) -> ptr mut u8?:
     return Global().acquire(layout)
 
+## What a collection's `try_` growth gives when its allocator has no block
+## for the room it needs (04, "Allocators"; Q-4): where `push` panics,
+## `try_push` returns `Err(OutOfMemory.Exhausted)` and leaves the
+## collection as it was.
+pub error OutOfMemory:
+    Exhausted
+
+# The collections on an allocator (D-060; stage 1's RULES.md, R234): each
+# is made on one by `with_allocator`, which on `Global` is the collection's
+# `new`, and grows without a panic by its `try_` methods, which on `Global`
+# are `push`, `insert` and `add` with `Ok` around their result. On another
+# allocator each is an intrinsic of its own that allocates through the
+# allocator value the collection holds.
+
+impl[T, A: Allocator] list[T, A]:
+    ## An empty list whose elements live in memory from `allocator`.
+    ##
+    ## ```
+    ## var xs: list[int] = list.with_allocator(Global())
+    ## xs.push(1)
+    ## assert xs == [1]
+    ## ```
+    @intrinsic("list.with_allocator")
+    pure def with_allocator(own allocator: A) -> list[T, A]
+
+    ## Appends `x` at the end, or gives `OutOfMemory`, the list as it was,
+    ## when its allocator has no block for the room that needs.
+    ##
+    ## ```
+    ## var xs = [1]
+    ## xs.try_push(2).expect("room for an element")
+    ## assert xs == [1, 2]
+    ## ```
+    @intrinsic("list.try_push")
+    @keeps(self, x)
+    pure def try_push(mut self, own x: T) -> () ! OutOfMemory
+
+impl[K, V, A: Allocator] dict[K, V, A]:
+    ## An empty dict whose entries live in memory from `allocator`.
+    @intrinsic("dict.with_allocator")
+    pure def with_allocator(own allocator: A) -> dict[K, V, A]
+
+    ## Inserts or replaces, as `insert` does, giving the previous value, or
+    ## gives `OutOfMemory`, the dict as it was, when its allocator has no
+    ## block for the room that needs.
+    @intrinsic("dict.try_insert")
+    @keeps(self, value)
+    pure def try_insert(mut self, own key: K, own value: V) -> V? ! OutOfMemory
+
+impl[T, A: Allocator] set[T, A]:
+    ## An empty set whose elements live in memory from `allocator`.
+    @intrinsic("set.with_allocator")
+    pure def with_allocator(own allocator: A) -> set[T, A]
+
+    ## Adds `x`, as `add` does, giving whether it was new, or gives
+    ## `OutOfMemory`, the set as it was, when its allocator has no block for
+    ## the room that needs.
+    @intrinsic("set.try_add")
+    pure def try_add(mut self, own x: T) -> bool ! OutOfMemory
+
+impl[A: Allocator] String[A]:
+    ## An empty string whose bytes live in memory from `allocator`.
+    @intrinsic("String.with_allocator")
+    pure def with_allocator(own allocator: A) -> String[A]
+
+    ## Appends `text`, or gives `OutOfMemory`, the string as it was, when
+    ## its allocator has no block for the room that needs.
+    @intrinsic("String.try_push")
+    pure def try_push(mut self, text: str) -> () ! OutOfMemory
+
 ## The alignment of a `Region`'s base.
 pub const REGION_ALIGN: int = 64
 
@@ -396,6 +466,17 @@ impl Drop for Region:
         #   layout, and the region ends here, after every collection that
         #   borrowed it.
         unsafe Global().release(self.base, Layout(size=self.size, align=REGION_ALIGN))
+
+# safety: valid_block, stable: a borrowed region hands out the region's own
+#   blocks, which stay valid while the region does, and the borrow keeps it
+#   alive and unreset (04, "Allocators"); pure: as the region's.
+unsafe impl Allocator for ref Region:
+    pure def acquire(self, layout: Layout) -> ptr mut u8?:
+        let region: ref Region = self
+        return region.acquire(layout)
+
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout):
+        pass
 
 # ------------------------------------------------------------------ the raw buffer
 

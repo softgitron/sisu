@@ -1,2 +1,2 @@
 6:9-6:14 E0608 comptime.derive-failed trait="Plain" ty="Odd" reason="`Odd` has no `@repr(c)`: the order of its fields, and so its bytes, are the compiler's to choose"
-  label 558:34-560:26 comptime.derive-here
+  label 639:34-641:26 comptime.derive-here

@@ -1,0 +1,5 @@
+7:45-7:46 E0300 type.mismatch expected="mem.Global" found="int"
+8:14-8:41 E0347 type.bound-not-satisfied ty="str" bound="mem.Allocator"
+9:34-9:48 E0351 type.unknown-associated ty="Array[_, _]" name="with_allocator"
+11:5-11:19 E0318 type.unused-result ty="! mem.OutOfMemory"
+  fix type.discard 11:5-11:5 "_ = "

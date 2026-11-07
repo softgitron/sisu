@@ -889,10 +889,11 @@ tests_summary="$(printf '  %-24s %4d files, %4d identical, %3d differing as list
 # Its SIR built with its tests, stage 0's `sisu sir --tests` against stage
 # 1's, which must hold `transcript_world` and `transcript_system`, so that
 # the driver runs the transcripts from it (decision 722); and the driver's
-# `sisu test` there, on stage 1 (`SISU_STAGE1_TRANSCRIPTS=1`, and with
-# `--native` the executable this run built), whose standard output must be
-# the case's `NAME.test`: the transcripts run from stage 1's SIR on every
-# run, where R120 checked them by hand.
+# `sisu test` there, on stage 1 (with `--native` the executable this run
+# built), whose standard output must be the case's `NAME.test`: the
+# transcripts run from stage 1's SIR on every run, where R120 checked them
+# by hand, and the driver asks for them without being told (decision 1280,
+# RULES.md, R233).
 class=transcripts
 find "$compiler/conformance/cases" -path '*.files/tests/*.transcript' | sed 's|\.files/tests/.*||' | sort -u |
     while read -r b; do [ -f "$b.sisu" ] && [ -f "$b.test" ] && echo "$b.sisu"; done > "$work/$class.list"
@@ -927,10 +928,10 @@ while read -r f; do
         report="$report\n  UNLISTED: $rel: $class (stage 0 in $box/stage0.sir, stage 1 in $box/stage1.sir)"
     fi
     if [ -n "$stage1_exe" ]; then
-        (cd "$box" && env -u SISU_FRONT_END SISU_STAGE1="$stage1_exe" SISU_STAGE1_TRANSCRIPTS=1 \
+        (cd "$box" && env -u SISU_FRONT_END SISU_STAGE1="$stage1_exe" \
             "$sisu" test --no-cache "$name" > test.out 2> test.err)
     else
-        (cd "$box" && env -u SISU_FRONT_END SISU_STAGE1_TRANSCRIPTS=1 \
+        (cd "$box" && env -u SISU_FRONT_END \
             "$sisu" test --no-cache "$name" > test.out 2> test.err)
     fi
     if cmp -s "${f%.sisu}.test" "$box/test.out"; then

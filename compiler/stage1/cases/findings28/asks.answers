@@ -1,0 +1,409 @@
+answer 1
+error[E0282]: `doubled` is `@no_alloc`, but `[x * 2 for x in xs]` may allocate
+  --> no_alloc_run.sisu:6:12
+  |
+6 |     return [x * 2 for x in xs]
+  |            ^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `doubled` may allocate
+
+error[E0400]: `xs` was moved on line 10 and cannot be used afterwards
+  --> no_alloc_run.sisu:11:19
+   |
+11 |     print(doubled(xs))
+   |                   ^^
+   |
+10 |     let ys = xs
+   |              -- `xs` is moved here
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
+
+error[D0006]: the program was not run: errors found (2)
+error: Failed
+answer 1
+error[E0282]: `doubled` is `@no_alloc`, but `[x * 2 for x in xs]` may allocate
+  --> no_alloc_run.sisu:6:12
+  |
+6 |     return [x * 2 for x in xs]
+  |            ^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `doubled` may allocate
+
+error[E0400]: `xs` was moved on line 10 and cannot be used afterwards
+  --> no_alloc_run.sisu:11:19
+   |
+11 |     print(doubled(xs))
+   |                   ^^
+   |
+10 |     let ys = xs
+   |              -- `xs` is moved here
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
+
+error[D0006]: the program was not run: errors found (2)
+error: Failed
+answer 1
+error[E0282]: `doubled` is `@no_alloc`, but `[x * 2 for x in xs]` may allocate
+  --> no_alloc_run.sisu:6:12
+  |
+6 |     return [x * 2 for x in xs]
+  |            ^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `doubled` may allocate
+
+error[E0400]: `xs` was moved on line 10 and cannot be used afterwards
+  --> no_alloc_run.sisu:11:19
+   |
+11 |     print(doubled(xs))
+   |                   ^^
+   |
+10 |     let ys = xs
+   |              -- `xs` is moved here
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
+
+error[D0006]: the program was not run: errors found (2)
+error: Failed
+answer 0
+sir 0
+source 0 "allocator_region.sisu"
+source 1 "<std>/prelude.sisu"
+source 2 "<std>/mem.sisu"
+entry main
+
+struct u8 {  }
+
+struct Cell[T] {  }
+
+struct ptr_mut[T] {  }
+
+struct mem.Layout { size: int, align: int }
+
+struct mem.Global {  }
+
+error mem.OutOfMemory { Exhausted }
+
+struct mem.Region drop mem.Region.Drop.drop { base: ptr_mut[u8], size: int, used: Cell[int] }
+
+intrinsic Cell.get pure inner 0
+intrinsic Cell.new pure from 0 own 0
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic Result.expect pure from 0 inner 1 own 0
+intrinsic error.trace_push pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic list.try_push pure own 1 keeps 0 1
+intrinsic list.with_allocator pure from 0 own 0
+intrinsic mem.global.acquire pure
+intrinsic mem.global.release pure
+intrinsic panic pure
+intrinsic print
+intrinsic range pure
+
+fn squares(2) source 0 from 0 @6:5-6:12 {
+    let _0: Result[list[int, ref mem.Region], {mem.OutOfMemory}]
+    let _1: ref mem.Region "r" @6:13-6:26
+    let _2: int "n" @6:28-6:34
+    let _3: list[int, ref mem.Region] "xs" @7:9-7:11
+    let _4: Iter[int]
+    let _5: int
+    let _6: ref mut Iter[int]
+    let _7: Option[int]
+    let _8: int
+    let _9: int "i" @8:9-8:10
+    let _10: ()
+    let _11: Result[(), {mem.OutOfMemory}]
+    let _12: ref mut list[int, ref mem.Region]
+    let _13: int
+    let _14: int
+    let _15: {mem.OutOfMemory}
+    let _16: ref mut {mem.OutOfMemory}
+    let _17: ()
+    let _18: bool "flag"
+    let _19: bool "flag"
+  bb0:
+    _18 = const false
+    _19 = const false
+    _3 = call intrinsic list.with_allocator[int, ref mem.Region](copy _1) @7:37-7:59
+    _18 = const true
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = call fn range#step() @8:14-8:22
+    _4 = call intrinsic range(const 0, copy _2, copy _5) @8:14-8:22
+    goto bb4
+  bb2 (cleanup):
+    drop _3 if _18
+    resume
+  bb3 (cleanup):
+    drop _4
+    goto bb2
+  bb4 (unwind bb3):
+    _6 = ref mut _4 @8:5-8:22
+    _7 = call intrinsic Iter.next(copy _6) @8:5-8:22
+    _8 = discriminant _7 @8:5-8:22
+    switch copy _8 [0: bb5, else: bb14] @8:5-8:22
+  bb5 (unwind bb3):
+    _9 = copy _7.as(0).0 @8:9-8:10
+    _12 = ref mut _3 @9:9-9:11
+    _13 = mul copy _9, copy _9 @9:21-9:26
+    _11 = call intrinsic list.try_push(copy _12, copy _13) @9:9-9:27
+    _19 = const true
+    goto bb6
+  bb6 (unwind bb7):
+    _14 = discriminant _11 @9:9-9:28
+    switch copy _14 [0: bb8, else: bb9] @9:9-9:28
+  bb7 (cleanup):
+    drop _11.as(1).0 if _19
+    goto bb3
+  bb8 (unwind bb7):
+    _10 = copy _11.as(0).0 @9:9-9:28
+    goto bb13
+  bb9 (unwind bb7):
+    _19 = const false
+    _15 = move _11.as(1).0 @9:9-9:28
+    _16 = ref mut _15 @9:9-9:28
+    _17 = call intrinsic error.trace_push(copy _16, const "allocator_region.sisu:9:9") @9:9-9:28
+    _0 = variant Result::Err(move _15) @9:9-9:28
+    goto bb10
+  bb10 (unwind bb3):
+    _19 = const false
+    goto bb11
+  bb11 (unwind bb2):
+    drop _4 @9:9-9:28
+    goto bb12
+  bb12:
+    _18 = const false
+    drop _3 @9:9-9:28
+    return @9:9-9:28
+  bb13 (unwind bb3):
+    _19 = const false
+    dead _15 @9:28-9:28
+    goto bb4
+  bb14 (unwind bb2):
+    drop _4 @9:28-9:28
+    goto bb15
+  bb15 (unwind bb2):
+    dead _4 @9:28-9:28
+    _18 = const false
+    _0 = variant Result::Ok(move _3) @10:12-10:18
+    goto bb16
+  bb16:
+    _18 = const false
+    return @10:5-10:18
+}
+
+fn main(0) source 0 @12:5-12:9 {
+    let _0: ()
+    let _1: mem.Region "region" @13:9-13:15
+    let _2: list[int, ref mem.Region] "xs" @14:9-14:11
+    let _3: Result[list[int, ref mem.Region], {mem.OutOfMemory}]
+    let _4: ref mem.Region
+    let _5: ()
+    let _6: String
+    let _7: ref mut String
+    let _8: bool
+    let _9: int
+    let _10: ref mem.Region
+    let _11: ()
+    let _12: ref String
+    let _13: list[int, ref mem.Region]
+    let _14: bool "flag"
+  bb0:
+    _14 = const false
+    _1 = call fn mem.Region.bump(const 1024) @13:18-13:44
+    goto bb1
+  bb1 (unwind bb2):
+    _4 = ref _1 @14:22-14:32
+    _3 = call fn squares(copy _4, const 4) @14:14-14:36
+    _2 = call intrinsic Result.expect(move _3, const "room in the region") @14:14-14:65
+    _14 = const true
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
+    _6 = call intrinsic fmt.new() @15:11-15:34
+    _7 = ref mut _6 @15:11-15:34
+    _10 = ref _1 @15:13-15:19
+    _9 = call fn mem.Region.in_use(copy _10) @15:13-15:28
+    _8 = gt copy _9, const 0 @15:13-15:32
+    _11 = call intrinsic fmt.display(copy _7, copy _8, const "") @15:13-15:32
+    goto bb5
+  bb4 (cleanup):
+    drop _2 if _14
+    goto bb2
+  bb5 (unwind bb6):
+    _12 = ref _6 @15:11-15:34
+    _5 = call intrinsic print(copy _12) @15:5-15:35
+    goto bb7
+  bb6 (cleanup):
+    drop _6
+    goto bb4
+  bb7 (unwind bb4):
+    drop _6 @15:35-15:35
+    goto bb8
+  bb8 (unwind bb4):
+    dead _6 @15:35-15:35
+    _14 = const false
+    _13 = move _2 @16:9-16:11
+    drop _13 @16:11-16:11
+    goto bb9
+  bb9 (unwind bb4):
+    _0 = const ()
+    goto bb10
+  bb10 (unwind bb2):
+    _14 = const false
+    goto bb11
+  bb11:
+    drop _1 @16:11-16:11
+    return
+}
+
+fn mem.Region.bump(1) pure source 2 @424:18-424:22 {
+    let _0: mem.Region
+    let _1: int "capacity" @424:23-424:36
+    let _2: mem.Layout "layout" @425:13-425:19
+    let _3: int
+    let _4: Option[ptr_mut[u8]]
+    let _5: mem.Global
+    let _6: ref mem.Global
+    let _7: int
+    let _8: ptr_mut[u8] "base" @426:13-426:17
+    let _9: Never
+    let _10: Cell[int]
+  bb0:
+    _3 = call fn mem.REGION_ALIGN() @425:50-425:62
+    _2 = struct mem.Layout(copy _1, copy _3) @425:22-425:63
+    _5 = struct mem.Global() @426:20-426:28
+    _6 = ref _5 @426:20-426:28
+    _4 = call intrinsic mem.global.acquire(copy _6, copy _2) @426:20-426:44
+    _7 = discriminant _4 @426:9-427:35
+    switch copy _7 [0: bb1, else: bb2] @426:9-427:35
+  bb1:
+    _8 = copy _4.as(0).0 @426:9-427:35
+    dead _5 @427:35-427:35
+    _10 = call intrinsic Cell.new(const 0) @428:54-428:61
+    _0 = struct mem.Region(copy _8, copy _1, move _10) @428:16-428:62
+    return @428:9-428:62
+  bb2:
+    _9 = call intrinsic panic(const "out of memory") @427:13-427:35
+    unreachable @427:13-427:35
+}
+
+fn mem.Region.in_use(1) pure source 2 @431:18-431:24 {
+    let _0: int
+    let _1: ref mem.Region "self" @431:18-431:24
+    let _2: ref Cell[int]
+  bb0:
+    _2 = ref _1.*.2 @432:16-432:25
+    _0 = call intrinsic Cell.get(copy _2) @432:16-432:31
+    return @432:9-432:31
+}
+
+fn mem.Region.Drop.drop(1) drop pure source 2 @464:14-464:18 {
+    let _0: ()
+    let _1: ref mut mem.Region "self" @464:14-464:18
+    let _2: ()
+    let _3: mem.Global
+    let _4: ref mem.Global
+    let _5: mem.Layout
+    let _6: int
+  bb0:
+    _3 = struct mem.Global() @468:16-468:24
+    _4 = ref _3 @468:16-468:24
+    _6 = call fn mem.REGION_ALIGN() @468:73-468:85
+    _5 = struct mem.Layout(copy _1.*.1, copy _6) @468:44-468:86
+    _2 = call intrinsic mem.global.release(copy _4, copy _1.*.0, copy _5) @468:16-468:87
+    dead _3 @468:87-468:87
+    _0 = const ()
+    return
+}
+
+fn range#step(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 1 @1194:55-1194:56
+    return @1194:55-1194:56
+}
+
+fn mem.REGION_ALIGN(0) value pure source 2 {
+    let _0: int
+  bb0:
+    _0 = const 64 @413:31-413:33
+    return @413:31-413:33
+}
+
+fn mem.Region#drop(1) glue source 0 own 0 {
+    let _0: ()
+    let _1: mem.Region "self"
+    let _2: ref mut mem.Region
+  bb0:
+    _2 = ref mut _1
+    _0 = call fn mem.Region.Drop.drop(move _2)
+    goto bb1
+  bb1:
+    return
+}
+answer 0
+sir 0
+source 0 "tests/clamp.sisu"
+source 1 "src/lib.sisu"
+test "keeps a small number" test#0
+
+intrinsic expect.fail_compare pure
+
+fn twice(1) source 0 @3:5-3:10 {
+    let _0: int
+    let _1: int "n" @3:11-3:17
+    let _2: int
+  bb0:
+    _2 = call fn steps.clamp(copy _1) @4:18-4:26
+    _0 = call fn steps.clamp(copy _2) @4:12-4:27
+    return @4:5-4:27
+}
+
+fn test#0(0) test source 0 @6:6-6:28 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: ()
+  bb0:
+    _1 = call fn twice(const 3) @7:12-7:20
+    _2 = eq copy _1, const 3 @7:5-7:25
+    switch copy _2 [0: bb2, else: bb1] @7:5-7:25
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _3 = call intrinsic expect.fail_compare(const "twice(3) == 3", const "", copy _1, const 3) @7:5-7:25
+    goto bb1
+}
+
+fn steps.clamp(1) source 1 @4:9-4:14 {
+    let _0: int
+    let _1: int "n" @4:15-4:21
+    let _2: bool
+    let _3: bool
+    let _4: ()
+  bb0:
+    _2 = lt copy _1, const 0 @5:8-5:13
+    switch copy _2 [0: bb2, else: bb3] @5:8-5:13
+  bb1:
+    _0 = copy _1 @9:12-9:13
+    return @9:5-9:13
+  bb2:
+    _3 = gt copy _1, const 9 @7:10-7:15
+    switch copy _3 [0: bb1, else: bb4] @7:10-7:15
+  bb3:
+    _0 = const 0 @6:16-6:17
+    return @6:9-6:17
+  bb4:
+    _4 = const () @8:9-8:13
+    goto bb1
+}
+# regions
+# region tests/clamp.sisu:4:5-4:27 statement twice bb0:0
+# region src/lib.sisu:5:5-8:13 statement steps.clamp bb0:0
+# region src/lib.sisu:6:9-6:17 branch steps.clamp bb3:0
+# region src/lib.sisu:6:9-6:17 statement steps.clamp bb3:0
+# region src/lib.sisu:8:9-8:13 branch steps.clamp bb4:0
+# region src/lib.sisu:8:9-8:13 statement steps.clamp bb4:0
+# region src/lib.sisu:9:5-9:13 statement steps.clamp bb1:0
+# region src/lib.sisu:12:5-12:17 statement none

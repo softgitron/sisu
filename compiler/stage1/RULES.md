@@ -12110,3 +12110,347 @@ classes.
       0's front end under R4 and R5, as `unsafe/tuple_pointer` does, and
       `testing/cover` does not differ. Stage 1 decides it (RULES.md,
       R232).
+
+## R233. The driver's asks of `E0282` and `--cover`: `D0006` said by stage 1, `@no_alloc` not deferred, a black-box file's map with its package's regions (decision 1300)
+
+**The rule.** Decisions 1280, 1282 and 1286 ask three things of stage 1.
+
+- **`E0282` is no ownership rule's.** Stage 1 finds `@no_alloc`'s
+  `E0282` (R215) among the ownership checker's findings of the SIR, and a
+  run's build ended them with `D0021`, the line of the ownership rules'
+  errors, whose `--defer-borrow` runs the program under a monitor that
+  observes the ownership rules alone; the driver said the line as `D0006`
+  (`owned_line`, `NOT_OWNERSHIP`). Now the report's ownership part ends
+  with `D0006` whenever one of its errors is `E0282`
+  (`Report.allocates`, `not_an_ownership_rule`), in `build --for-run`,
+  with or without `--emit-sir`, and in the refusal of `sir --tests` (R46),
+  which `sisu test` prints: the count is the program's errors, `E0282`
+  and the ownership rules' found with it, each in the order `check`
+  prints them, which is the line the driver's `owned_line` wrote, byte for
+  byte. `D0021` stays the line of the ownership rules' errors alone.
+- **`--defer-borrow` does not defer it.** `build --for-run --emit-sir
+  --defer-borrow` of a program whose findings hold an `E0282` answers as
+  the build without the option (`Deferred.allocates`): the front end's
+  warnings, its errors and `D0006`, status 1, no SIR; `sir --tests
+  --defer-borrow` as `sir --tests` refuses it, `D0006`, status 1; `sir
+  --defer-borrow` names the errors that stop it with `D0006`, status 1.
+  The ownership rules' errors of such a program stop with it: the
+  monitor would run a program the checker refuses for another reason. A
+  program without `E0282` defers as before (R189), purity's and a `let`
+  assigned twice still stopping it alone.
+- **A black-box file's map.** `sir --tests --cover PKG/tests/x.sisu` of a
+  package's black-box test file (R65) lists after the file's own regions
+  those of the package it tests (`cover_table`'s `tested`), each module
+  named from the package's directory, `src/lib.sisu`, as the package's
+  own map names it, each function as the file's SIR names it,
+  `steps.clamp`, and `none` for a region of a function the file's program
+  does not lower:
+
+  ```text
+  # regions
+  # region tests/clamp.sisu:4:5-4:27 statement twice bb0:0
+  # region src/lib.sisu:5:5-8:13 statement steps.clamp bb0:0
+  # region src/lib.sisu:6:9-6:17 branch steps.clamp bb3:0
+  ...
+  # region src/lib.sisu:12:5-12:17 statement none
+  ```
+
+  So the driver counts the file's runs by the file's own map and adds a
+  package's region reached there to the region of the same span and kind
+  in the package's map, where it mapped `PACKAGE.F` to `F` by name.
+  R231's marks are made in the package's functions too, which the file's
+  program lowers as its own.
+- **`check.sh`** runs the driver's `sisu test` of the transcripts' class
+  without `SISU_STAGE1_TRANSCRIPTS=1`, which the driver ignores since
+  decision 1280.
+
+What the driver may rely on from 0.22.0: `build --for-run` (with
+`--emit-sir`, with `--defer-borrow`) and `sir --tests` (with
+`--defer-borrow`) of a program with `E0282` end with `D0006` and status
+1, never `D0021` or the deferred status 3, so `owned_line`,
+`NOT_OWNERSHIP` and the fallback of `run --defer-borrow` to the build
+without the option can go; and `sir --tests --cover` of a black-box test
+file lists the tested package's regions after its own, as above; served.
+
+**What stage 0 must do.** Delete `owned_line`, `NOT_OWNERSHIP` and the
+deferred run's fallback for a stage 1 of 0.22.0 or later, and count a
+black-box file's runs against its own map, adding each package region it
+reaches to the package's region of the same span and kind, in place of
+the names' prefix. The driver's test
+`an_allocation_error_is_not_an_ownership_rules` expected `errors found
+(2)` of a comprehension, which R229 made one error; the round changed it
+to `(1)`, the count stage 1 and the driver's `owned_line` both give.
+
+**Why.** Item 1 of the round: decisions 1280, 1282 and 1286.
+
+**In stage 1.** `main` (`Report.allocates`, `not_an_ownership_rule`,
+`build_program`, `refusal`, `Deferred.allocates`, `deferred_program`,
+`build_with`, `sir_kept`'s `--defer-borrow`, `cover_table`), `check.sh`.
+
+**What it changes.** The line of a run's build and of `sisu test`'s
+refusal of a program with `E0282`, and the answers of `--defer-borrow`
+for one; the map of a black-box file. The cases
+`cases/findings28/no_alloc_run.sisu` (its `.diag`; `E0282` beside an
+`E0400`), asked by `findings28/asks.requests` with `build --for-run
+--emit-sir --defer-borrow`, `sir --tests --defer-borrow` and `build
+--for-run --emit-sir`, all three `D0006` with status 1, and the package
+`cases/packages/cover_tested.pkg`, whose `tests/clamp.sisu` the same
+file asks `sir --tests --cover` of. The Rust front end answers
+`no_alloc_run` with `W0030` (R215).
+
+- Differs: `compiler/stage1/cases/findings28/no_alloc_run.sisu`: ids, human
+
+**Decision 1300**, for docs/architecture.md:
+
+1300. Stage 1 ends a run's build, and `sisu test`'s refusal, of a program
+      whose ownership checker finds `@no_alloc`'s `E0282` with `D0006`,
+      counting the program's errors, and `--defer-borrow` does not defer
+      it, answering as the build without the option; `sir --tests --cover`
+      of a black-box test file lists the tested package's regions after
+      its own, its functions as the file's SIR names them. From `sisu1
+      0.22.0` the driver may drop `owned_line`, `NOT_OWNERSHIP` and its
+      mapping of names. Stage 1 decides it (RULES.md, R233).
+
+## R234. D-060's allocators, the second step: `with_allocator` and the `try_` growths, `Global` on today's path, the runtime's forms named (decision 1301)
+
+**The rule.** R225's steps 2 and 3, the front end's half: 04
+("Allocators") and 11 write `list.with_allocator(a)`, a collection on
+another allocator, and `try_push` and friends returning `! OutOfMemory`
+where `push` panics (Q-4). Stage 1 now has them:
+
+- **`OutOfMemory`** is `std.mem`'s and the prelude's name (beside
+  `Allocator` and `Global`, R227, in the part of `std.mem` the base
+  declares), an error with one variant, `OutOfMemory.Exhausted`: the
+  allocator gave no block for the room the growth needs, and the
+  collection is as it was. 04 names the error and not its variants; one
+  is enough until an allocator has more to say.
+- **`with_allocator`.** `list.with_allocator(a)`, `dict.with_allocator(a)`,
+  `set.with_allocator(a)` and `String.with_allocator(a)`, associated
+  functions of impls over the collection generic in its allocator
+  (`impl[T, A: Allocator] list[T, A]`, `std.mem`'s), return the empty
+  collection on `a`'s type, `list[T, A]`. The written `list` of the path
+  leaves its allocator to the argument (`allocator_inferred`), where a
+  written `list` otherwise takes `Global` (R227), so
+  `list.with_allocator(ref region)` is `list[T, ref Region]`, and a
+  declared type drives it as any call's: `var xs: list[int] =
+  list.with_allocator(Global())`.
+- **A borrowed `Region` is an allocator** (04: "A borrowed bump `Region`
+  is a valid allocator"): `std.mem` implements `Allocator` for `ref
+  Region`, handing out the region's blocks, so the list is a view of the
+  region by the existing rule (R21, R227): `list.with_allocator` borrows
+  from its argument (`from 0` in the SIR's declaration), and the list
+  cannot outlive the region.
+- **The `try_` growths.** `list.try_push(x) -> () ! OutOfMemory`,
+  `dict.try_insert(k, v) -> V? ! OutOfMemory`, `set.try_add(x) -> bool !
+  OutOfMemory` and `String.try_push(text) -> () ! OutOfMemory`, in the
+  same impls: what `push`, `insert` and `add` do, or the error. A
+  failure dropped is `E0318` as any error is ("this `! mem.OutOfMemory`
+  is not used"). 04's "and friends" is decided as these four, one for
+  each collection's growth by a value; `try_reserve` waits for a
+  `reserve`, which no collection has (`with_capacity` makes one), and
+  `try_extend` and `try_insert` at an index for a case that needs them.
+- **`Global` keeps today's path, byte for byte.** Lowering gives each of
+  these intrinsics, when the call's allocator is `Global` (the last of the
+  impl's parameters; `global_form`), the collection's own operation:
+  `list.with_allocator` is `list.new[T]` (`dict.new[K, V]`,
+  `set.new[T]`, `String.new` of `""`), the allocator not evaluated when
+  it is the value `Global()`, and `list.try_push` is `list.push` with its
+  result put in `Ok` (`dict.insert`, `set.add`, `String.push`;
+  `emit_in_ok`), so a program on `Global` runs on what the runtime has,
+  natively and in the interpreter, and its growth never fails as a
+  value: the C allocator of a hosted target that has no block aborts as
+  `push` does. A program that names no allocator has the SIR it had,
+  since the impls are new and the base's other definitions keep their
+  places.
+- **Another allocator.** On any other allocator, `ref Region`, a
+  program's own `Allocator`, or a type parameter `A: Allocator`, each is
+  the intrinsic of its name, `call intrinsic
+  list.with_allocator[int, ref mem.Region](copy _1)` and `call intrinsic
+  list.try_push(copy _12, copy _13)`, below.
+- **The other methods stay at `Global`**, as R227 left them: `push`,
+  `len` and the rest are the impls' over the collection at `Global`, so a
+  `list[int, ref Region]` grows by `try_push` and has no `len` yet
+  (`E0347`). Making those impls generic over the allocator names it in
+  every one of their functions' SIR (`list.sort_by[int, Global]`), which
+  waits until the runtime carries a collection on another allocator,
+  decided against for the round.
+
+**What stage 0 must do**, the runtime's half (step 2): run the eight
+intrinsics on an allocator other than `Global`, in the interpreter and
+natively, where a program on `Global` never reaches them (and a generic
+function over `A: Allocator` reaches them with `A` = `Global` too, which
+must behave as `Global`'s operations do).
+
+- `list.with_allocator[T, A](own a: A) -> list[T, A]`,
+  `dict.with_allocator[K, V, A]`, `set.with_allocator[T, A]` and
+  `String.with_allocator[A]` (the type arguments always written, the
+  last the allocator): an empty collection holding `a`, which it moves.
+  The SIR declares the result borrowing from the argument (`from 0`)
+  when `A` holds a reference.
+- `list.try_push(xs: ref mut list[T, A], own x: T) -> Result[(),
+  OutOfMemory]`, `dict.try_insert(d, own k: K, own v: V) ->
+  Result[Option[V], OutOfMemory]`, `set.try_add(s, own x: T) ->
+  Result[bool, OutOfMemory]` and `String.try_push(s, text: str) ->
+  Result[(), OutOfMemory]`: the growth, its new room from `A.acquire(
+  Layout)` of the allocator the collection holds and its old room given
+  back by `A.release`, or `Err(OutOfMemory.Exhausted)` with the
+  collection unchanged when `acquire` gives `None`; the SIR's types name
+  the error set `{mem.OutOfMemory}`.
+- A collection on another allocator is dropped through its allocator's
+  `release` (a `Region`'s does nothing; the region's own drop gives its
+  memory back), its elements dropped as `Global`'s are.
+- Natively, a collection on `Global` keeps today's layout; one on
+  another holds the allocator value beside its buffer (a `ref Region` is a
+  pointer). The `Allocator` methods are the program's functions,
+  `mem.Region.acquire` and the impl for `ref mem.Region`, called as a
+  `call trait mem.Allocator.acquire` is; in the interpreter's checked
+  model a `Region`'s blocks come from its own range (`mem.global.acquire`
+  of the region's capacity).
+
+No form the driver relies on is added by this rule.
+
+**Why.** Item 2 of the round: R225's plan, D-060.
+
+**In stage 1.** `std/mem.sisu` (`OutOfMemory`, the four impls,
+`Allocator for ref Region`), `typeck.std_sources` (`allocator_names`),
+`typeck.call` (`allocator_inferred`), `typeck.ty` (`left_default`),
+`lower.exprs` (`global_form`, `emit_in_ok`, `GlobalForm`).
+
+**What it changes.** No program of the corpus. The cases
+`cases/findings28/allocators_global.sisu` (its `.out`: a list, a dict, a
+set and a `String` on `Global`, grown by `?` in functions returning `!
+OutOfMemory`), `allocator_errors.sisu` (its `.diag`: `E0300` for an
+`int` where the declared `list[int]` takes `Global`, `E0347` for a `str`
+that is no allocator, `E0351` for `Array`, which takes none, and `E0318`
+for a `try_push` whose failure is dropped) and `allocator_region.sisu`
+(no error; its SIR, asked by `findings28/asks.requests`, holds
+`list.with_allocator[int, ref mem.Region]` and `list.try_push`, which the
+runtime does not run yet, so it has no `.out`). The Rust front end has
+none of these names: `E0201` for `Global` and `OutOfMemory`, and `E0220`
+for `std.mem`, as R227 lists. Blessed again: the labels into `std.mem` of
+`cases/findings11/plain_repr.diag` and `cases/unsafe/plain_refusals.diag`
+(the derive of `Plain`, 81 lines lower in `std/mem.sisu` for the new
+items), and `cases/findings22/std_doc_tests.tests`, which runs the two
+new doc examples of `std.mem` (200 passed where 198 did), as the
+conformance suite's `std/doc_examples.select` does (199 where 197).
+
+- Differs: `compiler/stage1/cases/findings28/allocators_global.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings28/allocator_errors.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings28/allocator_region.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1301**, for docs/architecture.md:
+
+1301. `list.with_allocator(a)`, `dict`'s, `set`'s and `String`'s build a
+      collection on `a`'s allocator, a `ref Region` among them, and
+      `list.try_push`, `dict.try_insert`, `set.try_add` and
+      `String.try_push` return `! OutOfMemory` (std.mem's and the
+      prelude's) where the growth panics; on `Global` they lower to the
+      collection's `new` and to its growth with `Ok` around the result, so
+      such a program runs on today's runtime and one that names no
+      allocator has the SIR it had, and on another allocator to the
+      intrinsics of their names, which the runtime's half of the step
+      runs. The collections' other methods stay at `Global`. Stage 1
+      decides it (RULES.md, R234).
+
+## R235. The type checker's memo: decided against for the round, with what the stable table needs (decision 1302)
+
+**The rule.** Nothing a command prints changes. R228 found what stands
+between `query diagnostics` of a changed module of `compiler/rt` (0.82 s)
+and the 100 ms an editor allows: the program's own check, 3.3 G
+instructions a request, and its lowering, 1.6 G, which no request keeps,
+since a body's types are indices into a table each resolution makes again.
+The round looked at what keeping the checker's results for an unchanged
+function needs, and found the table of types the smaller part of it:
+
+- **The table is stable by structure already.** A type is interned by its
+  structure (`Types.ids`, by `key_text`), and a table that holds the
+  base's types first maps another such table's types into itself by
+  structure (`Types.carried`), as R220's memo of the standard library's
+  bodies does with `remap_body`: a body typed against the base, its types
+  past the base's made again in each program's table in the order its
+  check made them. A body of the program's own could be kept the same
+  way, with the types it made.
+- **What the table does not give.** A kept body names definitions, and
+  the program's own are numbered by each resolution in the order of the
+  program's modules and items, so a function added above another renumbers
+  every definition after it (`DefId`), in the body's types (`Adt`), its
+  callees, its fields and its variants, which a remap would have to carry
+  by each definition's path, module and name, where the base's numbers
+  are the same in every request. And a body's check reads the program's
+  declarations, the signatures it calls, the impls its methods resolve
+  through, the inferred error sets of its callees (05), the templates it
+  instantiates and the constants it folds, which the checker records
+  nowhere; R228's `deps_of` reads them from the SIR, which lowering makes
+  only after the whole check. A memo needs the checker to record each
+  body's reads as it makes them, by path, and its results compared by
+  them, which is a change through `typeck.expr`, `typeck.call` and
+  `typeck.check` of the size of R228's whole rule.
+- **Lowering** names each function by the program's instances and
+  numbers made for the whole program at once (`lower.index_names`,
+  `StdSlots`), so its memo follows the checker's, per module.
+
+**Decided against**, for the round: the memo of the checker's and of
+lowering's results. Its cost is out of proportion to the round's other
+items, the driver's asks and the allocators' step, and a partial memo (the
+table alone) would change no request's time, since the table is not what
+is remade at a cost: the 3.3 G is the checking of the bodies, not the
+interning of their types. What a later round takes, in order: the
+program's definitions numbered by path across requests (or remapped by
+it), each body's reads recorded by the checker, then the memo of each
+function's `TBody`, its diagnostics and its requests by those reads,
+answered byte for byte as a fresh request, with a case that asks twice
+with a change between, as `findings27/asks.requests` does for R228.
+
+**Why.** Item 3 of the round: R228's decided-against.
+
+**What it changes.** Nothing.
+
+**Decision 1302**, for docs/architecture.md:
+
+1302. The type checker's and lowering's memo across a server's requests
+      waits: a body's types already map from one table to another by
+      structure (R220's memo of the standard library's bodies), but the
+      program's own definitions are renumbered by each resolution and the
+      checker records no body's reads of the program's declarations, so a
+      memo needs both first. Stage 1 decides it (RULES.md, R235).
+
+## R236. The merge's differences: the conformance suite's `testing/module_fixture` and `ownership/no_alloc_not_deferred` (decision 1303)
+
+**The rule.** Nothing a command prints changes. Stage 0's twenty-fifth
+round added five conformance cases (decisions 1282, 1284, 1285 and
+1286):
+
+- `testing/module_fixture.sisu` names a module's fixture in its tests'
+  parameters, which stage 1 takes (R200, R212, R219) and the Rust front
+  end answers with `E0702`, so its types and diagnostics differ as the
+  fixtures' own cases do.
+- `ownership/no_alloc_not_deferred.sisu` is `@no_alloc`'s, stage 1's
+  `E0282` (R215, R229), which the Rust front end answers with `W0030`, so
+  its ownership findings and diagnostics differ as those of R215's
+  cases do; its `.defer`, the deferred run's refusal, is what stage 1
+  now says itself (R233).
+- `testing/failure_database`, `testing/json_events` and
+  `packages/cover_black_box` do not differ.
+
+What each does is what its expectation says, from stage 1's SIR
+(`behaviour`), interpreted and natively. And the driver's test
+`an_allocation_error_is_not_an_ownership_rules`, written before R229
+made a comprehension one error, expected `errors found (2)`; the round
+made it `(1)`, as R233 says.
+
+**Why.** Item 4 of the round: the run of `check.sh --native --names
+--types --sir` on the round's first build found these two unlisted.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/testing/module_fixture.sisu`: types, ids, human
+- Differs: `compiler/conformance/cases/ownership/no_alloc_not_deferred.sisu`: ownership, ids, human
+
+**Decision 1303**, for docs/architecture.md:
+
+1303. The conformance suite's `testing/module_fixture` differs from stage
+      0's front end under stage 1's fixtures and
+      `ownership/no_alloc_not_deferred` under `@no_alloc`, as their rules'
+      own cases do, and `testing/failure_database`, `testing/json_events` and
+      `packages/cover_black_box` do not differ. Stage 1 decides it
+      (RULES.md, R236).
