@@ -2470,15 +2470,22 @@ fn deferred_codes(stderr: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The errors stage 1 reports among the ownership checker's findings of the
+/// SIR that are no ownership rule's, which the monitor does not observe:
+/// `@no_alloc`'s (its R215; decision 1282).
+const NOT_OWNERSHIP: &[&str] = &["E0282"];
+
 /// The errors a run's build printed (`stderr`), with stage 1's `D0021` (the
 /// ownership checker's errors, which `--defer-borrow` defers to the monitor)
-/// said as `D0006` when an error before it is not an ownership rule's, an
-/// `E04xx`: `@no_alloc`'s `E0282`, which stage 1 finds among the ownership
-/// checker's findings of the SIR, is not one the monitor observes
-/// (decision 1282).
+/// said as `D0006` when an error before it is not an ownership rule's
+/// ([`NOT_OWNERSHIP`], decision 1282).
 fn owned_line(stderr: &str) -> String {
-    let codes: Vec<&str> = stderr.lines().filter_map(|l| l.strip_prefix("error[E")).collect();
-    if codes.iter().all(|c| c.starts_with("04")) {
+    let codes: Vec<&str> = stderr
+        .lines()
+        .filter_map(|l| l.strip_prefix("error[")?.split(']').next())
+        .filter(|c| c.starts_with('E'))
+        .collect();
+    if !codes.iter().any(|c| NOT_OWNERSHIP.contains(c)) {
         return stderr.to_string();
     }
     let mut out = String::new();
@@ -3313,7 +3320,7 @@ fn stage1_command(
             // an ownership rule's (`@no_alloc`'s `E0282`), stops the run as
             // the build without the option says it, with `D0006` (decision
             // 1282), where the run called it a candidate false positive.
-            if deferring && !deferred_codes(&r.stderr).iter().all(|c| c.starts_with("E04")) {
+            if deferring && deferred_codes(&r.stderr).iter().any(|c| NOT_OWNERSHIP.contains(c)) {
                 let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
                 words.extend(contracts);
                 program(&mut words);

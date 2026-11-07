@@ -595,10 +595,11 @@ interpreter from the SIR stage 1 serialised, and `--native`), `fmt`,
 driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 `--front-end=rust` and `SISU_FRONT_END=rust`, and still does these, each a
 role to replace before it can be deleted, when the flag and the Rust
-branches of `cli.rs` go with it. With a stage 1 of 0.17.0 or later, what
-it has left since decision 1245 is building stage 1 itself, the last
-item below; with a stage 1 older than 0.21.0 a program's transcripts are
-still its (the second item):
+branches of `cli.rs` go with it. Since decision 1280 the driver relies on
+stage 1's 0.21.0 forms and builds around no older stage 1, so the Rust
+front end has two roles left: building stage 1 the first time, when no
+built stage 1 is at hand (the last item below; decision 1281), and being
+the oracle behind `--front-end=rust`:
 
 - (Done: **hot replacement**, `sisu run --watch` and a run under it
   recorded and replayed, is stage 1's from `sisu1 0.17.0`, each save
@@ -645,26 +646,30 @@ still its (the second item):
   decisions 1102 and 1144), from `sisu1 0.21.0` without a program
   written aside (its R221), and `--defer-borrow` with them and without a
   program too (decision 1245), as a test run's deferral (`sir --tests
-  --defer-borrow`, its R189, decision 1143). A stage 1 older than 0.21.0
-  whose SIR lacks the world, older than 0.11.0, or one that does not
-  report its program itself (decision 424) still has the Rust front end
-  build the program for its transcripts (`transcript_sir`), and stage 1's
-  own tests run on it too. *Pay*: `transcript_sir` and the
-  `keeps_transcripts` probe deleted with the older stage 1.)
+  --defer-borrow`, its R189, decision 1143). Since decision 1280
+  `transcript_sir`, the `keeps_transcripts` probe,
+  `SISU_STAGE1_TRANSCRIPTS` and the empty program aside are deleted; a
+  stage 1 older than 0.21.0, which only `SISU_STAGE1` can name, is
+  `D0164` for a transcript and for `test --std` alone.)
 - (Done: **`sisu run --defer-borrow`**, **`sisu check --diary`**,
   **`sisu explain-borrow`** and **`sisu audit --ownership`** and
   **`--caps`** are stage 1's from `sisu1 0.17.0`, its R186 to R189,
   decisions 1103 to 1106; `sisu parse --shape` is stage 1's, decision
   622. An older stage 1 and `--front-end=rust` keep the Rust front end's.)
-- **Building stage 1** the first time and after a source of it changed,
-  the Rust front end's one role left with a stage 1 of 0.21.0 or later
-  (decision 1245):
-  `compiler/target/stage1/sisu1` is built by the Rust front end (`sisu
-  build --native` in `compiler/stage1`), so stage 1's own sources must stay
-  within the language the Rust front end knows. *Pay*: once they need a
-  rule only stage 1 has, the previous stage-1 executable builds the next
-  (the fixed point says the result is the same program), from a seed kept
-  as a released executable.
+- **Building stage 1** the first time, the Rust front end's one role
+  left beside the oracle (decisions 1280 and 1281): since decision 1281
+  the stage 1 built before builds the next when its version is the
+  sources' or the minor one before (`sisu build --native` in
+  `compiler/stage1` with it as the front end, the fixed point's path,
+  D-078), in 51 s where the Rust front end takes 11 s; the Rust front end
+  builds it only when there is none, the first build of a fresh tree, when
+  that build fails, or when `SISU_STAGE1_BUILDER=rust` asks. So stage 1's
+  own sources must stay within the language the Rust front end knows
+  only for that first build. *Pay*: a seed executable (decision 1288), a
+  released `sisu1` kept for each version outside the tree and checked by
+  its SHA-256 recorded in it, which a fresh tree builds its first stage 1
+  from; then stage 1's sources may use a rule only stage 1 has, and
+  building stage 1 is no longer the Rust front end's.
 
 What the driver does around stage 1, because of what its commands are:
 
@@ -1158,11 +1163,14 @@ Nothing here switches the default.
 - **The time a run starts in**: both run stage 1 first (about 0.55 s for
   a small file); the interpreter then starts at once, where a native run
   lowers, compiles and links (about 1.8 s a case when the suite builds its
-  217 cases four at a time, 384 to 477 s of builds). *Need*: the
-  executable kept under `build/` (a package's) or in the user's cache (a
-  file's), keyed by the SIR's hash and the toolchain's version, so that an
-  unchanged program runs at once; a script (`#!`, 10) stays interpreted
-  until the cache holds it. *Estimate*: two days.
+  217 cases four at a time, 384 to 477 s of builds). (Done for a file's
+  run, decision 1287: its executable is kept under `target/run-cache/`,
+  keyed by the SIR's text and the toolchain that compiles and links it,
+  so a second run of a two-line program takes 0.016 s where its build
+  took 0.067 s and the interpreter's run 0.014 s; a package's executable
+  stays under `build/`.) *Need*: a script (`#!`, 10) stays interpreted
+  until the cache holds it, and the cache of a package's build keyed as a
+  file's is.
 - **The seeded scheduler**: native code has it, with `--explore N`, the
   same seeds and `--stats`, and yield checks where the interpreter has
   them (decisions 203 and 204), so a seed names the same schedule but for
@@ -1241,7 +1249,10 @@ provenance one of them.
 Decision 1207 measured these conditions again and left the default as it
 is: the native modes run the 297 cases of `native.list`, but the
 capability log and replay, the two `--stats` kinds and the cache of
-executables are still to do, a round of their own.
+executables are still to do, a round of their own. Decision 1287 made the
+cache of executables, and decision 1289 orders the rest: the capability
+log and its replaying host first, then the two `--stats` kinds, which a
+native default may send to the interpreter as `--monitor` is.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

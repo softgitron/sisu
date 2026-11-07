@@ -12846,3 +12846,192 @@ R211, R214, R216 and R219)
 1226. Stage 1's twenty-sixth round brought no difference from the merge:
       the conformance suite's `testing/mutants` differs from stage 0's
       front end in nothing. Stage 1 decides it (RULES.md, R226).
+
+**Stage 0's twenty-fifth round: stage 1's 0.21.0 forms relied on and the
+Rust front end's last fallbacks deleted, stage 1 built by stage 1, three
+findings of the manual, the failure database and the JSON stream of `sisu
+test`, `--cover` over black-box files, a module's fixtures dropped whole,
+a cache of built executables, and what waits** (sections "Testing", "The
+query layer and the driver", "Stage 2: the native backend"; D-078, D-089;
+17, 18; decisions 380, 722, 1144, 1207, 1241, 1244, 1245 and 1247; stage
+1's R189, R219, R221 and R223)
+
+1280. The driver relies on stage 1's 0.21.0 forms (its R221 and R223,
+      decision 1245) and deletes what built around an older stage 1. `sisu
+      test` asks for `sir --tests --transcripts` when `transcript::find`
+      finds a transcript beside the program, and its transcripts run from
+      that SIR alone: `transcript_sir`, the Rust front end's build of the
+      program for them (decision 380), the `keeps_transcripts` probe and
+      `SISU_STAGE1_TRANSCRIPTS` are gone, `D0128` (the transcript that ran
+      on that build and stopped at its errors) is retired, and a SIR
+      without the world of transcripts, which only a stage 1 older than
+      0.21.0 named by `SISU_STAGE1` writes, fails the transcript with
+      `D0164`. `sisu test --std` outside a package sends `sir --tests --std`
+      naming no path from the working directory, and the empty program
+      written aside (decision 1144) is retired, an older stage 1 being
+      `D0164` there too. The suite's `testing/shop` holds the transcripts
+      on stage 1's SIR, the driver's test
+      `transcripts_run_from_stage_1s_sir_when_it_keeps_their_world` a
+      transcript only stage 1 accepts, and
+      `test_std_alone_runs_the_examples_outside_a_package` the 197 examples
+      passing in an empty directory with nothing written there (4.4 s, the
+      release driver). What the Rust front end has left is building stage 1
+      the first time (decision 1281) and being the oracle behind
+      `--front-end=rust` (port-debt.md). This changes no rule of the
+      language.
+
+1281. Stage 1 is built by stage 1 (18, "Bootstrapping"; D-078). When the
+      driver finds `target/stage1/sisu1` older than a source of stage 1, or
+      not its build in the profile asked for, and the executable there
+      prints a version of the same major version as `compiler/stage1`'s
+      manifest and of its minor version or the one before, that stage 1,
+      copied aside, builds the next: `sisu build --native` in
+      `compiler/stage1` with it as the front end (`SISU_STAGE1`, a process
+      of its own, not served), the Rust lowering and Cranelift as before
+      (decision 304), the fixed point's path. Without one, or when its
+      build fails, the Rust front end builds it as before;
+      `SISU_STAGE1_BUILDER=rust` asks for the Rust front end, and
+      `target/stage1/built-by` says which built it (`stage1 0.21.0`,
+      `rust`). Measured on the release profile with every contract checked:
+      the Rust front end builds stage 1 in 11.2 s through the debug driver
+      (7.6 s through the release one), stage 1 in 51.4 s (46.8 s), most of
+      it stage 1's check of its own 23 MB of SIR, which `bootstrap.sh`'s
+      A.sir takes 60 s to print; the two executables print the same SIR of
+      a program (`testing/cover`) and differ in their bytes where stage 1's
+      SIR of itself differs from stage 0's (R124), as `bootstrap.sh`
+      reports of stage1-A and stage1-B. The gates of the round ran on a
+      stage 1 built by stage 1. So stage 1's sources need stay within what
+      the Rust front end knows only while no built stage 1 is at hand, the
+      first build of a fresh tree; decision 1288 says what retires that.
+      This changes no rule of the language.
+
+1282. A run's build that stops at an error which is not an ownership
+      rule's ends with `D0006`, not `D0021`: stage 1 finds `@no_alloc`'s
+      `E0282` (its R215) among the ownership checker's findings of the SIR
+      and ends with `D0021`, whose `--defer-borrow` ran the program under
+      the monitor and called the allocation "a candidate false positive",
+      though the monitor observes the ownership rules alone (the manual's
+      finding of its step 38). The driver says the line as `D0006` when an
+      error before it is `E0282` (`owned_line`, every `build --for-run` it
+      sends; `NOT_OWNERSHIP`), and `run --defer-borrow` of a program whose
+      deferred findings hold one refuses it as the run without the option
+      does, its errors and `D0006`, status 1; the ownership rules' errors
+      outside `E04xx`, as `E0366` before an assignment and `E0397` of a
+      must-consume value, defer as before. Stage 1 should say it itself (its
+      report's ownership part without `E0282`); until then the driver's
+      line stands. The case `ownership/no_alloc_not_deferred` holds the
+      deferred run's refusal and the driver's test
+      `an_allocation_error_is_not_an_ownership_rules` the plain, deferred
+      and native runs. This changes no rule of the language.
+
+1283. `sisu test --mutate --since REV` outside a git repository says why in
+      one line, `D0158` with `D0165`'s reason, "the working directory is not
+      in a git repository", where `git diff` outside a repository compared
+      two paths and printed its whole usage, about 100 lines (the manual's
+      finding of its step 38): the driver asks `git rev-parse
+      --is-inside-work-tree` first, and a diff that fails inside one gives
+      git's first line (`fatal: bad revision`). The driver's test
+      `mutate_since_outside_git_says_so_in_a_line` holds the line. This
+      changes no rule of the language.
+
+1284. A replay token of a test that reads a module's fixture (decision 1202)
+      runs the test alone, its fixture made and dropped as the run of every
+      test showed them: the making's output only when the test is the first
+      that reads the fixture, the drop's only when it is the last, the
+      others made and dropped quietly (`Options::fixture_lines`), so that
+      the token's report is the run's, where it showed the fixture's setup
+      and drop around every replayed test and the conformance runner's
+      replay check failed on such a case (the manual's finding of its step
+      38). The case `testing/module_fixture` (three failing tests of one
+      fixture with a `Drop`) holds the run and each of its three tokens; it
+      stays out of `native.list`, a native run keeping a value for each
+      test (decision 1202). This changes no rule of the language.
+
+1285. The failure database and the JSON stream of `sisu test` (17;
+      decision 1247) in their smallest forms, both the runner's. The
+      database is a file beside the test cache, `PROGRAM.failures` for a
+      file and `failures` beside a package's `test-cache`, one JSON object
+      a line, `{"test": NAME, "choices": [...]}`: after a run each test
+      that failed on a case keeps the choices the case's replay token
+      carries (decision 461), one that passed loses its entry, and the next
+      run gives each test its saved choices as a token gives them
+      (`Options::saved_cases`), so `check` tries that case before its own
+      and a property that still fails says `case 1, shrunk 0 times`; it is
+      read and written when the cache is (not with `--no-cache`, a search,
+      `--sim`, `--update`, `--defer-borrow`, `--cover`, natively or for the
+      standard library's examples). `sisu test --format=json` prints, in
+      the place of the report, a line for each test's start
+      (`{"event":"start","test":NAME}`) and end (`"result"` `ok`,
+      `failed` or `blocked`, `"cached"` for a result the cache gave, how it
+      failed as `"message"`, the hole as `"hole"`, what a test that did not
+      pass printed as `"output"` and its `"replay"` token), the same for
+      each transcript, and a last line of the counts; the status is the
+      report's. The cases `testing/failure_database` (a saved case found
+      first, from the case's files) and `testing/json_events` (a pass, a
+      failure and a hole; in `native.list`, which has 299 cases) hold them.
+      This changes no rule of the language.
+
+1286. `sisu test --cover` of a package counts what its black-box test files
+      (`tests/*.sisu`, decision 508) reach of it: each is built with
+      `--cover` too, its runs counted, and a statement of the package's
+      function `F` reached as `PACKAGE.F` counts for the package, whose
+      report comes after the last file's summary, where the black-box
+      files ran uncounted and a function only they call was reported
+      unreached (decision 1241's limit). The case `packages/cover_black_box`
+      holds a function reached only from `tests/triple.sisu`. `--cover`
+      with `--native` stays `D0163`: a native test counts no statement, and
+      counting would be a counter at each statement of every function in
+      both lowerings and a table the runner reads back from the
+      executable, instrumentation of its own, out of proportion to a map
+      the interpreter already gives of the same tests. And a module's
+      fixture of a `Shared`, a `Weak`, a mutex, an arena, a channel's end, a
+      function value or a handle is dropped as a frame's drop drops it,
+      the last owner of a `Shared` dropping its value with its drops,
+      where `drop_now` let them go without them (decision 1244's leftover);
+      the interpreter's test `a_modules_fixture_of_a_shared_drops_its_value`
+      holds a `Shared` of a value with a `Drop`. This changes no rule of the
+      language.
+
+1287. A file's `sisu run --native` takes its executable from a cache of
+      built executables (decision 1207, D-089's condition): the program is
+      built again only when its SIR changed or what compiles and links it
+      did, the key hashing the SIR's text, the profile, the lowering, the
+      backend, the directory its debug information records and the size and
+      time of the driver, the runtime in Rust's library, the runtime in
+      Sisu's object and stage 2's executable when it lowers
+      (`native::cached_build`); the executable is kept under
+      `target/run-cache/KEY/`, the 32 most recently run, and
+      `SISU_RUN_CACHE=0` builds aside as before. A package's executable
+      already stays where its builds go (decision 231). A second run of a
+      two-line program takes 0.016 s where its build took 0.067 s each time
+      and the interpreter's run takes 0.014 s (the release driver, the
+      median of 9 under a load of about 11), so a native run of a small
+      file no longer pays its build. This changes no rule of the language.
+
+1288. A seed executable (18, "Bootstrapping", stage 3) is a released
+      `sisu1` kept for each version outside the tree, named by the version
+      and checked by its SHA-256 recorded in the tree, from which a fresh
+      tree builds its first stage 1 as decision 1281 builds the next from
+      the last; with it the Rust front end's building role retires and
+      stage 1's sources may use a rule only stage 1 has. This round makes
+      none: an executable is 46 MB, of one target, and the repository holds
+      no binaries and has no release to keep it in, and the Rust front end
+      stays as the oracle behind `--front-end=rust` whatever builds stage 1,
+      so a fresh tree's first build stays its until a release is kept.
+      This changes no rule of the language.
+
+1289. A native run is still not the default of `sisu run` (decision 1207):
+      of what it lacks the cache of built executables is done (decision
+      1287); the capability log and its replaying host come next, since
+      `--record` and `sisu replay` are a plain run's options and every
+      conformance case is recorded and replayed (N-04), then `--stats
+      stack-depth` and `--stats shared`, which only the interpreter
+      reports and only on request, so a native default may send them to
+      the interpreter as `--monitor` is; hot replacement, the monitor and
+      the counterexample mode stay the interpreter's whatever the default.
+      This changes no rule of the language.
+
+1290. The intrinsic families of decisions 1107, 1148, 1208 and 1248 and
+      tagged-pointer provenance (decision 1108) are not this round's, which
+      spent its time on 1280 to 1289; the formatting family stays the
+      first, with 903's measurement. This changes no rule of the language.
