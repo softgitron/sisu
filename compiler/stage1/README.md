@@ -3246,8 +3246,9 @@ file (R233), each served. The new cases are in `cases/findings28/` and
 
 This round took R225's third step, what decision 1327 asks of stage 1
 before the runtime's half, R235's prerequisites, the manual's finding of
-`E0282`'s note and the merge. RULES.md has the rules (R237 to R240,
-decisions 1340 to 1343) and their decision texts:
+`E0282`'s note, the merge and stage 0's ask of decision 1361. RULES.md has
+the rules (R237 to R241, decisions 1340 to 1344) and their decision
+texts:
 
 - **D-060's allocators, the third step** (R237): every method of
   `list`, `dict`, `set` and `String`, and their impls of `Debug`,
@@ -3272,6 +3273,11 @@ decisions 1340 to 1343) and their decision texts:
   intrinsic the callee lowers to.
 - **The merge's differences** (R240): none; `testing/cover_transcript`
   differs from stage 0's front end in nothing.
+- **The allocator in the SIR** (R241, stage 0's decision 1361): for each
+  allocator but `Global` that a reached function's collection is on, its
+  `impl mem.Allocator` with `acquire` and `release`, whether or not the
+  program calls the trait, so that the runtime can grow the collection
+  through it.
 
 Decided against: the type checker's memo itself, for the round (R238),
 the prelude's impls made generic over the allocator, and `Default` of a
@@ -4499,7 +4505,8 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     twenty-ninth round took the collections' other methods on any
     allocator, a `Global` program's SIR kept (R237), each definition's
     key across requests and each body's reads (R238), and `E0282`'s note
-    through a call in the program's words (R239); decided against: the
+    through a call in the program's words (R239), and the allocator's
+    impl in the SIR for the runtime (R241); decided against: the
     type checker's memo itself, for the round (R238), and `Default` of a
     collection on another allocator (R237); left: compile-time types
     (R155), the allocators' runtime half and steps 4 and 5 (R225, R234,

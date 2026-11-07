@@ -60,7 +60,7 @@ from stage1.typeck import (
     std_lines,
     std_text,
 )
-from stage1.typeck.program import DefKind, EnumInfo, FnInfo, ModuleId, RANK_PHASE, RANK_STEP
+from stage1.typeck.program import DefKind, EnumInfo, FnInfo, ImplInfo, ModuleId, RANK_PHASE, RANK_STEP
 from stage1.typeck.program import Program as Resolved
 from stage1.typeck.thir import BodyKind, TBody
 from stage1.typeck.ty import DefId, TyData, Types
@@ -564,10 +564,12 @@ pure def trait_decls(
     # finds `<T as Trait>.Name` in the impl for `T`.
     var projected: set[String] = set()
     var mentioned: set[String] = set()
+    var allocs: list[Type] = []
     for f in functions:
         for l in f.locals:
             assoc_traits(l.ty, mut projected)
             type_names(l.ty, mut mentioned)
+            allocator_types(l.ty, mut allocs)
         for b in f.blocks:
             for st in b.stmts:
                 match st.kind:
@@ -595,7 +597,11 @@ pure def trait_decls(
             continue
         # An impl of a trait no function calls through, and without
         # associated types, gives nothing: its names and types are not made.
-        let dispatched = traits.contains(info.trait_ref.def_)
+        var dispatched = traits.contains(info.trait_ref.def_)
+        # The allocator a collection of the functions grows through, whose
+        # impl the runtime calls (RULES.md, R241).
+        if not dispatched and is_allocator_impl(ctx, prog, mut types, info, allocs, mentioned):
+            dispatched = True
         if not dispatched and info.assoc.is_empty():
             continue
         let trait_name = prog.qualified_name(info.trait_ref.def_)
@@ -991,6 +997,7 @@ pure def lower_reached(
     var keep: set[String] = set()
     var mentioned: set[String] = set()
     var typed_names: set[String] = set()
+    var allocs: list[Type] = []
     var work: list[String] = roots.copy()
     while True:
         while let Some(n) = work.pop():
@@ -1060,6 +1067,7 @@ pure def lower_reached(
             let f = ref fs[at]
             for l in f.locals:
                 type_names(l.ty, mut mentioned)
+                allocator_types(l.ty, mut allocs)
             reach_from(prog, ctx.traits, f, mut work, mut dispatched, mut mentioned)
             # Defaults and drops of declared types are reached through the
             # types, and so is a type's invariant check, which the run time
@@ -1086,7 +1094,15 @@ pure def lower_reached(
         for i in prog.impls:
             let info = prog.impl_info(i) else:
                 continue
-            if added_impls.contains(i) or not dispatched.contains(info.trait_ref.def_):
+            if added_impls.contains(i):
+                continue
+            if not dispatched.contains(info.trait_ref.def_):
+                # An allocator a reached collection grows through, whose
+                # `acquire` and `release` the runtime calls (RULES.md, R241).
+                if is_allocator_impl(ctx, prog, mut types, info, allocs, mentioned):
+                    _ = added_impls.add(i)
+                    for (_, m) in info.methods:
+                        work.push(ctx.fn_name(prog, types, m))
                 continue
             var needed = True
             if let Type.Named(n, a) = ctx.ty(prog, mut types, info.self_ty):
@@ -1123,6 +1139,80 @@ pure def allocated_name(n: str, args: int) -> String:
     if args == whole:
         return "{n}#allocator"
     return n.to_string()
+
+## The allocators other than `Global` that the collections in a type are
+## on, each once: `ref mem.Region` of a `list[int, ref mem.Region]`, and
+## for a collection on a type parameter, whose instance the run makes,
+## `GENERIC_ALLOCATOR` (RULES.md, R241).
+pure def allocator_types(t: Type, mut out: list[Type]):
+    match t:
+        case Type.Named(n, args):
+            if allocated_name(n, len(args)) != n:
+                var a = args[len(args) - 1].copy()
+                if has_param(a):
+                    a = Type.Param(GENERIC_ALLOCATOR)
+                if not out.contains(a):
+                    if a != Type.Named(name="mem.Global".to_string(), args=[]):
+                        out.push(a)
+            for x in args:
+                allocator_types(x, mut out)
+        case Type.Tuple(es):
+            for e in es:
+                allocator_types(e, mut out)
+        case Type.Ref(x, _):
+            for y in x:
+                allocator_types(y, mut out)
+        case _:
+            pass
+
+## Whether a type mentions a type parameter.
+pure def has_param(t: Type) -> bool:
+    return match t:
+        case Type.Param(_): True
+        case Type.Named(_, args): any_param(args)
+        case Type.Tuple(es): any_param(es)
+        case Type.Ref(x, _): any_param(x)
+        case Type.Fn(ps, r, _): any_param(ps) or any_param(r)
+        case Type.Dyn(_, args): any_param(args)
+        case Type.Assoc(_, _, _, _): True
+        case _: False
+
+pure def any_param(ts: list[Type]) -> bool:
+    for t in ts:
+        if has_param(t):
+            return True
+    return False
+
+## The stand-in of `allocator_types` for a collection on a type parameter.
+const GENERIC_ALLOCATOR: int = -1
+
+## Whether an impl is `std.mem`'s `Allocator` for one of `allocs`, the
+## allocators the program's collections are on, or, when a collection is
+## on a type parameter, for any type the program mentions but `Global`,
+## whose impl the runtime then has as a generic body's instance may need
+## it (RULES.md, R241).
+pure def is_allocator_impl(
+    ctx: Ctx,
+    prog: Resolved,
+    mut types: Types,
+    info: ImplInfo,
+    allocs: list[Type],
+    mentioned: set[String],
+) -> bool:
+    if allocs.is_empty() or prog.qualified_name(info.trait_ref.def_) != "mem.Allocator":
+        return False
+    let self_ty = ctx.ty(prog, mut types, info.self_ty)
+    if allocs.contains(self_ty):
+        return True
+    if not allocs.contains(Type.Param(GENERIC_ALLOCATOR)):
+        return False
+    var named = self_ty.copy()
+    if let Type.Ref(inner, _) = self_ty:
+        if len(inner) == 1:
+            named = inner[0].copy()
+    if let Type.Named(n, _) = named:
+        return n != "mem.Global" and mentioned.contains(n)
+    return False
 
 ## The names of the named types in a type.
 pure def type_names(t: Type, mut out: set[String]):

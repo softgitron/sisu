@@ -12547,10 +12547,11 @@ the same intrinsics on a collection of today's layout, which must behave
 as `Global`'s do: the case `findings29/allocators_generic.sisu` does it
 on today's runtime, interpreted and natively. The functions
 `list#allocator.*` are ordinary SIR functions. R234's forms are as they
-were, byte for byte (`findings28/asks.answers`' SIR of
-`allocator_region.sisu` is unchanged): its eight intrinsics, their type
-arguments and their declarations; this rule only adds the intrinsics
-above on a collection that names its allocator.
+were, byte for byte (this rule changes nothing of
+`findings28/asks.answers`' SIR of `allocator_region.sisu`, to which R241
+adds the allocator's impl): its eight intrinsics, their type arguments
+and their declarations; this rule only adds the intrinsics above on a
+collection that names its allocator.
 
 No form the driver relies on is added by this rule, and `sisu1
 --version` stays 0.22.0.
@@ -12787,3 +12788,80 @@ own cases' and `findings27/allocator_errors`'s `.diag`, which R237 changes.
 1343. Stage 1's twenty-ninth round brought no difference from the merge:
       the conformance suite's `testing/cover_transcript` differs from
       stage 0's front end in nothing. Stage 1 decides it (RULES.md, R240).
+
+## R241. The allocator a collection grows through is in the SIR (decision 1344)
+
+**The rule.** Stage 0's twenty-seventh round asks it (its decision
+1361): the runtime grows a collection on another allocator by calling the
+allocator's `acquire` and gives its room back by `release` (R234, R237),
+but lowering put an impl of a trait in the SIR only for a trait a
+function calls through (`trait_decls`, `lower_reached`), so a program that
+calls no method of `Allocator` itself, as `findings28/allocator_region.sisu`
+does not, had no `impl mem.Allocator for ref mem.Region` and no
+`acquire` or `release` for the runtime to call. Now, for each allocator
+other than `mem.Global` that a collection in the type of a local of a
+reached function is on (`allocator_types`: `ref mem.Region` of a
+`list[int, ref mem.Region]`, of a `dict` or `set` on it, of a `String`
+on it, at any depth of the type), the SIR has the impl of `mem.Allocator`
+for that type, `impl mem.Allocator for ref mem.Region { acquire:
+ref.mem.Allocator.acquire, release: ref.mem.Allocator.release }`, and
+its methods' functions with what they reach (`is_allocator_impl`). A
+collection on a type parameter (`list[int, $0]` in a generic function,
+whose instance the run makes) keeps the impl of `mem.Allocator` for every
+type the reached functions mention but `Global`, a reference's referent
+among them, so that the instance finds the one its type argument names.
+`Global`'s impl, whose methods are the intrinsics `mem.global.acquire`
+and `mem.global.release`, is put in only as before, since the runtime
+grows a collection on `Global` as it always has. A program that names no
+allocator has the SIR it had.
+
+**What the runtime may rely on**: a collection whose SIR type names an
+allocator `A` other than `mem.Global`, as the last argument of `list`,
+`set` or `dict` or the argument of `String`, in a local of any function
+of the SIR, comes with `impl mem.Allocator for A` and the functions its
+`acquire` and `release` name; a collection on a function's type
+parameter comes with the impls for each type the program mentions but
+`Global`, and the runtime finds the one for the instance's type argument
+by the type, as it finds any impl. The forms are R234's: the impl line
+as every impl line is written, `pure def acquire(self, layout: Layout) ->
+ptr mut u8?` and `pure unsafe def release(self, block: ptr mut u8,
+layout: Layout)`.
+
+No form the driver relies on, and `sisu1 --version` stays 0.22.0.
+
+**Decided against**: the impls taken from the intrinsics' type
+arguments alone, since a collection's intrinsic calls carry none
+(`list.push(copy _11, copy _12)`) where the locals' types always name the
+allocator; and, for a collection on a type parameter, the instances'
+type arguments followed through the calls, which the generic SIR does
+not make: the impls of the mentioned types are a few functions more in
+such a program only.
+
+**Why.** Stage 0's twenty-seventh round, decision 1361.
+
+**In stage 1.** `lower` (`allocator_types`, `has_param`,
+`GENERIC_ALLOCATOR`, `is_allocator_impl`, `trait_decls`,
+`lower_reached`).
+
+**What it changes.** The SIR of a program with a collection on another
+allocator. Blessed again: `cases/findings28/asks.answers` (the SIR of
+`allocator_region.sisu`: the impl for `ref mem.Region`, its functions and
+what they reach, `mem.align_up` and the intrinsics they call) and
+`cases/findings29/asks.answers` (the same of `allocator_region_sorted.sisu`,
+and, since the generic `list#allocator.sort_by` has a list on its type
+parameter, `mem.Region`'s own impl beside it).
+The new case `cases/findings29/allocator_impl.sisu`, whose `.sir` holds
+the impl for a list on a borrowed `Region` grown by `push` alone.
+
+- Differs: `compiler/stage1/cases/findings29/allocator_impl.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1344**, for docs/architecture.md:
+
+1344. For each allocator other than `mem.Global` that a collection in
+      the type of a local of a reached function is on, the SIR has its
+      `impl mem.Allocator` with the functions its `acquire` and `release`
+      name, whether or not the program calls a method of the trait; a
+      collection on a type parameter keeps the impls of every type the
+      program mentions but `Global`. The runtime grows such a collection
+      through them (stage 0's decision 1361). Stage 1 decides it
+      (RULES.md, R241).

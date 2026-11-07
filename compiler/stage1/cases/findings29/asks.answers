@@ -65,9 +65,14 @@ struct mem.Global {  }
 
 struct mem.Region drop mem.Region.Drop.drop { base: ptr_mut[u8], size: int, used: Cell[int] }
 
+intrinsic Cell.get pure inner 0
 intrinsic Cell.new pure from 0 own 0
+intrinsic Cell.set own 1
 intrinsic Iter.next pure inner 0 keeps 0
 intrinsic Option.expect pure from 0 inner 1 own 0
+intrinsic contract.fail pure
+intrinsic fmt.debug pure
+intrinsic fmt.new pure
 intrinsic int.cmp pure
 intrinsic len pure
 intrinsic list.contains pure
@@ -79,8 +84,12 @@ intrinsic list.reverse pure keeps 0
 intrinsic list.with_allocator pure from 0 own 0
 intrinsic mem.global.acquire pure
 intrinsic mem.global.release pure
+intrinsic mem.ptr.offset pure inner 0
 intrinsic panic pure
 intrinsic range pure
+
+impl mem.Allocator for mem.Region { acquire: mem.Region.mem.Allocator.acquire, release: mem.Region.mem.Allocator.release }
+impl mem.Allocator for ref mem.Region { acquire: ref.mem.Allocator.acquire, release: ref.mem.Allocator.release }
 
 fn sorted_in(2) source 0 @9:5-9:14 {
     let _0: int
@@ -383,6 +392,144 @@ fn merge_runs[T](3) pure source 1 from 0 1 own 0 1 @2234:10-2234:20 {
     goto bb26
   bb26:
     return @2251:5-2251:15
+}
+
+fn mem.align_up(2) pure source 2 @291:14-291:22 {
+    let _0: int
+    let _1: int "n" @291:23-291:29
+    let _2: int "align" @291:31-291:41
+    let _3: bool
+    let _4: String
+    let _5: ref mut String
+    let _6: ()
+    let _7: (int, String)
+    let _8: list[(int, String)]
+    let _9: Never
+    let _10: bool
+    let _11: int
+    let _12: int
+    let _13: String
+    let _14: ref mut String
+    let _15: int
+    let _16: int
+    let _17: (int, String)
+    let _18: String
+    let _19: ref mut String
+    let _20: (int, String)
+    let _21: String
+    let _22: ref mut String
+    let _23: int
+    let _24: (int, String)
+    let _25: String
+    let _26: ref mut String
+    let _27: (int, String)
+    let _28: list[(int, String)]
+    let _29: Never
+    let _30: int
+    let _31: int
+    let _32: int
+    let _33: int
+    let _34: bool "flag"
+    let _35: bool "flag"
+    let _36: bool "flag"
+  bb0:
+    _34 = const false
+    _35 = const false
+    _36 = const false
+    _3 = gt copy _2, const 0 @292:14-292:23
+    switch copy _3 [0: bb2, else: bb1] @292:14-292:23
+  bb1:
+    _12 = sub copy _2, const 1 @292:36-292:47
+    _11 = bitand copy _2, copy _12 @292:28-292:47
+    _10 = eq copy _11, const 0 @292:28-292:52
+    switch copy _10 [0: bb6, else: bb5] @292:28-292:52
+  bb2:
+    _4 = call intrinsic fmt.new() @292:14-292:19
+    _5 = ref mut _4 @292:14-292:19
+    _6 = call intrinsic fmt.debug(copy _5, copy _2, const "") @292:14-292:19
+    goto bb3
+  bb3 (unwind bb4):
+    _7 = tuple(const 0, move _4) @292:14-292:23
+    _8 = list(move _7) @292:14-292:23
+    _9 = call intrinsic contract.fail(const 0, const "align_up", const "align > 0", move _8) @292:14-292:23
+    unreachable @292:14-292:23
+  bb4 (cleanup):
+    resume
+  bb5:
+    _31 = add copy _1, copy _2 @293:13-293:22
+    _30 = sub copy _31, const 1 @293:12-293:27
+    _33 = sub copy _2, const 1 @293:31-293:42
+    _32 = bitnot copy _33 @293:30-293:42
+    _0 = bitand copy _30, copy _32 @293:12-293:42
+    return @293:5-293:42
+  bb6:
+    _13 = call intrinsic fmt.new() @292:28-292:47
+    _14 = ref mut _13 @292:28-292:47
+    _16 = sub copy _2, const 1 @292:36-292:47
+    _15 = bitand copy _2, copy _16 @292:28-292:47
+    _6 = call intrinsic fmt.debug(copy _14, copy _15, const "") @292:28-292:47
+    goto bb7
+  bb7 (unwind bb4):
+    _17 = tuple(const 6, move _13) @292:28-292:52
+    _34 = const true
+    goto bb8
+  bb8 (unwind bb9):
+    _18 = call intrinsic fmt.new() @292:28-292:33
+    _19 = ref mut _18 @292:28-292:33
+    _6 = call intrinsic fmt.debug(copy _19, copy _2, const "") @292:28-292:33
+    _20 = tuple(const 0, move _18) @292:28-292:52
+    _35 = const true
+    goto bb10
+  bb9 (cleanup):
+    drop _17 if _34
+    resume
+  bb10 (unwind bb11):
+    _21 = call intrinsic fmt.new() @292:36-292:47
+    _22 = ref mut _21 @292:36-292:47
+    _23 = sub copy _2, const 1 @292:36-292:47
+    _6 = call intrinsic fmt.debug(copy _22, copy _23, const "") @292:36-292:47
+    _24 = tuple(const 15, move _21) @292:28-292:52
+    _36 = const true
+    goto bb12
+  bb11 (cleanup):
+    drop _20 if _35
+    goto bb9
+  bb12 (unwind bb13):
+    _25 = call intrinsic fmt.new() @292:37-292:42
+    _26 = ref mut _25 @292:37-292:42
+    _6 = call intrinsic fmt.debug(copy _26, copy _2, const "") @292:37-292:42
+    _27 = tuple(const 9, move _25) @292:28-292:52
+    _34 = const false
+    _35 = const false
+    _36 = const false
+    _28 = list(move _17, move _20, move _24, move _27) @292:28-292:52
+    _29 = call intrinsic contract.fail(const 0, const "align_up", const "align & (align - 1) == 0", move _28) @292:28-292:52
+    unreachable @292:28-292:52
+  bb13 (cleanup):
+    drop _24 if _36
+    goto bb11
+}
+
+fn mem.Layout.is_valid(1) pure source 2 @278:18-278:26 {
+    let _0: bool
+    let _1: mem.Layout "self" @278:18-278:26
+    let _2: int
+    let _3: int
+  bb0:
+    _0 = ge copy _1.0, const 0 @279:16-279:30
+    switch copy _0 [0: bb2, else: bb1] @279:16-279:49
+  bb1:
+    _0 = gt copy _1.1, const 0 @279:35-279:49
+    switch copy _0 [0: bb4, else: bb3] @279:16-279:88
+  bb2:
+    switch copy _0 [0: bb4, else: bb3] @279:16-279:88
+  bb3:
+    _3 = sub copy _1.1, const 1 @279:67-279:83
+    _2 = bitand copy _1.1, copy _3 @279:54-279:83
+    _0 = eq copy _2, const 0 @279:54-279:88
+    return @279:9-279:88
+  bb4:
+    return @279:9-279:88
 }
 
 fn list#allocator.sort_by[T, A](2) pure source 2 @989:14-989:21 {
@@ -760,6 +907,64 @@ fn list.sort_by[T](2) pure source 1 @2067:14-2067:21 {
     return
 }
 
+fn mem.Region.mem.Allocator.acquire(2) pure source 2 @446:14-446:21 {
+    let _0: Option[ptr_mut[u8]]
+    let _1: ref mem.Region "self" @446:14-446:21
+    let _2: mem.Layout "layout" @446:28-446:42
+    let _3: bool
+    let _4: int
+    let _5: bool
+    let _6: int "start" @449:13-449:18
+    let _7: int
+    let _8: ref Cell[int]
+    let _9: bool
+    let _10: int
+    let _11: ()
+    let _12: ref Cell[int]
+    let _13: int
+    let _14: ptr_mut[u8]
+  bb0:
+    _4 = call fn mem.REGION_ALIGN() @447:27-447:39
+    _3 = gt copy _2.1, copy _4 @447:12-447:39
+    switch copy _3 [0: bb2, else: bb3] @447:12-447:64
+  bb1:
+    _8 = ref _1.*.2 @449:30-449:39
+    _7 = call intrinsic Cell.get(copy _8) @449:30-449:45
+    _6 = call fn mem.align_up(copy _7, copy _2.1) @449:21-449:60
+    _10 = add copy _6, copy _2.0 @450:12-450:31
+    _9 = gt copy _10, copy _1.*.1 @450:12-450:43
+    switch copy _9 [0: bb5, else: bb6] @450:12-450:43
+  bb2:
+    _5 = call fn mem.Layout.is_valid(copy _2) @447:47-447:64
+    _3 = not copy _5 @447:43-447:64
+    switch copy _3 [0: bb1, else: bb4] @447:12-447:64
+  bb3:
+    switch copy _3 [0: bb1, else: bb4] @447:12-447:64
+  bb4:
+    _0 = variant Option::None() @448:20-448:24
+    return @448:13-448:24
+  bb5:
+    _12 = ref _1.*.2 @457:13-457:22
+    _13 = add copy _6, copy _2.0 @457:27-457:46
+    _11 = call intrinsic Cell.set(copy _12, copy _13) @457:13-457:47
+    _14 = call intrinsic mem.ptr.offset(copy _1.*.0, copy _6) @458:25-458:48
+    _0 = variant Option::Some(copy _14) @458:20-458:49
+    return @458:13-458:49
+  bb6:
+    _0 = variant Option::None() @451:20-451:24
+    return @451:13-451:24
+}
+
+fn mem.Region.mem.Allocator.release(3) pure source 2 @460:21-460:28 {
+    let _0: ()
+    let _1: ref mem.Region "self" @460:21-460:28
+    let _2: ptr_mut[u8] "block" @460:35-460:52
+    let _3: mem.Layout "layout" @460:54-460:68
+  bb0:
+    _0 = const ()
+    return
+}
+
 fn mem.Region.Drop.drop(1) drop pure source 2 @464:14-464:18 {
     let _0: ()
     let _1: ref mut mem.Region "self" @464:14-464:18
@@ -775,6 +980,29 @@ fn mem.Region.Drop.drop(1) drop pure source 2 @464:14-464:18 {
     _5 = struct mem.Layout(copy _1.*.1, copy _6) @468:44-468:86
     _2 = call intrinsic mem.global.release(copy _4, copy _1.*.0, copy _5) @468:16-468:87
     dead _3 @468:87-468:87
+    _0 = const ()
+    return
+}
+
+fn ref.mem.Allocator.acquire(2) pure source 2 @474:14-474:21 {
+    let _0: Option[ptr_mut[u8]]
+    let _1: ref mem.Region "self" @474:14-474:21
+    let _2: mem.Layout "layout" @474:28-474:42
+    let _3: ref mem.Region "region" @475:13-475:19
+    let _4: ref mem.Region
+  bb0:
+    _3 = copy _1 @475:34-475:38
+    _4 = ref _3.* @476:16-476:22
+    _0 = call fn mem.Region.mem.Allocator.acquire(copy _4, copy _2) @476:16-476:38
+    return @476:9-476:38
+}
+
+fn ref.mem.Allocator.release(3) pure source 2 @478:21-478:28 {
+    let _0: ()
+    let _1: ref mem.Region "self" @478:21-478:28
+    let _2: ptr_mut[u8] "block" @478:35-478:52
+    let _3: mem.Layout "layout" @478:54-478:68
+  bb0:
     _0 = const ()
     return
 }

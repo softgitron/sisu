@@ -1,0 +1,15 @@
+# The allocator a collection grows through is in the SIR (stage 0's
+# decision 1361; RULES.md, R241): this program calls no method of
+# `Allocator`, yet its list on a borrowed `Region` needs `impl
+# mem.Allocator for ref mem.Region` with its `acquire` and `release`,
+# which the runtime calls to grow the list and give its room back.
+from std.mem import Region
+
+def grown(r: ref Region) -> int:
+    var xs: list[int, ref Region] = list.with_allocator(r)
+    xs.push(1)
+    return len(xs)
+
+def main():
+    let region = Region.bump(capacity=256)
+    _ = grown(ref region)
