@@ -1125,11 +1125,15 @@ impl Runner<'_> {
         let shown = |o: &Output| format!("{}\n--- stderr\n{}\n--- status {}\n", o.stdout, o.stderr, o.status);
         let monitored = invoke_with_input(self.sisu, &cwd, &with_args(&["run", "--monitor"]), input);
         self.report.monitored += 1;
+        // The monitor's run is the interpreter's, so a package whose plain
+        // run is native (decision 1360) is compared with `NAME.out`.
+        let interpreted_run =
+            format!("{}\n--- stderr\n{}\n--- status {}\n", interpreted, run.stderr, run.status);
         self.compare(
             case,
             "the monitor agrees with the checker (a difference is a soundness hole)",
             None,
-            &shown(&run),
+            &interpreted_run,
             &shown(&monitored),
         );
         let log = sandbox.dir.join("run.log").display().to_string();
