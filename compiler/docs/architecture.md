@@ -13303,3 +13303,113 @@ query layer and the driver", "Stage 2: the native backend"; D-078, D-089;
       own cases do, and `testing/failure_database`, `testing/json_events` and
       `packages/cover_black_box` do not differ. Stage 1 decides it
       (RULES.md, R236).
+
+**Stage 0's twenty-seventh round: a native run as the default of `sisu run`, the first command after stage 1 is built again, and what waits (the allocators' runtime half, a failing run's token, the intrinsic families)** (sections "Stage 2: the native backend", "The query layer and the driver", "Testing"; D-060, D-085, D-089; 06, 17, Q-77; decisions 721, 1207, 1287, 1289, 1321, 1323, 1326 to 1328; stage 1's R158, R234 and R237)
+
+1360. A plain `sisu run` on stage 1 runs the program natively (D-089;
+      the conditions decisions 1207 and 1289 left open hold): its SIR,
+      from the served `build --for-run --emit-sir` built for the native
+      runtime, is built by stage 2 and the Sisu backend in the debug
+      profile into the cache of built executables (decision 1287) and run
+      as `run --native` runs it, with the seed, `--explore`, the
+      schedulers, the scheduler's `--stats` and `--record` (decision
+      1321). The interpreter runs it under `--interpreted` (the flag
+      D-089 keeps for the oracle; `D0109` beside `--native`) and the
+      options only it serves (`--monitor`, `--defer-borrow`, `--watch`,
+      `--sir`, `--stats stack-depth`, `--stats shared`, decisions 54,
+      1200 and 1326); a program that reaches raw memory or C
+      (`native::reaches_raw_memory`: an intrinsic of `extern.`, or of
+      `mem.` but `mem.size_of` and `mem.align_of`, or an `@export`),
+      whose provenance and places only the interpreter's checked model
+      checks (D-085, Q-77's second option) and whose emulated C writes
+      the log holds; and one the native backend refuses (`D0103`, not
+      shown, the refusal kept beside the cache's entry so that the next
+      run does not build again), each built again for the interpreter's
+      runtime so that `target.runtime` says `interpreter` (decision 721).
+      The Rust front end's run stays the interpreter's. What held when
+      decided: the six native modes over `native.list`'s 317 lines with
+      none failed, 259 of its running cases recorded and replayed both
+      ways, a cached run of 0.016 s against the interpreter's 0.014 s
+      (decision 1287); of the suite's 259 running files 226 now run
+      natively by default and 33 reach raw memory (32 of `unsafe/`, one of
+      `std/`). The runner's plain run of a case is the native one,
+      compared with `NAME.native-out` where the case has one, and its runs
+      under the monitor and from `sisu sir` are the interpreter's, compared
+      with `NAME.out` there (`reflect/target`, the one such case), so that
+      each case is held to both runtimes; no expectation of the suite
+      changed (593 cases, 3 failed before the runner's change, all
+      `reflect/target`'s, 0 after), the suite took 162 s of wall time on
+      a cold cache, a two-line program's cached run takes 0.040 s where
+      its run under `--interpreted` takes 0.046 s and its first run, which
+      builds it, 0.93 s (the release driver, the median of 9 under a load
+      of about 6), and `sisu help`'s line of `run` says the rule
+      (`D0002`). This changes no rule of the language.
+
+1361. The allocators' runtime half (R234's eight intrinsics; decision
+      1327's list) waits again, for a form of stage 1's: the SIR stage 1
+      writes for a collection on `ref Region` (`findings28/
+      allocator_region.sisu`'s program, from `sisu1 0.22.0` and from the
+      twenty-ninth round's worktree alike) holds neither `impl
+      mem.Allocator for ref mem.Region` nor its `acquire` and `release`,
+      which appear only when the program itself calls a method of the
+      trait, so neither runtime can grow such a collection through the
+      program's allocator as R234 asks ("called as a `call trait
+      mem.Allocator.acquire` is"). Stage 1 must list, for each allocator
+      type a collection intrinsic is instantiated at other than
+      `mem.Global`, the impl of `mem.Allocator` for it and its functions in
+      the SIR. Stage 1's twenty-ninth round (its R237) adds the
+      collections' other intrinsics on such a collection, so the
+      interpreter's value of a collection on an allocator (a field each of
+      `Value::List` and the tables, or a value around them that each
+      intrinsic reads through) and the native second layout, which every
+      inline operation of both lowerings must tell from `Global`'s, are
+      designed once for R234's and R237's forms together, a round of their
+      own with both: about a week natively and two days in the
+      interpreter. Meanwhile such a program reaches raw memory through
+      `Region`'s `mem.global.acquire`, so decision 1360 leaves it to the
+      interpreter, which refuses its intrinsics as before. This changes
+      no rule of the language.
+
+1362. The first command after stage 1 is built again is answered by the
+      new stage 1 (the coordinator's finding: the suite's first run after
+      stage 1's sources changed failed 5 of 593 cases with diagnostics not
+      of the new stage 1, the second none). Two paths answered with
+      another front end than the one the command would run: the driver's
+      probes of the stage 1 that chooses a command's front end
+      (`front::stage1_takes_the_roles` and `stage1_sir_reports`, which
+      route `check --diary`, `test --std`, `--defer-borrow` and `run
+      --watch`) answered false while the executable was stale, so a
+      command that came during another's build went to the Rust front end;
+      they now build it, or wait under the build's lock while another
+      command builds it, as the command itself would (`current_stage1`).
+      And the driver's server of a stage 1 compared only its own
+      executable between requests, and the processes of a stage 1 that
+      `SISU_STAGE1` names, which R158's own check of its build does not
+      cover, kept answering after the file was replaced; the server now
+      keeps that stage 1's size and time too and answers `stale` when they
+      changed, as for its own (R158's marker), so the command asks a new
+      server of the new executable. The driver's test
+      `a_rebuilt_stage_1_answers_the_first_command_after_it` replaces the
+      stage 1 at `SISU_STAGE1` by a script answering every request with
+      `new`, renamed into place as a build is, and asks at once: the
+      first command after it prints `new`, where the driver of round 26
+      printed the old stage 1's answer. This changes no rule of the
+      language.
+
+1363. A failing `sisu run` prints no replay token (decision 1321's open
+      item), decided against: 17 gives the token to a failing test, inside
+      which every source of nondeterminism is a fake or the seeded
+      scheduler, and says that "outside tests the same reproduction comes
+      from the capability log that `sisu run --record` writes and `sisu
+      replay` re-executes", and a run holds the real `System`, which 17's
+      token could only say it cannot replay; 06 asks for no token of a run.
+      A failing run is reproduced by `--record`, natively too since
+      decision 1321 and by default since decision 1360. This changes no
+      rule of the language.
+
+1364. The intrinsic families of decisions 1107, 1148, 1208, 1248 and
+      1290 and tagged-pointer provenance (decision 1108) are not this
+      round's, which spent its time on 1360 to 1363; the formatting
+      family stays the first, with 903's measurement, and provenance is
+      now also what lets decision 1360's default take raw memory. This
+      changes no rule of the language.
