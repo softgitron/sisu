@@ -14,9 +14,12 @@
 //! started when every one is busy. The first command that finds no server
 //! starts one under a lock beside the socket, so that one starts. The
 //! server ends after [`IDLE`] without a request and when this executable
-//! is built again, answering `stale` to the request that finds it so; a
-//! process of stage 1 that answers `stale` (`sisu1` was built again) is
-//! replaced and the request sent again. Whatever goes wrong, the command
+//! or the `sisu1` it serves is built again, answering `stale` to the
+//! request that finds it so, which the command then sends to a new server
+//! of the new `sisu1` (decision 1362: the stage 1 that `SISU_STAGE1`
+//! names is checked by nothing else); a process of stage 1 that answers
+//! `stale` (`sisu1` was built again) is replaced and the request sent
+//! again. Whatever goes wrong, the command
 //! runs stage 1 as a process of its own, as it does under
 //! `SISU_STAGE1_SERVE=0`.
 
@@ -215,8 +218,9 @@ pub fn serve(args: &[String]) -> i32 {
     let _ = std::fs::remove_file(&sock);
     let Ok(listener) = UnixListener::bind(&sock) else { return sisu_interp::exit::ERROR };
     let state = Arc::new(State {
-        stage1: crate::front::Stage1::at(sisu1, crate::front::compiler_dir()),
-        built: stamp(&me),
+        built: (stamp(&me), stamp(&sisu1)),
+        stage1: crate::front::Stage1::at(sisu1.clone(), crate::front::compiler_dir()),
+        sisu1,
         me,
         sock,
         most: std::thread::available_parallelism().map_or(2, |n| n.get()),
@@ -227,14 +231,14 @@ pub fn serve(args: &[String]) -> i32 {
         ending: std::sync::atomic::AtomicBool::new(false),
     });
     // The watch: the server ends when it was idle long enough, or this
-    // executable was built again, between requests.
+    // executable or its stage 1 was built again, between requests.
     {
         let state = state.clone();
         std::thread::spawn(move || {
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 let quiet = state.last.lock().map(|t| t.elapsed() >= idle).unwrap_or(true);
-                let rebuilt = stamp(&state.me) != state.built;
+                let rebuilt = state.rebuilt();
                 if (quiet || rebuilt || state.ending.load(std::sync::atomic::Ordering::SeqCst))
                     && state.busy.load(std::sync::atomic::Ordering::SeqCst) == 0
                 {
@@ -269,8 +273,10 @@ pub fn serve(_args: &[String]) -> i32 {
 struct State {
     stage1: crate::front::Stage1,
     me: PathBuf,
-    /// This executable's stamp when the server started.
-    built: Option<(u64, u128)>,
+    /// The stage 1 it serves.
+    sisu1: PathBuf,
+    /// This executable's stamp and its stage 1's when the server started.
+    built: (Option<(u64, u128)>, Option<(u64, u128)>),
     sock: PathBuf,
     /// How many processes of stage 1 it keeps at most: one for each core.
     most: usize,
@@ -338,6 +344,13 @@ impl Served {
 
 #[cfg(unix)]
 impl State {
+    /// Whether this executable or the stage 1 it serves was built again
+    /// since the server started: a stage 1 renamed into place by its build
+    /// has a new size or time (decision 1362).
+    fn rebuilt(&self) -> bool {
+        (stamp(&self.me), stamp(&self.sisu1)) != self.built
+    }
+
     /// One request: read, handed to a process of stage 1, its answer
     /// written back; a stream closed with no answer when none could give
     /// one.
@@ -349,7 +362,7 @@ impl State {
         if requests.read_line(&mut line).map_or(true, |n| n == 0) || !line.ends_with('\n') {
             return;
         }
-        if self.ending.load(std::sync::atomic::Ordering::SeqCst) || stamp(&self.me) != self.built {
+        if self.ending.load(std::sync::atomic::Ordering::SeqCst) || self.rebuilt() {
             self.end();
             let _ = back.write_all(b"stale\n");
             return;

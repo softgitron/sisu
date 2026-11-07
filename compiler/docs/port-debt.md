@@ -1101,12 +1101,18 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
 
 ### A native run as the default of `sisu run` (D-089)
 
-`sisu run` interprets the SIR stage 1 serialised; `sisu run --native`
-builds the program with stage 2 and the Sisu backend and runs the
-executable. D-089 keeps the interpreter as an oracle until each of its
-roles has a replacement; these are the roles a plain `sisu run` still
-takes from it, what a native default needs for each, and what each costs.
-Nothing here switches the default.
+From decision 1360 a plain `sisu run` on stage 1 builds the program
+with stage 2 and the Sisu backend, its executable kept in the cache of
+built executables, and runs that, as `sisu run --native` does; the
+interpreter runs it under `--interpreted`, under the options only it
+serves (`--monitor`, `--defer-borrow`, `--watch`, `--sir`, `--stats
+stack-depth` and `--stats shared`), for a program that reaches raw memory
+or C (an intrinsic of `extern.`, of `std.mem`'s pointers, blocks of
+`Global` and conversions of bytes, or an `@export`), and for one the
+native backend refuses (`D0103`, which the cache remembers), and the Rust
+front end's `sisu run` stays the interpreter's. D-089 keeps the
+interpreter as an oracle until each of its roles has a replacement; these
+are the roles it still takes, what each needs, and what each costs.
 
 - **The checked memory model of unsafe code** (D-085, decision 301): a
   run in the interpreter checks every raw access (released, out of
@@ -1175,7 +1181,8 @@ Nothing here switches the default.
   stays under `build/`, and from decision 1323 is copied there from the
   same cache, keyed as a file's: a second `build --native` of
   `packages/workspace.pkg` takes 0.029 s where it took 0.096 s.) *Need*:
-  a script (`#!`, 10) stays interpreted until the cache holds it.
+  nothing: a script (`#!`, 10) runs natively as any file does from decision
+  1360, its first run paying its build.
 - **The seeded scheduler**: native code has it, with `--explore N`, the
   same seeds and `--stats`, and yield checks where the interpreter has
   them (decisions 203 and 204), so a seed names the same schedule but for
@@ -1222,9 +1229,8 @@ Nothing here switches the default.
   the suite records and replays 259 of `native.list`'s running cases both
   ways. *Need*: a C function that writes to standard output itself
   (`unsafe/foreign`) is outside the log natively, where the interpreter
-  emulates it as the host's output; a native default would record its
-  C calls of `write` too, or leave such a program's log to the
-  interpreter.
+  emulates it as the host's output; the native default leaves such a
+  program, and its log, to the interpreter (decision 1360).
 - **The ownership monitor and the counterexample mode** (`--monitor`,
   `--defer-borrow`, decision 54): the monitor is the checker's check
   (18, principle 5), and stays the interpreter's, as the conformance
@@ -1236,9 +1242,12 @@ Nothing here switches the default.
   `--stats shared` stay the interpreter's too, as `--monitor` does
   (decision 1326): a native default sends a run that asks for them to the
   interpreter. *Estimate*: none.
-- **The suite**: once these are done, the runner's default run of a case
-  is the native one, compared with the interpreter's expectations as
-  `--native` compares them now, and `--interpreted` runs the oracle.
+- **The suite**: done (decision 1360): the runner's plain `sisu run` of
+  a case is now the native one, compared with the interpreter's
+  expectations (`NAME.native-out` where the program tells the runtimes
+  apart), and its runs under the monitor and from `sisu sir` are the
+  interpreter's, compared with the plain run's output, so that each case
+  is held to both runtimes; `--interpreted` runs the oracle alone.
 
 Without the native checked mode and the hot replacement, about two weeks
 of work make a native run the default of `sisu run` for every program
@@ -1261,8 +1270,11 @@ log and its replaying host first, then the two `--stats` kinds, which a
 native default may send to the interpreter as `--monitor` is. Decision
 1321 made the log and its replay, decision 1323 the cache of a package's
 build, and decision 1326 leaves the two `--stats` kinds to the
-interpreter, so what a native default still lacks is the rule itself and
-the checked memory model's provenance for `unsafe` code.
+interpreter, so what a native default still lacked was the rule itself and
+the checked memory model's provenance for `unsafe` code. Decision 1360
+made the rule, with raw memory and C left to the interpreter (Q-77's
+second option) until the provenance is checked natively; a program that
+reaches them runs natively by default once it is.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

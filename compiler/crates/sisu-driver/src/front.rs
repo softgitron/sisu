@@ -290,35 +290,40 @@ fn newer_source(dir: &Path, than: std::time::SystemTime) -> bool {
     false
 }
 
-/// [`Stage1::sir_reports`] of the stage-1 executable as it is, without
-/// building it: false when it is missing or a source of stage 1 is newer.
+/// [`Stage1::sir_reports`] of the stage-1 executable, built first when it
+/// is missing or a source of stage 1 is newer, as the command it decides
+/// would build it (decision 1362): false when it cannot be built.
 pub fn stage1_sir_reports() -> bool {
     if let Ok(v) = std::env::var(SIR_REPORTS_VAR) {
         return v == "1";
     }
-    let compiler = compiler_dir();
-    if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
-        return Stage1 { exe: PathBuf::from(given), compiler }.sir_reports();
-    }
-    let exe = stage1_exe(&compiler);
-    if stale(&exe, &compiler.join("stage1").join("src")) {
-        return false;
-    }
-    Stage1 { exe, compiler }.sir_reports()
+    current_stage1().is_some_and(|s| s.sir_reports())
 }
 
-/// [`Stage1::takes_the_roles`] of the stage-1 executable as it is, without
-/// building it: false when it is missing or a source of stage 1 is newer.
+/// [`Stage1::takes_the_roles`] of the stage-1 executable, built first when
+/// it is missing or a source of stage 1 is newer (decision 1362): false
+/// when it cannot be built.
 pub fn stage1_takes_the_roles() -> bool {
+    current_stage1().is_some_and(|s| s.takes_the_roles())
+}
+
+/// The stage 1 a command of this process runs: the one `SISU_STAGE1`
+/// gives, or the driver's build, made first when it is stale, or waited
+/// for under the build's lock while another command makes it, so that
+/// what a command asks of stage 1 before it runs it is asked of the
+/// stage 1 it runs, never of the one a build is replacing (decision 1362);
+/// none when it cannot be built, whose failure the command reports.
+fn current_stage1() -> Option<Stage1> {
     let compiler = compiler_dir();
     if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
-        return Stage1 { exe: PathBuf::from(given), compiler }.takes_the_roles();
+        return Some(Stage1 { exe: PathBuf::from(given), compiler });
     }
     let exe = stage1_exe(&compiler);
-    if stale(&exe, &compiler.join("stage1").join("src")) {
-        return false;
+    if stale(&exe, &compiler.join("stage1").join("src")) || !built_in(&exe, stage1_profile()) {
+        let mut quiet = sisu_interp::TestHost::default();
+        return Stage1::ready(&mut quiet).ok();
     }
-    Stage1 { exe, compiler }.takes_the_roles()
+    Some(Stage1 { exe, compiler })
 }
 
 /// The stage-1 front end, built and ready to run.

@@ -833,6 +833,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 // 386).
                 "run" => &[
                     "--sir",
+                    "--interpreted",
                     "--monitor",
                     "--defer-borrow",
                     "--stats",
@@ -1257,7 +1258,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             // 1321); the interpreter's other modes are its own.
             let schedulers: &[&str] = if stage1 { &[] } else { &["--record"] };
             if p.flags.contains(&"--native")
-                && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--watch"]
+                && let Some(other) = ["--sir", "--interpreted", "--monitor", "--defer-borrow", "--watch"]
                     .iter()
                     .find(|o| p.flags.contains(o))
                     .map(|o| o.to_string())
@@ -2645,11 +2646,21 @@ fn stage1_command(
         Ok(s) => s,
         Err(code) => return code,
     };
+    // A plain `sisu run` runs natively (decision 1360; D-089), but with an
+    // option only the interpreter serves (`--interpreted`, the monitor, the
+    // counterexample mode, `--watch`, `--stats stack-depth` and `--stats
+    // shared`), and for a program that reaches raw memory or C or that the
+    // native backend refuses, which [`crate::native::default_build`] sends
+    // back to the interpreter.
+    let native_default = cmd == "run"
+        && !has("--native")
+        && !["--interpreted", "--monitor", "--defer-borrow", "--watch", "--sir"].iter().any(|f| has(f))
+        && p.stats.is_none();
     // A native build is built for the native runtime, which
     // `target.runtime` names to compile-time code (stage 1's R116,
     // decision 721): `sisu run --native`, `sisu build --native` and `sisu
-    // test --native`.
-    let native_runtime = (has("--native") || crate::native_tests::chosen().is_some())
+    // test --native`, and a plain `sisu run` that may run natively.
+    let native_runtime = (has("--native") || native_default || crate::native_tests::chosen().is_some())
         && matches!(cmd, "run" | "build" | "test" | "bench")
         && stage1.takes_target_runtime();
     let runtime_words = |words: &mut Vec<String>| {
@@ -2661,8 +2672,11 @@ fn stage1_command(
     // The options every program command passes on: the runtime, the
     // lockfile and the features (decision 250), then the path.
     let accept = has("--accept-unsafe");
-    let program = |words: &mut Vec<String>| {
-        runtime_words(words);
+    let program_on = |words: &mut Vec<String>, native: bool| {
+        if native {
+            words.push("--target-runtime".into());
+            words.push("native".into());
+        }
         if locked {
             words.push("--locked".into());
         }
@@ -2680,6 +2694,7 @@ fn stage1_command(
             words.push(path.clone());
         }
     };
+    let program = |words: &mut Vec<String>| program_on(words, native_runtime);
     let contracts = opts.contracts_given.then(|| format!("--contracts={}", opts.level.name()));
     let shown = |host: &mut dyn Host, r: &crate::front::Ran| {
         host.stdout(&r.stdout);
@@ -3444,6 +3459,81 @@ fn stage1_command(
             if target.path.is_some() {
                 built_with.pop();
             }
+            // The native default (decision 1360): the program's executable
+            // from the cache of built executables, run as `run --native`
+            // runs it; a program the interpreter keeps is built again for
+            // the interpreter's runtime, which `target.runtime` names.
+            let (text, prog, built_with) = if native_default {
+                let aside = std::env::temp_dir().join(format!("sisu-default-{}", std::process::id()));
+                let name = target
+                    .path
+                    .as_deref()
+                    .and_then(|p| std::path::Path::new(p).file_stem())
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                match crate::native::default_build(&prog, &name, &aside, host) {
+                    crate::native::Chosen::Built(e) => {
+                        let how = crate::native::Run {
+                            seed: opts.seeds.first,
+                            explore: opts.seeds.explore,
+                            stats: has("--stats"),
+                            profile: crate::native::Profile::Debug,
+                            strategy: opts.strategy.clone(),
+                            bound: opts.bound,
+                            keep: None,
+                        };
+                        let code = match &opts.record {
+                            Some(log) => {
+                                let header = sisu_interp::record::Header {
+                                    toolchain: crate::replay::TOOLCHAIN.into(),
+                                    file: target.path.clone().unwrap_or_else(|| ".".to_string()),
+                                    hash: sisu_interp::record::content_hash(text.as_bytes()),
+                                    source: text.clone(),
+                                    seed: opts.seeds.first,
+                                    hash_key: 0,
+                                    contracts: opts.level.name().into(),
+                                    files: Vec::new(),
+                                    layout: None,
+                                    watch: false,
+                                    sir: true,
+                                    warnings: r.stderr.clone(),
+                                    options: built_with,
+                                    directory: None,
+                                };
+                                crate::native::run_recorded(&e, &args, &how, &header, log, &opts.redact, host)
+                            }
+                            None => crate::native::run_built(&e, &args, &how, host),
+                        };
+                        let _ = std::fs::remove_dir_all(&aside);
+                        return code;
+                    }
+                    crate::native::Chosen::Failed(code) => {
+                        let _ = std::fs::remove_dir_all(&aside);
+                        return code;
+                    }
+                    crate::native::Chosen::Interpreted if native_runtime && stage1.assists() => {
+                        let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                        words.extend(contracts.clone());
+                        program_on(&mut words, false);
+                        let mut quiet = sisu_interp::TestHost::default();
+                        let again = run(&mut quiet, &words, Backend::Unused).ok().filter(|a| a.status == exit::OK);
+                        match again.and_then(|a| Some((sisu_sir::read(&a.stdout).ok()?, a.stdout))) {
+                            Some((p, t)) if p.entry.is_some() => {
+                                let mut with = Vec::new();
+                                program_on(&mut with, false);
+                                if target.path.is_some() {
+                                    with.pop();
+                                }
+                                (t, p, with)
+                            }
+                            _ => (text, prog, built_with),
+                        }
+                    }
+                    crate::native::Chosen::Interpreted => (text, prog, built_with),
+                }
+            } else {
+                (text, prog, built_with)
+            };
             let mut rebuild_words =
                 ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
             rebuild_words.extend(contracts.clone());

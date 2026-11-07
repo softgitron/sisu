@@ -783,6 +783,37 @@ pub(crate) fn cached_build(
     profile: Profile,
     host: &mut dyn Host,
 ) -> Option<Result<PathBuf, i32>> {
+    let (root, key) = match cache_key(prog, profile, host)? {
+        Ok(k) => k,
+        Err(code) => return Some(Err(code)),
+    };
+    let dir = root.join(&key);
+    let name = if name.is_empty() { "program" } else { name };
+    let exe = dir.join(name);
+    if exe.is_file() {
+        // Its time says when it last ran, which the eviction reads.
+        let _ = std::fs::write(dir.join("used"), "");
+        return Some(Ok(exe));
+    }
+    let part = root.join(format!("{key}.part-{}", std::process::id()));
+    std::fs::create_dir_all(&part).ok()?;
+    if let Err(code) = build(Code::Sir(prog), &part.join(name), profile, host) {
+        let _ = std::fs::remove_dir_all(&part);
+        return Some(Err(code));
+    }
+    let _ = std::fs::write(part.join("used"), "");
+    // Another run that built it first keeps its own.
+    if std::fs::rename(&part, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&part);
+    }
+    evict(&root);
+    exe.is_file().then_some(Ok(exe))
+}
+
+/// The cache of built executables' directory and the key of the program's
+/// entry in it ([`cached_build`]); none when the cache is off or this
+/// executable's parts cannot be found.
+fn cache_key(prog: &sisu_sir::Program, profile: Profile, host: &mut dyn Host) -> Option<Result<(PathBuf, String), i32>> {
     if std::env::var(RUN_CACHE_VAR).is_ok_and(|v| v == "0") {
         return None;
     }
@@ -827,27 +858,95 @@ pub(crate) fn cached_build(
     };
     let key = format!("{:016x}{:016x}", hash(0xcbf2_9ce4_8422_2325), hash(0x6c62_272e_07bb_0142));
     let root = crate::front::compiler_dir().join("target").join("run-cache");
-    let dir = root.join(&key);
-    let name = if name.is_empty() { "program" } else { name };
-    let exe = dir.join(name);
-    if exe.is_file() {
-        // Its time says when it last ran, which the eviction reads.
+    Some(Ok((root, key)))
+}
+
+/// Whether a program reaches raw memory or C (decision 1360): its SIR
+/// declares an intrinsic of `extern.` (a C function), or of `std.mem`'s
+/// pointers, blocks of `Global` and conversions of bytes, all but
+/// `mem.size_of` and `mem.align_of`, or exports a function to C. Such a
+/// program runs in the interpreter by default, whose checked memory model
+/// gives a pointer's provenance and a place's liveness, which a native
+/// build's checks do not yet (D-085, Q-77's second option), and whose
+/// emulated C functions write to the capability log.
+pub(crate) fn reaches_raw_memory(prog: &sisu_sir::Program) -> bool {
+    !prog.exports.is_empty()
+        || prog.intrinsics.iter().any(|i| {
+            let n = i.name.as_str();
+            n.starts_with("extern.") || (n.starts_with("mem.") && !matches!(n, "mem.size_of" | "mem.align_of"))
+        })
+}
+
+/// Where a plain `sisu run` runs its program (decision 1360).
+pub(crate) enum Chosen {
+    /// Natively, this executable, from the cache of built executables or
+    /// built in the directory the caller removes after the run.
+    Built(PathBuf),
+    /// In the interpreter: the program reaches raw memory or C, or the
+    /// native backend refuses it (`D0103`), which a run does not show.
+    Interpreted,
+    /// Its build failed otherwise, reported, with this status.
+    Failed(i32),
+}
+
+/// The file beside a cached entry that says the native backend refused
+/// its program (`D0103`), so that a plain run of it goes to the
+/// interpreter without building it again.
+const REFUSED: &str = "refused";
+
+/// A plain `sisu run`'s executable (decision 1360): none for a program that
+/// reaches raw memory or C ([`reaches_raw_memory`]) or that the native
+/// backend refuses, which the cache remembers; else the cache's, built
+/// first when it is not there, or, with the cache off, built in `aside`.
+/// What the build printed is shown only when the program runs natively or
+/// the build failed otherwise.
+pub(crate) fn default_build(prog: &sisu_sir::Program, name: &str, aside: &Path, host: &mut dyn Host) -> Chosen {
+    if reaches_raw_memory(prog) {
+        return Chosen::Interpreted;
+    }
+    let profile = Profile::Debug;
+    let mut quiet = sisu_interp::TestHost::default();
+    let entry = match cache_key(prog, profile, &mut quiet) {
+        Some(Ok((root, key))) => Some(root.join(key)),
+        Some(Err(code)) => {
+            host.stderr(&quiet.err);
+            return Chosen::Failed(code);
+        }
+        None => None,
+    };
+    if let Some(dir) = &entry
+        && dir.join(REFUSED).is_file()
+    {
         let _ = std::fs::write(dir.join("used"), "");
-        return Some(Ok(exe));
+        return Chosen::Interpreted;
     }
-    let part = root.join(format!("{key}.part-{}", std::process::id()));
-    std::fs::create_dir_all(&part).ok()?;
-    if let Err(code) = build(Code::Sir(prog), &part.join(name), profile, host) {
-        let _ = std::fs::remove_dir_all(&part);
-        return Some(Err(code));
+    let built = match cached_build(prog, name, profile, &mut quiet) {
+        Some(r) => r,
+        None => {
+            let exe = aside.join(if name.is_empty() { "program" } else { name });
+            let _ = std::fs::create_dir_all(aside);
+            build(Code::Sir(prog), &exe, profile, &mut quiet).map(|()| exe)
+        }
+    };
+    match built {
+        Ok(exe) => {
+            host.stderr(&quiet.err);
+            Chosen::Built(exe)
+        }
+        Err(_) if quiet.err.starts_with("error[D0103]") => {
+            if let Some(dir) = &entry
+                && std::fs::create_dir_all(dir).is_ok()
+            {
+                let _ = std::fs::write(dir.join(REFUSED), &quiet.err);
+                let _ = std::fs::write(dir.join("used"), "");
+            }
+            Chosen::Interpreted
+        }
+        Err(code) => {
+            host.stderr(&quiet.err);
+            Chosen::Failed(code)
+        }
     }
-    let _ = std::fs::write(part.join("used"), "");
-    // Another run that built it first keeps its own.
-    if std::fs::rename(&part, &dir).is_err() {
-        let _ = std::fs::remove_dir_all(&part);
-    }
-    evict(&root);
-    exe.is_file().then_some(Ok(exe))
 }
 
 /// Removes all but the [`RUN_CACHE_KEEP`] most recently run executables

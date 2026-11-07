@@ -688,6 +688,54 @@ fn the_server_of_stage_1_answers_as_a_process_does() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The stage 1 built again is the one that answers the first command
+/// after its build (decision 1362): the driver's server of a stage 1 that
+/// `SISU_STAGE1` names, which no check of the driver's covers, answers
+/// `stale` once the file at that path changed, and the command is answered
+/// by a new server of the new executable, here a script that answers every
+/// request with `new`, renamed into place as a build of stage 1 is.
+#[cfg(unix)]
+#[test]
+fn a_rebuilt_stage_1_answers_the_first_command_after_it() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = std::env::temp_dir().join(format!("sisu-rebuilt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    // The driver builds its stage 1 when it is missing or stale.
+    let _ = std::process::Command::new(env!("CARGO_BIN_EXE_sisu")).args(["check", "--help"]).output();
+    let built = std::env::var_os("SISU_STAGE1")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/stage1/sisu1"));
+    let real = dir.join("real");
+    std::fs::copy(&built, &real).expect("a copy of stage 1");
+    let sisu1 = dir.join("sisu1");
+    std::fs::copy(&real, &sisu1).expect("a copy of stage 1");
+    std::fs::write(dir.join("a.sisu"), "def main():\n    print(\"hi\")\n").expect("a file");
+    let check = || {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(["check", "a.sisu"])
+            .current_dir(&dir)
+            .env("SISU_STAGE1", &sisu1)
+            .env("SISU_STAGE1_SERVE", "1")
+            .output()
+            .expect("sisu runs");
+        (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code())
+    };
+    assert_eq!(check(), (String::new(), Some(0)));
+    // The server is up, with a process of the first stage 1.
+    assert_eq!(check(), (String::new(), Some(0)), "again");
+    let script = format!(
+        "#!/bin/sh\nif [ \"$3\" = sir ] && [ \"$4\" = --repl-serve ]; then\n  while read -r line; do\n    [ -z \"$line\" ] && exit 0\n    printf 'answer 0 4 0\\nnew\\n' >&2\n  done\n  exit 0\nfi\nexec {} \"$@\"\n",
+        real.display()
+    );
+    let part = dir.join("sisu1.part");
+    std::fs::write(&part, script).expect("the new stage 1");
+    std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    std::fs::rename(&part, &sisu1).expect("the new stage 1 in place");
+    assert_eq!(check(), ("new\n".to_string(), Some(0)), "the first command after the build");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A command whose run of stage 1 ends with stage 1's own usage error
 /// (`error: Usage(text="usage: sisu run -- tokens ...")`, its `main`'s) is
 /// shown the driver's usage of the command, `D0151`, with the usage's

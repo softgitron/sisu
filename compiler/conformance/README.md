@@ -128,6 +128,19 @@ below apply to every `.sisu` file of the package.
 
 ## Checks without an expectation file
 
+A case's plain `sisu run` is native on stage 1 (decision 1360): the
+program is built by stage 2 and the Sisu backend, from the cache of built
+executables, and run, but a program that reaches raw memory or C, or that
+the native backend refuses, which runs in the interpreter; its runs under
+the monitor and from `sisu sir` below are the interpreter's, so that each
+running case is held to both runtimes. A program built for the native
+runtime sees `target.runtime` as `native` (decision 721), so a case whose
+output tells the runtimes apart has its plain run's output in
+`NAME.native-out` and the interpreter's in `NAME.out`, with which those
+two runs are compared (`reflect/target`); on the Rust front end
+(`--front-end=rust`) the plain run is the interpreter's and is compared
+with `NAME.out`.
+
 These checks apply to every case without an expectation file:
 
 - `sisu parse --print NAME.sisu` reproduces the file byte for byte (the

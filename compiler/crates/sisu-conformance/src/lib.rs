@@ -424,6 +424,22 @@ pub(crate) fn replay_file(out: &str, token: &str) -> Option<String> {
 }
 
 impl Runner<'_> {
+    /// What a case's plain `sisu run` must print, and the expectation it
+    /// is blessed into, with what the interpreter's runs of it (under the
+    /// monitor, from `sisu sir`) must print: a plain run on stage 1 runs
+    /// natively (decision 1360), built for the native runtime, so a case
+    /// whose program tells the runtimes apart (`target.runtime`) has its
+    /// native output in `NAME.native-out`, as the native mode reads it,
+    /// and the interpreter's in `NAME.out`; on the Rust front end a plain
+    /// run is the interpreter's.
+    fn plain_run(&self, case: &Case, run: &Output) -> ((&'static str, String), String) {
+        let out = case.expected("out").unwrap_or_default();
+        match case.expected("native-out") {
+            Some(native) if self.sisu.front_end.as_deref() != Some("rust") => (("native-out", native), out),
+            _ => (("out", out), run.stdout.clone()),
+        }
+    }
+
     /// Every failing test of the `sisu test` output `out`, again from its
     /// replay token: it must fail the same way (17, "Simulation and
     /// replay").
@@ -853,7 +869,8 @@ impl Runner<'_> {
         let mut run_args = s(&["run", &file]);
         run_args.extend(args.iter().cloned());
         let run = invoke_with_input(self.sisu, &sandbox.dir, &run_args, input);
-        self.compare(case, "stdout", Some("out"), &case.expected("out").unwrap_or_default(), &run.stdout);
+        let (expected, interpreted) = self.plain_run(case, &run);
+        self.compare(case, "stdout", Some(expected.0), &expected.1, &run.stdout);
         // Principle 5 of 18: the checker checks itself. A program the
         // checker accepted runs the same under the dynamic ownership
         // monitor; any difference is the monitor rejecting it, which means
@@ -880,7 +897,7 @@ impl Runner<'_> {
                 case,
                 "the monitor agrees with the checker (a difference is a soundness hole)",
                 None,
-                &format!("{}\n--- stderr\n{}\n--- status {}\n", run.stdout, run.stderr, run.status),
+                &format!("{}\n--- stderr\n{}\n--- status {}\n", interpreted, run.stderr, run.status),
                 &format!(
                     "{}\n--- stderr\n{}\n--- status {}\n",
                     monitored.stdout, monitored.stderr, monitored.status
@@ -943,7 +960,7 @@ impl Runner<'_> {
                 let mut a = s(&["run", "--sir", &sir_file]);
                 a.extend(args);
                 let again = invoke_with_input(self.sisu, &sandbox.dir, &a, input);
-                self.compare(case, "run --sir: stdout", None, &run.stdout, &again.stdout);
+                self.compare(case, "run --sir: stdout", None, &interpreted, &again.stdout);
                 // Warnings precede the program's own output when running
                 // the source; the SIR has none to print.
                 let source_err = if check.stdout.is_empty() {
@@ -1089,7 +1106,8 @@ impl Runner<'_> {
             a
         };
         let run = invoke_with_input(self.sisu, &cwd, &with_args(&["run"]), input);
-        self.compare(case, "stdout", Some("out"), &case.expected("out").unwrap_or_default(), &run.stdout);
+        let (expected, interpreted) = self.plain_run(case, &run);
+        self.compare(case, "stdout", Some(expected.0), &expected.1, &run.stdout);
         self.compare(case, "stderr", Some("err"), &case.expected("err").unwrap_or_default(), &run.stderr);
         let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
         self.report.checks += 1;
@@ -1142,7 +1160,7 @@ impl Runner<'_> {
                 let mut a = s(&["run", "--sir", &sir_file]);
                 a.extend(args.iter().cloned());
                 let again = invoke_with_input(self.sisu, &cwd, &a, input);
-                self.compare(case, "run --sir: stdout", None, &run.stdout, &again.stdout);
+                self.compare(case, "run --sir: stdout", None, &interpreted, &again.stdout);
                 self.compare(
                     case,
                     "run --sir: exit status",
