@@ -1,0 +1,11 @@
+# Mutants of the lines changed since a revision need a git repository.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    return hour >= 16 and hour < 22
+
+test "open from the first hour":
+    assert open_at(16)
+
+test "closed from the closing hour":
+    assert not open_at(22)

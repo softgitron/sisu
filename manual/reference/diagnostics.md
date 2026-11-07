@@ -12784,65 +12784,6 @@ explored 5 schedules (seeds 0 to 4): every run exited with status 0
 
 [R16](sisu-command.md#choosing-the-schedule) describes it.
 
-### D0128
-
-`cli.transcript-front-end`: a transcript runs on the Rust front end's
-build of the program, which stops at errors stage 1 does not report:
-{diagnostics}.
-
-A program's transcripts run from the SIR that its tests run from,
-which stage 1 writes with the world a transcript runs in
-([R15](testing.md#transcripts)). They run on the Rust front end's build
-instead with a stage 1 older than 0.11.0, or when the environment
-variable `SISU_STAGE1_TRANSCRIPTS` is `0`, and then D0128 is what a
-program gets that writes a form the frozen Rust front end lacks, such as
-`^` in a slice's bound: it passes its check and its tests, and each of
-its transcripts fails with the Rust front end's diagnostics. The status
-is 1. With this compiler the program's transcript passes, so the
-session shows no D0128:
-
-<!-- file: examples/reference-diagnostics/d0128_transcript_front_end.sisu -->
-```sisu
-# A program with a transcript, and a slice that only stage 1 reads.
-def main(sys: System):
-    let words = sys.env.args()
-    print(words[1:^1])
-```
-
-<!-- file: examples/reference-diagnostics/d0128_transcript_front_end.files/tests/middle.transcript -->
-```text
-$ middle sauna kiuas löyly
-["kiuas"]
-```
-
-<!-- output: examples/reference-diagnostics/d0128_transcript_front_end.console -->
-```console
-$ sisu test d0128_transcript_front_end.sisu
-transcript "tests/middle.transcript" ... ok
-1 passed, 0 failed, 0 blocked
-```
-
-Where D0128 still comes, write the forms that both front ends read in
-a program that has transcripts: here the slice's end as
-`len(words) - 1`.
-
-<!-- file: examples/reference-diagnostics/d0128_transcript_front_end_fixed.sisu -->
-```sisu
-# The slice written with `len`, which both front ends read.
-def main(sys: System):
-    let words = sys.env.args()
-    print(words[1:len(words) - 1])
-```
-
-<!-- output: examples/reference-diagnostics/d0128_transcript_front_end_fixed.console -->
-```console
-$ sisu test d0128_transcript_front_end_fixed.sisu
-transcript "tests/middle.transcript" ... ok
-1 passed, 0 failed, 0 blocked
-```
-
-[R15](testing.md#transcripts) describes it.
-
 ### D0129
 
 `cli.missing-code`: `sisu explain` needs a diagnostic's code, such as
@@ -13178,6 +13119,69 @@ regions: 4, 4 reached by the tests and 0 not
 `--from-sir` (D0163).
 
 Shown in [chapter 19](../tutorial/19-testing.md#testing-the-tests).
+
+### D0164
+
+`cli.stage1-too-old`: {what} needs stage 1's `sisu1 0.21.0` or later,
+and the stage 1 run is older.
+
+The driver relies on stage 1's forms of 0.21.0: a program's transcripts
+run from the SIR of its `sir --tests --transcripts`, and `sisu test
+--std` outside a package from its `sir --tests --std`. Only a stage 1
+older than that, which the environment variable `SISU_STAGE1` can still
+name, lacks them, and then the transcript fails with D0164, or `test
+--std` stops with it. The status is 1. The stage 1 that `sisu` builds
+for itself is never older, so no session of the manual shows it.
+
+Leave `SISU_STAGE1` unset, or point it at a stage 1 of 0.21.0 or
+later; `sisu1 --version` prints its version.
+
+[R16](sisu-command.md#choosing-the-front-end) describes it.
+
+### D0165
+
+`cli.mutate-no-git`: the working directory is not in a git repository.
+
+`sisu test --mutate --since REV` asks git which lines changed since the
+revision `REV`, and the working directory is in no git repository, so
+there is no revision to compare with. It is the reason that D0158
+(`cli.mutate-no-region`) gives, in one line; inside a repository, D0158
+gives git's own first line instead, such as a revision git does not
+know. The tests have run, and the status is 1:
+
+<!-- file: examples/reference-diagnostics/d0165_mutate_no_git.sisu -->
+```sisu
+# Mutants of the lines changed since a revision need a git repository.
+
+## Whether the sauna is open at `hour`, from 16 until 22.
+def open_at(hour: int) -> bool:
+    return hour >= 16 and hour < 22
+
+test "open from the first hour":
+    assert open_at(16)
+
+test "closed from the closing hour":
+    assert not open_at(22)
+```
+
+<!-- output: examples/reference-diagnostics/d0165_mutate_no_git.console -->
+```console
+$ sisu test --mutate --since HEAD d0165_mutate_no_git.sisu
+test "open from the first hour" ... ok
+test "closed from the closing hour" ... ok
+2 passed, 0 failed, 0 blocked
+error[D0158]: the lines changed since `HEAD` could not be read from git: the working directory is not in a git repository
+$ sisu test --mutate d0165_mutate_no_git.sisu
+test "open from the first hour" ... ok (cached)
+test "closed from the closing hour" ... ok (cached)
+2 passed, 0 failed, 0 blocked
+mutants: 3 run against the tests, 3 killed and 0 survived
+```
+
+Run `--since` in the repository's working tree, or leave it out, as the
+second command does, and every mutant of the program runs.
+
+[R15](testing.md#mutation-testing) describes it.
 
 ### D0190
 
@@ -13959,7 +13963,6 @@ it. `sisu explain CODE` prints the same line.
 | D0125 | `native.sisu-failed` | internal compiler error: the Sisu backend failed to compile the program (status {status}); `--backend=cranelift` compiles it with the Rust backend: {detail} |
 | D0126 | `native.rt-build` | building the runtime in Sisu from `{seed}` failed: {detail} |
 | [D0127](#d0127) | `cli.explore-differs` | schedule seed {seed} of {count} printed other output than seed {first}, with the same exit status {status}; `--schedule-seed {seed}` runs it again |
-| [D0128](#d0128) | `cli.transcript-front-end` | a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report: {diagnostics} |
 | [D0129](#d0129) | `cli.missing-code` | `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch` |
 | [D0130](#d0130) | `cli.missing-name` | `sisu new` needs the name of the package to create |
 | [D0131](#d0131) | `cli.version` | sisu {version} |
@@ -13994,6 +13997,8 @@ it. `sisu explain CODE` prints the same line.
 | [D0161](#d0161) | `cli.cover-unreached` | {at}: no test reaches this {kind} |
 | D0162 | `cli.cover-summary` | regions: {count}, {reached} reached by the tests and {unreached} not |
 | D0163 | `cli.cover-alone` | `--cover` counts the regions the tests reach in the interpreter; it does not combine with `{option}` |
+| [D0164](#d0164) | `cli.stage1-too-old` | {what} needs stage 1's `sisu1 0.21.0` or later, and the stage 1 run is older |
+| [D0165](#d0165) | `cli.mutate-no-git` | the working directory is not in a git repository |
 | D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
 | D0171 | `cli.hole-scope` | in scope: {bindings} |
 | D0172 | `cli.hole-scope-none` | nothing is in scope |

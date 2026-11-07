@@ -1,4 +1,0 @@
-# A program with a transcript, and a slice that only stage 1 reads.
-def main(sys: System):
-    let words = sys.env.args()
-    print(words[1:^1])

@@ -1,3 +1,0 @@
-$ sisu test d0128_transcript_front_end.sisu
-transcript "tests/middle.transcript" ... ok
-1 passed, 0 failed, 0 blocked

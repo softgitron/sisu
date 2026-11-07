@@ -1,0 +1,10 @@
+$ sisu test --mutate --since HEAD d0165_mutate_no_git.sisu
+test "open from the first hour" ... ok
+test "closed from the closing hour" ... ok
+2 passed, 0 failed, 0 blocked
+error[D0158]: the lines changed since `HEAD` could not be read from git: the working directory is not in a git repository
+$ sisu test --mutate d0165_mutate_no_git.sisu
+test "open from the first hour" ... ok (cached)
+test "closed from the closing hour" ... ok (cached)
+2 passed, 0 failed, 0 blocked
+mutants: 3 run against the tests, 3 killed and 0 survived

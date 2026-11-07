@@ -1278,8 +1278,12 @@ fn an_allocation_error_is_not_an_ownership_rules() {
             .output()
             .expect("sisu runs");
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        // One `E0282` per allocating operation (stage 1's R229), then `D0006`.
+        assert!(stderr.contains("error[E0282]"), "{args:?}: {stderr}");
+        assert!(!stderr.contains("D0021"), "{args:?}: {stderr}");
+        let last = stderr.trim_end().rsplit('\n').next().unwrap_or("");
         assert!(
-            stderr.ends_with("error[D0006]: the program was not run: errors found (2)\n"),
+            last.starts_with("error[D0006]: the program was not run: errors found ("),
             "{args:?}: {stderr}"
         );
         assert!(out.stdout.is_empty(), "{args:?}");
