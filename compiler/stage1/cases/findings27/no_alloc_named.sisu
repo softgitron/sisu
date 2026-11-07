@@ -1,0 +1,53 @@
+# `E0282` names what the program wrote that allocates, not the intrinsic it
+# reaches, reports a comprehension once, and offers its fixes: for a list
+# the function makes, the caller's list filled in place, and for every
+# error the attribute removed (RULES.md, R229).
+@no_alloc
+def doubled(xs: list[int]) -> list[int]:
+    return [x * 2 for x in xs]
+
+@no_alloc
+def joined(s: str, t: str) -> String:
+    return s + t
+
+@no_alloc
+def told(n: int) -> String:
+    return "n is {n}"
+
+@no_alloc
+def grow(mut xs: list[int], v: int):
+    xs.push(v)
+
+@no_alloc
+def nested(mut xs: list[list[int]]):
+    xs.push([1, 2])
+
+def helper(mut xs: list[int]):
+    xs.push(1)
+
+@no_alloc
+def through(mut xs: list[int]):
+    helper(mut xs)
+
+@no_alloc
+def long_one(xs: list[int]) -> list[int]:
+    return [x * 2 + 1 for x in xs if x > 0 and x < 1000000]
+
+@no_alloc  # a comment the fix would remove with the line
+def commented(xs: list[int]) -> list[int]:
+    return [1]
+
+@no_alloc
+def filled(mut out: list[int], xs: list[int]):
+    for i in range(min(len(out), len(xs))):
+        out[i] = xs[i] * 2
+
+def main():
+    var xs = [1]
+    grow(mut xs, 2)
+    through(mut xs)
+    var ls: list[list[int]] = []
+    nested(mut ls)
+    var out = [0, 0, 0]
+    filled(mut out, xs)
+    print("{doubled(xs)} {joined("a", "b")} {told(1)} {long_one(xs)} {commented(xs)} {out}")

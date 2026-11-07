@@ -1,0 +1,13 @@
+# The allocator parameter's errors (RULES.md, R227): a collection of too
+# many arguments, and one on another allocator than `Global`, whose impls
+# wait for the allocators' third step (R225), so that it has no `len`.
+from std.mem import Region
+
+def too_many(xs: list[int, Global, Global]) -> int:
+    return 0
+
+def on_region(xs: list[int, ref Region]) -> int:
+    return len(xs)
+
+def main():
+    pass

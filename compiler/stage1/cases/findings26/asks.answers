@@ -178,12 +178,15 @@ error[E0282]: `total[Big]` is `@no_alloc`, but `Big.Weighed.weight` may allocate
    |                ^^^^^^^^^^^^^^
   = note: `Big.Weighed.weight` calls `list.push`, at no_alloc_instances.sisu:24:9
   = note: in this instance, which the program makes at no_alloc_instances.sisu:43:11
+  = fix: remove `@no_alloc`, so that `total` may allocate
 
-error[E0282]: `pair` is `@no_alloc`, but the list it makes may allocate
+error[E0282]: `pair` is `@no_alloc`, but `[1, 2]` may allocate
   --> no_alloc_instances.sisu:36:16
    |
 36 |     let both = [1, 2]
    |                ^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `pair` may allocate
 
 error: Failed
 answer 0

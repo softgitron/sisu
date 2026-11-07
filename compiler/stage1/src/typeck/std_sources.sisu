@@ -57,6 +57,42 @@ pub pure def std_file(home: str, name: str) -> String:
         return "{home}/std/../stage1/std/{name}.sisu"
     return "{home}/std/{name}.sisu"
 
+## Whether `name` is one of the prelude's collections that take their
+## allocator as a last type parameter, `A: Allocator = Global` (04,
+## "Allocators"; 11; D-060; RULES.md, R227).
+pub pure def allocated(name: str) -> bool:
+    return name == "list" or name == "dict" or name == "set" or name == "String"
+
+## The names of `std.mem` that the prelude's collections name, which every
+## module sees as the prelude's (RULES.md, R227).
+pub pure def allocator_names() -> list[str]:
+    return ["Allocator", "Global"]
+
+## The headers of the prelude's collections as `std/prelude.sisu` writes
+## them, each with the header stage 1 reads in its place: the collection
+## with its allocator parameter (RULES.md, R227). The frozen Rust front end
+## builds the same file into its executable and fills a defaulted
+## parameter into every type it resolves, where its literals and its
+## builtins make a collection's type of one argument, so the shared text
+## keeps the headers it reads until it is retired.
+pub pure def allocator_headers() -> list[(str, str)]:
+    return [
+        ("pub struct String:\n", "pub struct String[A: Allocator = Global]:\n"),
+        ("pub struct list[T]:\n", "pub struct list[T, A: Allocator = Global]:\n"),
+        ("pub struct dict[K, V]:\n", "pub struct dict[K, V, A: Allocator = Global]:\n"),
+        ("pub struct set[T]:\n", "pub struct set[T, A: Allocator = Global]:\n"),
+    ]
+
+## The prelude stage 1 reads: `text`, the prelude's source, with each
+## collection's header given its allocator parameter (`allocator_headers`),
+## on the line it was, so that every other line of the prelude, and every
+## position on it, is the shared file's.
+pub pure def with_allocators(text: str) -> String:
+    var out = text.to_string()
+    for (written, read) in allocator_headers():
+        out = out.replace(written, read)
+    return out
+
 ## The std modules stage 1 reads in a copy of its own, which a rule of
 ## RULES.md changes where the Rust front end, which reads the original,
 ## cannot evaluate the change: `json`, whose decoder validates refinements

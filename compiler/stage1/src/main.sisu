@@ -133,7 +133,15 @@ from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage, StdMarks
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program, ROOT_PACKAGE
-from stage1.typeck.std_sources import display_path, documented, importable, std_file, target_for
+from stage1.typeck.std_sources import (
+    allocator_names,
+    display_path,
+    documented,
+    importable,
+    std_file,
+    target_for,
+    with_allocators,
+)
 from stage1.typeck.ty import DefId, TyKey
 
 error UsageError:
@@ -1050,6 +1058,7 @@ def sir_kept(
         # tests that name it, which the runner gives, and each test's
         # fixtures on its line (RULES.md, R219).
         built.module_fixtures = words.contains("--module-fixtures")
+        built.cover = words.contains("--cover")
         # `--modules`: each test's and benchmark's module beside it
         # (RULES.md, R142), which the driver reads to run one module's.
         let modules = words.contains("--modules")
@@ -1402,6 +1411,9 @@ struct Input:
     ## parameter of the tests that name it, and each test's fixtures are on
     ## its line (RULES.md, R219).
     module_fixtures: bool
+    ## `sir --tests --cover`: the statements that lower to nothing at a place
+    ## of their own get one, for the runner's count (RULES.md, R231).
+    cover: bool
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
@@ -1473,6 +1485,7 @@ def file_input(
             roots=[],
             std_tests=False,
             module_fixtures=False,
+            cover=False,
             regions=[],
         )
     )
@@ -1646,6 +1659,7 @@ def held_layout_input(
             roots=[],
             std_tests=False,
             module_fixtures=False,
+            cover=False,
             regions=[],
         )
     )
@@ -2019,7 +2033,7 @@ pure def explained(
             match l.place:
                 case Arg.Text(t):
                     place = t.copy()
-                case Arg.Source(loc):
+                case Arg.Source(loc) | Arg.Code(loc, _):
                     let (start, end) = span_of(text, lines, Some(loc))
                     if start <= end and end <= text.byte_len():
                         place = text.byte_slice(start, end).to_string()
@@ -2594,7 +2608,7 @@ pure def lower_of(
 ) -> lower.Lowered?:
     let typed = checked.typed else:
         return None
-    var lowered = lower.lower(
+    var lowered = lower.lower_covered(
         typed,
         base,
         input.modules[0].file,
@@ -2604,6 +2618,7 @@ pure def lower_of(
         mut kept.lowered,
         mut kept.slots,
         input.roots,
+        input.cover,
     )
     if input.runtime != "full":
         lowered.program.runtime = Some(input.runtime.copy())
@@ -3183,9 +3198,15 @@ pure def const_failures(
     prog: sir.Program, constants: list[Constant], catalog: Catalog
 ) -> list[(int, Diagnostic)]:
     var out: list[(int, Diagnostic)] = []
+    var wanted: list[(String, int)] = []
     for c in constants:
+        wanted.push((c.function.copy(), c.budget))
+    # One evaluator for them all (RULES.md, R228).
+    let stops = interp.stops_of(prog, wanted, catalog)
+    for k in range(len(constants)):
+        let c = ref constants[k]
         let (i, start, end) = (c.file, c.start, c.end)
-        let Err(stop) = interp.value_of(prog, c.function, c.budget, catalog) else:
+        let stop = stops[k].copy() else:
             continue
         match stop:
             case interp.Stop.Panicked(message):
@@ -5940,6 +5961,8 @@ def environment(sys: System, home: str) -> Environment ! IoError:
         _ = prelude.items.add(module.to_string())
         _ = std.insert(module.to_string(), names)
     _ = prelude.items.add("target".to_string())
+    for n in allocator_names():
+        _ = prelude.items.add(n.to_string())
     return Ok(Environment(prelude=prelude, std=std, parses=None))
 
 ## The base of a command that checks a program, made with the cache
@@ -6155,6 +6178,11 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
         names.push(name)
     for name in names:
         _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new(std_file(home, name)))?)
+    # The prelude as stage 1 reads it: its collections with their allocator
+    # parameter (RULES.md, R227).
+    if let Some(p) = texts.get("prelude"):
+        let read = with_allocators(p)
+        _ = texts.insert("prelude".to_string(), read)
     # A build for another runtime than the interpreter, or of a package for
     # another runtime profile than `full`, has its `target` (RULES.md, R116
     # and R122).

@@ -13035,3 +13035,48 @@ query layer and the driver", "Stage 2: the native backend"; D-078, D-089;
       tagged-pointer provenance (decision 1108) are not this round's, which
       spent its time on 1280 to 1289; the formatting family stays the
       first, with 903's measurement. This changes no rule of the language.
+
+**Stage 1's twenty-seventh round** (stage 1's RULES.md, R227 to R232; D-060's allocators' first step, the collections' `A: Allocator = Global` interned away at `Global`, the ownership checker's results kept by each function's dependencies and the constants evaluated by one evaluator, `E0282` naming the program's own operation once with its fixes, `E0283`'s words, every region of `--cover` placed, the merge's differences)
+
+1260. `list`, `dict`, `set` and `String` take their allocator as a last
+      type parameter, `A: Allocator = Global` (D-060), which stage 1
+      reads into the prelude's headers and the table of types leaves out
+      at `Global`, so that a program that names no allocator, or names
+      `Global`, has the SIR and the output it had; `Allocator` and
+      `Global` are `std.mem`'s and the prelude's names, and the impls over
+      the collections are at `Global` until the allocators' third step.
+      Stage 1 decides it (RULES.md, R227).
+
+1261. The ownership checker keeps, from one program of a batch or one
+      served request to the next, each function of the program's own
+      with what its check reads besides its SIR, the declared types it
+      reaches and the functions it names, and checks again only a
+      function whose SIR or dependencies changed; and `check` evaluates
+      the program's constants with one evaluator, where it made one for
+      each. A `query diagnostics` of `compiler/rt` after a change takes
+      0.82 s where it took 1.34 to 1.36 s, each answer a fresh request's
+      bytes; the type checker's and lowering's memo waits for a table of
+      types stable across requests. Stage 1 decides it (RULES.md, R228).
+
+1262. `E0282` names the operation the program wrote that allocates, in
+      its own text (`[x * 2 for x in xs]`, `s + t`, `xs.push(v)`) or, where
+      that is long, in words that name no intrinsic; a statement within
+      another that allocates is the other's error, so a comprehension is
+      one; and each error has the fix that removes `@no_alloc`, and one at
+      a list the function makes the fix of a list its caller makes and it
+      fills in place. Stage 1 decides it (RULES.md, R229).
+
+1263. `E0283` says that a module's fixture is one value its tests share
+      and that tests may run in parallel, which is true of both runners,
+      where it said they run at once. Stage 1 decides it (RULES.md, R230).
+
+1264. `sisu1 sir --tests --cover` gives each statement of the program that
+      lowers to nothing at a place of its own (`pass`, `break`,
+      `continue`, `defer`, a `let` without a value) a unit assignment at
+      its place, so that every region of the map names a statement the
+      runner counts. Stage 1 decides it (RULES.md, R231).
+
+1265. The conformance suite's `unsafe/option_pointer` differs from stage
+      0's front end under R4 and R5, as `unsafe/tuple_pointer` does, and
+      `testing/cover` does not differ. Stage 1 decides it (RULES.md,
+      R232).

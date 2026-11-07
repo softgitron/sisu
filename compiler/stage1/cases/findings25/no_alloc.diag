@@ -1,4 +1,9 @@
 19:18-19:37 E0282 type.no-alloc name="render" what="`Synth.next_sample`"
-23:17-23:27 E0282 type.no-alloc name="label" what="the list it makes"
-24:12-24:24 E0282 type.no-alloc name="label" what="`fmt.new`"
+  fix type.no-alloc-remove 16:1-17:1 ""
+23:17-23:27 E0282 type.no-alloc name="label" what="`[n, n + 1]`"
+  fix type.no-alloc-pass-in
+  fix type.no-alloc-remove 21:1-22:1 ""
+24:12-24:24 E0282 type.no-alloc name="label" what="`\"{parts[0]}\"`"
+  fix type.no-alloc-remove 21:1-22:1 ""
 28:12-28:16 E0282 type.no-alloc name="apply" what="the function value it calls"
+  fix type.no-alloc-remove 26:1-27:1 ""

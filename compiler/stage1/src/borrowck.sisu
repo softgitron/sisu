@@ -44,7 +44,17 @@ from stage1.borrowck.init import Analysis
 from stage1.borrowck.types import Types
 from stage1.diag import Catalog, Diagnostic, Lines, render_ids, sort_unique
 from stage1.lower.names import CONTRACTS_ALL
-from stage1.sir import Function, Program, TypeDecl
+from stage1.sir import (
+    Callee,
+    Function,
+    ImplDecl,
+    IntrinsicDecl,
+    Loc,
+    Program,
+    Rvalue,
+    StatementKind,
+    TypeDecl,
+)
 
 ## The checked program: SIR with its drops placed, and the findings.
 pub struct Checked:
@@ -58,6 +68,36 @@ pub struct Checked:
 ## as before, gets the drops it got before, and no finding.
 pub struct Placed:
     entries: dict[String, PlacedFn]
+    ## The program's own functions as the last check of a program checked
+    ## them, with their findings (RULES.md, R228), and what of the program
+    ## as a whole their checks read.
+    own_fns: dict[String, OwnFn]
+    facts: Facts?
+
+## What the checks of a function read of the program besides the function,
+## the declared types it reaches and the functions it names
+## (`OwnFn.deps`): every declared type, the intrinsics' and the trait
+## methods' facts, the impls a `call trait` may reach, and where each
+## `Drop` impl takes its value, which a finding's note names.
+struct Facts:
+    types: list[TypeDecl]
+    intrinsics: list[IntrinsicDecl]
+    trait_methods: list[IntrinsicDecl]
+    impls: list[ImplDecl]
+    drops: list[Loc?]
+
+## A function of the program's own as a check found it (RULES.md, R228):
+## the function as lowering gave it, the declared types it reaches and the
+## functions it names, as `deps` writes them; then the function with its
+## drops placed, the findings of its moves and those of its loans and of
+## must-consume.
+struct OwnFn:
+    input: Function
+    decls: list[TypeDecl]
+    deps: list[Function]
+    output: Function
+    moves: list[Finding]
+    loans: list[Finding]
 
 struct PlacedFn:
     ## The function as lowering gave it, without its source's number.
@@ -70,7 +110,27 @@ struct PlacedFn:
 
 impl Placed:
     pub pure def new() -> Placed:
-        return Placed(entries={})
+        return Placed(entries={}, own_fns={}, facts=None)
+
+    ## The program's own function `f` as the last check found it, when
+    ## nothing it reads has changed since (RULES.md, R228), taken out of the
+    ## memo.
+    pure def own_reuse(mut self, f: Function, types: Types, deps: list[Function]) -> OwnFn?:
+        var out = self.own_fns.remove(f.name.copy()) else:
+            return None
+        if not same_function(out.input, f) or len(out.deps) != len(deps):
+            return None
+        for i in range(len(deps)):
+            if not same_function(out.deps[i], deps[i]):
+                return None
+        if out.decls != types.reached_decls(f):
+            return None
+        out.output.source = f.source
+        for k in range(len(out.moves)):
+            out.moves[k].source = f.source
+        for k in range(len(out.loans)):
+            out.loans[k].source = f.source
+        return Some(out)
 
     ## What was made of `f` before, if it may be taken again.
     pure def reuse(self, f: Function, types: Types, findings_too: bool) -> Function?:
@@ -91,6 +151,97 @@ impl Placed:
             input=f.copy(), decls=types.reached_decls(f), output=g.copy(), checked=checked
         )
         _ = self.entries.insert(f.name.copy(), entry)
+
+## What the checks of the program's functions read of it as a whole
+## (RULES.md, R228).
+pure def facts_of(p: Program, types: Types) -> Facts:
+    var drops: list[Loc?] = []
+    for t in p.types:
+        let drop = match t:
+            case TypeDecl.Struct(_, _, _, d, _, _): d.copy()
+            case TypeDecl.Enum(_, _, _, d, _, _, _): d.copy()
+        let name = drop else:
+            continue
+        var at: Loc? = None
+        if let Some(i) = types.function(name):
+            let g = ref p.functions[i]
+            if len(g.locals) > 1:
+                at = g.locals[1].loc
+        drops.push(at)
+    return Facts(
+        types=p.types.copy(),
+        intrinsics=p.intrinsics.copy(),
+        trait_methods=p.trait_methods.copy(),
+        impls=p.impls.copy(),
+        drops=drops,
+    )
+
+pure def same_facts(a: Facts, b: Facts) -> bool:
+    return a.types == b.types
+        and a.intrinsics == b.intrinsics
+        and a.trait_methods == b.trait_methods
+        and a.impls == b.impls
+        and a.drops == b.drops
+
+## How deep `deps_of` follows a generic function's calls, as must-consume
+## follows them (`consume.instance_drops`).
+const DEPS_DEPTH: int = 9
+
+## The functions the checks of `f` read besides `f` (RULES.md, R228): each
+## function it calls, makes a closure of or names as a value, and each
+## impl's function a `call trait` of it reaches; of a non-generic one its
+## signature, the function without its blocks, and of a generic one, whose
+## instances must-consume checks, the whole function and, so, what it
+## reads, to the depth must-consume follows.
+pure def deps_of(p: Program, types: Types, f: Function) -> list[Function]:
+    var out: list[Function] = []
+    var seen: set[String] = set()
+    _ = seen.add(f.name.copy())
+    deps_into(p, types, f, 0, mut seen, mut out)
+    return out
+
+pure def deps_into(
+    p: Program,
+    types: Types,
+    f: Function,
+    depth: int,
+    mut seen: set[String],
+    mut out: list[Function],
+):
+    var names: list[String] = []
+    for b in f.blocks:
+        for s in b.stmts:
+            match s.kind:
+                case StatementKind.Call(_, callee, _):
+                    match callee:
+                        case Callee.Fn(n, _):
+                            names.push(n.copy())
+                        case Callee.Trait(n, tys):
+                            if let Some((target, _)) = types.trait_target(p, n, tys):
+                                names.push(target)
+                        case _:
+                            pass
+                case StatementKind.Assign(_, value):
+                    if let Rvalue.Closure(n, _, _) = value:
+                        names.push(n.copy())
+                case _:
+                    pass
+    for n in names:
+        if seen.contains(n.copy()):
+            continue
+        _ = seen.add(n.copy())
+        let i = types.function(n) else:
+            continue
+        let g = ref p.functions[i]
+        var dep = g.copy()
+        dep.source = 0
+        if g.type_params.is_empty():
+            dep.blocks = []
+            out.push(dep)
+            continue
+        out.push(dep)
+        if depth < DEPS_DEPTH:
+            deps_into(p, types, g, depth + 1, mut seen, mut out)
 
 ## Whether two functions are the same but for the number of their source,
 ## which depends on the program's other files.
@@ -125,22 +276,65 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
     let types = Types.of(p)
     var findings: list[Finding] = []
     var functions: list[Function] = []
+    # The program's own functions are kept from the last check when what
+    # they read is unchanged (RULES.md, R228): a served request after a
+    # change checks again only the functions whose SIR or whose
+    # dependencies changed.
+    let facts = facts_of(p, types)
+    if findings_too:
+        var same = False
+        if let Some(earlier) = ref placed.facts:
+            same = same_facts(earlier, facts)
+        if not same:
+            placed.own_fns = {}
+            placed.facts = Some(facts)
+    var kept_loans: dict[String, list[Finding]] = {}
+    var now: dict[String, OwnFn] = {}
+    # A name two functions share is checked each time.
+    var names: set[String] = set()
+    var twice: set[String] = set()
+    for f in p.functions:
+        if not names.add(f.name.copy()):
+            _ = twice.add(f.name.copy())
     for f in p.functions:
         let std_fn = f.source < len(p.sources) and p.sources[f.source].starts_with("<std>/")
         if std_fn:
             if let Some(g) = placed.reuse(f, types, findings_too):
                 functions.push(g)
                 continue
+        var deps: list[Function] = []
+        let memo = findings_too and not std_fn and not twice.contains(f.name.copy())
+        if memo:
+            deps = deps_of(p, types, f)
+            if let Some(e) = placed.own_reuse(f, types, deps):
+                for x in e.moves:
+                    findings.push(x.copy())
+                _ = kept_loans.insert(f.name.copy(), e.loans.copy())
+                functions.push(e.output.copy())
+                _ = now.insert(f.name.copy(), e)
+                continue
         var g = f.copy()
         let init = Analysis.run(g, types)
         var found = 0
+        var moves: list[Finding] = []
         if findings_too:
             for x in init.findings(g, types, p):
                 findings.push(x.copy())
+                moves.push(x.copy())
                 found += 1
         elaborate.elaborate(mut g, init, types)
         if std_fn and found == 0:
             placed.keep(f, types, g, findings_too)
+        if memo:
+            let e = OwnFn(
+                input=f.copy(),
+                decls=types.reached_decls(f),
+                deps=deps,
+                output=g.copy(),
+                moves=moves,
+                loans=[],
+            )
+            _ = now.insert(f.name.copy(), e)
         functions.push(g)
     var program = Program(
         sources=p.sources.copy(),
@@ -166,12 +360,24 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
         let trusted = f.source < len(program.sources)
             and program.sources[f.source].starts_with("<std>/")
         if not trusted:
+            if let Some(earlier) = kept_loans.get(f.name.copy()):
+                for x in earlier:
+                    findings.push(x.copy())
+                continue
+            var these: list[Finding] = []
             let a = loans.Analysis.run(program, f, types, True)
             for x in a.findings(program, f, types):
-                findings.push(x.copy())
+                these.push(x.copy())
             let (found, _) = consume.check(f, types, p)
             for x in found:
+                these.push(x.copy())
+            for x in these:
                 findings.push(x.copy())
+            if let Some(e) = now.get(f.name.copy()):
+                var done = e.copy()
+                done.loans = these
+                _ = now.insert(f.name.copy(), done)
+    placed.own_fns = now
     for x in purity.check(program, types):
         findings.push(x.copy())
     # `@no_alloc` through the call graph (RULES.md, R215).

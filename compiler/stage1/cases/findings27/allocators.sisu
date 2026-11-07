@@ -1,0 +1,28 @@
+# D-060's allocators, the first step (RULES.md, R227): the collections take
+# their allocator as a last type parameter, `A: Allocator = Global`, which
+# ordinary code never writes; one that names `Global` has the types and the
+# SIR of one that names none, and a function generic over the allocator
+# takes a collection of either.
+def total(xs: list[int, Global]) -> int:
+    var n = 0
+    for x in xs:
+        n += x
+    return n
+
+def count[T, A: Allocator](xs: list[T, A]) -> int:
+    var n = 0
+    for _ in xs:
+        n += 1
+    return n
+
+struct Inventory:
+    names: dict[String, int, Global]
+    tags: set[String]
+
+def main():
+    var xs: list[int] = [1, 2]
+    xs.push(3)
+    let ys: list[int, Global] = [x * 2 for x in xs]
+    let s: String[Global] = "text".to_string()
+    let inv = Inventory(names={"bolt".to_string(): 4}, tags={"steel".to_string()})
+    print("{total(xs)} {total(ys)} {count(ys)} {s} {len(inv.names)} {len(inv.tags)}")

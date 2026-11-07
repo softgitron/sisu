@@ -14,7 +14,7 @@
 ##! that drops on the way out, are exempt (04: "Panic paths are exempt").
 
 import stage1.sir.write
-from stage1.borrowck.finding import Finding, text
+from stage1.borrowck.finding import Arg, Finding, text
 from stage1.borrowck.types import Types
 from stage1.diag import Msg
 from stage1.sir import (
@@ -44,13 +44,26 @@ struct Site:
 
 ## What a statement does that allocates, if anything: the words of the
 ## error for a statement of the `@no_alloc` function itself (`the list it
-## makes`, `` `list.push` ``), the words of the note for one of a function
-## it calls (`makes a list`), and whether what it calls is known only at
-## run time.
+## makes`, `` `push` ``), which the error quotes the program's own text in
+## place of where `quoted` (RULES.md, R229), the words of the note for one
+## of a function it calls (`makes a list`), whether what it calls is known
+## only at run time, and whether it makes a list, which the function's
+## caller may make in its place.
 struct Allocation:
     what: String
     how: String
     unknown: bool
+    quoted: bool
+    list: bool
+
+## A finding of `check_body` before it is kept: the finding, its
+## statement, and whether the statement itself allocates, so that one
+## within another such statement is the other's (RULES.md, R229).
+struct Found:
+    finding: Finding
+    site: (int, int)
+    loc: Loc?
+    direct: bool
 
 ## The `E0282` errors of the program's `@no_alloc` functions, one at each
 ## statement that allocates or calls a function that may.
@@ -58,14 +71,15 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
     var out: list[Finding] = []
     var memo: dict[String, Site?] = {}
     var made: dict[String, list[Instance]]? = None
-    for (name, shown) in p.no_alloc:
+    for (name, shown, attr) in p.no_alloc:
         let fi = types.function(name) else:
             continue
         let f = ref p.functions[fi]
+        let fixes = Fixes(name=shown.copy(), attr=attr)
         # What allocates whatever the type arguments are, at the function
         # itself; what depends on them waits for each instance (RULES.md,
         # R222).
-        let reported = check_body(p, types, f, shown, [], None, [], mut memo, mut out)
+        let reported = check_body(p, types, f, shown, fixes, [], None, [], mut memo, mut out)
         if f.type_params.is_empty():
             continue
         if made.is_none():
@@ -79,20 +93,56 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                 args.push(write.ty(a))
             let named = "{shown}[{args.join(", ")}]"
             _ = check_body(
-                p, types, f, named, inst.args, Some(inst.at.copy()), reported, mut memo, mut out
+                p,
+                types,
+                f,
+                named,
+                fixes,
+                inst.args,
+                Some(inst.at.copy()),
+                reported,
+                mut memo,
+                mut out,
             )
     return out
+
+## What the fixes of a `@no_alloc` function's errors name: the function as
+## the program writes it, and its attribute's line, which the fix that
+## removes the attribute removes (none when the attribute shares its line;
+## RULES.md, R229).
+struct Fixes:
+    name: String
+    attr: Loc?
+
+impl Fixes:
+    ## The fixes of an error: for a list the function makes, the list its
+    ## caller makes in its place, which has no edit, then the attribute
+    ## removed.
+    pure def add(self, own found: Finding, list: bool) -> Finding:
+        var out = found
+        if list:
+            out = out.fix(Msg.TypeNoAllocPassIn, [], None)
+        if let Some(at) = self.attr:
+            out = out.fix(
+                Msg.TypeNoAllocRemove, [text("name", self.name)], Some((at, "".to_string()))
+            )
+        return out
 
 ## The `E0282` errors of the body of `f`, a `@no_alloc` function named
 ## `shown`, with its type parameters `args` (none for the function as
 ## written, where what depends on them is left to its instances), made at
 ## `made` (an instance's call), but at the statements `skip` names, which
 ## the function as written reported; returns the statements it reported.
+## A statement that allocates within another that does, the element a
+## comprehension pushes or the list a `push` is given, is the other's
+## error, so that one operation of the program is one error (RULES.md,
+## R229).
 pure def check_body(
     p: Program,
     types: Types,
     f: Function,
     shown: str,
+    fixes: Fixes,
     args: list[Type],
     made: String?,
     skip: list[(int, int)],
@@ -100,6 +150,7 @@ pure def check_body(
     mut out: list[Finding],
 ) -> list[(int, int)]:
     var reported: list[(int, int)] = []
+    var found_here: list[Found] = []
     let panics = panic_blocks(f)
     for b in range(len(f.blocks)):
         let block = ref f.blocks[b]
@@ -110,14 +161,19 @@ pure def check_body(
                 continue
             let s = ref block.stmts[si]
             if let Some(a) = allocation(p, types, f, s, args):
-                var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with(
-                    "what", a.what
+                var what = Arg.Text(a.what.copy())
+                if a.quoted:
+                    if let Some(l) = s.loc:
+                        what = Arg.Code(loc=l, fallback=a.what.copy())
+                var found = Finding.new(Msg.TypeNoAlloc, f, s.loc).with("name", shown).with_arg(
+                    "what", what
                 ).at(b, si)
                 if a.unknown:
                     found = found.note(Msg.TypeNoAllocUnknown, [])
                 if let Some(at) = made:
                     found = found.note(Msg.TypeNoAllocInstance, [text("at", at)])
-                out.push(found)
+                found = fixes.add(found, a.list)
+                found_here.push(Found(finding=found, site=(b, si), loc=s.loc, direct=True))
                 reported.push((b, si))
                 continue
             let (callee, callee_args) = called(p, types, f, s, args) else:
@@ -139,9 +195,32 @@ pure def check_body(
             found = found.note(Msg.TypeNoAllocThrough, params)
             if let Some(made_at) = made:
                 found = found.note(Msg.TypeNoAllocInstance, [text("at", made_at)])
-            out.push(found)
+            found = fixes.add(found, False)
+            found_here.push(Found(finding=found, site=(b, si), loc=s.loc, direct=False))
             reported.push((b, si))
+    for k in range(len(found_here)):
+        let x = ref found_here[k]
+        var inner = False
+        if x.direct:
+            for j in range(len(found_here)):
+                let y = ref found_here[j]
+                if j == k or not y.direct:
+                    continue
+                # Within the other, or at its very place and after it.
+                if within(x.loc, y.loc) and (j < k or not within(y.loc, x.loc)):
+                    inner = True
+                    break
+        if not inner:
+            out.push(x.finding.copy())
     return reported
+
+## Whether the place `a` lies within `b`, both known.
+pure def within(a: Loc?, b: Loc?) -> bool:
+    let x = a else:
+        return False
+    let y = b else:
+        return False
+    return (x.line, x.col) >= (y.line, y.col) and (x.end_line, x.end_col) <= (y.end_line, y.end_col)
 
 ## An instance of a generic function the program makes: its type
 ## arguments, and where the first call that makes it is.
@@ -313,7 +392,7 @@ pure def allocation(
                 case Rvalue.Aggregate(kind, _):
                     match kind:
                         case Aggregate.List:
-                            return Some(made("the list it makes", "makes a list"))
+                            return Some(made_list("the list it makes", "makes a list"))
                         case Aggregate.Set:
                             return Some(made("the set it makes", "makes a set"))
                         case Aggregate.Dict:
@@ -354,7 +433,7 @@ pure def allocation(
             match callee:
                 case Callee.Intrinsic(n, _):
                     if grows(n):
-                        return Some(made("`{n}`", "calls `{n}`"))
+                        return Some(made(intrinsic_words(n), "calls `{n}`"))
                     if moves_out(n):
                         return None
                     if not dest.proj.is_empty():
@@ -365,7 +444,9 @@ pure def allocation(
                     if has_param(t):
                         return None
                     if owns_memory(types, t, 0):
-                        return Some(made("`{n}`", "calls `{n}`"))
+                        if n == "list.new":
+                            return Some(made_list(intrinsic_words(n), "calls `{n}`"))
+                        return Some(made(intrinsic_words(n), "calls `{n}`"))
                     return None
                 case Callee.Value(_):
                     return Some(
@@ -373,6 +454,8 @@ pure def allocation(
                             what="the function value it calls".to_string(),
                             how="calls a function value".to_string(),
                             unknown=True,
+                            quoted=False,
+                            list=False,
                         )
                     )
                 case Callee.Trait(n, tys):
@@ -388,6 +471,8 @@ pure def allocation(
                             what="`{n}`".to_string(),
                             how="calls `{n}` on a type only the run knows".to_string(),
                             unknown=True,
+                            quoted=False,
+                            list=False,
                         )
                     )
                 case Callee.Fn(_, _):
@@ -395,8 +480,38 @@ pure def allocation(
         case _:
             return None
 
+## An allocation the error names by the program's own text, `what` where
+## that text does not fit the message (RULES.md, R229).
 pure def made(what: str, how: str) -> Allocation:
-    return Allocation(what=what.to_string(), how=how.to_string(), unknown=False)
+    return Allocation(
+        what=what.to_string(), how=how.to_string(), unknown=False, quoted=True, list=False
+    )
+
+## An allocation of a list, which the caller may make in its place.
+pure def made_list(what: str, how: str) -> Allocation:
+    var a = made(what, how)
+    a.list = True
+    return a
+
+## The words for what an intrinsic does where the error cannot quote the
+## program's text: what the program wrote that reaches it, not the
+## intrinsic's own name (RULES.md, R229).
+pure def intrinsic_words(n: str) -> String:
+    return match n:
+        case "list.new": "the list it makes".to_string()
+        case "set.new": "the set it makes".to_string()
+        case "dict.new": "the dict it makes".to_string()
+        case "fmt.new": "the text it formats".to_string()
+        case _: "a call of `{method_of(n)}`".to_string()
+
+## The method of an intrinsic's name, `push` of `list.push`.
+pure def method_of(n: str) -> String:
+    var k = n.byte_len() - 1
+    while k > 0:
+        if n.byte_at(k) == 46:
+            return n.byte_slice(k + 1, n.byte_len()).to_string()
+        k -= 1
+    return n.to_string()
 
 ## The intrinsics that grow a collection, a text or the heap in place.
 pure def grows(n: str) -> bool:

@@ -1,0 +1,41 @@
+# The regions `sisu test --cover` once skipped (RULES.md, R231): a `pass`,
+# a `break`, a `continue`, a `defer` and its body, and a `let` without a
+# value lowered to no statement at a place of their own, so their regions
+# had none; now each has a unit assignment there, which the runner counts.
+enum Shape:
+    Circle(r: int)
+    Square(s: int)
+
+def kind(s: Shape) -> int:
+    match s:
+        case Shape.Circle(_):
+            pass
+        case Shape.Square(_):
+            return 2
+    return 0
+
+def steps(n: int) -> int:
+    var i = 0
+    while True:
+        if i > n:
+            break
+        if i == 3:
+            i += 2
+            continue
+        i += 1
+    defer:
+        pass
+    return i
+
+def later(x: int) -> int:
+    var y: int
+    y = x
+    return y
+
+test "the regions":
+    assert kind(Shape.Circle(r=1)) == 0
+    assert steps(5) == 6
+    assert later(1) == 1
+
+def main():
+    print("{kind(Shape.Square(s=2))} {steps(1)} {later(3)}")

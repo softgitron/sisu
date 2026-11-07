@@ -362,6 +362,32 @@ pub pure def value_of(prog: Program, name: str, budget: int, catalog: Catalog) -
     var it = Interp(frames=[], fuel=budget, funcs=funcs, catalog=catalog.copy(), printed=None)
     return Ok(Some(it.call(prog, at, [])?))
 
+## Why each of the program's functions `wanted`, functions of nothing (the
+## constants'), stops when run as `value_of` runs it with its budget, `None`
+## for one that gives a value or is not there: what `check` reports of the
+## constants (RULES.md, R178), from one evaluator, whose table of the
+## program's functions and catalog `value_of` made again for each
+## (RULES.md, R228).
+pub pure def stops_of(prog: Program, wanted: list[(String, int)], catalog: Catalog) -> list[Stop?]:
+    var funcs: dict[String, int] = {}
+    for i in range(len(prog.functions)):
+        if not funcs.contains(prog.functions[i].name.copy()):
+            _ = funcs.insert(prog.functions[i].name.copy(), i)
+    var it = Interp(frames=[], fuel=0, funcs=funcs, catalog=catalog.copy(), printed=None)
+    var out: list[Stop?] = []
+    for (name, budget) in wanted:
+        let at = it.funcs.get(name.copy()) else:
+            out.push(None)
+            continue
+        it.frames = []
+        it.fuel = budget
+        match it.call(prog, at, []):
+            case Ok(_):
+                out.push(None)
+            case Err(stop):
+                out.push(Some(stop))
+    return out
+
 ## A worksheet's run by the evaluator (RULES.md, R196): the program's
 ## `main` run with a budget of `budget` steps, its `System` a value nothing
 ## can use, so that the first use of the world stops it; what it printed,

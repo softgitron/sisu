@@ -1,0 +1,26 @@
+# A served request after a change checks the ownership of only the
+# functions whose SIR or whose dependencies changed (RULES.md, R228):
+# `asks.requests` asks for this program's diagnostics, then for them with
+# `scaled`'s body changed on its line (`memo_changed.txt`), then again;
+# `lent`'s error, in a function the change leaves as it was, is the kept
+# function's, and each answer is a fresh request's.
+struct Meter:
+    reading: int
+
+def scaled(m: Meter, by: int) -> int:
+    return m.reading * by + 1
+
+def lent(mut xs: list[int]) -> int:
+    let first = ref xs[0]
+    xs.push(1)
+    return first
+
+def total(xs: list[Meter]) -> int:
+    var n = 0
+    for m in xs:
+        n += scaled(m, 2)
+    return n
+
+def main():
+    var xs = [1, 2]
+    print("{lent(mut xs)} {total([Meter(reading=1)])}")

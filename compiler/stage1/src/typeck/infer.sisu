@@ -184,6 +184,12 @@ impl InferTable:
         match ad:
             case TyData.Adt(d1, a1):
                 if let TyData.Adt(d2, a2) = bd:
+                    # A collection at `Global` against one whose allocator is
+                    # a parameter or not known yet (RULES.md, R227).
+                    if d1 == d2 and len(a1) != len(a2):
+                        let w1 = types.written_args(d1, a1)
+                        let w2 = types.written_args(d2, a2)
+                        return len(w1) == len(w2) and self.unify_all(mut types, w1, w2)
                     return d1 == d2 and len(a1) == len(a2) and self.unify_all(mut types, a1, a2)
                 return False
             case TyData.Tuple(e1, _):

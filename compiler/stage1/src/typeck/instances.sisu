@@ -1099,7 +1099,7 @@ impl Resolver:
                 case _: None
         match self.prog.defs[d.index].kind():
             case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
-                if self.prog.type_generics(d).is_empty():
+                if len(self.prog.type_generics(d)) == self.types.left_out(d):
                     return Some(self.types.adt(d, []))
                 return None
             case DefKind.TypeAlias(t):

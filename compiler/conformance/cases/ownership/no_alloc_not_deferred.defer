@@ -1,15 +1,11 @@
 --- stderr
-error[E0282]: `doubled` is `@no_alloc`, but `list.new` may allocate
+error[E0282]: `doubled` is `@no_alloc`, but `[x * 2 for x in xs]` may allocate
   --> no_alloc_not_deferred.sisu:6:14
   |
 6 |     let ys = [x * 2 for x in xs]
   |              ^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `doubled` may allocate
 
-error[E0282]: `doubled` is `@no_alloc`, but `list.push` may allocate
-  --> no_alloc_not_deferred.sisu:6:15
-  |
-6 |     let ys = [x * 2 for x in xs]
-  |               ^^^^^
-
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)
 --- status 1

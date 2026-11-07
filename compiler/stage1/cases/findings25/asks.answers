@@ -170,18 +170,22 @@ error[E0282]: `render` is `@no_alloc`, but `Synth.next_sample` may allocate
 19 |         out[i] = synth.next_sample()
    |                  ^^^^^^^^^^^^^^^^^^^
   = note: `Synth.next_sample` calls `list.push`, at no_alloc.sisu:13:9
+  = fix: remove `@no_alloc`, so that `render` may allocate
 
-error[E0282]: `label` is `@no_alloc`, but the list it makes may allocate
+error[E0282]: `label` is `@no_alloc`, but `[n, n + 1]` may allocate
   --> no_alloc.sisu:23:17
    |
 23 |     let parts = [n, n + 1]
    |                 ^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `label` may allocate
 
-error[E0282]: `label` is `@no_alloc`, but `fmt.new` may allocate
+error[E0282]: `label` is `@no_alloc`, but `"{parts[0]}"` may allocate
   --> no_alloc.sisu:24:12
    |
 24 |     return "{parts[0]}"
    |            ^^^^^^^^^^^^
+  = fix: remove `@no_alloc`, so that `label` may allocate
 
 error[E0282]: `apply` is `@no_alloc`, but the function value it calls may allocate
   --> no_alloc.sisu:28:12
@@ -189,10 +193,11 @@ error[E0282]: `apply` is `@no_alloc`, but the function value it calls may alloca
 28 |     return f(1)
    |            ^^^^
   = note: which function it calls is known only when it runs, so it may be one that allocates
+  = fix: remove `@no_alloc`, so that `apply` may allocate
 
 error: Failed
 answer 1
-error[E0283]: `counter` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `Cell[int]` is not
+error[E0283]: `counter` is a fixture of its module, one value that every test naming it shares, and tests may run in parallel (17), so what it returns must be `Sync`, and `Cell[int]` is not
   --> fixture_sync.sisu:4:2
   |
 4 | @fixture(scope="module")

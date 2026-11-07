@@ -11704,3 +11704,409 @@ difference that no rule lists but the round's own.
 1226. Stage 1's twenty-sixth round brought no difference from the merge:
       the conformance suite's `testing/mutants` differs from stage 0's
       front end in nothing. Stage 1 decides it (RULES.md, R226).
+
+## R227. D-060's allocators, the first step: the collections' allocator parameter, interned away at `Global` (decision 1260)
+
+**The rule.** R225's first step. 04, "Allocators", 11 and D-060 write the
+collections `list[T, A: Allocator = Global]`, `dict[K, V, A: Allocator =
+Global]`, `set[T, A: Allocator = Global]` and `String[A: Allocator =
+Global]`. Stage 1 now reads them so:
+
+- **The prelude's headers.** The prelude stage 1 reads is
+  `std/prelude.sisu` with each of the four collections' headers given its
+  last parameter `A: Allocator = Global`, on the line it was
+  (`std_sources.allocator_headers`, `with_allocators`), so that every
+  other line, and every position the prelude's diagnostics and pages
+  name, is the shared file's. The shared text keeps its headers: the
+  frozen Rust front end builds `std/prelude.sisu` into its executable and
+  builds stage 1 the first time, and it fills a defaulted parameter into
+  every type it resolves while its literals and its builtins make a
+  collection's type of one argument, so the changed text would leave it
+  unable to build stage 1 (below).
+- **`Allocator` and `Global` are the prelude's.** They are `std.mem`'s
+  (R4), the one `from std.mem import Global` names. The base declares
+  the part of `std.mem` that the allocators' signatures need, the raw
+  pointers, `Layout`, `size_of`, `align_of`, `align_up`, `Allocator`,
+  `Global` and its impl, and `alloc_raw` (up to `MEM_HEAD_END`), and the
+  prelude's names hold `Allocator` and `Global` (the name pass's
+  environment too, `allocator_names`); a program that imports `std.mem`
+  gets the rest of it, `Region`, `RawBuf` and `Plain` with its impls on
+  the numbers, in the same module (`Resolver.std_rest`, `complete_std`),
+  so that a program that does not import it sees no method of `Plain` on
+  an `f32` (`plain_size`), as before, and the definitions the base made
+  take the places in the program's order of definitions that the import
+  gives them (`Program.reranked`, `lower.def_rank`, whose index now
+  weighs `RANK_STEP`), so that the SIR of a program that imports
+  `std.mem`, the runtime in Sisu's seed `compiler/rt/rt.sir` among them,
+  declares its types in the order it did. The trait stays `unsafe` to
+  implement.
+- **Interned away at `Global`.** The table of types records each
+  collection's count of parameters and the default of its last
+  (`Types.intern_default`), and makes `list[T, Global]` the type
+  `list[T]` (`Types.adt`): a program that names no allocator, and one that
+  names `Global`, has the types, the SIR and the output it had, byte for
+  byte, and the 19 sites of the checker, lowering and the ownership
+  checker that make a collection's type of its element keep making it so.
+  A written `list` of one argument takes the default (`left_out`, the
+  defaulted parameters of D-060 as a program's own type takes them), and
+  `list` in a body annotation infers its element alone. Unifying a
+  collection at `Global` with one whose allocator is a parameter or not
+  yet known unifies the allocator with `Global` (`written_args`), so
+  `def count[T, A: Allocator](xs: list[T, A])` takes a `list[int]`. The
+  allocator is not a value the collection holds: R21's check of a
+  collection of references (`E0438`) passes it by (`is_allocator_arg`),
+  and `list[T, ref Region]` is a type, which step 3 makes a view.
+- **Arity.** `list[int, Global, Global]` is `E0208`, "expected 2, found
+  3"; the SIR names a collection on another allocator,
+  `list[int, mem.Region]`.
+
+**The impls.** The prelude's and the std modules' impls over
+`list[T]`, `dict[K, V]`, `set[T]` and `String` default the new
+parameter, as a written type does, so each is an impl for the collection
+at `Global`, and their text does not change: every program that names no
+allocator calls them as before. A collection on another allocator has
+none of them (`list[int, ref Region]` does not implement `Len`,
+`E0347`). Making them generic over the allocator (`impl[T, A: Allocator]
+list[T, A]`) waits for step 3, decided against for this round: each of
+their methods would take the allocator as a type argument the SIR names
+(`list.push[int, Global]`), which the interning cannot leave out, since a
+function's type arguments are not a type; and until step 2 no allocator
+but `Global` has a runtime to call them on.
+
+**What the second step needs.** The runtime in Sisu (D-086, R9) past its
+first slice: `list` and `String` stored on `RawBuf[T, A]`, a collection's
+value holding its allocator beside its buffer where the allocator is not
+zero-sized (`Global` is, so today's layouts stay), and the runtime's
+intrinsics that grow a collection (`list.push`, `dict.insert`, `String.
+push`) allocating through `A.acquire` and `A.release`; the backend's
+layouts of a collection with such a value; and, in the interpreter's
+checked model, a `Region`'s blocks from the region's range. Step 3's
+`with_allocator` and `try_push` (with `! OutOfMemory`) then build one
+and grow it without a panic; the impls become generic over `A` with them.
+
+**The Rust front end** reads the shared prelude, whose collections have
+one parameter, and does not read `std.mem` (R4). For the oracle and the
+`doc` classes:
+
+- the pages of `std.core` (`sisu doc --std`) print stage 1's headers,
+  `pub struct list[T, A: Allocator = Global]`, where the Rust front end's
+  print `pub struct list[T]`;
+- a program that names `Global` or `Allocator` without an import is
+  `E0201` there, and one that imports them from `std.mem` `E0220`, as
+  every program of R4 that imports `std.mem` is;
+- `list[int, Global]` is `E0208` there, "expected 1, found 2".
+
+**Why.** Item 1 of the round: R225's first step, which this round takes
+since the round owns the prelude and the collection modules.
+
+**In stage 1.** `typeck.std_sources` (`allocated`, `allocator_names`,
+`allocator_headers`, `with_allocators`), `main` (`std_texts`,
+`environment`), `typeck.collect` (`base_core`'s part of `std.mem`,
+`MEM_HEAD_END`, `std_rest`, `complete_std`, the generics' default
+interned, the written references' check), `typeck.ty` (`Types.interned`, `adt`,
+`intern_default`, `written_args`, `is_allocator_arg`, `left_out`),
+`typeck.check` (a type's omitted arguments, the written references' check),
+`typeck.infer` (`unify`), `typeck.instances` (a type of no written
+arguments), `typeck.program` (`ref_items`, `reranked`, `RANK_PHASE`,
+`RANK_STEP`), `lower` (`def_rank`), `typeck` (`std_promotions`, the
+eager instances' order, and the derived impls of a module the base declared in
+part, which a program declares when it imports it).
+
+**What it changes.** No program of the corpus that names no allocator.
+The pages of `std.core` (the four headers). The cases
+`cases/findings27/allocators.sisu` (its `.out`: a `list[int, Global]`, a
+`dict` and a `String[Global]`, a function generic over the allocator) and
+`allocator_errors.sisu` (its `.diag`: `E0208` and `E0347` on a
+`list[int, ref Region]`).
+
+- Differs: `--std std.core`: doc, doc-output
+- Differs: `compiler/stage1/cases/findings27/allocators.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings27/allocator_errors.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1260**, for docs/architecture.md:
+
+1260. `list`, `dict`, `set` and `String` take their allocator as a last
+      type parameter, `A: Allocator = Global` (D-060), which stage 1
+      reads into the prelude's headers and the table of types leaves out
+      at `Global`, so that a program that names no allocator, or names
+      `Global`, has the SIR and the output it had; `Allocator` and
+      `Global` are `std.mem`'s and the prelude's names, and the impls over
+      the collections are at `Global` until the allocators' third step.
+      Stage 1 decides it (RULES.md, R227).
+
+## R228. The ownership checker's results kept by each function's dependencies, and the constants evaluated by one evaluator (decision 1261)
+
+**The rule.** Nothing a command prints changes; a served request after a
+change does less. R220 decided against a memo of the later phases for
+want of each body's dependencies on the other modules' declarations,
+which no phase recorded. This round records them for one phase, the
+ownership checker, where the SIR names them, and found the larger part
+of a `query diagnostics` elsewhere:
+
+- **Each function's dependencies.** For a function of the program's own,
+  the ownership checker reads, besides its SIR, the declared types it
+  reaches (`Types.reached_decls`, which `Placed` keyed the standard
+  library's functions by since R125), the functions it names (each it
+  calls, makes a closure of, or reaches through a `call trait` by the
+  impls), of a non-generic one its signature, the function without its
+  blocks, and of a generic one, whose instances must-consume checks, the
+  whole function and what it names in turn, to must-consume's depth
+  (`deps_of`); and, of the program as a whole, every declared type, the
+  intrinsics' and trait methods' facts, the impls, and where each `Drop`
+  takes its value, which a finding's note names (`Facts`).
+- **The memo.** `Placed`, which a batch keeps from one program to the next
+  and the server from one request to the next (`Kept.placed`), now keeps
+  each function of the program's own as the last check found it, with its
+  dependencies, its drops placed, the findings of its moves, and those of
+  its loans and of must-consume (`OwnFn`). A function whose SIR (but for
+  its source's number), declared types and dependencies are the same as
+  the kept one's, in a program whose `Facts` are the same, takes the
+  kept results, and its loans are not walked again; any other is checked
+  as before and replaces it. A name two functions share is checked each
+  time. Purity and `@no_alloc`, which walk the call graph, run whole each
+  time.
+- **The constants by one evaluator.** `check` evaluates every constant of
+  the program at compile time for its errors (R178), and made a new
+  evaluator for each, with the table of the program's functions and a
+  copy of the catalog (`interp.value_of`): the 244 constants of
+  `compiler/rt` made 244 tables and 244 copies of the catalog, 5.4 G of a
+  request's 16 G instructions, a third of its time. One evaluator now runs them all
+  (`interp.stops_of`), its frames and budget set again for each.
+
+The answers are byte for byte a fresh request's: what is kept is a
+function of the inputs it is keyed by, and `cases/findings27/asks.
+requests` asks for `memo.sisu`'s diagnostics, then with `scaled`'s body
+changed on its line (`memo_changed.txt`), then again, `lent`'s `E0405` in
+a function the change leaves as it was coming from the memo; the answers
+are those of a server that answers each request alone. Twenty-one
+requests of `compiler/rt`'s `src/show.sisu`, its text and a change of
+one line in turn, gave the same bytes before and after, as did
+twenty-one saves of `live/swap`.
+
+**Measured** (natively, the release profile, served, the mean of 20
+requests after the first, at a load of about 2): a `query diagnostics`
+of `compiler/rt`'s `src/show.sisu`, each request with the module changed
+by a line from the last, takes 0.82 s where it took 1.34 to 1.36 s; a
+save of `live/swap` takes 0.011 to 0.014 s where it took 0.008 to 0.016
+s, no change a run this short shows. Under callgrind, three requests of
+`rt` took 47.8 G instructions, the base made among them: the constants'
+evaluators 16.2 G before this rule's second part, the program's check 9.8
+G, lowering 4.7 G and the ownership checker 6.3 G with the memo, of
+which its dependencies and their comparison 2.0 G. In a batch of
+`compiler/rt` three times, the ownership checker and what follows it
+takes 0.18 s for each later program where it took 0.36 s.
+
+**Decided against**, for the round: the memo of the type checker's and
+lowering's results by the same records. The type checker's table of
+types is one for the program, each body's types are indices into it, and
+each round of resolution makes it again from a copy of the base, so a
+body's types kept from another request name another table's indices;
+lowering names each function by the program's instances and numbers, made
+for the whole program at once (`lower.index_names`, `StdSlots`). Keeping
+either needs the table of types made stable across requests, by a key of
+each type rather than its index, and the instances and names numbered
+per module; the records `deps_of` makes are the shape both would use,
+by declaration rather than by SIR. That, a check of 3.3 G and a lowering
+of 1.6 G a request on `rt`, is what stands between `query diagnostics`
+and the 100 ms an editor allows, with the base's copy for each round of
+resolution (R220).
+
+**Why.** Item 2 of the round.
+
+**In stage 1.** `borrowck` (`Placed.own_fns`, `facts`, `OwnFn`, `Facts`,
+`own_reuse`, `facts_of`, `same_facts`, `deps_of`, `deps_into`,
+`DEPS_DEPTH`, `check_with`), `sir` (`Eq` on `ImplDecl`, `ImplTarget` and
+`IntrinsicDecl`), `interp` (`stops_of`), `main` (`const_failures`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings27/memo.sisu` (its `.diag`), with `memo_changed.txt`,
+asked by `asks.requests`.
+
+**Decision 1261**, for docs/architecture.md:
+
+1261. The ownership checker keeps, from one program of a batch or one
+      served request to the next, each function of the program's own
+      with what its check reads besides its SIR, the declared types it
+      reaches and the functions it names, and checks again only a
+      function whose SIR or dependencies changed; and `check` evaluates
+      the program's constants with one evaluator, where it made one for
+      each. A `query diagnostics` of `compiler/rt` after a change takes
+      0.82 s where it took 1.34 to 1.36 s, each answer a fresh request's
+      bytes; the type checker's and lowering's memo waits for a table of
+      types stable across requests. Stage 1 decides it (RULES.md, R228).
+
+## R229. `E0282` names the program's own operation, once, with its fixes (decision 1262)
+
+**The rule.** The manual's finding (its step 38): `E0282` named what
+allocates by the intrinsic lowering calls, which the program never
+writes ("`fmt.new` may allocate" of an interpolation, "`list.new`" of a
+comprehension), reported a comprehension as two errors ("`list.new`" at
+it and "`list.push`" at its element), and had no fix. Now:
+
+- **The program's text.** A statement of the `@no_alloc` function that
+  allocates is named by what the program wrote there, in backticks: the
+  comprehension `[x * 2 for x in xs]`, `s + t`, `xs.push(v)`, the
+  interpolation `"n is {n}"`, `s.to_string()`, a list literal, a
+  `.copy()`, a closure (`Arg.Code`, the source at the statement's place).
+  Where that text spans lines or is longer than 40 bytes the words name
+  what it is: "the list it makes", "the set it makes", "the dict it
+  makes", "the text it formats", or "a call of `push`", the method the
+  intrinsic is, never the intrinsic's own name (`intrinsic_words`). A
+  call of a function that allocates is named by the function, as before,
+  with its note; what is known only at run time keeps its words.
+- **Once.** A statement that allocates within another that does, at a
+  place inside the other's, is the other's error: the element a
+  comprehension pushes, the list a `push` is given (`xs.push([1, 2])` is
+  one error). A call of a function inside one is still its own error.
+- **Fixes.** Every error has the fix "remove `@no_alloc`, so that `NAME`
+  may allocate" (`type.no-alloc-remove`), whose edit removes the
+  attribute's line, offered when the attribute stands alone on it (a
+  comment after it, which the edit would remove, leaves the fix out);
+  an error at a list the function makes has first "take the list as a
+  `mut` parameter, made by the caller where allocating is allowed, and
+  set its elements in place without growing it"
+  (`type.no-alloc-pass-in`), without an edit, so that `sisu fix` (R176)
+  leaves such an error to the programmer. A set or a dict filled in
+  place grows, and a text formatted in place does, so neither has the
+  second fix.
+
+```text
+error[E0282]: `doubled` is `@no_alloc`, but `[x * 2 for x in xs]` may allocate
+  --> no_alloc_named.sisu:7:12
+  |
+7 |     return [x * 2 for x in xs]
+  |            ^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `doubled` may allocate
+```
+
+**Why.** Item 3 of the round: the manual's finding.
+
+**In stage 1.** `borrowck.alloc` (`Allocation.quoted` and `list`,
+`Found`, `within`, `Fixes`, `made_list`, `intrinsic_words`,
+`method_of`), `borrowck.finding` (`Arg.Code`, `code_text`,
+`CODE_WIDTH`), `sir` (`Program.no_alloc` with the attribute's line),
+`lower` (`attribute_line`), `diag` and the catalog
+(`type.no-alloc-remove`, `type.no-alloc-pass-in`).
+
+**What it changes.** The `E0282` errors of every case: the `.diag` of
+`cases/findings25/no_alloc.sisu` and of
+`cases/findings26/no_alloc_instances.sisu`, blessed again, and their
+words in `findings25/asks.answers` and `findings26/asks.answers`. The new
+case `cases/findings27/no_alloc_named.sisu` (its `.diag`). The Rust front
+end answers each with `W0030`, as R215 lists.
+
+- Differs: `compiler/stage1/cases/findings27/no_alloc_named.sisu`: ids, human
+
+**Decision 1262**, for docs/architecture.md:
+
+1262. `E0282` names the operation the program wrote that allocates, in
+      its own text (`[x * 2 for x in xs]`, `s + t`, `xs.push(v)`) or, where
+      that is long, in words that name no intrinsic; a statement within
+      another that allocates is the other's error, so a comprehension is
+      one; and each error has the fix that removes `@no_alloc`, and one at
+      a list the function makes the fix of a list its caller makes and it
+      fills in place. Stage 1 decides it (RULES.md, R229).
+
+## R230. `E0283`'s words: no order of the tests (decision 1263)
+
+**The rule.** The manual's finding: `E0283` said a module's fixture is
+shared by its tests "while they run at once", where the interpreter's
+runner runs the tests that share one in turn, on one thread (decision
+1202), and a native run gives each test a value of its own. The
+requirement stays: 17 runs tests in parallel by default, and a value its
+tests share is reached from whatever thread runs each. The words now say
+what is true of both runners:
+
+```text
+error[E0283]: `counter` is a fixture of its module, one value that every test naming it shares, and tests may run in parallel (17), so what it returns must be `Sync`, and `Cell[int]` is not
+```
+
+**Why.** Item 4 of the round: the manual's finding.
+
+**In stage 1.** The catalog (`type.module-fixture-sync`).
+
+**What it changes.** The words of `cases/findings25/fixture_sync.sisu`'s
+error in `findings25/asks.answers`, blessed again; its `.diag`, which
+holds the identifiers, does not change.
+
+**Decision 1263**, for docs/architecture.md:
+
+1263. `E0283` says that a module's fixture is one value its tests share
+      and that tests may run in parallel, which is true of both runners,
+      where it said they run at once. Stage 1 decides it (RULES.md, R230).
+
+## R231. The regions' positions: each region of `--cover` has a statement with a place (decision 1264)
+
+**The rule.** Decision 1241's note: the runner skips a region whose SIR
+statement has no place, and stage 1 wrote `none` for a region whose
+statements lowered to nothing at a place of their own: a `pass`, a
+`break` and a `continue` (a jump and the drops on the way, which have
+none), a `defer` (registered for the scope's exits), its body when it is
+`pass`, and a `let` without a value, so that a match's arm of `pass`, a
+loop's `break` and the like were never in the map. With `--cover`
+(`Input.cover`, `lower.lower_covered`, `Ctx.cover`) lowering gives each
+of them a unit assignment at its place, `_N = const () @LINE:COL-...`,
+which the runner counts when it runs (`FnLower.cover_mark`); a block's
+`pass` statements are kept by the type checker beside its statements
+(`TBlock.passes`), which no other phase reads. Only `sir --tests
+--cover` lowers so, and only the program's own functions, so `sir`,
+`sir --tests` and the standard library's bodies are as before, byte for
+byte. Every region of a program now names a statement of SIR with a
+place; `none` is left for a region lowering writes nothing of at all,
+which no case of the corpus has.
+
+**What stage 0 must do.** Nothing: the runner counts the new statements
+as it counts any, and `cases/findings27/cover.sisu`, run by `sisu test
+--cover`, maps 25 regions where the round's first build left 9 of them
+`none`, which the runner skipped. No form the driver relies on is added,
+and `sisu1 --version` stays 0.21.0.
+
+**Why.** Item 5 of the round: decision 1241's note.
+
+**In stage 1.** `main` (`Input.cover`, `lower_of`), `lower`
+(`lower_covered`), `lower.names` (`Ctx.cover`), `lower.stmts`
+(`block_stmts`, `cover_mark`, `break`, `continue`, `defer`, `let`),
+`typeck.thir` (`TBlock.passes`), `typeck.check` (`new_block_with`,
+`check_block_in_scope`).
+
+**What it changes.** No output of the corpus but `sir --tests --cover`'s.
+The case `cases/findings27/cover.sisu`, asked by
+`findings27/asks.requests`.
+
+**Decision 1264**, for docs/architecture.md:
+
+1264. `sisu1 sir --tests --cover` gives each statement of the program that
+      lowers to nothing at a place of its own (`pass`, `break`,
+      `continue`, `defer`, a `let` without a value) a unit assignment at
+      its place, so that every region of the map names a statement the
+      runner counts. Stage 1 decides it (RULES.md, R231).
+
+## R232. The merge's differences: the conformance suite's `unsafe/option_pointer` (decision 1265)
+
+**The rule.** Nothing a command prints changes. Stage 0's twenty-fourth
+round added two conformance cases (decisions 1240 and 1241):
+
+- `unsafe/option_pointer.sisu` imports `std.mem` and writes `unsafe`
+  code, stage 1's (R4, R5), which the Rust front end answers with `E0220`,
+  `E0201` and `E0900`, so its AST, names, SIR, diagnostics and pages
+  differ as those of `unsafe/tuple_pointer` do (R218).
+- `testing/cover.sisu` does not differ.
+
+What each does is what its `.out` says, from stage 1's SIR
+(`behaviour`), interpreted and natively.
+
+**Why.** Item 6 of the round: the coordinator's run of `check.sh` on the
+round's first commit found `unsafe/option_pointer` unlisted in seven
+classes.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/unsafe/option_pointer.sisu`: ast, names, sir, ids, human, doc, doc-output
+
+**Decision 1265**, for docs/architecture.md:
+
+1265. The conformance suite's `unsafe/option_pointer` differs from stage
+      0's front end under R4 and R5, as `unsafe/tuple_pointer` does, and
+      `testing/cover` does not differ. Stage 1 decides it (RULES.md,
+      R232).

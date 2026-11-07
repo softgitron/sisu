@@ -62,6 +62,8 @@ from stage1.typeck.program import (
     ParamInfo,
     Predicate,
     Program,
+    RANK_PHASE,
+    RANK_STEP,
     Request,
 )
 from stage1.typeck.program import param_local_ty as local_ty_of_param
@@ -126,8 +128,9 @@ pub pure def base(texts: dict[String, String], catalog: Catalog) -> Base:
     var imported: dict[String, String] = {}
     for (name, text) in r.std_derived.items():
         _ = all.insert("<derive>/{name}.sisu", text.copy())
-        # A program declares those of the modules it imports.
-        if not r.is_loaded(name):
+        # A program declares those of the modules it imports, and of one
+        # the base declared in part (RULES.md, R227).
+        if not r.is_loaded(name) or r.std_rest.contains(name.copy()):
             _ = imported.insert(name.copy(), text.copy())
     r.std_derived = imported
     if not all.contains("target"):
@@ -187,7 +190,7 @@ pub pure def base_cached(texts: dict[String, String], catalog: Catalog, cache: B
     var imported: dict[String, String] = {}
     for (name, text) in r.std_derived.items():
         _ = all.insert("<derive>/{name}.sisu", text.copy())
-        if not r.is_loaded(name):
+        if not r.is_loaded(name) or r.std_rest.contains(name.copy()):
             _ = imported.insert(name.copy(), text.copy())
     r.std_derived = imported
     if not all.contains("target"):
@@ -227,6 +230,10 @@ pure def std_promotions(
         let m = prog.defs[i].module
         let module_name = prog.modules[m.index].name.copy()
         if not importable().contains(module_name) or m.index >= len(all.sources):
+            continue
+        # A module the base's core loads, `std.mem` for the prelude's
+        # allocators (RULES.md, R227), keeps its syntax for lowering alone.
+        if all.sources[m.index].items.is_empty():
             continue
         let f = prog.fn_info(d) else:
             continue
@@ -982,9 +989,13 @@ pure def check_round(
             continue
         if instance_declared(prog, d, []):
             continue
-        var rank = i
+        var rank = i * RANK_STEP
         if i < len(prog.phases):
-            rank = prog.phases[i] * 10000000 + i
+            rank = prog.phases[i] * RANK_PHASE + i * RANK_STEP
+        # A std module's definitions the base declared in part, where its
+        # import would have made them (RULES.md, R227).
+        if let Some(r) = prog.reranked.get(i):
+            rank = r
         if prog.defs[i].module != root_id:
             rank += 1000000000000
         eager.push((rank, d))
