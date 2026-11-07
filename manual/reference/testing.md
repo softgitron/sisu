@@ -725,6 +725,17 @@ $ sisu test --format=json properties.sisu
 {"event":"start","test":"a share of a share is the share of the product"}
 {"event":"end","test":"a share of a share is the share of the product","result":"failed","message":"panic: the property failed for (1, 10) (case 1, shrunk 0 times)\n  the property returned False\n  at test \"a share of a share is the share of the product\" (properties.sisu:15:5)","replay":"1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10"}
 {"event":"summary","passed":1,"failed":1,"blocked":0}
+$ sisu test --native properties.sisu
+test "a share is never more than the whole" ... ok
+test "a share of a share is the share of the product" ... FAILED
+
+test "a share of a share is the share of the product" ... FAILED
+panic: the property failed for (1, 10) (case 1, shrunk 0 times)
+  the property returned False
+  at test "a share of a share is the share of the product" (properties.sisu:15:5)
+replay: sisu test --replay 1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10 properties.sisu
+
+1 passed, 1 failed, 0 blocked
 ```
 
 A test that failed on a case keeps the case in the failure database
@@ -736,8 +747,10 @@ session fails on case 1 without shrinking, and a test that passes
 loses its line. The database is read and written when the test cache
 is ([What sisu test remembers](#what-sisu-test-remembers)), so not with
 `--no-cache`, a search of schedules, `--sim`, `--update`,
-`--defer-borrow`, `--cover`, `--native` or the standard library's
-examples. The third command prints the report as JSON
+`--defer-borrow`, `--cover` or the standard library's examples, and by
+a native run too, which caches no result but keeps the database: the
+last command's compiled test fails on case 1 as the second did. The
+third command prints the report as JSON
 ([R16](sisu-command.md#sisu-test)): a line for each test's start and
 its end, the end with its result, `"cached"` for a result the cache
 gave, and for a failure its message and replay token, then a line of
@@ -1239,6 +1252,10 @@ own, and the test cache is not read, so every test runs.
   a statement of the package that it reaches counts for the package,
   whose regions are reported after the last file's list
   ([Black-box tests](#black-box-tests) shows a run).
+- A transcript's runs are counted as a test's are, so a program that
+  only its transcripts test has the regions they reach counted reached
+  ([chapter 19](../tutorial/19-testing.md#testing-the-tests) shows the
+  booking tool of its transcript section).
 - Since stage 1's twenty-seventh round every region names a statement
   with a place, a `pass`, a `break`, a `continue` and a `defer`
   included, so none is left out of the map.
@@ -1246,9 +1263,7 @@ own, and the test cache is not read, so every test runs.
 **Stage 0 differs.** 17 takes the regions from the compiler's own
 instrumentation, in any build; stage 0 counts them in the interpreter
 only, and decided against counting a native build, which would need a
-counter at every statement in both lowerings. The runs of a program's
-transcripts are not counted, so a program that only a transcript tests
-has every region reported unreached though the transcript passes.
+counter at every statement in both lowerings.
 
 **Status.** In stage 0 (17, "Coverage and mutation"), with the
 difference noted.

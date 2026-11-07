@@ -1311,12 +1311,25 @@ regions: 7, 5 reached by the tests and 2 not
 ```
 
 No test is at 90 degrees or more, so the `else` and its `return` never
-run. Like a survivor, an unreached region is a map of what is
-untested, not a failure. `--cover` counts in the interpreter, so it
-does not combine with `--native` (D0163). `--mutate` counts the same
+run. Like a survivor, an unreached region marks what is untested,
+not a failure. A transcript's runs count as well, so the
+booking tool of [Transcripts](#transcripts) misses only its `case _`:
+
+<!-- output: examples/19-testing/sauna_cover.console -->
+```console
+$ sisu test --cover sauna.sisu
+transcript "tests/sauna.transcript" ... ok
+1 passed, 0 failed, 0 blocked
+sauna.sisu:32:13: no test reaches this branch
+sauna.sisu:32:13: no test reaches this statement
+regions: 26, 24 reached by the tests and 2 not
+```
+
+`--cover` counts in the interpreter, so it does not combine with
+`--native` (D0163). `--mutate` counts the same
 way, and runs against each mutant only the tests that reach its line.
 `--format=json` prints the report as a line of JSON for each test's
-start and end, for tools to read
+start and end
 ([R16](../reference/sisu-command.md#sisu-test)); fuzzing (`--fuzz`) is
 designed in [17](../../proposal/17-testing.md).
 

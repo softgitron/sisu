@@ -80,7 +80,8 @@ between requests, and the ownership checker's results for each function
 whose code and dependencies did not change, so the diagnostics of a
 program of 18 modules after a one-line change take about 0.82 seconds,
 where they took 1.35; most of what is left is checking and lowering the
-program's own types again, which keeps no memo yet. A field's references and its rename include the
+program's own types again, which keeps no memo yet, since each request
+numbers the program's definitions anew. A field's references and its rename include the
 keyword of each construction, the `turn` of `Sauna(turn=1)`, and the
 field's name in each struct pattern, the `turn` of `case
 Sauna(turn=t)`. A file with a syntax error still gets what its

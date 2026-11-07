@@ -4128,8 +4128,10 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 The run ends with D0006, since an allocation is not an ownership
-rule's error, and `--defer-borrow` refuses the program as the plain run
-does. The note names the call `louder`'s comprehension lowers to,
+rule's error: stage 1 says the line itself, counting every error of the
+program, the ownership rules' found beside it included, and answers
+`--defer-borrow` as the plain build, so the option refuses the program
+as the plain run does. The note names the call `louder`'s comprehension lowers to,
 `list.new`, not the comprehension. Do the work in place, in memory the
 caller gives, or leave the allocation where the attribute does not
 reach:
@@ -13195,6 +13197,47 @@ second command does, and every mutant of the program runs.
 
 [R15](testing.md#mutation-testing) describes it.
 
+### D0166
+
+`cli.replay-not-native`: `sisu replay --native` runs the SIR a log holds
+natively, and `{path}` {reason}: `sisu replay {path}` replays it in the
+interpreter.
+
+`sisu replay --native LOG` compiles the SIR in the log's header and
+runs it against the log's records, so it replays a log that holds the
+SIR that ran, whichever runtime recorded it. A log of a run of the Rust
+front end holds the program's source instead, and a log of `sisu run
+--watch` holds its saves, which only the interpreter builds and swaps
+in. The status is 1:
+
+<!-- file: examples/reference-diagnostics/d0166_replay_source.sisu -->
+```sisu
+# A log that holds its program's source replays in the interpreter only.
+def main():
+    print("Hei, maailma!")
+```
+
+<!-- output: examples/reference-diagnostics/d0166_replay_source.console -->
+```console
+$ sisu run --front-end=rust --record source.log d0166_replay_source.sisu
+Hei, maailma!
+$ sisu replay --native source.log
+error[D0166]: `sisu replay --native` runs the SIR a log holds natively, and `source.log` holds its program's source, not the SIR its run ran: `sisu replay source.log` replays it in the interpreter
+$ sisu replay source.log
+Hei, maailma!
+$ sisu run --record sir.log d0166_replay_source.sisu
+Hei, maailma!
+$ sisu replay --native sir.log
+Hei, maailma!
+```
+
+Replay such a log without `--native`, as the third command does, or
+record the run again with stage 1's front end, as the fourth does, and
+the log replays natively too.
+
+[R16](sisu-command.md#recording-a-run---record-and---redact) describes
+it.
+
 ### D0190
 
 `cli.fix-errors-left`: `{file}` does not check after the fixes: errors
@@ -14011,6 +14054,7 @@ it. `sisu explain CODE` prints the same line.
 | D0163 | `cli.cover-alone` | `--cover` counts the regions the tests reach in the interpreter; it does not combine with `{option}` |
 | [D0164](#d0164) | `cli.stage1-too-old` | {what} needs stage 1's `sisu1 0.21.0` or later, and the stage 1 run is older |
 | [D0165](#d0165) | `cli.mutate-no-git` | the working directory is not in a git repository |
+| [D0166](#d0166) | `cli.replay-not-native` | `sisu replay --native` runs the SIR a log holds natively, and `{path}` {reason}: `sisu replay {path}` replays it in the interpreter |
 | D0170 | `cli.hole` | {at}: the typed hole {hole} of type `{ty}`, in `{function}` |
 | D0171 | `cli.hole-scope` | in scope: {bindings} |
 | D0172 | `cli.hole-scope-none` | nothing is in scope |

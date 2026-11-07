@@ -801,8 +801,9 @@ than a derived one, is E0398 in stage 0, which hashes keys by their
 structure. Each collection takes its allocator as a last parameter,
 D-060's `list[T, A: Allocator = Global]`, `dict[K, V, A]`, `set[T, A]`
 and `String[A]`, which a program leaves out: `list[int]` is `list[int,
-Global]`, and only a collection at `Global` has methods until the
-allocators' later steps ([R7](ownership.md#allocators)).
+Global]`, and a collection on another allocator has only
+`with_allocator` and the `try_` growths until the allocators' later
+steps ([R7](ownership.md#allocators)).
 
 **Status.** In stage 0, with the differences noted.
 
@@ -1453,10 +1454,11 @@ The standard collections take their allocator this way, D-060's
 is `list[T, ref Region]` and every other list leaves the parameter out.
 
 **Stage 0 differs.** A collection's type at `Global` is the one it had
-before the parameter, in the SIR too, and only a collection at `Global`
-has the collections' impls: a `list[int, ref Region]` has no `Len`
-(E0347) and nothing builds one, until the allocators' later steps
-([R7](ownership.md#allocators)).
+before the parameter, in the SIR too. `list.with_allocator(ref
+region)` builds a `list[int, ref Region]`, and `try_push` grows it, but
+the collections' other impls are for `Global` only, so it has no `Len`
+(E0347), and the runtime does not run it yet, until the allocators'
+later steps ([R7](ownership.md#allocators)).
 
 **Status.** In stage 0 (D-060 leaning), with the differences noted.
 

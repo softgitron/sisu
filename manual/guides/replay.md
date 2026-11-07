@@ -111,6 +111,11 @@ panic: index out of bounds: the length is 1 but the index is 1
   `proc` and `stdin`, leaves the results of those capabilities out of
   the log, for a log that would hold secrets; its replay stops at the
   first call whose result it lacks.
+- A failure of the compiled program records the same way: `sisu run
+  --native --record LOG` writes the log the interpreter's run writes,
+  and `sisu replay --native LOG` replays a log natively, so a log
+  from either runtime reproduces the failure in the other
+  ([R16](../reference/sisu-command.md#recording-a-run---record-and---redact)).
 
 ## 3. Fix the bug, and check the fix
 

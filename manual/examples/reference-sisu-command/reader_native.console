@@ -1,0 +1,15 @@
+$ sisu run --native --record native.log reader.sisu
+1: Hei
+2: maailma
+$ sisu replay native.log
+1: Hei
+2: maailma
+$ sisu replay --native native.log
+1: Hei
+2: maailma
+$ sisu run --record run.log reader.sisu
+1: Hei
+2: maailma
+$ sisu replay --native --release run.log
+1: Hei
+2: maailma

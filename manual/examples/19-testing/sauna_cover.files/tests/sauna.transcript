@@ -1,0 +1,9 @@
+$ sauna list
+17:00 Roni
+$ sauna book Aino 18
+booked 18:00 for Aino
+$ sauna book Eero 18
+error: Taken(hour=18) (exit 1)
+$ sauna list
+17:00 Roni
+18:00 Aino

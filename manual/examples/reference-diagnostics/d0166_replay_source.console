@@ -1,0 +1,10 @@
+$ sisu run --front-end=rust --record source.log d0166_replay_source.sisu
+Hei, maailma!
+$ sisu replay --native source.log
+error[D0166]: `sisu replay --native` runs the SIR a log holds natively, and `source.log` holds its program's source, not the SIR its run ran: `sisu replay source.log` replays it in the interpreter
+$ sisu replay source.log
+Hei, maailma!
+$ sisu run --record sir.log d0166_replay_source.sisu
+Hei, maailma!
+$ sisu replay --native sir.log
+Hei, maailma!

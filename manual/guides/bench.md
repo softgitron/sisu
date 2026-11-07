@@ -192,6 +192,10 @@ stats stack-depth: 1 calls at a depth of 1 to 1 frames
 stats stack-depth: 5 calls at a depth of 2 to 3 frames
 ```
 
+The depths are the interpreter's, and its estimate of the native stack
+they need: `--stats stack-depth` and `--stats shared` count in the
+interpreter only, and a native run takes `--stats` alone
+([R16](../reference/sisu-command.md#counting-what-the-run-did---stats)).
 Until the profiler lands, benchmark the parts of a slow program one at
 a time: a function whose benchmark grows fastest with its input is
 where to look first.

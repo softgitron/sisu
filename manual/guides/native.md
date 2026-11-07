@@ -61,7 +61,10 @@ löyly!
   executable with what the interpreter prints.
 - In a package, `sisu build --native` writes `build/debug/NAME` beside
   the lockfile, `NAME` being the package's, and `--output PATH` writes
-  the executable at `PATH` instead.
+  the executable at `PATH` instead. A package's build and native run
+  take the executable from the same cache and copy it there, so a
+  second build of an unchanged package takes about 0.03 seconds where
+  the first took 0.1.
 - Builds and native runs are served by [the server of stage
   1](../reference/sisu-command.md#the-server-of-stage-1), which keeps
   stage 1 running between commands: a package's `sisu build --native`

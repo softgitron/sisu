@@ -92,13 +92,13 @@ usage: sisu <command> [options] [<file>]
 Without a file, a command works on the package of the current directory (`sisu.toml`).
 
 commands:
-  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--from-sir FILE` runs a file of serialised SIR, natively with `--native`, and `--native --from-lir FILE` a file of LIR, stage 2's lowering of SIR)
+  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, natively too, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--from-sir FILE` runs a file of serialised SIR, natively with `--native`, and `--native --from-lir FILE` a file of LIR, stage 2's lowering of SIR)
   check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log, `--holes [<path>]` lists each typed hole of the program, a file's or a package's, with the type its place needs and the bindings in scope that fit it)
   doc [<path>]           the documentation, a Markdown page per module, printed each after a line naming its file (`--output DIR` writes the pages into DIR instead, `--std [MODULE...]` documents the standard library, or the modules named, as `std.time`, `--digest` writes the API as one plain text instead, each item's declaration with its first paragraph, capabilities, holes and first example, into `DIR/NAME.txt` with `--output DIR`)
   build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR, `--native --from-lir` a file of LIR)
-  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--mutate` runs them against each mutant of the program and prints the mutants no test kills, `--since REV` only those on lines changed since the revision REV, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed, `--native` compiles them and runs each natively, `--release` with the release profile)
+  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--defer-borrow` runs those of a program the ownership checker rejected in the counterexample mode, `--no-cache` runs the tests that passed before too and tries no case the failure database saved, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--mutate` runs them against each mutant of the program and prints the mutants no test kills, `--since REV` only those on lines changed since the revision REV, `--cover` prints after the report each region of the program that no test or transcript reaches, `--format=json` prints a line of JSON for each test's start and end in the place of the report, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed, `--native` compiles them and runs each natively, `--release` with the release profile)
   bench [<file>]         run the benchmarks (`--iterations N`, `--samples K` times each after a run not timed, `--from-sir FILE` those of a file `sisu sir --tests` printed)
-  replay <log>           run a recorded program again against its capability log
+  replay <log>           run a recorded program again against its capability log (`--native` natively, whichever runtime recorded it, `--monitor` under the ownership monitor)
   fmt [<path>...]        format files in place (`--check` reports what would change)
   repl [<file>|<dir>]    an interactive session, with a package loaded from its directory (`--echo` writes each input after its prompt, for a session read from a pipe)
   ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)
@@ -409,8 +409,11 @@ whose SIR or dependencies changed; and `check` evaluates the program's
 constants with one evaluator, where it made one for each. A `query
 diagnostics` of `compiler/rt`, the runtime in Sisu, after a change of
 one line takes 0.82 seconds where it took 1.35, natively and served.
-Checking and lowering the program's types keep no memo yet, which waits
-for a table of types that stays the same from one request to the next.
+Checking and lowering the program's types keep no memo yet: the table
+of types already maps from one request to the next by structure, but
+each request numbers the program's definitions anew, and the checker
+does not record what each body reads of the program's declarations, so
+a memo waits for both.
 
 **Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980, 1061, 1140, 1220 and 1261 of
 the [architecture notes](../../compiler/docs/architecture.md)).
@@ -616,11 +619,13 @@ words with D0006, where it built the program a second time without the
 option to get them; and stage 1 follows each deferred finding with a
 line naming its function, which the driver reads, so a finding in a
 closure and one in the function that makes it are told apart. Stage 1
-counts `@no_alloc`'s E0282 among the ownership checker's findings, and
-the driver says the line of such a run as D0006, not D0021, and refuses
-it under `--defer-borrow` as the run without the option does, status 1
-([R14](attributes.md#resource-limits)), since the monitor observes the
-ownership rules alone. What a run prints is the same as before for the
+finds `@no_alloc`'s E0282 with the ownership checker, but it is no
+ownership rule's, so from `sisu1 0.22.0` stage 1 itself ends such a
+run's build with D0006, not D0021, counting every error of the
+program, and answers it under `--defer-borrow` as the build without the
+option, status 1 ([R14](attributes.md#resource-limits)), since the
+monitor observes the ownership rules alone; the driver said those lines
+for an older stage 1. What a run prints is the same as before for the
 programs on this page.
 `--front-end=rust` lowers the program with the Rust front end instead.
 
@@ -725,6 +730,39 @@ error[D0037]: the replay diverged from the log: record 2 of the log is a call to
 `--record` records one run, so it does not combine with `--explore`,
 `--defer-borrow`, `--sir` or `--from-sir` (D0038).
 
+A native run records too: `sisu run --native --record LOG` writes the
+log that the interpreter's run writes, its header holding the SIR that
+ran and its records the native runtime's, in the same names and order,
+and `sisu replay --native LOG` runs a log's SIR natively, `--release`
+with the release profile. So a log replays in either runtime, whichever
+recorded it:
+
+<!-- output: examples/reference-sisu-command/reader_native.console -->
+```console
+$ sisu run --native --record native.log reader.sisu
+1: Hei
+2: maailma
+$ sisu replay native.log
+1: Hei
+2: maailma
+$ sisu replay --native native.log
+1: Hei
+2: maailma
+$ sisu run --record run.log reader.sisu
+1: Hei
+2: maailma
+$ sisu replay --native --release run.log
+1: Hei
+2: maailma
+```
+
+A log of a run of the Rust front end holds the program's source, and
+one under `--watch` its saves, so only the interpreter replays them
+(D0166, [R17](diagnostics.md#d0166)). Of the conformance suite's 260
+cases that run natively, 259 give the same records in both runtimes;
+the one apart calls C's `write`, which the interpreter emulates as
+standard output.
+
 **Status.** In stage 0, a prototype of the experiment (Q-49, D-070).
 
 ### Counting what the run did: --stats
@@ -734,7 +772,9 @@ output: the tasks, the most at once, the switches between them, the
 latency of scheduling, and the `Shared` cells and whether another task
 reached them. `--stats stack-depth` reports the depth of the call stack
 instead, and `--stats shared` each place that constructs a `Shared`.
-`--stats=` with another word is D0094.
+`--stats=` with another word is D0094. A native run gives the
+scheduler's numbers, its latency in microseconds only, and refuses the
+other two (D0109), which count in the interpreter.
 
 <!-- output: examples/reference-sisu-command/stats.console -->
 ```console
@@ -762,9 +802,11 @@ native backend, as `sisu build --native` does, and runs it.
 checks it can prove unnecessary; it goes with `--native` only (D0111),
 since the interpreter has no profiles. A native run takes the schedule
 options, `--scheduler pct` and `--scheduler exhaustive` with `--depth`
-among them ([Choosing the schedule](#choosing-the-schedule)), and
-`--stats` with no word after it; it does not combine with `--sir`,
-`--monitor`, `--defer-borrow`, `--watch` or `--record` (D0109). A
+among them ([Choosing the schedule](#choosing-the-schedule)),
+`--record` ([Recording a run](#recording-a-run---record-and---redact))
+and `--stats` with no word after it; it does not combine with `--sir`,
+`--monitor`, `--defer-borrow`, `--watch`, `--stats stack-depth` or
+`--stats shared` (D0109). A
 native debug build checks raw memory as the interpreter does, with the
 same panics: the blocks of `Global` and of C's `malloc`, the text of
 `getenv`, and pointers to the program's own variables, whose frame
@@ -774,18 +816,24 @@ it came from, so it lets pass a few accesses that the interpreter
 stops; the release build checks none
 ([chapter 27](../tutorial/27-systems.md#raw-memory)).
 
-A file's `sisu run --native` takes its executable from a cache of built
+`sisu run --native` takes its executable from a cache of built
 executables under `target/run-cache/` beside the driver, the 32 run
-last, and builds again only when the program's SIR, the profile, the
-lowering, the backend or the driver and its runtimes changed: a second
-run of a two-line program takes 0.016 seconds where its build took
-0.067, with a release build of `sisu`, and the interpreter's run 0.014.
-`SISU_RUN_CACHE=0` builds aside each time; a package's executable stays
-where its builds go. A plain `sisu run` stays the interpreter's until
-the native runtime has what only the interpreter gives: the capability
-log and its replay, which come next, then `--stats stack-depth` and
-`--stats shared`; hot replacement, the monitor and the counterexample
-mode stay the interpreter's whatever the default.
+last within 512 MB, and builds again only when the program's SIR, the
+profile, the lowering, the backend or the driver and its runtimes
+changed: a second run of a two-line program takes 0.016 seconds where
+its build took 0.067, with a release build of `sisu`, and the
+interpreter's run 0.014. A package's `sisu build --native` and `sisu
+run --native` take theirs from the same cache and copy it where the
+package's builds go, so a second build of an unchanged package takes
+0.029 seconds where it took 0.096, and a second run 0.021 where it took
+0.077; so does a file's `build --native` without `--output`.
+`SISU_RUN_CACHE=0` builds aside each time. A plain `sisu run` stays the
+interpreter's: `--stats stack-depth` and `--stats shared` stay the
+interpreter's too, since natively each would need a hook in every
+function or at every `Shared` construction for numbers that the
+interpreter gives of the same program, and hot replacement, the monitor
+and the counterexample mode stay the interpreter's whatever the
+default.
 
 <!-- output: examples/reference-sisu-command/native.console -->
 ```console
@@ -809,7 +857,7 @@ Cranelift in a debug build too).
 
 **Status.** In stage 0 (stage 2 of the bootstrap,
 [18](../../proposal/18-next-steps.md); the cache of built executables,
-decision 1287 of the [architecture
+the decisions 1287 and 1323 of the [architecture
 notes](../../compiler/docs/architecture.md)).
 
 ### Running serialised SIR: --sir, --from-sir and --from-lir
@@ -853,13 +901,15 @@ written in Sisu hands its SIR to these.
 
 ### sisu replay
 
-- `sisu replay [--monitor] LOG`
+- `sisu replay [--native [--release]] [--monitor] LOG`
 
 `sisu replay` runs a recorded program again, with the capability log
 standing in for the world: each capability call returns the result the
 log holds, standard input is the log's, and the scheduler takes the
 log's seed. The program is the source the log holds, so the replay
-needs only the log. `--monitor` replays under the ownership monitor.
+needs only the log. `--monitor` replays under the ownership monitor,
+and `--native` runs the log's SIR natively, whichever runtime recorded
+it, which a log that holds the source cannot give (D0166).
 The example of [Recording a run](#recording-a-run---record-and---redact)
 shows a replay.
 
@@ -1453,7 +1503,8 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   that take the real `System` run one at a time. The output does not
   depend on it.
 - `--no-monitor` runs without the ownership monitor.
-- `--no-cache` runs every test. Without it, a test that passed is not
+- `--no-cache` runs every test and tries no case that the failure
+  database saved, as `sisu help` says. Without it, a test that passed is not
   run again while nothing it reaches has changed: the cache is keyed on
   the code each test reaches and on the options that decide a run, and
   a cached test is reported `ok (cached)` (D0152), counted as passed,
@@ -1467,9 +1518,10 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   token. The next run gives each such test its saved case first, so a
   property that still fails reports `case 1, shrunk 0 times`; a test that
   passes loses its line. It is read and written when the cache is, so not
-  with `--no-cache`, `--sim`, `--update`, `--defer-borrow`, `--cover`,
-  `--native`, a search of schedules or `--std`'s examples
-  ([R15](testing.md#property-tests)).
+  with `--no-cache`, `--sim`, `--update`, `--defer-borrow`, `--cover`, a
+  search of schedules or `--std`'s examples, and by `--native` too,
+  which hands each compiled test its saved case though it caches no
+  result ([R15](testing.md#property-tests)).
 - `--format=json` prints, in the report's place, a line of JSON for each
   test's start and one for its end, with its result (`ok`, `failed` or
   `blocked`), `"cached"` for a result the cache gave, and for a test
@@ -1522,7 +1574,7 @@ warning[W0001]: typed hole `halve` of type `int`
 - `--std` runs the standard library's doc examples besides the
   program's tests, before them; outside a package and without a file,
   it runs them alone, with no test cache, which has no file to sit
-  beside. Stage 1 lowers them as tests from `sisu1 0.17.0`, 197 of
+  beside. Stage 1 lowers them as tests from `sisu1 0.17.0`, 199 of
   them, each once, and from `sisu1 0.21.0` alone, with no program
   written aside for them (an older stage 1 is D0164); alone they take about 3 seconds, where they
   took about 3.5 before stage 1 made each module's examples once for a
@@ -1544,8 +1596,8 @@ warning[W0001]: typed hole `halve` of type `int`
   the tests' own ([R15](testing.md#coverage)). It does not combine with
   `--native`, `--release`, `--defer-borrow`, `--mutate`, `--replay` or
   `--from-sir` (D0163). A package's files of `tests/` are counted for
-  the package, which is reported after the last of them; its transcripts
-  are not counted.
+  the package, which is reported after the last of them, and the runs of
+  a program's transcripts count as its tests' do.
 - `--mutate` runs the tests, then runs against each mutant of the
   program, a copy with one small change, the selected tests that reach
   its line, and prints each
@@ -1685,8 +1737,9 @@ error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 
 **Stage 0 differs.** [17](../../proposal/17-testing.md) has `sisu test`
 write a JSON event stream, with TAP and JUnit XML as `--format` options;
-stage 0 prints the human form only, and has no `--fuzz`
-([Commands that are designed](#commands-that-are-designed)).
+stage 0's `--format=json` is a line for each test's start and end, and
+stage 0 has no `--fuzz`
+([Options of the existing commands](#options-of-the-existing-commands)).
 `--cover` counts in the interpreter, where 17 instruments any build.
 The mutants of `--mutate` are stage 1's, from `sisu1 0.19.0`, and
 `--cover`'s regions from `sisu1 0.20.0` ([sisu sir](#sisu-sir)); with
@@ -1806,7 +1859,7 @@ test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 test "std.time/days_in_month (doc example)" ... ok
 5 passed, 0 failed, 0 blocked
-193 not selected
+195 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -2932,7 +2985,7 @@ a command line can produce, by what they report:
 | D0022 | `sisu audit` without an audit. |
 | D0024 to D0027, D0041 to D0050, D0127 | Schedules explored, and the schedulers. |
 | [D0028](diagnostics.md#d0028), [D0029](diagnostics.md#d0029) | `--contracts`. |
-| D0030 to D0040 | Replay tokens, capability logs and replays. |
+| D0030 to D0040, [D0166](diagnostics.md#d0166) | Replay tokens, capability logs and replays. |
 | D0051, [D0052](diagnostics.md#d0052) | `--faults`. |
 | D0054 to D0056 | Snapshots. |
 | D0057 to D0059, [D0136](diagnostics.md#d0136) | `sisu bench`. |

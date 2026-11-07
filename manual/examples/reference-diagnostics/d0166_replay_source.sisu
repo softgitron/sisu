@@ -1,0 +1,3 @@
+# A log that holds its program's source replays in the interpreter only.
+def main():
+    print("Hei, maailma!")

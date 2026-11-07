@@ -298,11 +298,46 @@ def main():
 
 The parameter is the first step of the allocators that
 [03](../../proposal/03-types-and-generics.md#generic-syntax) and
-[04](../../proposal/04-memory-and-ownership.md#allocators) design. A
-collection on another allocator, such as a region that frees everything
-at once, has none of the collections' methods and traits yet, and
-nothing builds one: until
-the later steps every collection allocates from `Global`
+[04](../../proposal/04-memory-and-ownership.md#allocators) design. The
+second gives each collection an associated function that takes the
+allocator as a value, `list.with_allocator(a)`, and a growth that
+reports a failure as an error instead of a panic: `list.try_push`,
+`dict.try_insert`, `set.try_add` and `String.try_push` return `!
+OutOfMemory`, whose one variant `Exhausted` says the allocator had no
+room. `with_allocator` takes its type's allocator from its argument,
+so a function that grows a list without a panic reads as any other
+that can fail:
+
+<!-- file: examples/15-generics/room.sisu -->
+```sisu
+# A list on an allocator it names, grown by `try_push`, which can fail.
+def squares(n: int) -> list[int] ! OutOfMemory:
+    var xs: list[int] = list.with_allocator(Global())
+    for i in range(n):
+        xs.try_push(i * i)?
+    return Ok(xs)
+
+def main():
+    print(squares(4))
+    match squares(3):
+        case Ok(xs):
+            print("{len(xs)} squares, the last {xs[^1]}")
+        case Err(e):
+            print("no room: {e}")
+```
+
+<!-- output: examples/15-generics/room.out -->
+```text
+Ok([0, 1, 4, 9])
+3 squares, the last 4
+```
+
+On `Global` the program runs today, and its growth never fails as a
+value: a machine out of memory stops it as `push` would. A collection
+on another allocator, such as a region that frees everything at once,
+type-checks, but it has none of the other methods yet (`len` of one is
+E0347) and no runtime runs it: until the later steps every collection
+allocates from `Global`
 ([chapter 27](27-systems.md#what-is-still-to-come)).
 
 ## Values that carry their type
@@ -1194,7 +1229,9 @@ When every test passes, compare your answer with
   E0304), and a call against the bounds where it is made, so no error
   appears inside a generic function at a use.
 - A generic impl, `impl[T: Display] Display for Labelled[T]`, gives the
-  ability to every type it covers. A type parameter can have a default.
+  ability to every type it covers. A type parameter can have a default,
+  as a collection's allocator does: `list.with_allocator(a)` names one,
+  and `try_push` returns `! OutOfMemory` where `push` would panic.
 - `dyn Trait` is a value that carries its type, behind a `Box` or a
   `ref` (E0395), for a trait whose methods can be called through it
   (E0241).

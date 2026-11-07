@@ -1,0 +1,14 @@
+# A list on an allocator it names, grown by `try_push`, which can fail.
+def squares(n: int) -> list[int] ! OutOfMemory:
+    var xs: list[int] = list.with_allocator(Global())
+    for i in range(n):
+        xs.try_push(i * i)?
+    return Ok(xs)
+
+def main():
+    print(squares(4))
+    match squares(3):
+        case Ok(xs):
+            print("{len(xs)} squares, the last {xs[^1]}")
+        case Err(e):
+            print("no room: {e}")

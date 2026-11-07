@@ -359,9 +359,17 @@ Err(Full(pending=2))
 
 Allocation failure panics. A collection's `try_push` and its kind give
 `! OutOfMemory` for code that must handle it, such as code on a fixed
-budget ([R7](ownership.md#allocators)).
+budget ([R7](ownership.md#allocators)): `list.try_push`,
+`dict.try_insert`, `set.try_add` and `String.try_push`, whose error
+`OutOfMemory.Exhausted` says the allocator gave no room and leaves the
+collection as it was. A failure dropped is E0318, as any error is.
 
-**Status.** Designed (Q-4); stage 0 has no `try_push`.
+**Stage 0 differs.** The four growths run on `Global` only, where they
+never fail as a value: a hosted program out of memory stops as `push`
+does. On another allocator they type-check and wait for the runtime
+([R7](ownership.md#allocators)).
+
+**Status.** In stage 0 (Q-4), with the difference noted.
 
 ## Diagnostics of this page
 

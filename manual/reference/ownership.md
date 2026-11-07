@@ -782,15 +782,28 @@ the prelude as well as in `std.mem`. A collection at `Global`, written
 or left out, is the type it was, `list[int, Global]` being `list[int]`,
 so a program that names no allocator has the SIR and the output it
 had, and `sisu doc --std` prints `pub struct list[T, A: Allocator =
-Global]`. A collection on another allocator is a type,
-`list[int, ref Region]`, but the collections' impls are for `Global`
-only, so it has no method and no trait (E0347 for `Len`), and nothing
-builds one; a third argument is E0208. The steps left are the runtime
-allocating through the collection's allocator value, `with_allocator`
-and `try_push` (E0351 and E0304 today) with the impls made generic over
-the allocator, `@no_alloc` passing a collection's growth in a borrowed
-region, and the `freestanding` profile's explicit allocator. `Region`
-exists in `std.mem`, under `RawBuf`
+Global]`; a third argument is E0208. The second step, R234, gives
+`list.with_allocator(a)`, `dict`'s, `set`'s and `String`'s, which take
+the allocator's type from the argument, and the growths that fail as a
+value, `list.try_push`, `dict.try_insert`, `set.try_add` and
+`String.try_push`, each returning `! OutOfMemory` (`std.mem`'s and the
+prelude's, with one variant, `Exhausted`), whose failure dropped is
+E0318; `ref Region` implements `Allocator`, so `list.with_allocator(ref
+region)` is a `list[T, ref Region]` that borrows the region. On
+`Global` these are the collection's `new` and its growth with `Ok`
+around the result, so such a program runs in both runtimes and never
+fails as a value
+([chapter 15](../tutorial/15-generics.md#type-parameters-with-defaults)
+shows one). A collection on another allocator type-checks, but only
+`with_allocator` and the `try_` growths take it: the other methods and
+the traits are for `Global` only (E0347 for `Len`), and the runtime does
+not run its allocation yet, so a run stops at `with_allocator` with an
+internal error of the interpreter, and a native build with D0103. The
+steps left are the runtime allocating through the collection's
+allocator value with the other methods made generic over it,
+`@no_alloc` passing a collection's growth in a borrowed region, and the
+`freestanding` profile's explicit allocator. `Region` is in `std.mem`,
+under `RawBuf`
 ([chapter 27](../tutorial/27-systems.md#what-is-still-to-come)).
 
 **Status.** Designed (D-060, leaning; Q-4), with the differences

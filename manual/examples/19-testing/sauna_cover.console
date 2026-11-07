@@ -1,0 +1,6 @@
+$ sisu test --cover sauna.sisu
+transcript "tests/sauna.transcript" ... ok
+1 passed, 0 failed, 0 blocked
+sauna.sisu:32:13: no test reaches this branch
+sauna.sisu:32:13: no test reaches this statement
+regions: 26, 24 reached by the tests and 2 not

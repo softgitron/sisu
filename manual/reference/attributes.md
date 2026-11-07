@@ -1323,9 +1323,9 @@ error[D0006]: the program was not run: errors found (1)
 string. The check still differs from 04's in two ways: a closure that
 captures by value is taken to allocate, since whether its captures fit
 in its value is the backend's to know; and no collection is free of
-allocation by its allocator, since only the first of the allocators'
-steps, the collections' allocator parameter, is done
-([R7](ownership.md#allocators)). `@no_block` and `@stack` are accepted
+allocation by its allocator, since the runtime does not yet allocate
+through a collection's allocator, whose type and `with_allocator` are
+the two steps done ([R7](ownership.md#allocators)). `@no_block` and `@stack` are accepted
 and checked by nothing, and stage 0 says so at each with W0030
 (`resolve.unchecked-attribute`, [R17](diagnostics.md#w0030)), so that a
 program that writes one does not take the promise for a check; on a

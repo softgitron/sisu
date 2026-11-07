@@ -158,7 +158,7 @@ frame of `reading` has returned. A native build checks it by address,
 so it says less than the interpreter: a pointer into a frame that has
 returned, whose stack memory a later call of the same depth now uses,
 looks alive to it. A native run keeps the executable it built, so
-running the same file again does not build it again.
+running the same file or package again does not build it again.
 
 ## Saying why it holds
 
@@ -850,13 +850,14 @@ call with a panic, since only a native build makes it.
 
 Much of systems programming in Sisu is designed and not in the
 compiler yet. Allocators for the
-collections, `list.with_allocator(Region.bump(n))` for memory released
-all at once and `try_push` for allocation that can fail, are designed in
-[04](../../proposal/04-memory-and-ownership.md#allocators) (E0351 and
-E0304 today). The first of their five steps is done: the collections
-take an allocator parameter, `list[T, A: Allocator = Global]`, which
-your code never writes, and every collection still allocates from
-`Global` ([R7](../reference/ownership.md#allocators)). `@no_block` and
+collections, a list on a `Region` for memory released all at once, are
+designed in
+[04](../../proposal/04-memory-and-ownership.md#allocators), and two of
+their five steps are done: the allocator parameter, and
+`with_allocator` with `try_push`, which run on `Global`
+([chapter 15](15-generics.md#type-parameters-with-defaults)). A list on a
+region type-checks, but has no `len` yet and no runtime runs it
+([R7](../reference/ownership.md#allocators)). `@no_block` and
 `@stack` compile with the warning W0030 (`resolve.unchecked-attribute`),
 since nothing checks them yet. The
 manifest's runtime profile is read, but `single` gets the runtime that

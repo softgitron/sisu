@@ -273,17 +273,22 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
   save takes about 0.025 seconds where the Rust front end's took 0.07,
   and the diagnostics of the 18 modules of the runtime in Sisu after a
   one-line change 0.82 seconds where they took 1.35; the rest of that
-  time is checking and lowering the types, which keep no memo yet.
+  time is checking and lowering the types, which keep no memo yet,
+  since the program's definitions are numbered anew by each request and
+  the checker does not yet record what each body reads.
 - **The interpreter is slow.** It is fine for development, tests and an
   oracle, and not for users, which is why the native backend was built
   beside stage 1 rather than after it.
 - **The interpreter's tools have no native counterpart yet.** The
-  ownership monitor, the counterexample mode, record and replay and hot
-  replacement run on the interpreter only, so a native run is not yet
-  the default of `sisu run`: it waits for the native runtime's
-  capability log and replay. A file's native run no longer pays its
-  build each time, since a cache keeps the executable while the
-  program's SIR and the toolchain are the same.
+  ownership monitor, the counterexample mode, hot replacement and two of
+  `--stats`' reports run on the interpreter only, so a native run is not
+  yet the default of `sisu run`. Record and replay are native now: a
+  native run writes the interpreter's capability log, with the SIR that
+  ran in its header, and a log replays in either runtime, 259 of the
+  conformance suite's 260 native cases giving the same records in both.
+  A native run no longer pays its build each time, a package's either,
+  since a cache keeps the executable while the program's SIR and the
+  toolchain are the same.
 - **Self-hosting freezes early mistakes.** A compiler written in its own
   language must keep compiling through every change of the language,
   which makes early design errors expensive to undo; editions and the
