@@ -86,6 +86,10 @@ pub struct TClosure:
 pub struct TBlock:
     pub stmts: list[TStmt]
     pub span: TextRange
+    ## Each `pass` of the block, before the statement of `stmts` it comes
+    ## before, and its span, which `sir --tests --cover` gives a place in
+    ## the SIR (RULES.md, R231).
+    pub passes: list[(int, TextRange)]
 
 @derive(Eq, Copy)
 pub enum Unwrap:

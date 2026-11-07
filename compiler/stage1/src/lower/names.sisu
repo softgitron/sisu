@@ -51,6 +51,10 @@ pub struct Ctx:
     ## The `unsafe` blocks of `pure` functions that assert purity (D-085),
     ## each a source and its range, as the bodies are lowered.
     pub asserted: list[(int, Loc)]
+    ## Whether the program's own statements that lower to nothing at a place
+    ## of their own get a unit assignment there, for `sir --tests --cover`
+    ## (RULES.md, R231).
+    pub cover: bool
 
 impl Ctx:
     ## A context that names nothing of a program's own: what the names of
@@ -71,6 +75,7 @@ impl Ctx:
             instances={},
             traits={},
             asserted=[],
+            cover=False,
         )
 
     ## Finds the program's tests, benchmarks and instances by definition,

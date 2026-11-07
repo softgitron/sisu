@@ -1058,6 +1058,7 @@ def sir_kept(
         # tests that name it, which the runner gives, and each test's
         # fixtures on its line (RULES.md, R219).
         built.module_fixtures = words.contains("--module-fixtures")
+        built.cover = words.contains("--cover")
         # `--modules`: each test's and benchmark's module beside it
         # (RULES.md, R142), which the driver reads to run one module's.
         let modules = words.contains("--modules")
@@ -1410,6 +1411,9 @@ struct Input:
     ## parameter of the tests that name it, and each test's fixtures are on
     ## its line (RULES.md, R219).
     module_fixtures: bool
+    ## `sir --tests --cover`: the statements that lower to nothing at a place
+    ## of their own get one, for the runner's count (RULES.md, R231).
+    cover: bool
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
@@ -1481,6 +1485,7 @@ def file_input(
             roots=[],
             std_tests=False,
             module_fixtures=False,
+            cover=False,
             regions=[],
         )
     )
@@ -1654,6 +1659,7 @@ def held_layout_input(
             roots=[],
             std_tests=False,
             module_fixtures=False,
+            cover=False,
             regions=[],
         )
     )
@@ -2027,7 +2033,7 @@ pure def explained(
             match l.place:
                 case Arg.Text(t):
                     place = t.copy()
-                case Arg.Source(loc):
+                case Arg.Source(loc) | Arg.Code(loc, _):
                     let (start, end) = span_of(text, lines, Some(loc))
                     if start <= end and end <= text.byte_len():
                         place = text.byte_slice(start, end).to_string()
@@ -2602,7 +2608,7 @@ pure def lower_of(
 ) -> lower.Lowered?:
     let typed = checked.typed else:
         return None
-    var lowered = lower.lower(
+    var lowered = lower.lower_covered(
         typed,
         base,
         input.modules[0].file,
@@ -2612,6 +2618,7 @@ pure def lower_of(
         mut kept.lowered,
         mut kept.slots,
         input.roots,
+        input.cover,
     )
     if input.runtime != "full":
         lowered.program.runtime = Some(input.runtime.copy())
@@ -3191,9 +3198,15 @@ pure def const_failures(
     prog: sir.Program, constants: list[Constant], catalog: Catalog
 ) -> list[(int, Diagnostic)]:
     var out: list[(int, Diagnostic)] = []
+    var wanted: list[(String, int)] = []
     for c in constants:
+        wanted.push((c.function.copy(), c.budget))
+    # One evaluator for them all (RULES.md, R228).
+    let stops = interp.stops_of(prog, wanted, catalog)
+    for k in range(len(constants)):
+        let c = ref constants[k]
         let (i, start, end) = (c.file, c.start, c.end)
-        let Err(stop) = interp.value_of(prog, c.function, c.budget, catalog) else:
+        let stop = stops[k].copy() else:
             continue
         match stop:
             case interp.Stop.Panicked(message):

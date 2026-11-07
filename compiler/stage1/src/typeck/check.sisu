@@ -856,7 +856,13 @@ impl Checker:
         return self.add(TExprKind.Coerce(expr=x, kind=kind), ty, span)
 
     pub pure def new_block(mut self, own stmts: list[TStmt], span: TextRange) -> BlockId:
-        self.blocks.push(TBlock(stmts=stmts, span=span))
+        return self.new_block_with(stmts, span, [])
+
+    ## A block with its `pass` statements (RULES.md, R231).
+    pub pure def new_block_with(
+        mut self, own stmts: list[TStmt], span: TextRange, own passes: list[(int, TextRange)]
+    ) -> BlockId:
+        self.blocks.push(TBlock(stmts=stmts, span=span, passes=passes))
         return BlockId(index=len(self.blocks) - 1)
 
     pub pure def add_pat(mut self, own kind: TPatKind, ty: Ty, span: TextRange) -> PatId:
@@ -967,7 +973,8 @@ impl Checker:
             let written = cx.ast.type_expr(args[i])
             let TypeKind.Ref(_, inner) = written.kind else:
                 continue
-            if not is_ref_item(self.types, targs[i]) or self.types.is_allocator_arg(d, len(targs), i):
+            if not is_ref_item(self.types, targs[i])
+                    or self.types.is_allocator_arg(d, len(targs), i):
                 continue
             let inner_start = cx.ast.type_expr(inner).range.start
             let owned_ty = self.owned_items(cx, t)
@@ -1519,11 +1526,15 @@ impl Checker:
         # An instance's code is what unfolding left of its template's, where
         # a `comptime if` that holds may end what follows (decision 251).
         var warned = cx.prog.instance_sites.contains(self.def_)
+        var passes: list[(int, TextRange)] = []
         for s in b.stmts:
             let stmt = cx.ast.stmt(s)
             var quiet = False
             match stmt.kind:
-                case StmtKind.Pass | StmtKind.Error:
+                case StmtKind.Pass:
+                    quiet = True
+                    passes.push((len(stmts), stmt.range))
+                case StmtKind.Error:
                     quiet = True
                 case _:
                     pass
@@ -1539,7 +1550,7 @@ impl Checker:
             for i in range(before, len(stmts)):
                 if self.stmt_diverges(stmts[i]):
                     diverged = True
-        return self.new_block(stmts, b.range)
+        return self.new_block_with(stmts, b.range, passes)
 
     pub pure def check_stmt(mut self, cx: Cx, id: StmtId, mut out: list[TStmt]):
         let s = cx.ast.stmt(id)

@@ -1,0 +1,236 @@
+answer 0
+15:5-15:15	E0405	borrow.mut-while-borrowed	error	`xs` is already borrowed on line 14, so it cannot be borrowed with `mut` until that borrow ends on line 16
+answer 0
+15:5-15:15	E0405	borrow.mut-while-borrowed	error	`xs` is already borrowed on line 14, so it cannot be borrowed with `mut` until that borrow ends on line 16
+answer 0
+15:5-15:15	E0405	borrow.mut-while-borrowed	error	`xs` is already borrowed on line 14, so it cannot be borrowed with `mut` until that borrow ends on line 16
+answer 1
+error[E0405]: `xs` is already borrowed on line 14, so it cannot be borrowed with `mut` until that borrow ends on line 16
+  --> memo.sisu:15:5
+   |
+15 |     xs.push(1)
+   |     ^^^^^^^^^^
+   |
+14 |     let first = ref xs[0]
+   |                 --------- borrowed here by `first`
+   |
+16 |     return first
+   |            ----- the borrow is still used here
+  = note: move this after line 16, where the borrow ends, or work on a copy made with `.copy()`
+
+error: Failed
+answer 0
+sir 0
+source 0 "cover.sisu"
+entry main
+test "the regions" test#0
+
+enum Shape { Circle(r: int), Square(s: int) }
+
+intrinsic assert.fail_compare pure
+intrinsic fmt.display pure
+intrinsic fmt.new pure
+intrinsic fmt.text pure
+intrinsic print
+
+fn kind(1) source 0 @9:5-9:9 {
+    let _0: int
+    let _1: ref Shape "s" @9:10-9:18
+    let _2: int
+    let _3: ()
+  bb0:
+    _2 = discriminant _1.* @10:5-14:21
+    switch copy _2 [0: bb1, 1: bb2, else: bb3] @10:5-14:21
+  bb1:
+    _3 = const () @12:13-12:17
+    _0 = const 0 @15:12-15:13
+    return @15:5-15:13
+  bb2:
+    _0 = const 2 @14:20-14:21
+    return @14:13-14:21
+  bb3:
+    unreachable @10:5-14:21
+}
+
+fn steps(1) source 0 @17:5-17:10 {
+    let _0: int
+    let _1: int "n" @17:11-17:17
+    let _2: int "i" @18:9-18:10
+    let _3: bool
+    let _4: ()
+    let _5: bool
+    let _6: int
+    let _7: int
+  bb0:
+    _2 = const 0 @18:13-18:14
+    switch const true [0: bb1, else: bb2] @19:11-19:15
+  bb1:
+    _4 = const () @26:5-27:13
+    goto bb7
+  bb2:
+    _3 = gt copy _2, copy _1 @20:12-20:17
+    switch copy _3 [0: bb3, else: bb4] @20:12-20:17
+  bb3:
+    _5 = eq copy _2, const 3 @22:12-22:18
+    switch copy _5 [0: bb5, else: bb6] @22:12-22:18
+  bb4:
+    _4 = const () @21:13-21:18
+    goto bb1
+  bb5:
+    _7 = add copy _2, const 1 @25:9-25:15
+    _2 = move _7 @25:9-25:15
+    switch const true [0: bb1, else: bb2] @19:11-19:15
+  bb6:
+    _6 = add copy _2, const 2 @23:13-23:19
+    _2 = move _6 @23:13-23:19
+    _4 = const () @24:13-24:21
+    switch const true [0: bb1, else: bb2] @19:11-19:15
+  bb7 (unwind bb8):
+    _0 = copy _2 @28:12-28:13
+    goto bb9
+  bb8 (cleanup):
+    _4 = const () @27:9-27:13
+    resume
+  bb9:
+    _4 = const () @27:9-27:13
+    return @28:5-28:13
+}
+
+fn later(1) source 0 @30:5-30:10 {
+    let _0: int
+    let _1: int "x" @30:11-30:17
+    let _2: ()
+    let _3: int "y" @31:9-31:10
+  bb0:
+    _2 = const () @31:5-31:15
+    _3 = copy _1 @32:5-32:10
+    _0 = copy _3 @33:12-33:13
+    return @33:5-33:13
+}
+
+fn test#0(0) test source 0 @35:6-35:19 {
+    let _0: ()
+    let _1: int
+    let _2: Shape
+    let _3: ref Shape
+    let _4: bool
+    let _5: Never
+    let _6: int
+    let _7: bool
+    let _8: Never
+    let _9: int
+    let _10: bool
+    let _11: Never
+  bb0:
+    _2 = variant Shape::Circle(const 1) @36:17-36:34
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = ref _2 @36:17-36:34
+    _1 = call fn kind(copy _3) @36:12-36:35
+    _4 = eq copy _1, const 0 @36:5-36:40
+    switch copy _4 [0: bb3, else: bb4] @36:5-36:40
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3 (unwind bb2):
+    _5 = call intrinsic assert.fail_compare(const "kind(Shape.Circle(r=1)) == 0", const "", copy _1, const 0) @36:5-36:40
+    unreachable @36:5-36:40
+  bb4:
+    drop _2 @36:40-36:40
+    goto bb5
+  bb5:
+    dead _2 @36:40-36:40
+    _6 = call fn steps(const 5) @37:12-37:20
+    _7 = eq copy _6, const 6 @37:5-37:25
+    switch copy _7 [0: bb7, else: bb6] @37:5-37:25
+  bb6:
+    _9 = call fn later(const 1) @38:12-38:20
+    _10 = eq copy _9, const 1 @38:5-38:25
+    switch copy _10 [0: bb9, else: bb8] @38:5-38:25
+  bb7:
+    _8 = call intrinsic assert.fail_compare(const "steps(5) == 6", const "", copy _6, const 6) @37:5-37:25
+    unreachable @37:5-37:25
+  bb8:
+    _0 = const ()
+    return
+  bb9:
+    _11 = call intrinsic assert.fail_compare(const "later(1) == 1", const "", copy _9, const 1) @38:5-38:25
+    unreachable @38:5-38:25
+}
+
+fn main(0) source 0 @40:5-40:9 {
+    let _0: ()
+    let _1: ()
+    let _2: String
+    let _3: ref mut String
+    let _4: int
+    let _5: Shape
+    let _6: ref Shape
+    let _7: ()
+    let _8: int
+    let _9: int
+    let _10: ref String
+  bb0:
+    _2 = call intrinsic fmt.new() @41:11-41:60
+    _3 = ref mut _2 @41:11-41:60
+    _5 = variant Shape::Square(const 2) @41:18-41:35
+    goto bb1
+  bb1 (unwind bb2):
+    _6 = ref _5 @41:18-41:35
+    _4 = call fn kind(copy _6) @41:13-41:36
+    _7 = call intrinsic fmt.display(copy _3, copy _4, const "") @41:13-41:36
+    _7 = call intrinsic fmt.text(copy _3, const " ") @41:11-41:60
+    _8 = call fn steps(const 1) @41:39-41:47
+    _7 = call intrinsic fmt.display(copy _3, copy _8, const "") @41:39-41:47
+    _7 = call intrinsic fmt.text(copy _3, const " ") @41:11-41:60
+    _9 = call fn later(const 3) @41:50-41:58
+    _7 = call intrinsic fmt.display(copy _3, copy _9, const "") @41:50-41:58
+    goto bb3
+  bb2 (cleanup):
+    drop _5
+    resume
+  bb3 (unwind bb4):
+    _10 = ref _2 @41:11-41:60
+    _1 = call intrinsic print(copy _10) @41:5-41:61
+    goto bb5
+  bb4 (cleanup):
+    drop _2
+    goto bb2
+  bb5 (unwind bb2):
+    drop _2 @41:61-41:61
+    goto bb6
+  bb6:
+    drop _5 @41:61-41:61
+    goto bb7
+  bb7:
+    dead _5 @41:61-41:61
+    dead _2 @41:61-41:61
+    _0 = const ()
+    return
+}
+# regions
+# region cover.sisu:10:5-14:21 statement kind bb0:0
+# region cover.sisu:12:13-12:17 branch kind bb1:0
+# region cover.sisu:12:13-12:17 statement kind bb1:0
+# region cover.sisu:14:13-14:21 branch kind bb2:0
+# region cover.sisu:14:13-14:21 statement kind bb2:0
+# region cover.sisu:15:5-15:13 statement kind bb1:1
+# region cover.sisu:18:5-18:14 statement steps bb0:0
+# region cover.sisu:19:5-25:15 statement steps bb0:1
+# region cover.sisu:20:9-25:15 branch steps bb2:0
+# region cover.sisu:20:9-21:18 statement steps bb2:0
+# region cover.sisu:21:13-21:18 branch steps bb4:0
+# region cover.sisu:21:13-21:18 statement steps bb4:0
+# region cover.sisu:22:9-24:21 statement steps bb3:0
+# region cover.sisu:23:13-24:21 branch steps bb6:0
+# region cover.sisu:23:13-23:19 statement steps bb6:0
+# region cover.sisu:24:13-24:21 statement steps bb6:2
+# region cover.sisu:25:9-25:15 statement steps bb5:0
+# region cover.sisu:26:5-27:13 statement steps bb1:0
+# region cover.sisu:27:9-27:13 branch steps bb8:0
+# region cover.sisu:27:9-27:13 statement steps bb8:0
+# region cover.sisu:28:5-28:13 statement steps bb9:1
+# region cover.sisu:31:5-31:15 statement later bb0:0
+# region cover.sisu:32:5-32:10 statement later bb0:1
+# region cover.sisu:33:5-33:13 statement later bb0:2
+# region cover.sisu:41:5-41:61 statement main bb3:0

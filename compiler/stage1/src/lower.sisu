@@ -23,7 +23,7 @@ import stage1.lower.stmts
 import stage1.sir.write
 import stage1.typeck.borrows
 from stage1.diag import Catalog
-from stage1.diag import Lines
+from stage1.diag import Lines, TextRange
 from stage1.lower.func import lower_body
 from stage1.lower.glue import glue_functions
 from stage1.lower.names import CONTRACTS_ALL, Ctx
@@ -60,7 +60,7 @@ from stage1.typeck import (
     std_lines,
     std_text,
 )
-from stage1.typeck.program import DefKind, EnumInfo, FnInfo, ModuleId
+from stage1.typeck.program import DefKind, EnumInfo, FnInfo, ModuleId, RANK_PHASE, RANK_STEP
 from stage1.typeck.program import Program as Resolved
 from stage1.typeck.thir import BodyKind, TBody
 from stage1.typeck.ty import DefId, TyData, Types
@@ -259,6 +259,27 @@ pub pure def lower(
     mut kept_slots: StdSlots,
     extra: list[String],
 ) -> Lowered:
+    return lower_covered(
+        typed, base, path, level, catalog, mut kept, mut kept_lowered, mut kept_slots, extra, False
+    )
+
+## `lower`, with `cover` for `sir --tests --cover` (RULES.md, R231): each
+## statement of the program's own that lowers to no statement at a place of
+## its own, `pass`, `break`, `continue`, `defer` and a `let` without a
+## value, lowers to a unit assignment at its place, which the runner counts
+## when it runs.
+pub pure def lower_covered(
+    own typed: Typed,
+    base: Base,
+    path: str,
+    level: int,
+    catalog: Catalog,
+    mut kept: StdBodies,
+    mut kept_lowered: StdLowered,
+    mut kept_slots: StdSlots,
+    extra: list[String],
+    cover: bool,
+) -> Lowered:
     let prog = ref typed.prog
     var types = typed.types.copy()
     var ctx = Ctx(
@@ -276,6 +297,7 @@ pub pure def lower(
         instances={},
         traits=traits_by_name(prog),
         asserted=[],
+        cover=cover,
     )
     ctx.index_names(prog)
     for (m, t) in typed.texts.items():
@@ -388,10 +410,11 @@ pub pure def lower(
         _ = test_fixtures.pop()
     # The functions marked `@no_alloc` (RULES.md, R215), with the names the
     # program gives them, which the ownership checker's pass checks.
-    var no_alloc: list[(String, String)] = []
-    for (d, _) in prog.no_alloc:
+    var no_alloc: list[(String, String, Loc?)] = []
+    for (d, at) in prog.no_alloc:
         if prog.fn_info(d).is_some():
-            no_alloc.push((ctx.fn_name(prog, types, d), prog.qualified_name(d)))
+            let line = attribute_line(ctx, prog.defs[d.index].module, at)
+            no_alloc.push((ctx.fn_name(prog, types, d), prog.qualified_name(d), line))
     var benches: list[(String, String)] = []
     for d in prog.benches:
         if let Some(f) = prog.fn_info(d):
@@ -799,6 +822,34 @@ pure def owner_body(name: str, bodies: dict[String, int]) -> int?:
         n = n.byte_slice(0, cut).to_string()
 
 ## Where the last `part` in `s` starts.
+## The line of a function's attribute whose name is `r` (after its `@`),
+## from the line's start to the next line's, when the attribute stands
+## alone on it: what the fix that removes `@no_alloc` removes (RULES.md,
+## R229).
+pure def attribute_line(ctx: Ctx, m: ModuleId, r: TextRange) -> Loc?:
+    let text = ctx.texts.get(m) else:
+        return None
+    let lines = ctx.lines.get(m) else:
+        return None
+    let at = r.start - 1
+    if at < 0 or r.end > text.byte_len() or text.byte_at(at) != 64:
+        return None
+    var b = at
+    while b > 0 and text.byte_at(b - 1) == 32:
+        b -= 1
+    if b > 0 and text.byte_at(b - 1) != 10:
+        return None
+    var e = r.end
+    while e < text.byte_len() and (text.byte_at(e) == 32 or text.byte_at(e) == 13):
+        e += 1
+    if e < text.byte_len():
+        if text.byte_at(e) != 10:
+            return None
+        e += 1
+    let (line, col) = lines.line_col(text, b)
+    let (end_line, end_col) = lines.line_col(text, e)
+    return Some(Loc(line=line, col=col, end_line=end_line, end_col=end_col))
+
 pub pure def last_index_of(s: str, part: str) -> int?:
     let n = part.byte_len()
     var i = s.byte_len() - n
@@ -849,10 +900,12 @@ pure def body_key(prog: Resolved, d: DefId, kind: BodyKind) -> int:
 ## A definition's place in stage 0's order of definitions: its phase, then
 ## its index (`Program.phases`).
 pub pure def def_rank(prog: Resolved, d: DefId) -> int:
+    if let Some(r) = prog.reranked.get(d.index):
+        return r
     var phase = 0
     if d.index < len(prog.phases):
         phase = prog.phases[d.index]
-    return phase * 10000000 + d.index
+    return phase * RANK_PHASE + d.index * RANK_STEP
 
 ## The name of the function a body lowers to.
 pure def slot_name(ctx: Ctx, prog: Resolved, types: Types, d: DefId, kind: BodyKind) -> String:

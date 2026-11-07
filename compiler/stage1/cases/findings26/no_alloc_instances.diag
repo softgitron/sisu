@@ -1,2 +1,5 @@
 31:16-31:30 E0282 type.no-alloc name="total[Big]" what="`Big.Weighed.weight`"
-36:16-36:22 E0282 type.no-alloc name="pair" what="the list it makes"
+  fix type.no-alloc-remove 27:1-28:1 ""
+36:16-36:22 E0282 type.no-alloc name="pair" what="`[1, 2]`"
+  fix type.no-alloc-pass-in
+  fix type.no-alloc-remove 34:1-35:1 ""

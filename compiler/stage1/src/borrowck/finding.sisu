@@ -6,11 +6,14 @@ from stage1.diag import Diagnostic, Edit, Fix, Label, Lines, Msg, Note, Param
 from stage1.sir import Function, Loc
 
 ## A parameter of a finding's message: a text, or the source text at a
-## location (a temporary's expression).
+## location (a temporary's expression), or that text as code, in
+## backticks, where it is one short line, and the fallback where it is not
+## (an operation `@no_alloc` names, RULES.md, R229).
 @derive(Eq)
 pub enum Arg:
     Text(String)
     Source(Loc)
+    Code(loc: Loc, fallback: String)
 
 ## A message's parameter, by name.
 @derive(Eq)
@@ -145,6 +148,19 @@ pure def render_arg(text: str, lines: Lines, a: Arg) -> String:
     return match a:
         case Arg.Text(t): t.copy()
         case Arg.Source(l): source_text(text, lines, l)
+        case Arg.Code(l, fallback): code_text(text, lines, l, fallback)
+
+## How long the text of an operation a message quotes may be (RULES.md,
+## R229).
+const CODE_WIDTH: int = 40
+
+## The text at a location in backticks, or `fallback` where it is empty,
+## spans lines or is longer than `CODE_WIDTH`.
+pure def code_text(text: str, lines: Lines, l: Loc, fallback: str) -> String:
+    let t = source_text(text, lines, l)
+    if t.is_empty() or t.contains("\n") or t.byte_len() > CODE_WIDTH:
+        return fallback.to_string()
+    return "`{t}`"
 
 ## The text at a location.
 pure def source_text(text: str, lines: Lines, l: Loc) -> String:

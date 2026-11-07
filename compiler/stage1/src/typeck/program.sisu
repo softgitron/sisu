@@ -578,6 +578,12 @@ pub enum Auto:
     Send
     Sync
 
+## A phase's and an index's weight in `lower.def_rank`: an index takes
+## `RANK_STEP` places, so that the definitions of a std module the base
+## declared in part fit between two others (RULES.md, R227).
+pub const RANK_PHASE: int = 100000000
+pub const RANK_STEP: int = 128
+
 pub struct Program:
     pub defs: list[Def]
     pub modules: list[ModuleData]
@@ -686,6 +692,10 @@ pub struct Program:
     ## stage 0 declares every module's items before it resolves any, so a
     ## definition's place in its order is its phase and then its index.
     pub phases: list[int]
+    ## The place in that order of each definition of a std module the base
+    ## declared in part, which a program that imports the module puts where
+    ## its import would have made it (RULES.md, R227; `def_rank`).
+    pub reranked: dict[int, int]
     ## The packages: the root package, std, then the dependencies.
     pub packages: list[PackageData]
     ## The modules of the program's own source (and the modules of its
@@ -738,6 +748,7 @@ impl Program:
             instances=[],
             instance_sites={},
             phases=[],
+            reranked={},
             packages=[],
             user_modules=[],
             drop_types=set(),

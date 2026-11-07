@@ -3150,6 +3150,51 @@ and `test --std` with no path outside a package, their first source
 served; the memo (R220) changes no answer. The new cases are in
 `cases/findings26/`.
 
+### The twenty-seventh round: D-060's allocators, the ownership checker's memo by dependencies, `E0282`'s names and fixes, `E0283`'s words, the regions' positions
+
+This round took R225's first step, R220's memo of the later phases, the
+manual's step 38 findings on `E0282` and `E0283`, decision 1241's note on
+`--cover` and the merge. RULES.md has the rules (R227 to R232, decisions
+1260 to 1265) and their decision texts:
+
+- **D-060's allocators, the first step** (R227): `list`, `dict`, `set`
+  and `String` take a last type parameter `A: Allocator = Global`, read
+  into the prelude's headers by stage 1 (the shared file keeps its
+  headers, which the Rust front end needs to build stage 1); `Allocator`
+  and `Global` are `std.mem`'s and the prelude's names, the base
+  declaring the part of `std.mem` they need and an import the rest; the
+  table of types leaves `Global` out, so every program that names no
+  allocator has the SIR and output it had. The impls stay at `Global`
+  until step 3.
+- **The ownership checker's memo** (R228): each function of the program's
+  own is kept with the declared types it reaches and the functions it
+  names, and checked again only when its SIR or those changed; and the
+  constants are evaluated by one evaluator, where each made its own. A
+  `query diagnostics` of `compiler/rt` after a change takes 0.82 s where
+  it took 1.34 to 1.36 s.
+- **`E0282`** (R229) names what the program wrote, `[x * 2 for x in xs]`,
+  `s + t`, `xs.push(v)`, reports a comprehension once, and has the fixes
+  that remove `@no_alloc` and, for a list the function makes, that take
+  it from the caller.
+- **`E0283`** (R230) no longer says the tests run at once.
+- **The regions' positions** (R231): under `--cover`, `pass`, `break`,
+  `continue`, `defer` and a `let` without a value lower to a unit
+  assignment at their place, so every region names a statement the
+  runner counts.
+- **The merge's differences** (R232): the conformance suite's
+  `unsafe/option_pointer`, under R4 and R5.
+
+Decided against: the impls over the collections generic over the
+allocator (R227), which step 3 takes with `with_allocator`, since their
+methods' SIR would name the allocator; and, for the round, the type
+checker's and lowering's memo (R228), which needs a table of types stable
+across requests. Open: the allocators' steps 2 to 5 (R225), compile-time
+types (R155), and the runner's halves of `--mutate` and a module's
+fixture, stage 0's.
+
+Stage 1's version stays 0.21.0: no form the driver relies on is added.
+The new cases are in `cases/findings27/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -4071,6 +4116,20 @@ checked once a process (a server's later request takes them from its
 `Kept`), and the parse of every documented module for the examples'
 places (1.8 G), which a base that kept its modules' syntax would give.
 
+The twenty-seventh round measured `query diagnostics` of `compiler/rt`
+again (served, the mean of 20 requests after the first, at a load of
+about 2): 1.34 to 1.36 s, of which, under callgrind, the evaluation of
+the program's 244 constants for their errors (R178) was a third, each
+with an evaluator of its own, a table of the program's functions and a
+copy of the catalog. R228 evaluates them with one and keeps the ownership
+checker's results for each function whose SIR and dependencies are
+unchanged: 0.82 s. Of what is left a request, the check is 3.3 G
+instructions and lowering 1.6 G, which a memo would need a table of types
+stable across requests to keep, and the ownership checker 2.1 G, its
+memo's records and comparisons 0.7 G of it; a save of `live/swap` is
+unchanged, 0.011 to 0.014 s. The allocators' parameter (R227) costs a
+look-up in a small table at each collection type the checker makes.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -4315,7 +4374,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     for the round: the allocators' first step, the defaulted parameter on
     the prelude's collections (R225); left: compile-time types (R155), the
     allocators' steps (R225), and the runner's halves of `--cover`,
-    `--mutate` and a module's fixture, stage 0's. The tenth round took a variant's
+    `--mutate` and a module's fixture, stage 0's. The twenty-seventh round took the allocators'
+    first step (R227), `E0282`'s names and fixes (R229), `E0283`'s words
+    (R230) and the regions' positions (R231); decided against: the impls
+    over the collections generic over their allocator, which step 3
+    takes (R227); left: compile-time types (R155), the allocators' steps
+    2 to 5 (R225), and the runner's halves of `--mutate` and a module's
+    fixture, stage 0's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

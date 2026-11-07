@@ -254,9 +254,16 @@ E0282 error   type.no-alloc               `{name}` is `@no_alloc`, but {what} ma
 # Stage 1's (RULES.md, R222): a generic `@no_alloc` function is checked at
 # each instance the program makes, where its type arguments are known.
 -     note    type.no-alloc-instance      in this instance, which the program makes at {at}
+# Stage 1's (RULES.md, R229): the fixes, the attribute's line removed, and,
+# for a list the function makes, the list its caller makes and it fills.
+-     fix     type.no-alloc-remove        remove `@no_alloc`, so that `{name}` may allocate
+-     fix     type.no-alloc-pass-in       take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
 # Stage 1's (RULES.md, R219; 17, "Fixtures"): a module's fixture is made once
-# and shared by the module's tests, which run at once.
-E0283 error   type.module-fixture-sync    `{name}` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `{ty}` is not
+# and shared by the module's tests. The words name no order of the tests,
+# which the interpreter's runner runs in turn on one thread and a native run
+# gives each a value of its own, while 17 runs tests in parallel by default
+# (stage 1's RULES.md, R230).
+E0283 error   type.module-fixture-sync    `{name}` is a fixture of its module, one value that every test naming it shares, and tests may run in parallel (17), so what it returns must be `Sync`, and `{ty}` is not
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`

@@ -56,8 +56,29 @@ impl FnLower:
         self.pop_scope(cx)
 
     pub pure def block_stmts(mut self, cx: Cx, b: TBlockId):
-        for s in cx.body.blocks[b.index].stmts:
-            self.stmt(cx, s)
+        if not cx.ctx.cover:
+            for s in cx.body.blocks[b.index].stmts:
+                self.stmt(cx, s)
+            return
+        # Each `pass` at its place (RULES.md, R231).
+        let block = ref cx.body.blocks[b.index]
+        for i in range(len(block.stmts) + 1):
+            for (k, span) in block.passes:
+                if k == i:
+                    self.cover_mark(cx, cx.loc(span))
+            if i < len(block.stmts):
+                self.stmt(cx, block.stmts[i])
+
+    ## Under `--cover`, a unit assignment at `loc` for a statement of the
+    ## program's own that lowers to nothing there, which the runner counts
+    ## when it runs (RULES.md, R231).
+    pure def cover_mark(mut self, cx: Cx, loc: Loc?):
+        if not cx.ctx.cover or loc.is_none():
+            return
+        if cx.ctx.file_name(cx.prog, cx.module).starts_with("<std>/"):
+            return
+        let u = self.unit()
+        self.assign(cx, u, Rvalue.Use(Operand.Const(Const.Unit)), loc)
 
     pure def stmt(mut self, cx: Cx, s: TStmt):
         # Temporaries of a statement live until its end.
@@ -123,11 +144,13 @@ impl FnLower:
             case TStmt.Break(_):
                 if let Some(l) = self.loops.last().copied():
                     let target = l.break_bb
+                    self.cover_mark(cx, at)
                     self.emit_exit(cx, l.depth, at)
                     self.goto(target)
             case TStmt.Continue(_):
                 if let Some(l) = self.loops.last().copied():
                     let target = l.continue_bb
+                    self.cover_mark(cx, at)
                     self.emit_exit(cx, l.depth, at)
                     self.goto(target)
             case TStmt.If(branches, else_, _):
@@ -177,6 +200,7 @@ impl FnLower:
             case TStmt.Contract(c):
                 self.contract_stmt(cx, c)
             case TStmt.Defer(body, _):
+                self.cover_mark(cx, at)
                 let i = len(self.defers)
                 self.defers.push(body)
                 self.register_below(1, DropEntry.Defer(i))
@@ -253,6 +277,7 @@ impl FnLower:
         let init = init_in else:
             # `let x: T`: the local exists from here, assigned later; its
             # drop at the end of the scope is guarded by the dataflow.
+            self.cover_mark(cx, loc)
             if let TPatKind.Bind(local, _) = cx.body.pats[pat.index].kind:
                 let l = self.local_for(cx, local)
                 self.scope_local(1, l)

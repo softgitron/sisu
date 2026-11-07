@@ -92,6 +92,8 @@ from stage1.typeck.program import (
     ParamInfo,
     Predicate,
     Program,
+    RANK_PHASE,
+    RANK_STEP,
     RefinementInfo,
     StructInfo,
     TraitInfo,
@@ -371,6 +373,11 @@ pub struct Resolver:
     ## The syntax of the modules the base resolves, by module, which
     ## `typeck.base` takes so that lowering can check a std body it reaches.
     pub std_kept: list[Module]
+    ## A std module the base declared in part, by name: its whole syntax,
+    ## whose other items an import of it declares (`std.mem`, whose
+    ## `Allocator` and `Global` the prelude's collections name; RULES.md,
+    ## R227).
+    pub std_rest: dict[String, Module]
     ## The traits written as `dyn T` in signatures, with the module, for the
     ## check that they can be (stage 0's `dyn_uses`).
     dyn_uses: list[(DefId, ModuleId, TextRange)]
@@ -387,6 +394,11 @@ pub struct Resolver:
     ## prelude's templates for every std module, those a program may import
     ## included: a program that imports one declares the text made here.
     pub std_derived: dict[String, String]
+
+## Where the part of `std.mem` the base declares ends (RULES.md, R227): its
+## raw pointers, layouts and allocators come before it, `Region`, `RawBuf`
+## and `Plain` after.
+const MEM_HEAD_END: str = "## The alignment of a `Region`'s base."
 
 impl Resolver:
     pub pure def new() -> Resolver:
@@ -459,6 +471,7 @@ impl Resolver:
             std_safety_texts=Shared(safety_texts),
             foreign_fns={},
             std_kept=[],
+            std_rest={},
             dyn_uses=[],
             phase=0,
             std_derives=Templates.none(),
@@ -600,8 +613,26 @@ impl Resolver:
         let td = r.new_def(prelude, "target", TextRange.empty(0), Vis.Pub, DefKind.Module(t))
         _ = r.prog.modules[prelude.index].items.insert("target".to_string(), td)
         _ = r.load_std("builtin_impls", builtin_impls(), templates)
+        var mem_module: ModuleId? = None
         if allocators:
-            let m = r.load_std("mem", mem_text, templates)
+            # Its raw pointers, layouts and allocators alone, which the
+            # allocators' signatures need; the rest, `Plain` and its impls on
+            # the numbers among it, a program sees when it imports the module.
+            let whole = build.module(parse(mem_text, Catalog.parse("")).tree)
+            var head = whole.copy()
+            head.items = []
+            let cut = mem_text.find(MEM_HEAD_END) ?? mem_text.byte_len()
+            for id in whole.items:
+                if whole.ast.item(id).range.start < cut:
+                    head.items.push(id)
+            # Its derived impls come with the rest, whose `Debug` of `RawBuf`
+            # they hold.
+            let m = r.add_module("mem", True, head.copy())
+            _ = r.std_loaded.insert("mem".to_string(), m)
+            _ = r.module_texts.insert(m, mem_text.to_string())
+            r.declare_items(m, head.items, "")
+            _ = r.std_rest.insert("mem".to_string(), whole)
+            mem_module = Some(m)
             for n in allocator_names():
                 if let Some(d) = r.prog.modules[m.index].items.get(n.to_string()):
                     _ = r.prog.modules[prelude.index].items.insert(n.to_string(), d)
@@ -610,9 +641,13 @@ impl Resolver:
         r.check_traits(0)
         # The type checker never checks the std modules' bodies: their syntax
         # goes from the program, which each file copies, and stays for
-        # lowering.
+        # lowering. `std.mem`'s stays, as a module a program imports keeps
+        # it, for the derive of its `Plain` (RULES.md, R227).
         r.std_kept = r.sources.copy()
         for i in range(len(r.sources)):
+            if let Some(m) = mem_module:
+                if m.index == i:
+                    continue
             r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[], left_out=[])
         # The text of each std module a program may import that has
         # templates, for their instances.
@@ -1217,6 +1252,35 @@ impl Resolver:
             return Some(m)
         return None
 
+    ## Declares the items of the std module `name`, loaded as `m`, that the
+    ## base left out (`std_rest`), when a program imports it, and the derived
+    ## impls of the whole module, which the base did not declare (unfolded
+    ## from `templates` by the base's copy that loads every module, and the
+    ## text it made after).
+    pure def complete_std(mut self, name: str, m: ModuleId, templates: Templates):
+        let whole = self.std_rest.remove(name.to_string()) else:
+            return
+        var rest: list[ItemId] = []
+        if m.index < len(self.sources):
+            for id in whole.items:
+                if not self.sources[m.index].items.contains(id):
+                    rest.push(id)
+            self.sources[m.index] = whole.copy()
+        # The definitions the base made go where the import makes the rest,
+        # in their order, as an import of the whole module made them
+        # (`def_rank`).
+        let start = len(self.prog.defs)
+        var head: list[int] = []
+        for i in range(start):
+            if self.prog.defs[i].module == m:
+                head.push(i)
+        if len(head) < RANK_STEP - 1 and start > 0:
+            for k in range(len(head)):
+                let at = self.phase * RANK_PHASE + (start - 1) * RANK_STEP + 1 + k
+                _ = self.prog.reranked.insert(head[k], at)
+        self.declare_items(m, rest, "")
+        self.declare_derived(m, whole.items, templates)
+
     pure def load_std(mut self, name: str, text: str, templates: Templates) -> ModuleId:
         let module = build.module(parse(text, Catalog.parse("")).tree)
         return self.load_std_module(name, module, text, templates)
@@ -1228,7 +1292,9 @@ impl Resolver:
     pure def load_std_module(
         mut self, name: str, own module: Module, text: str, templates: Templates
     ) -> ModuleId:
-        if let Some(m) = self.std_loaded.get(name.to_string()):
+        let loaded = self.std_loaded.get(name.to_string()).copied()
+        if let Some(m) = loaded:
+            self.complete_std(name, m, templates)
             return m
         let items = module.items.copy()
         let m = self.add_module(name, True, module)
@@ -3801,7 +3867,9 @@ impl Resolver:
             var d = Diagnostic.new(Msg.CapInternal, at.start, at.end)
             self.report_other(module, d.with("name", "std.rt"))
             return (None, None)
-        if let Some(m) = self.std_loaded.get(name.copy()):
+        let loaded = self.std_loaded.get(name.copy()).copied()
+        if let Some(m) = loaded:
+            self.complete_std(name, m, Templates.none())
             return (Some(m), None)
         var found: Module? = None
         if let Some(m) = self.std_parsed.get(name.copy()):
@@ -4219,7 +4287,9 @@ impl Resolver:
     ## The std module `name`, loaded as an import loads it when the base
     ## has not; `None` when stage 1 cannot load it.
     pure def std_module_named(mut self, name: str) -> ModuleId?:
-        if let Some(m) = self.std_loaded.get(name.to_string()):
+        let loaded = self.std_loaded.get(name.to_string()).copied()
+        if let Some(m) = loaded:
+            self.complete_std(name, m, Templates.none())
             return Some(m)
         var found: Module? = None
         if let Some(m) = self.std_parsed.get(name.to_string()):
@@ -5585,7 +5655,8 @@ impl Resolver:
             let written = self.ast(ctx.module).type_expr(args[i]).copy()
             let TypeKind.Ref(_, inner) = written.kind else:
                 continue
-            if not is_ref_item(self.types, targs[i]) or self.types.is_allocator_arg(d, len(targs), i):
+            if not is_ref_item(self.types, targs[i])
+                    or self.types.is_allocator_arg(d, len(targs), i):
                 continue
             let inner_start = self.ast(ctx.module).type_expr(inner).range.start
             var owned: list[Ty] = []

@@ -1,0 +1,5 @@
+query	diagnostics	memo.sisu	--dir	cases/findings27
+query	diagnostics	memo.sisu	--text	memo_changed.txt	--dir	cases/findings27
+query	diagnostics	memo.sisu	--dir	cases/findings27
+check	memo.sisu	--dir	cases/findings27
+sir	--tests	--cover	cover.sisu	--dir	cases/findings27

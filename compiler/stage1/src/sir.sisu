@@ -235,8 +235,9 @@ pub struct Program:
     pub test_fixtures: list[list[FixtureUse]]
     ## The functions marked `@no_alloc` (RULES.md, R215), each with its name
     ## as the program writes it, which the ownership checker's pass checks
-    ## for allocation through the call graph. Not written.
-    pub no_alloc: list[(String, String)]
+    ## for allocation through the call graph, and the line of its attribute,
+    ## which a fix removes (R229). Not written.
+    pub no_alloc: list[(String, String, Loc?)]
     ## Benchmark name and the function that runs it (decision 285).
     pub benches: list[(String, String)]
     ## The trait methods called through `call trait`, with their facts.
@@ -303,6 +304,7 @@ impl Program:
         return None
 
 ## `impl[N] Trait[args] for Type { method: target, ... }`.
+@derive(Eq)
 pub struct ImplDecl:
     pub params: int
     pub trait_name: String
@@ -312,11 +314,13 @@ pub struct ImplDecl:
     ## What the impl binds the trait's associated types to.
     pub assoc: list[(String, Type)]
 
+@derive(Eq)
 pub enum ImplTarget:
     Fn(String)
     Intrinsic(String)
 
 ## What the checkers know about a host intrinsic or a trait method.
+@derive(Eq)
 pub struct IntrinsicDecl:
     pub name: String
     pub pure: bool

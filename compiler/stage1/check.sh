@@ -459,10 +459,11 @@ export -f stage0_syntax check0 in_package stage0_check stage0_sir stage0_human s
 
 # The differences DISCREPANCIES.md lists (stage 0's accidents) and those
 # RULES.md lists (the rules stage 1 decides where the frozen Rust front end
-# keeps its own), one "path output" per line.
+# keeps its own), one "path output" per line; a path may hold a space
+# (`--std std.core`, RULES.md, R227).
 allowed="$work/allowed.txt"
-cat "$here/DISCREPANCIES.md" "$here/RULES.md" | sed -n 's/^- Differs: `\([^`]*\)`: \(.*\)$/\1 \2/p' |
-    while read -r path outputs; do
+cat "$here/DISCREPANCIES.md" "$here/RULES.md" | sed -n 's/^- Differs: `\([^`]*\)`: \(.*\)$/\1\t\2/p' |
+    while IFS=$'\t' read -r path outputs; do
         for o in $(echo "$outputs" | tr ',' ' '); do echo "$path $o"; done
     done > "$allowed"
 
