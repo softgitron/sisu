@@ -806,12 +806,12 @@ fn mem.Region#drop(1) glue source 0 own 0 {
 }
 answer 0
 main fn ends	main enum Shape; main struct Point; prelude struct list
-main fn impl Display for Point.fmt	main struct Point; prelude fn Formatter.write; prelude struct Formatter; prelude struct String
-main fn main	main enum Shape; main fn ends; main fn moved; main struct Point; prelude fn print; prelude struct list
+main fn impl Display for Point.fmt	main struct Point; prelude fn Formatter.write; prelude struct Formatter; prelude struct String; prelude trait Display
+main fn main	main enum Shape; main fn ends; main fn moved; main struct Point; prelude fn print; prelude struct list; prelude trait Display
 main fn moved	main const ORIGIN; main struct Point
 answer 0
 main fn ends	main enum Shape; main struct Point; prelude struct list
-main fn impl Display for Point.fmt	main struct Point; prelude fn Formatter.write; prelude struct Formatter; prelude struct String
-main fn main	main enum Shape; main fn ends; main fn moved; main struct Point; prelude fn print; prelude struct list
+main fn impl Display for Point.fmt	main struct Point; prelude fn Formatter.write; prelude struct Formatter; prelude struct String; prelude trait Display
+main fn main	main enum Shape; main fn ends; main fn moved; main struct Point; prelude fn print; prelude struct list; prelude trait Display
 main fn moved	main const ORIGIN; main struct Point
 main fn unused	

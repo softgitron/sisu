@@ -1,9 +1,9 @@
 # A list on a borrowed `Region` grown, sorted and searched by the methods
 # of the impls over a collection on any allocator (RULES.md, R237): its
 # SIR, asked by `findings29/asks.requests`, calls the intrinsics of a list
-# on `ref mem.Region` and the functions `list#allocator.sort_by` and
-# `list#allocator.contains`, which the runtime's half of the allocators
-# runs; a program on `Global` reaches none of them.
+# on `ref mem.Region`, `list.contains` by the structural fast path among
+# them, and the function `list#allocator.sort_by`, which the allocators'
+# runtime half runs; a program on `Global` reaches none of them.
 from std.mem import Region
 
 def sorted_in(r: ref Region, n: int) -> int:

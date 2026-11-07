@@ -4803,11 +4803,6 @@ def query_answer(
         return Ok(query.rename(typed, files, programs, m, offset, catalog, new))
     return Ok(query.references(typed, files, programs, m, offset, catalog))
 
-## The program that holds `file` (whose text is `text`, which stands for
-## the file's), checked with its tests as `check` checks it: the package
-## of which it is a module, or the file alone (with the dependencies its
-## inline metadata names); with the index of the file's module among the
-## program's and each module's path on disk.
 ## `query reads FILE` (RULES.md, R238): each function of the program's own
 ## modules by its key, a tab, and the keys of the declarations its check
 ## read, separated by `; `, a line each in the order of the keys: what a
@@ -4827,6 +4822,11 @@ pure def query_reads(typed: typeck.Typed) -> String:
         out.push("{l}\n")
     return out
 
+## The program that holds `file` (whose text is `text`, which stands for
+## the file's), checked with its tests as `check` checks it: the package
+## of which it is a module, or the file alone (with the dependencies its
+## inline metadata names); with the index of the file's module among the
+## program's and each module's path on disk.
 def query_input(
     sys: System, home: str, file: str, text: str, mut env: Environment, catalog: Catalog
 ) -> (Input, int, list[String]) ! IoError:

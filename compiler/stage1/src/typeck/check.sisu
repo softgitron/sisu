@@ -218,6 +218,10 @@ pub struct Checker:
     ## The impls a call of a trait method asks for: like `bounds`, but an
     ## impl's associated types are its own.
     pub impl_bounds: list[(Ty, TraitRef, TextRange)]
+    ## The traits of the bounds and impls `check_bounds` checked, which it
+    ## takes out of the two lists above: what the body read of the traits
+    ## (`reads`; RULES.md, R238).
+    pub checked_traits: list[TraitRef]
     ## The bounds in scope: the function's own, elaborated.
     pub env: list[Predicate]
     ## The names of the function's generic parameters, for diagnostics.
@@ -356,6 +360,7 @@ impl Checker:
             self_ty=None,
             bounds=[],
             impl_bounds=[],
+            checked_traits=[],
             env=[],
             generic_names=[],
             const_generics=[],
@@ -490,7 +495,7 @@ impl Checker:
                     read_def(d, mut seen, mut out)
                 case _:
                     pass
-        var traits: list[TraitRef] = []
+        var traits: list[TraitRef] = self.checked_traits.copy()
         for (_, tr, _) in self.bounds:
             traits.push(tr.copy())
         for (_, tr, _) in self.impl_bounds:

@@ -1,5 +1,5 @@
 # `E0282`'s note through a call names what the callee does, in the
-# program's words (RULES.md, R237): `louder` makes a list, `label` builds
+# program's words (RULES.md, R239): `louder` makes a list, `label` builds
 # a `String`, `tally` grows a list with `push`, never the intrinsic each
 # lowers to (`list.new`, `fmt.new`, `list.push`).
 

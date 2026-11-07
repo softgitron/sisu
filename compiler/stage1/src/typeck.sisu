@@ -2750,8 +2750,10 @@ impl Checker:
         var all: list[(Ty, TraitRef, TextRange, bool)] = []
         for (t, b, s) in self.bounds:
             all.push((t, b.copy(), s, True))
+            self.checked_traits.push(b.copy())
         for (t, b, s) in self.impl_bounds:
             all.push((t, b.copy(), s, False))
+            self.checked_traits.push(b.copy())
         self.bounds = []
         self.impl_bounds = []
         for (ty, bound, span, strict) in all:

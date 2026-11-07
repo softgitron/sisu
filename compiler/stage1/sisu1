@@ -26,6 +26,8 @@
 #                                                `hover`, `definition`, `references`, `completions`,
 #                                                `selection`, `actions` and `rename ... NEW`, one line
 #                                                per item of tab-separated fields (RULES.md, R164, R169)
+#                                                (and `reads`, what each body's check read, by the
+#                                                definitions' keys, RULES.md, R238)
 #   sisu1 fix FILE [--dry-run] [--all]           each diagnostic's preferred fix (with `--all` each
 #                                                lint's) applied to FILE, checked again until none
 #                                                applies, with `sisu fix`'s status: 1 when errors

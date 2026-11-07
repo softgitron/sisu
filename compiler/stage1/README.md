@@ -3242,6 +3242,47 @@ the tested package's regions in `sir --tests --cover` of a black-box test
 file (R233), each served. The new cases are in `cases/findings28/` and
 `cases/packages/cover_tested.pkg`.
 
+### The twenty-ninth round: D-060's allocators' third step, the type checker's memo's prerequisites, `E0282`'s note through a call, the merge's differences
+
+This round took R225's third step, what decision 1327 asks of stage 1
+before the runtime's half, R235's prerequisites, the manual's finding of
+`E0282`'s note and the merge. RULES.md has the rules (R237 to R240,
+decisions 1340 to 1343) and their decision texts:
+
+- **D-060's allocators, the third step** (R237): every method of
+  `list`, `dict`, `set` and `String`, and their impls of `Debug`,
+  `Display`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Len` and `Contains`,
+  works on a collection on another allocator and in a function generic
+  over `A: Allocator`. `std.mem` declares them over the collection on any
+  allocator, at its end, in the part the base declares, beside the
+  prelude's over the collection at `Global`; a type that names its
+  allocator finds `std.mem`'s (`TyKey.Allocated`) and one on `Global` the
+  prelude's, so a program that names no allocator has the SIR it had, and
+  their functions are `list#allocator.sort_by` and so on. Mixing
+  allocators is `E0300` and `E0369`, a list on a borrowed `Region` that
+  outlives it `E0407`. RULES.md lists what the runtime must run beyond
+  R234's eight intrinsics, whose forms are unchanged.
+- **The type checker's memo's prerequisites** (R238): each definition's
+  key across a server's requests, its module, kind and path
+  (`Program.def_key`), and the definitions each body's check read
+  (`Checker.reads`), which `query reads FILE` prints by key, about 5 % of
+  a request on `rt`. The memo itself is decided against for the round.
+- **`E0282`'s note through a call** (R239): "`louder` makes a list",
+  "builds a `String`", "grows a list with `push`", where it named the
+  intrinsic the callee lowers to.
+- **The merge's differences** (R240): none; `testing/cover_transcript`
+  differs from stage 0's front end in nothing.
+
+Decided against: the type checker's memo itself, for the round (R238),
+the prelude's impls made generic over the allocator, and `Default` of a
+collection on another allocator (R237). Open: the allocators' runtime
+half (R234, R237) and steps 4 and 5 (R225), the type checker's and
+lowering's memo (R235, R238), compile-time types (R155), and the
+runner's halves of `--mutate` and a module's fixture, stage 0's.
+
+Stage 1's version stays 0.22.0: no form the driver relies on is added.
+The new cases are in `cases/findings29/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -4186,6 +4227,17 @@ allocators' second step (R234) costs a comparison of an intrinsic's name
 at each intrinsic call lowering makes, and a black-box file's map (R233)
 the parse of the tested package's modules once more under `--cover`.
 
+The twenty-ninth round recorded each body's reads (R238) and measured
+them on the same requests of `rt`, eight runs of each build in turn at a
+load of 1.3 to 5: 0.68 to 0.74 s a request (a mean of 0.70 s) against
+0.61 to 0.70 s (0.67 s) for the same build without them, about 5 % of a
+request, for the memo a later round makes. Of the impls over a
+collection on any allocator (R237), a program on `Global` pays the base's
+declaring them, once a process, and a second look-up at a method its
+collection's own impls do not have: their methods are under a key of
+their own, and lowering adds their impls only to a program that names an
+allocator.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -4443,6 +4495,15 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     generic over the allocator and `try_reserve` (R234), and the type
     checker's memo (R235); left: compile-time types (R155), the
     allocators' runtime half and steps 4 and 5 (R225, R234), and the
+    runner's halves of `--mutate` and a module's fixture, stage 0's. The
+    twenty-ninth round took the collections' other methods on any
+    allocator, a `Global` program's SIR kept (R237), each definition's
+    key across requests and each body's reads (R238), and `E0282`'s note
+    through a call in the program's words (R239); decided against: the
+    type checker's memo itself, for the round (R238), and `Default` of a
+    collection on another allocator (R237); left: compile-time types
+    (R155), the allocators' runtime half and steps 4 and 5 (R225, R234,
+    R237), the type checker's and lowering's memo (R235, R238), and the
     runner's halves of `--mutate` and a module's fixture, stage 0's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),

@@ -1,6 +1,6 @@
 # What each body's check read, by the definitions' keys (RULES.md, R238):
 # `findings29/asks.requests` asks `query reads` of this text and of
-# `reads_changed.txt`, which adds a function above the others, renumbering
+# `reads_changed.txt`, which adds a function above `moved`, renumbering
 # every definition after it; the lines of the bodies it leaves as they
 # were are the same.
 struct Point:

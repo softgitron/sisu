@@ -12585,8 +12585,9 @@ set, called on `Global`, interpreted and natively),
 `allocator_methods.sisu` (no error: every method of the four collections
 on a borrowed `Region`, which the runtime does not run yet, so it has no
 `.out`), `allocator_region_sorted.sisu` (no error; its SIR, asked by
-`findings29/asks.requests`, calls `list#allocator.sort_by` and
-`list#allocator.contains` and the intrinsics on `ref mem.Region`),
+`findings29/asks.requests`, calls `list#allocator.sort_by` and the
+intrinsics on `ref mem.Region`, `list.contains` among them by the
+structural fast path),
 `allocator_mixing.sisu` (its `.diag`: `E0300`, `E0369` and `E0351`) and
 `allocator_outlives.sisu` (its `.diag`: `E0407`). The Rust front end
 has none of these names (`E0201`, `E0220`), as R227 lists.
@@ -12641,7 +12642,8 @@ Stage 1 now has both:
   types of its values, locals and patterns name (a type's type arguments,
   a tuple's elements, a function type's, an error set's members, a
   `dyn`'s and an associated type's trait), the traits its bounds and its
-  calls of trait methods ask for, and the templates it asks instances of.
+  calls of trait methods ask for (kept as the checker checks them,
+  `Checker.checked_traits`), and the templates it asks instances of.
   What the memo then compares of each, by its key, is what the check read
   of it: a function's signature and inferred error set, a type's fields,
   variants and methods' signatures, a trait's impls, a constant's value;
@@ -12659,13 +12661,14 @@ its text and what it read are unchanged, then lowering's per module
 (R235), is a round's work of its own, decided against for this one (below).
 
 **Measured** (natively, the release profile, served, the mean of 20
-requests after the first, at a load of about 2): a `query
-diagnostics` of `compiler/rt`'s `src/show.sisu`, each request with the
-module changed by a line from the last, takes 0.71 to 0.75 s (a mean of
-0.73 s over four runs) where it took 0.69 to 0.72 s (0.71 s) before the
-reads were recorded: the walk of each body's expressions, locals,
-patterns and bounds once, with each type it meets walked once, is about
-3 % of a request. The 21 answers are byte for byte those before.
+requests after the first, eight runs of each build taken in turn, at a
+load of 1.3 to 5): a `query diagnostics` of `compiler/rt`'s
+`src/show.sisu`, each request with the module changed by a line from the
+last, takes 0.68 to 0.74 s (a mean of 0.70 s) where the same build with
+the reads not recorded takes 0.61 to 0.70 s (0.67 s): the walk of each
+body's expressions, locals, patterns and bounds once, with each type it
+meets walked once, is about 5 % of a request. The 21 answers are byte for byte those of the
+build without the reads.
 
 **Decided against**, for the round: the memo itself. With the keys and
 the reads, what is left is the comparison of each read definition between
@@ -12679,15 +12682,16 @@ time.
 
 **Why.** Item 2 of the round: R235's prerequisites.
 
-**In stage 1.** `typeck.check` (`Checker.reads`, `read_def`, `ty_reads`,
-`Finished.reads`), `typeck` (`BodyResult.reads`, `Round.reads`,
-`Typed.reads`, `check_one`), `typeck.program` (`def_key`, `key_of`,
-`def_path`, `def_kind_word`), `main` (`query reads`, `query_reads`).
+**In stage 1.** `typeck.check` (`Checker.reads`, `checked_traits`,
+`read_def`, `ty_reads`, `Finished.reads`), `typeck` (`check_bounds`,
+`BodyResult.reads`, `Round.reads`, `Typed.reads`, `check_one`),
+`typeck.program` (`def_key`, `key_of`, `def_path`, `def_kind_word`),
+`main` (`query reads`, `query_reads`), `sisu1`'s usage.
 
 **What it changes.** No output of the corpus. The case
 `cases/findings29/reads.sisu`, asked by `findings29/asks.requests` with
 `query reads` of its text and of `reads_changed.txt`, the same text with
-a function added above the others, which renumbers every definition after
+a function added above `moved`, which renumbers every definition after
 it: the lines of the functions it leaves as they were are the same.
 
 **Decision 1341**, for docs/architecture.md:
