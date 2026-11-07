@@ -195,7 +195,7 @@ sisu run -- query values FILE               # a worksheet's values and output by
 sisu run -- grammar                         # the parser's grammar, from its `##!` comments (R202)
 sisu run -- doc [--std] --digest [PATH] [--output DIR]  # the API as one plain text, each item's declaration and its doc's first paragraph (R207)
 sisu run -- sir --tests (--mutants | --mutant=K) [PATH]  # each mutant of `sisu test --mutate` after a line `# mutant K: FILE:LINE:COL: WHAT` (R208)
-sisu run -- sir --tests --cover [PATH]      # the SIR, then a line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and branch, for `sisu test --cover` (R216)
+sisu run -- sir --tests --cover [PATH]      # the SIR, then a line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and branch, for `sisu test --cover`, a black-box test file's with its package's after its own (R216, R233)
 sisu run -- sir --tests --module-fixtures [PATH]  # each test's fixtures on its line, a module's fixture the test's `ref T` parameter (R219)
 sisu run -- sir --tests --std               # outside a package: the standard library's doc examples alone, as tests of an empty `examples.sisu` (R221)
 sisu run -- sir --tests --transcripts [PATH]  # the world of transcripts kept whatever is beside the program, for the driver (R223)
