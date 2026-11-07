@@ -773,19 +773,28 @@ cannot leave the region's frame, and resetting the region waits until
 every such collection is dead. Allocation failure panics; `try_push`
 and its kind return `! OutOfMemory` for code that must handle it.
 
-**Status.** Designed (D-060, leaning; Q-4); stage 0 has the global
-allocator only, and neither `with_allocator` nor `try_push`; `Region`
+**Stage 0 differs.** [04](../../proposal/04-memory-and-ownership.md#allocators)
+builds a collection on any allocator; stage 0 has the first of the five
+steps that stage 1's [rules](../../compiler/stage1/RULES.md) plan in
+R225, which R227 took: `list`, `dict`, `set` and `String` take their allocator as a last type
+parameter, `A: Allocator = Global`, and `Allocator` and `Global` are in
+the prelude as well as in `std.mem`. A collection at `Global`, written
+or left out, is the type it was, `list[int, Global]` being `list[int]`,
+so a program that names no allocator has the SIR and the output it
+had, and `sisu doc --std` prints `pub struct list[T, A: Allocator =
+Global]`. A collection on another allocator is a type,
+`list[int, ref Region]`, but the collections' impls are for `Global`
+only, so it has no method and no trait (E0347 for `Len`), and nothing
+builds one; a third argument is E0208. The steps left are the runtime
+allocating through the collection's allocator value, `with_allocator`
+and `try_push` (E0351 and E0304 today) with the impls made generic over
+the allocator, `@no_alloc` passing a collection's growth in a borrowed
+region, and the `freestanding` profile's explicit allocator. `Region`
 exists in `std.mem`, under `RawBuf`
-([chapter 27](../tutorial/27-systems.md#what-is-still-to-come)). Stage
-1's [rules](../../compiler/stage1/RULES.md), in R225, plan the
-allocators in five steps: the defaulted parameter
-on `list`, `dict`, `set` and `String`, kept out of the SIR while it is
-`Global`; the runtime allocating through the collection's allocator
-value; `with_allocator` and `try_push`; `@no_alloc` passing a
-collection's growth in a borrowed region; and the `freestanding`
-profile's explicit allocator. The first waits for a round of its own,
-since it changes the arity of the prelude's collections and every impl
-over them.
+([chapter 27](../tutorial/27-systems.md#what-is-still-to-come)).
+
+**Status.** Designed (D-060, leaning; Q-4), with the differences
+noted: stage 0 allocates from the global allocator only.
 
 ## Unsafe code and raw pointers
 

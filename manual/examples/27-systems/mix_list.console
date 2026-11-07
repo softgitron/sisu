@@ -1,14 +1,10 @@
 $ sisu run mix_list.sisu
-error[E0282]: `mix` is `@no_alloc`, but `list.new` may allocate
+error[E0282]: `mix` is `@no_alloc`, but `[voice[i] * gain for i in range(N)]` may allocate
   --> mix_list.sisu:6:18
   |
 6 |     let scaled = [voice[i] * gain for i in range(N)]
   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `mix` may allocate
 
-error[E0282]: `mix` is `@no_alloc`, but `list.push` may allocate
-  --> mix_list.sisu:6:19
-  |
-6 |     let scaled = [voice[i] * gain for i in range(N)]
-  |                   ^^^^^^^^^^^^^^^
-
-error[D0021]: the program was not run: the ownership checker found errors (2); `--defer-borrow` runs it under the monitor
+error[D0006]: the program was not run: errors found (1)

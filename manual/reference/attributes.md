@@ -1216,9 +1216,15 @@ driver needs ([04](../../proposal/04-memory-and-ownership.md#resource-attributes
 through its calls into their bodies, the standard library's included:
 a statement that makes, grows, copies or boxes a value that owns
 memory, or calls a function that may, is E0282 (`type.no-alloc`,
-[R17](diagnostics.md#e0282)) at the statement, with a note that names
-where the callee allocates. The paths that only panic are exempt, so an
-`assert`'s message may be built:
+[R17](diagnostics.md#e0282)) at the statement, once for a statement and
+what it holds, naming what the program wrote there, with a note that
+names where a callee allocates. Each error has the fix that removes
+`@no_alloc` (`type.no-alloc-remove`), and one at a list the function
+makes has first the fix of a list the caller makes and the function
+fills in place (`type.no-alloc-pass-in`). An allocation error is not
+the ownership checker's, so the run ends with D0006 and `--defer-borrow`
+refuses it too. The paths that only panic are exempt, so an `assert`'s
+message may be built:
 
 <!-- file: examples/reference-attributes/no_alloc.sisu -->
 ```sisu
@@ -1246,13 +1252,14 @@ def main():
 <!-- output: examples/reference-attributes/no_alloc.console -->
 ```console
 $ sisu run no_alloc.sisu
-error[E0282]: `report` is `@no_alloc`, but `fmt.new` may allocate
+error[E0282]: `report` is `@no_alloc`, but `"highest: {highest(readings)}"` may allocate
   --> no_alloc.sisu:15:11
    |
 15 |     print("highest: {highest(readings)}")
    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: remove `@no_alloc`, so that `report` may allocate
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+error[D0006]: the program was not run: errors found (1)
 ```
 
 A generic function is checked as 04 checks it, at each instance the
@@ -1307,15 +1314,17 @@ error[E0282]: `highest[Logged]` is `@no_alloc`, but `Logged.Reading.celsius` may
    |                        ^^^^^^^^^^^^^^^^^^^^^
   = note: `Logged.Reading.celsius` calls `fmt.new`, at no_alloc_generic.sisu:17:15
   = note: in this instance, which the program makes at no_alloc_generic.sisu:30:11
+  = fix: remove `@no_alloc`, so that `highest` may allocate
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+error[D0006]: the program was not run: errors found (1)
 ```
 
 `highest[Plain]` checks; `highest[Logged]` prints, which formats a
 string. The check still differs from 04's in two ways: a closure that
 captures by value is taken to allocate, since whether its captures fit
 in its value is the backend's to know; and no collection is free of
-allocation by its allocator, since the allocators are missing
+allocation by its allocator, since only the first of the allocators'
+steps, the collections' allocator parameter, is done
 ([R7](ownership.md#allocators)). `@no_block` and `@stack` are accepted
 and checked by nothing, and stage 0 says so at each with W0030
 (`resolve.unchecked-attribute`, [R17](diagnostics.md#w0030)), so that a

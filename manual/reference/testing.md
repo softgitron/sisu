@@ -144,7 +144,20 @@ tests of `tests/tank.sisu`:
 test "a full tank" ... ok
 test "more used than there was" ... ok
 2 passed, 0 failed, 0 blocked
+$ sisu test --cover
+tests of `levels`:
+test "clamp keeps zero" ... ok
+1 passed, 0 failed, 0 blocked
+tests of `tests/tank.sisu`:
+test "a full tank" ... ok
+test "more used than there was" ... ok
+2 passed, 0 failed, 0 blocked
+regions: 2, 2 reached by the tests and 0 not
 ```
+
+Under `--cover` ([Coverage](#coverage)) each file of `tests/` is
+counted for the package, whose regions are reported after the last
+file's list: `left`, which only `tests/tank.sisu` calls, is reached.
 
 With `left` written as `full - used`, without the clamp, the black-box
 test fails, and its replay token runs it again from its file:
@@ -612,11 +625,17 @@ after the last, failed or not: its `Drop` runs once, and what the
 fixture and the drop print is the output of the first test and of the
 last. A value whose type has no `Drop` of its own is dropped as its
 type drops it, a list's elements one by one, first to last, each with
-what it owns ([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
+what it owns, and a `Shared`, a `Weak`, a mutex, an arena, a channel's
+end, a function value or a handle as a frame's end drops it, so the
+last owner of a `Shared` drops its value with that value's `Drop`
+([chapter 19](../tutorial/19-testing.md#fixtures-that-tests-ask-for)
 shows a run). A replay token runs its test alone, with the fixture
-called before it. A fixture that panics fails the test that needed it.
-Since the tests share the value, what the fixture returns must be
-`Sync`: E0283 (`type.module-fixture-sync`,
+made before it and dropped after it, and shows what the run showed:
+the making's output only when the test is the first that names the
+fixture, and the drop's only when it is the last. A fixture that panics
+fails the test that needed it. Since the tests share the value, and 17
+lets tests run in parallel, what the fixture returns must be `Sync`:
+E0283 (`type.module-fixture-sync`,
 [R17](diagnostics.md#e0283)) at the attribute otherwise. The runner
 reads which tests share a fixture from the SIR of stage 1's `sir
 --tests --module-fixtures`, from `sisu1 0.20.0`, whose line of each
@@ -689,13 +708,47 @@ panic: the property failed for (1, 10) (case 2, shrunk 14 times)
 replay: sisu test --replay 1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10 properties.sisu
 
 1 passed, 1 failed, 0 blocked
+$ sisu test properties.sisu
+test "a share is never more than the whole" ... ok (cached)
+test "a share of a share is the share of the product" ... FAILED
+
+test "a share of a share is the share of the product" ... FAILED
+panic: the property failed for (1, 10) (case 1, shrunk 0 times)
+  the property returned False
+  at test "a share of a share is the share of the product" (properties.sisu:15:5)
+replay: sisu test --replay 1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10 properties.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --format=json properties.sisu
+{"event":"start","test":"a share is never more than the whole"}
+{"event":"end","test":"a share is never more than the whole","result":"ok","cached":true}
+{"event":"start","test":"a share of a share is the share of the product"}
+{"event":"end","test":"a share of a share is the share of the product","result":"failed","message":"panic: the property failed for (1, 10) (case 1, shrunk 0 times)\n  the property returned False\n  at test \"a share of a share is the share of the product\" (properties.sisu:15:5)","replay":"1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10"}
+{"event":"summary","passed":1,"failed":1,"blocked":0}
 ```
 
-**Stage 0 differs.** The failure database of 17, which runs the cases
-that failed before first, is missing, and so is `--fuzz`
+A test that failed on a case keeps the case in the failure database
+of 17, `FILE.failures` beside a file or `failures` beside a package's
+`test-cache`, one line of JSON a test, `{"test": NAME, "choices":
+[...]}`, the choices its replay token holds. The next run gives the
+test its saved case before its own, so the second command of the
+session fails on case 1 without shrinking, and a test that passes
+loses its line. The database is read and written when the test cache
+is ([What sisu test remembers](#what-sisu-test-remembers)), so not with
+`--no-cache`, a search of schedules, `--sim`, `--update`,
+`--defer-borrow`, `--cover`, `--native` or the standard library's
+examples. The third command prints the report as JSON
+([R16](sisu-command.md#sisu-test)): a line for each test's start and
+its end, the end with its result, `"cached"` for a result the cache
+gave, and for a failure its message and replay token, then a line of
+the counts.
+
+**Stage 0 differs.** `--fuzz`, which 17 designs, is missing
 ([R16](sisu-command.md#options-of-the-existing-commands)).
 
-**Status.** In stage 0 (D-070 leans).
+**Status.** In stage 0 (D-070 leans; the failure database and the
+JSON lines are decision 1285 of the [architecture
+notes](../../compiler/docs/architecture.md)).
 
 ## Every small case
 
@@ -911,9 +964,11 @@ The transcripts run from the SIR that the tests run from, which stage
 program that writes a form only stage 1 takes, such as `^` in a slice's
 bound, or calls `cli.about`
 ([G6](../guides/command-line.md#4-test-the-command-line-with-a-transcript)),
-passes its transcripts as it passes its tests. With a stage 1 older than
-0.11.0 they run on the Rust front end's build, and such a program fails
-each with D0128 ([R17](diagnostics.md#d0128)).
+passes its transcripts as it passes its tests. A stage 1 older than
+0.21.0, which only the environment variable `SISU_STAGE1` can name,
+writes no such SIR, and each transcript fails with D0164
+([R17](diagnostics.md#d0164)); the Rust front end no longer builds the
+program for them.
 
 **Status.** In stage 0.
 
@@ -1032,14 +1087,17 @@ takes the real `System` is never cached
 ([chapter 19](../tutorial/19-testing.md#what-sisu-test-remembers) shows
 a run of each).
 
-**Stage 0 differs.** 17's machine-readable output (JSON, TAP, JUnit XML)
-is designed ([R16](sisu-command.md#options-of-the-existing-commands));
-decision 1247 of the [architecture
-notes](../../compiler/docs/architecture.md) writes down its smallest
-form, a line of JSON for each test's start and end with its result and
-its replay token.
+Beside the cache, `sisu test` keeps the failure database, the cases
+that failed, which the next run tries first
+([Property tests](#property-tests) shows one), and `--format=json`
+prints the report as lines of JSON for a tool to read.
 
-**Status.** In stage 0, except the machine-readable output.
+**Stage 0 differs.** Of 17's machine-readable output, `--format=json`
+gives the smallest form, a line for each test's start and end; TAP and
+JUnit XML are designed
+([R16](sisu-command.md#options-of-the-existing-commands)).
+
+**Status.** In stage 0, with the difference noted.
 
 ## Mutation testing
 
@@ -1091,8 +1149,9 @@ million more, so a mutant that loops is killed.
 
 - `--since REV` keeps the mutants on the lines that `git diff` says
   changed since the revision `REV`, and counts the others (D0156); a
-  git that cannot answer is D0158, and `--since` without `--mutate`
-  D0160.
+  git that cannot answer is D0158 with git's first line as its reason,
+  and outside a git repository with D0165's one line
+  ([R17](diagnostics.md#d0165)); `--since` without `--mutate` is D0160.
 - Tests that fail on the program itself stop the mode before any
   mutant runs (D0157).
 - The survivors are suggestions, not a gate: the status is the tests'
@@ -1176,12 +1235,20 @@ own, and the test cache is not read, so every test runs.
   combine with `--native`, `--release`, `--defer-borrow`, `--mutate`,
   `--replay` or `--from-sir` (D0163).
 
+- In a package, each file of `tests/` is built with `--cover` too, and
+  a statement of the package that it reaches counts for the package,
+  whose regions are reported after the last file's list
+  ([Black-box tests](#black-box-tests) shows a run).
+- Since stage 1's twenty-seventh round every region names a statement
+  with a place, a `pass`, a `break`, a `continue` and a `defer`
+  included, so none is left out of the map.
+
 **Stage 0 differs.** 17 takes the regions from the compiler's own
 instrumentation, in any build; stage 0 counts them in the interpreter
-only, and for the program's own tests: not for the files of `tests/`
-beside a package ([Black-box tests](#black-box-tests)), nor for the
-runs of its transcripts, so a program that only a transcript tests has
-every region reported unreached though the transcript passes.
+only, and decided against counting a native build, which would need a
+counter at every statement in both lowerings. The runs of a program's
+transcripts are not counted, so a program that only a transcript tests
+has every region reported unreached though the transcript passes.
 
 **Status.** In stage 0 (17, "Coverage and mutation"), with the
 difference noted.
@@ -1200,7 +1267,7 @@ difference noted.
 | [D0135](diagnostics.md#d0135) | `cli.test-output` | [What a test prints](#what-a-test-prints) |
 | [D0134](diagnostics.md#d0134) | `native.test-unsupported` | [Native tests](#native-tests) |
 | [D0161](diagnostics.md#d0161), D0162, D0163 | `cli.cover-unreached`, `cli.cover-summary`, `cli.cover-alone` | [Coverage](#coverage) |
-| D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
+| D0061, [D0164](diagnostics.md#d0164) | `cli.transcript-differs`, `cli.stage1-too-old` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |
 | [D0149](diagnostics.md#d0149), [D0150](diagnostics.md#d0150) | `cli.token-module-run`, `cli.token-package-run` | [The tests of one module](#the-tests-of-one-module) |

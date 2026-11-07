@@ -1,1 +1,2 @@
-15:11-15:41 E0282 type.no-alloc name="report" what="`fmt.new`"
+15:11-15:41 E0282 type.no-alloc name="report" what="`\"highest: {highest(readings)}\"`"
+  fix type.no-alloc-remove 13:1-14:1 ""

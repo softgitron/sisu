@@ -1,0 +1,11 @@
+# A collection's allocator is a type parameter whose default is `Global`.
+def total(prices: list[int]) -> int:
+    var sum = 0
+    for p in prices:
+        sum += p
+    return sum
+
+def main():
+    let prices: list[int, Global] = [280, 350]
+    print(total(prices))
+    print(len(prices))

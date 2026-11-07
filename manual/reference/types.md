@@ -798,8 +798,11 @@ def main():
 
 **Stage 0 differs.** A key type with an `Eq` or `Hash` impl of its own, rather
 than a derived one, is E0398 in stage 0, which hashes keys by their
-structure. The allocator parameter of D-060, `list[T, A: Allocator =
-Global]`, waits for allocators ([R7](ownership.md#allocators)).
+structure. Each collection takes its allocator as a last parameter,
+D-060's `list[T, A: Allocator = Global]`, `dict[K, V, A]`, `set[T, A]`
+and `String[A]`, which a program leaves out: `list[int]` is `list[int,
+Global]`, and only a collection at `Global` has methods until the
+allocators' later steps ([R7](ownership.md#allocators)).
 
 **Status.** In stage 0, with the differences noted.
 
@@ -1445,12 +1448,17 @@ leaves the parameter out gets the default, so `Labelled[int]` is
 - The type parameters of a function or an `impl` take no defaults
   (E0246).
 
-**Stage 0 differs.** D-060 declares the standard collections with an
-allocator parameter, `list[T, A: Allocator = Global]`, so that a list in
-a borrowed region is `list[T, ref Region]`; stage 0's collections have
-no such parameter yet ([R7](ownership.md#allocators)).
+The standard collections take their allocator this way, D-060's
+`list[T, A: Allocator = Global]`, so that a list in a borrowed region
+is `list[T, ref Region]` and every other list leaves the parameter out.
 
-**Status.** In stage 0; the allocator parameter is leaning (D-060).
+**Stage 0 differs.** A collection's type at `Global` is the one it had
+before the parameter, in the SIR too, and only a collection at `Global`
+has the collections' impls: a `list[int, ref Region]` has no `Len`
+(E0347) and nothing builds one, until the allocators' later steps
+([R7](ownership.md#allocators)).
+
+**Status.** In stage 0 (D-060 leaning), with the differences noted.
 
 ## Constant parameters
 

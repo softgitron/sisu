@@ -1,5 +1,5 @@
 $ sisu test e0283_module_fixture_sync.sisu
-error[E0283]: `guests` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `Cell[int]` is not
+error[E0283]: `guests` is a fixture of its module, one value that every test naming it shares, and tests may run in parallel (17), so what it returns must be `Sync`, and `Cell[int]` is not
   --> e0283_module_fixture_sync.sisu:4:2
   |
 4 | @fixture(scope="module")

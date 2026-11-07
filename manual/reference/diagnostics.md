@@ -4082,7 +4082,15 @@ error named by its type arguments, `highest[Logged]`, with the note
 ([R14](attributes.md#resource-limits) shows one). A call through a
 function value, or of a trait's method on a type that only the run
 knows, such as a `dyn` value's, is the error too, with the note
-`type.no-alloc-unknown`. A path that only panics is exempt:
+`type.no-alloc-unknown`. The error names what the program wrote, the
+comprehension `[x * 2 for x in xs]`, `s + t` or a call, or in words,
+such as "the list it makes", where that text is long; a statement that
+allocates inside another that does is the other's one error. Each error
+has the fix `type.no-alloc-remove`, which removes the attribute, and an
+error at a list the function makes has first `type.no-alloc-pass-in`,
+a list the caller makes and the function fills in place, which `sisu
+fix` leaves to you since it has no edit. A path that only panics is
+exempt:
 
 <!-- file: examples/reference-diagnostics/e0282_no_alloc.sisu -->
 ```sisu
@@ -4114,15 +4122,17 @@ error[E0282]: `play` is `@no_alloc`, but `louder` may allocate
 10 |     let loud = louder(samples, gain)
    |                ^^^^^^^^^^^^^^^^^^^^^
   = note: `louder` calls `list.new`, at e0282_no_alloc.sisu:5:12
+  = fix: remove `@no_alloc`, so that `play` may allocate
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+error[D0006]: the program was not run: errors found (1)
 ```
 
-The run ends with D0021, as for the ownership checker's errors, and
-its offer does not help here: under `--defer-borrow` the program runs,
-and the account calls the allocation a candidate false positive. Do the
-work in place, in memory the caller gives, or leave the allocation
-where the attribute does not reach:
+The run ends with D0006, since an allocation is not an ownership
+rule's error, and `--defer-borrow` refuses the program as the plain run
+does. The note names the call `louder`'s comprehension lowers to,
+`list.new`, not the comprehension. Do the work in place, in memory the
+caller gives, or leave the allocation where the attribute does not
+reach:
 
 <!-- file: examples/reference-diagnostics/e0282_no_alloc_fixed.sisu -->
 ```sisu
@@ -4150,15 +4160,17 @@ Shown in [R14](attributes.md#resource-limits) and the tutorial's
 
 ### E0283
 
-`type.module-fixture-sync`: `{name}` is a fixture of its module, whose
-tests share its value while they run at once, so what it returns must
-be `Sync`, and `{ty}` is not.
+`type.module-fixture-sync`: `{name}` is a fixture of its module, one
+value that every test naming it shares, and tests may run in parallel
+(17), so what it returns must be `Sync`, and `{ty}` is not.
 
 A `@fixture(scope="module")` makes one value for the tests of its
-module that name it ([R15](testing.md#fixtures)), so the value must be
-one that tests may share: a `Cell`, which changes behind a shared
-borrow, is not `Sync` ([R9](concurrency.md)). The error stands at the
-attribute:
+module that name it ([R15](testing.md#fixtures)). Stage 0's interpreter
+runs those tests in turn, but 17 lets tests run in parallel, and a
+shared value is reached from whatever thread runs each, so the value
+must be one that tests may share: a `Cell`, which changes behind a
+shared borrow, is not `Sync` ([R9](concurrency.md)). The error stands
+at the attribute:
 
 <!-- file: examples/reference-diagnostics/e0283_module_fixture_sync.sisu -->
 ```sisu
@@ -4177,7 +4189,7 @@ test "one guest arrives"(guests: Cell[int]):
 <!-- output: examples/reference-diagnostics/e0283_module_fixture_sync.console -->
 ```console
 $ sisu test e0283_module_fixture_sync.sisu
-error[E0283]: `guests` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `Cell[int]` is not
+error[E0283]: `guests` is a fixture of its module, one value that every test naming it shares, and tests may run in parallel (17), so what it returns must be `Sync`, and `Cell[int]` is not
   --> e0283_module_fixture_sync.sisu:4:2
   |
 4 | @fixture(scope="module")
@@ -13395,7 +13407,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0280](#e0280) | `resolve.plain-padding-end` | `{ty}` cannot derive `Plain`: C's layout leaves {bytes} bytes of padding after `{before}`, at offsets {start} to {end}, the end of the struct, and a plain type has none (22) |
 | [E0281](#e0281) | `type.fixture-signature` | `{name}` is a `@fixture`, which a test names as a parameter to receive what it returns, so it is a free function that takes nothing |
 | [E0282](#e0282) | `type.no-alloc` | `{name}` is `@no_alloc`, but {what} may allocate |
-| [E0283](#e0283) | `type.module-fixture-sync` | `{name}` is a fixture of its module, whose tests share its value while they run at once, so what it returns must be `Sync`, and `{ty}` is not |
+| [E0283](#e0283) | `type.module-fixture-sync` | `{name}` is a fixture of its module, one value that every test naming it shares, and tests may run in parallel (17), so what it returns must be `Sync`, and `{ty}` is not |
 
 ### Types, every code
 

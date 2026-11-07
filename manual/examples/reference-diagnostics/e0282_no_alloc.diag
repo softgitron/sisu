@@ -1,1 +1,2 @@
 10:16-10:37 E0282 type.no-alloc name="play" what="`louder`"
+  fix type.no-alloc-remove 8:1-9:1 ""

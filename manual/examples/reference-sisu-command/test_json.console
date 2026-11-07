@@ -1,0 +1,18 @@
+$ sisu test --format=json tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
+{"event":"start","test":"doubles a number"}
+{"event":"end","test":"doubles a number","result":"ok"}
+{"event":"start","test":"doubles (-1, -2)"}
+{"event":"end","test":"doubles (-1, -2)","result":"ok"}
+{"event":"start","test":"doubles (-3, -5)"}
+{"event":"end","test":"doubles (-3, -5)","result":"failed","message":"panic: assertion failed: double(x) == y\n  left:  -6\n  right: -5\n  at test \"doubles (-3, -5)\" (tests.sisu:12:5)","replay":"1-ed778be29924c09d-0.0.1-t2-s0-r0"}
+{"event":"start","test":"halves a number"}
+{"event":"end","test":"halves a number","result":"blocked","hole":"halve","output":"in scope at the typed hole `todo(\"halve\")`:\n  x = 42\n"}
+{"event":"start","test":"large numbers/doubles a large number"}
+{"event":"end","test":"large numbers/doubles a large number","result":"ok"}
+{"event":"summary","passed":3,"failed":1,"blocked":1}

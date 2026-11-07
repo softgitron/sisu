@@ -157,7 +157,8 @@ stop at the read: the obligation `valid` does not hold, since the
 frame of `reading` has returned. A native build checks it by address,
 so it says less than the interpreter: a pointer into a frame that has
 returned, whose stack memory a later call of the same depth now uses,
-looks alive to it.
+looks alive to it. A native run keeps the executable it built, so
+running the same file again does not build it again.
 
 ## Saying why it holds
 
@@ -852,10 +853,10 @@ compiler yet. Allocators for the
 collections, `list.with_allocator(Region.bump(n))` for memory released
 all at once and `try_push` for allocation that can fail, are designed in
 [04](../../proposal/04-memory-and-ownership.md#allocators) (E0351 and
-E0304 today), planned in five steps, the first a defaulted
-allocator parameter on `list`, `dict`, `set` and `String`
-([R7](../reference/ownership.md#allocators)); `Region` exists, under
-`RawBuf`. `@no_block` and
+E0304 today). The first of their five steps is done: the collections
+take an allocator parameter, `list[T, A: Allocator = Global]`, which
+your code never writes, and every collection still allocates from
+`Global` ([R7](../reference/ownership.md#allocators)). `@no_block` and
 `@stack` compile with the warning W0030 (`resolve.unchecked-attribute`),
 since nothing checks them yet. The
 manifest's runtime profile is read, but `single` gets the runtime that
@@ -868,10 +869,7 @@ leaves out the code that nothing reaches, but links the C library
 dynamically and keeps its debug information: a ten-line program is
 6.25 MB, 1.74 MB stripped, nearly all of it the runtime, as `sisu build
 --native --explain-size` shows part by part
-([R22](../reference/targets.md#binary-size-and-startup)). A native debug build
-checks raw memory as the interpreter does, the memory C gives out
-included, except where the interpreter alone knows enough: which
-borrow a pointer came from, which it checks only by address. The
+([R22](../reference/targets.md#binary-size-and-startup)). The
 exercises of this
 chapter practise the safe side of systems work: layouts, bytes and
 code that does not allocate.
@@ -1184,23 +1182,19 @@ def main():
 <!-- output: examples/27-systems/mix_list.console -->
 ```console
 $ sisu run mix_list.sisu
-error[E0282]: `mix` is `@no_alloc`, but `list.new` may allocate
+error[E0282]: `mix` is `@no_alloc`, but `[voice[i] * gain for i in range(N)]` may allocate
   --> mix_list.sisu:6:18
   |
 6 |     let scaled = [voice[i] * gain for i in range(N)]
   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: take the list as a `mut` parameter, made by the caller where allocating is allowed, and set its elements in place without growing it
+  = fix: remove `@no_alloc`, so that `mix` may allocate
 
-error[E0282]: `mix` is `@no_alloc`, but `list.push` may allocate
-  --> mix_list.sisu:6:19
-  |
-6 |     let scaled = [voice[i] * gain for i in range(N)]
-  |                   ^^^^^^^^^^^^^^^
-
-error[D0021]: the program was not run: the ownership checker found errors (2); `--defer-borrow` runs it under the monitor
+error[D0006]: the program was not run: errors found (1)
 ```
 
-The comprehension makes a list and grows it, and each is an error;
-D0021's offer of `--defer-borrow` does not help here.
+The error quotes the comprehension. Its first fix, a list the caller
+makes and `mix` fills in place, is what `out` already is.
 
 </details>
 

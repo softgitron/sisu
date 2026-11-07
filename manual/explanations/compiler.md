@@ -252,19 +252,28 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
   against it. Of the driver's work, the Rust front end, which knows
-  none of the rules added since it was frozen, still does one thing by
-  default: building stage 1 itself, which a seed executable would
-  retire. The language server's worksheets and `sisu test
-  --defer-borrow` and `--std` left that list in stage 0's twenty-second
-  round, `sisu run --watch` in its twenty-third, and `sisu test --std
-  --defer-borrow` and the last fallback for a program's transcripts in
-  its twenty-fourth; until stage 1's `sir --tests` kept the world they
-  run in, a transcript of a program that used a newer rule failed with
-  the Rust front end's errors (D0128). Stage 1 checks a whole program
-  again for each save of `sisu run --watch`, where the Rust front end
-  redid only what changed; since its server keeps each module's parse
-  and the standard library's bodies between requests, a save takes
-  about 0.025 seconds where the Rust front end's took 0.07.
+  none of the rules added since it was frozen, now does one thing by
+  default: the first build of stage 1 in a fresh tree. The language
+  server's worksheets and `sisu test --defer-borrow` and `--std` left
+  its list in stage 0's twenty-second round, `sisu run --watch` in its
+  twenty-third, `sisu test --std --defer-borrow` and the last fallback
+  for a program's transcripts in its twenty-fourth, and building stage
+  1 again after a change in its twenty-fifth, when the stage 1 already
+  built took that over, as the bootstrap's fixed point does. The price
+  is time: stage 1 builds itself in about 47 seconds, where the Rust
+  front end took 7.6, most of it stage 1 checking its own 23 MB of SIR.
+  While a fresh tree needs the oracle for its first build, stage 1's
+  own sources keep to the rules the oracle knows; a seed executable, a
+  released `sisu1` kept for each version and checked by its hash, would
+  end that, and waits for a release to keep it in. Stage 1 checks a
+  whole program again for each save of `sisu run --watch`, where the
+  Rust front end redid only what changed; since its server keeps each
+  module's parse, the standard library's bodies and the ownership
+  checker's results for each unchanged function between requests, a
+  save takes about 0.025 seconds where the Rust front end's took 0.07,
+  and the diagnostics of the 18 modules of the runtime in Sisu after a
+  one-line change 0.82 seconds where they took 1.35; the rest of that
+  time is checking and lowering the types, which keep no memo yet.
 - **The interpreter is slow.** It is fine for development, tests and an
   oracle, and not for users, which is why the native backend was built
   beside stage 1 rather than after it.
@@ -272,8 +281,9 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
   ownership monitor, the counterexample mode, record and replay and hot
   replacement run on the interpreter only, so a native run is not yet
   the default of `sisu run`: it waits for the native runtime's
-  capability log and replay and for a cache of built executables,
-  without which a small program pays its build at each run.
+  capability log and replay. A file's native run no longer pays its
+  build each time, since a cache keeps the executable while the
+  program's SIR and the toolchain are the same.
 - **Self-hosting freezes early mistakes.** A compiler written in its own
   language must keep compiling through every change of the language,
   which makes early design errors expensive to undo; editions and the

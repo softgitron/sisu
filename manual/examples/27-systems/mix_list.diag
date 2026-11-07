@@ -1,2 +1,3 @@
-6:18-6:53 E0282 type.no-alloc name="mix" what="`list.new`"
-6:19-6:34 E0282 type.no-alloc name="mix" what="`list.push`"
+6:18-6:53 E0282 type.no-alloc name="mix" what="`[voice[i] * gain for i in range(N)]`"
+  fix type.no-alloc-pass-in
+  fix type.no-alloc-remove 4:1-5:1 ""

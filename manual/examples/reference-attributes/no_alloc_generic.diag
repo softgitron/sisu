@@ -1,1 +1,2 @@
 25:24-25:45 E0282 type.no-alloc name="highest[Logged]" what="`Logged.Reading.celsius`"
+  fix type.no-alloc-remove 21:1-22:1 ""

@@ -52,7 +52,11 @@ löyly!
   arguments after its name.
 - `sisu run --native FILE ARGS` builds the executable and runs it, as
   the second command does; the third runs the same program in the
-  interpreter. They must print the same: `sisu-conformance --native`
+  interpreter. A file's executable is kept in a cache under
+  `target/run-cache/` beside `sisu`, so a second run of an unchanged
+  program builds nothing: a two-line program runs in about 0.016
+  seconds where its build took 0.067 ([R16](../reference/sisu-command.md#compiling-and-running-natively---native-and---release)).
+  `SISU_RUN_CACHE=0` builds it each time. They must print the same: `sisu-conformance --native`
   builds the compiler's conformance cases natively and compares each
   executable with what the interpreter prints.
 - In a package, `sisu build --native` writes `build/debug/NAME` beside
@@ -221,6 +225,7 @@ stage 2 of the bootstrap ([18](../../proposal/18-next-steps.md)).
 [12](../../proposal/12-interop-and-targets.md) designs the targets,
 their tiers and `--target`, which stage 0 does not have, and
 [09](../../proposal/09-modules-packages-and-build.md) a content-addressed
-cache of builds. Stage 0 compiles a debug build with the backend written
+cache of builds, of which stage 0 has the cache of a file's native
+runs. Stage 0 compiles a debug build with the backend written
 in Sisu and a release build with Cranelift, which stands in for the
 LLVM backend that [10](../../proposal/10-tooling.md) plans for release.

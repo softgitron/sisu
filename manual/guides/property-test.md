@@ -291,6 +291,9 @@ Without the bound `T: Arbitrary`, `arbitrary[T]` is E0820
 
 **Status.** In stage 0, with a part of
 [17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
-designed and missing: the database that keeps each failing case and
-tries it first on the next run, which the test of step 4 stands in for.
-Fuzzing with `--fuzz` is designed too.
+designed and missing: fuzzing with `--fuzz`. The failure database of 17
+is in stage 0: `sisu test` keeps each failing case in `FILE.failures`
+beside the program and tries it first on the next run, so a property
+that still fails reports case 1 without shrinking
+([R15](../reference/testing.md#property-tests)); a test that keeps the
+case, as in step 3, holds it in the code for good.

@@ -1,4 +1,4 @@
-# A fixture of the module: its tests share one value, made once.
+# The module's fixture again, with assertions that both fail.
 
 ## A menu of prices in cents, which says when it is put away.
 struct Menu:

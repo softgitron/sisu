@@ -317,13 +317,28 @@ stage 1, and from the Rust front end only where stage 1 is not built
 --watch` with a run recorded under it and its `sisu replay`, each the
 default as the sections of each say, with the Rust front end's answer
 under `--front-end=rust`; `sisu test --std --defer-borrow` is stage 1's
-too, since stage 0's twenty-fourth round. What the Rust front end still
-does by default is one thing: building stage 1 itself, the first time
-and after a source of stage 1 changed. A program's transcripts run on
-the front end its tests run on, stage 1 unless you choose the Rust one:
-from `sisu1 0.21.0` from its `sir --tests --transcripts`, whose SIR
-holds the transcripts' world, and with a stage 1 older than 0.11.0 on
-the Rust front end (D0128). `sisu
+too, since stage 0's twenty-fourth round. A program's transcripts run
+on the front end its tests run on, stage 1 unless you choose the Rust
+one, from stage 1's `sir --tests --transcripts`, whose SIR holds the
+transcripts' world; a stage 1 older than `sisu1 0.21.0`, which only
+`SISU_STAGE1` can name, fails them with D0164
+([R17](diagnostics.md#d0164)), as it stops `sisu test --std` outside a
+package.
+
+Stage 1 is built by stage 1. When a source of stage 1 changed, the
+stage 1 already built, of the same major version as stage 1's manifest
+and of its minor version or the one before, builds the next as a
+process of its own, `sisu build --native` in `compiler/stage1`; it
+takes about 47 seconds with a release build of `sisu`, where the Rust
+front end took 7.6, most of it stage 1 checking its own SIR.
+`target/stage1/built-by` says which front end built it (`stage1
+0.21.0`, or `rust`). The Rust front end builds it only when no built
+stage 1 is at hand, the first build of a fresh tree, when that build
+fails, or when `SISU_STAGE1_BUILDER=rust` asks; besides being the
+oracle, that first build is all it does by default. A seed executable,
+a released `sisu1` for each version checked by its hash, would retire
+the role; none is kept yet, since the repository holds no executables.
+`sisu
 test` and `sisu bench` run stage 1 once for each program, and print its
 warnings once, before the report.
 
@@ -343,7 +358,7 @@ executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
 to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
-decision 268 in the [architecture
+decisions 268, 1280, 1281 and 1288 in the [architecture
 notes](../../compiler/docs/architecture.md)); the proposal has one
 front end.
 
@@ -385,9 +400,19 @@ time. What a command prints is the same either way. From `sisu1
 modules a program may import parsed once, each module's parse while
 its text is unchanged, and the standard library's bodies as the last
 request checked them, so a later request of the same program does only
-what changed, and every answer is the bytes a fresh request gives.
+what changed, and every answer is the bytes a fresh request gives. Since
+stage 1's twenty-seventh round, its version still 0.21.0, the memo also
+keeps the ownership checker's results for each function of the program,
+with what its check reads besides the function's SIR, the declared types
+it reaches and the functions it names, and checks again only a function
+whose SIR or dependencies changed; and `check` evaluates the program's
+constants with one evaluator, where it made one for each. A `query
+diagnostics` of `compiler/rt`, the runtime in Sisu, after a change of
+one line takes 0.82 seconds where it took 1.35, natively and served.
+Checking and lowering the program's types keep no memo yet, which waits
+for a table of types that stays the same from one request to the next.
 
-**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980, 1061, 1140 and 1220 of
+**Status.** In stage 0, from `sisu1 0.13.0` (decisions 942, 980, 1061, 1140, 1220 and 1261 of
 the [architecture notes](../../compiler/docs/architecture.md)).
 
 ## Running programs
@@ -590,8 +615,13 @@ the human form, as a plain build does, and the driver prints those
 words with D0006, where it built the program a second time without the
 option to get them; and stage 1 follows each deferred finding with a
 line naming its function, which the driver reads, so a finding in a
-closure and one in the function that makes it are told apart. What a
-run prints is the same as before for the programs on this page.
+closure and one in the function that makes it are told apart. Stage 1
+counts `@no_alloc`'s E0282 among the ownership checker's findings, and
+the driver says the line of such a run as D0006, not D0021, and refuses
+it under `--defer-borrow` as the run without the option does, status 1
+([R14](attributes.md#resource-limits)), since the monitor observes the
+ownership rules alone. What a run prints is the same as before for the
+programs on this page.
 `--front-end=rust` lowers the program with the Rust front end instead.
 
 **Status.** In stage 0, a tool of the experiment (18, Phase 3).
@@ -742,12 +772,20 @@ must not have returned and which a shared borrow made read-only. It
 checks a pointer by its address, where the interpreter knows the borrow
 it came from, so it lets pass a few accesses that the interpreter
 stops; the release build checks none
-([chapter 27](../tutorial/27-systems.md#raw-memory)). A plain `sisu
-run` stays the interpreter's until the native runtime has what only the
-interpreter gives: the capability log and its replay, hot replacement,
-`--stats stack-depth` and `--stats shared`, and a cache of built
-executables, without which a small program pays its build at each
-run.
+([chapter 27](../tutorial/27-systems.md#raw-memory)).
+
+A file's `sisu run --native` takes its executable from a cache of built
+executables under `target/run-cache/` beside the driver, the 32 run
+last, and builds again only when the program's SIR, the profile, the
+lowering, the backend or the driver and its runtimes changed: a second
+run of a two-line program takes 0.016 seconds where its build took
+0.067, with a release build of `sisu`, and the interpreter's run 0.014.
+`SISU_RUN_CACHE=0` builds aside each time; a package's executable stays
+where its builds go. A plain `sisu run` stays the interpreter's until
+the native runtime has what only the interpreter gives: the capability
+log and its replay, which come next, then `--stats stack-depth` and
+`--stats shared`; hot replacement, the monitor and the counterexample
+mode stay the interpreter's whatever the default.
 
 <!-- output: examples/reference-sisu-command/native.console -->
 ```console
@@ -770,7 +808,9 @@ Cranelift, which stands in for LLVM (`--backend=cranelift` asks for
 Cranelift in a debug build too).
 
 **Status.** In stage 0 (stage 2 of the bootstrap,
-[18](../../proposal/18-next-steps.md)).
+[18](../../proposal/18-next-steps.md); the cache of built executables,
+decision 1287 of the [architecture
+notes](../../compiler/docs/architecture.md)).
 
 ### Running serialised SIR: --sir, --from-sir and --from-lir
 
@@ -1421,6 +1461,43 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   cache is
   `FILE.test-cache` beside a file, or `build/debug/test-cache` in a
   package. A test that takes the real `System` is never cached.
+- The failure database sits beside the cache, `FILE.failures` beside a
+  file or `failures` beside a package's `test-cache`, a line of JSON for
+  each test that failed on a case, with the choices of the case's replay
+  token. The next run gives each such test its saved case first, so a
+  property that still fails reports `case 1, shrunk 0 times`; a test that
+  passes loses its line. It is read and written when the cache is, so not
+  with `--no-cache`, `--sim`, `--update`, `--defer-borrow`, `--cover`,
+  `--native`, a search of schedules or `--std`'s examples
+  ([R15](testing.md#property-tests)).
+- `--format=json` prints, in the report's place, a line of JSON for each
+  test's start and one for its end, with its result (`ok`, `failed` or
+  `blocked`), `"cached"` for a result the cache gave, and for a test
+  that did not pass its message, hole, output and replay token; the
+  same for each transcript, and a last line of the counts. The warnings
+  still come first, on standard error, and the status is the report's:
+
+<!-- output: examples/reference-sisu-command/test_json.console -->
+```console
+$ sisu test --format=json tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
+{"event":"start","test":"doubles a number"}
+{"event":"end","test":"doubles a number","result":"ok"}
+{"event":"start","test":"doubles (-1, -2)"}
+{"event":"end","test":"doubles (-1, -2)","result":"ok"}
+{"event":"start","test":"doubles (-3, -5)"}
+{"event":"end","test":"doubles (-3, -5)","result":"failed","message":"panic: assertion failed: double(x) == y\n  left:  -6\n  right: -5\n  at test \"doubles (-3, -5)\" (tests.sisu:12:5)","replay":"1-ed778be29924c09d-0.0.1-t2-s0-r0"}
+{"event":"start","test":"halves a number"}
+{"event":"end","test":"halves a number","result":"blocked","hole":"halve","output":"in scope at the typed hole `todo(\"halve\")`:\n  x = 42\n"}
+{"event":"start","test":"large numbers/doubles a large number"}
+{"event":"end","test":"large numbers/doubles a large number","result":"ok"}
+{"event":"summary","passed":3,"failed":1,"blocked":1}
+```
 - `FILE`, a module under a package's `src/`, runs that module's tests
   only, with the package compiled as `sisu test` compiles it, so the
   module imports the modules beside it; the replay line names the
@@ -1447,7 +1524,7 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   it runs them alone, with no test cache, which has no file to sit
   beside. Stage 1 lowers them as tests from `sisu1 0.17.0`, 197 of
   them, each once, and from `sisu1 0.21.0` alone, with no program
-  written aside for them; alone they take about 3 seconds, where they
+  written aside for them (an older stage 1 is D0164); alone they take about 3 seconds, where they
   took about 3.5 before stage 1 made each module's examples once for a
   check. With `--defer-borrow` they run from stage 1 too, every one
   passing under the monitor. Under `--front-end=rust` the Rust front
@@ -1466,14 +1543,16 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   that no test reached (D0161), then the counts (D0162); the status is
   the tests' own ([R15](testing.md#coverage)). It does not combine with
   `--native`, `--release`, `--defer-borrow`, `--mutate`, `--replay` or
-  `--from-sir` (D0163), and neither the files of `tests/` beside a
-  package nor the transcripts are counted.
+  `--from-sir` (D0163). A package's files of `tests/` are counted for
+  the package, which is reported after the last of them; its transcripts
+  are not counted.
 - `--mutate` runs the tests, then runs against each mutant of the
   program, a copy with one small change, the selected tests that reach
   its line, and prints each
   mutant that every test passed by its place (D0153), then the counts
   (D0154); `--since REV` keeps the mutants on the lines changed since
-  the git revision `REV` (D0156, and D0158 when git cannot say). The
+  the git revision `REV` (D0156, and D0158 when git cannot say, with
+  D0165's reason outside a git repository). The
   status is the tests' own: the survivors are suggestions
   ([R15](testing.md#mutation-testing)). Tests that fail on the program
   stop it before any mutant runs (D0157), `--since` without `--mutate`
@@ -2811,7 +2890,9 @@ and shows the survivors for a person to choose.
   Designed ([10](../../proposal/10-tooling.md), "Debugging and
   profiling").
 - `sisu test --fuzz` runs coverage-guided fuzzing, and `--format`
-  writes TAP or JUnit XML. Designed ([17](../../proposal/17-testing.md)).
+  writes TAP or JUnit XML besides the lines of JSON that
+  `--format=json` writes ([sisu test](#sisu-test)). Designed
+  ([17](../../proposal/17-testing.md)).
 - `sisu build --target TARGET` cross-compiles, and `--explain-size`
   reports what monomorphisation cost, the copies of each package, beside
   the parts of the executable that stage 0's `--explain-size` gives
@@ -2844,7 +2925,7 @@ a command line can produce, by what they report:
 | D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131), [D0151](diagnostics.md#d0151) | The usage, a command's usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
 | [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114, [D0132](diagnostics.md#d0132) | A program with errors that did not run, was not documented, or was not compiled. |
-| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135), [D0137](diagnostics.md#d0137), [D0152](diagnostics.md#d0152) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed, the program a list is of, a result from the cache. |
+| D0007, D0008, D0053, D0060 to D0063, [D0135](diagnostics.md#d0135), [D0137](diagnostics.md#d0137), [D0152](diagnostics.md#d0152) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed, the program a list is of, a result from the cache. |
 | [D0010](diagnostics.md#d0010), D0011 | `sisu explain`. |
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |
@@ -2860,7 +2941,7 @@ a command line can produce, by what they report:
 | D0139 to D0147, [D0148](diagnostics.md#d0148) | `sisu build --native --explain-size`. |
 | D0170 to D0174, D0180 to D0187 | The lines of `sisu check --holes` ([sisu check --holes](#sisu-check---holes)). |
 | D0175 to D0179, [D0190](diagnostics.md#d0190) | The lines of `sisu fix` ([sisu fix](#sisu-fix)). |
-| [D0153](diagnostics.md#d0153) to D0160 | `sisu test --mutate` and `--since` ([sisu test](#sisu-test)). |
+| [D0153](diagnostics.md#d0153) to D0160, [D0165](diagnostics.md#d0165) | `sisu test --mutate` and `--since` ([sisu test](#sisu-test)). |
 | [D0161](diagnostics.md#d0161) to D0163 | `sisu test --cover` ([sisu test](#sisu-test)). |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
@@ -2869,7 +2950,7 @@ a command line can produce, by what they report:
 | D0095 to D0102 | The language server's answers. |
 | D0103 to [D0111](diagnostics.md#d0111), D0119 to D0126, [D0134](diagnostics.md#d0134) | The native backend, its lowering, the runtime in Sisu, and `sisu test --native`. |
 | [D0113](diagnostics.md#d0113) | `sisu doc --std`. |
-| [D0115](diagnostics.md#d0115) to D0118 | The front end. |
+| [D0115](diagnostics.md#d0115) to D0118, [D0164](diagnostics.md#d0164) | The front end, and a stage 1 too old for what the driver asks of it. |
 
 `sisu explain CODE` prints any of them, and [R17, Diagnostics](diagnostics.md#the-driver)
 has an entry for each one that the manual shows, with the fix.

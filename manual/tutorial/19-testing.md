@@ -69,9 +69,6 @@ test "feels/the edges of warm" ... ok (cached)
 - `--skip-tag slow` leaves out the tests tagged `slow`, and `--tag
   slow` runs only those. `--filter TEXT` runs the tests whose names
   hold the text. The last line counts the tests left out.
-- A test that passed in the first run and has not changed since is
-  `ok (cached)` in the later ones ([What sisu test
-  remembers](#what-sisu-test-remembers)).
 
 A name is fixed text, since runs choose and replay by it, so a brace in
 it is written twice:
@@ -524,12 +521,13 @@ test "tea is not on the menu"(menu: Menu):
     assert menu.prices.get("tea").copied() == None
 ```
 
-Made to expect `Some(300)`, both fail, and their output shows one menu,
-set up in the first and put away in the last:
+Made to expect `Some(300)`, in `menu_once_fails.sisu`, both fail, and
+their output shows one menu, set up in the first and put away in the
+last:
 
 <!-- output: examples/19-testing/menu_once_fails.console -->
 ```console
-$ sisu test menu_once.sisu
+$ sisu test menu_once_fails.sisu
 test "a bun costs 280" ... FAILED
 test "tea is not on the menu" ... FAILED
 
@@ -542,8 +540,8 @@ panic: assertion failed: menu.prices.get("bun").copied() == Some(300)
     │           │          │           │
     │           Some(280)  Some(280)   Some(300)
     {"coffee": 350, "bun": 280}
-  at test "a bun costs 280" (menu_once.sisu:18:5)
-replay: sisu test --replay 1-3e8b95517d0c922e-0.0.1-t0-s0-r0 menu_once.sisu
+  at test "a bun costs 280" (menu_once_fails.sisu:18:5)
+replay: sisu test --replay 1-90b7de5bc6b68220-0.0.1-t0-s0-r0 menu_once_fails.sisu
 
 test "tea is not on the menu" ... FAILED
 what the test printed:
@@ -554,8 +552,8 @@ panic: assertion failed: menu.prices.get("tea").copied() == Some(300)
     │           │          │           │
     │           None       None        Some(300)
     {"coffee": 350, "bun": 280}
-  at test "tea is not on the menu" (menu_once.sisu:22:5)
-replay: sisu test --replay 1-3e8b95517d0c922e-0.0.1-t1-s0-r0 menu_once.sisu
+  at test "tea is not on the menu" (menu_once_fails.sisu:22:5)
+replay: sisu test --replay 1-90b7de5bc6b68220-0.0.1-t1-s0-r0 menu_once_fails.sisu
 
 0 passed, 2 failed, 0 blocked
 ```
@@ -667,6 +665,17 @@ panic: the property failed for [0, 0] (case 1, shrunk 0 times)
 replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sorting.sisu
 
 0 passed, 1 failed, 0 blocked
+$ sisu test sorting.sisu
+test "the numbers come out in order" ... ok (cached)
+test "every number is kept" ... FAILED
+
+test "every number is kept" ... FAILED
+panic: the property failed for [0, 0] (case 1, shrunk 0 times)
+  the property returned False
+  at test "every number is kept" (sorting.sisu:20:5)
+replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sorting.sisu
+
+1 passed, 1 failed, 0 blocked
 ```
 
 - `check(arbitrary[list[int]]) do xs:` runs the block for each case,
@@ -693,7 +702,9 @@ everything that decides the run: the code's content hash, the
 toolchain's version, which test, the scheduler's seed, the seed of the
 case and, for a property, the shrunk case. The second command of the
 session in the previous section ran it, and failed the same way at
-once, on the shrunk case.
+once, on the shrunk case. `sisu test` also saves the case in
+`sorting.failures` beside the program and tries it first in the next
+run, so the third command fails on case 1, shrunk 0 times.
 
 A token fits in a bug report: whoever has the same code can run the
 failure again on any machine, since in a test every source of chance
@@ -915,8 +926,7 @@ test "a refused reminder is counted" ... ok
   the method's name.
 
 A trait whose methods cannot all be faked is E0614 (`comptime.no-fake`,
-[R15](../reference/testing.md#fakes-of-your-own-traits)), and the same
-machinery gives `cap.Wrap` of chapter 18 for your traits.
+[R15](../reference/testing.md#fakes-of-your-own-traits)).
 
 > **From Python.** There is no `unittest.mock`. A mock replaces what a
 > function reached for by itself; a Sisu function is handed what it
@@ -980,9 +990,6 @@ test "a receipt for two" ... ok
   under the test's name, and shows what it stored.
 - From then on, the test passes while the receipt looks the same. Keep
   the `.snap` file with the code.
-
-A value that is not text is stored in its `Debug` form, as `{x:?}`
-writes it.
 
 **Try it.** Write a euro sign after each amount, `{cents % 100:02} €`,
 and run the tests.
@@ -1308,8 +1315,10 @@ run. Like a survivor, an unreached region is a map of what is
 untested, not a failure. `--cover` counts in the interpreter, so it
 does not combine with `--native` (D0163). `--mutate` counts the same
 way, and runs against each mutant only the tests that reach its line.
-A JSON report and fuzzing (`--fuzz`) are designed in
-[17](../../proposal/17-testing.md).
+`--format=json` prints the report as a line of JSON for each test's
+start and end, for tools to read
+([R16](../reference/sisu-command.md#sisu-test)); fuzzing (`--fuzz`) is
+designed in [17](../../proposal/17-testing.md).
 
 ## Exercise 19.1: predict the test clock
 

@@ -76,9 +76,11 @@ from stage 1, the front end that `sisu check` runs, through the same
 server of it that every command asks
 ([R16](../reference/sisu-command.md#the-server-of-stage-1)), so a hover
 answers in about 9 ms. The server keeps each unchanged module's parse
-between requests, so the diagnostics of a program of 18 modules after a
-one-line change take about 1.35 seconds, most of it checking the
-program's own types and ownership again. A field's references and its rename include the
+between requests, and the ownership checker's results for each function
+whose code and dependencies did not change, so the diagnostics of a
+program of 18 modules after a one-line change take about 0.82 seconds,
+where they took 1.35; most of what is left is checking and lowering the
+program's own types again, which keeps no memo yet. A field's references and its rename include the
 keyword of each construction, the `turn` of `Sauna(turn=1)`, and the
 field's name in each struct pattern, the `turn` of `case
 Sauna(turn=t)`. A file with a syntax error still gets what its

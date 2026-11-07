@@ -9,3 +9,20 @@ panic: the property failed for (1, 10) (case 2, shrunk 14 times)
 replay: sisu test --replay 1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10 properties.sisu
 
 1 passed, 1 failed, 0 blocked
+$ sisu test properties.sisu
+test "a share is never more than the whole" ... ok (cached)
+test "a share of a share is the share of the product" ... FAILED
+
+test "a share of a share is the share of the product" ... FAILED
+panic: the property failed for (1, 10) (case 1, shrunk 0 times)
+  the property returned False
+  at test "a share of a share is the share of the product" (properties.sisu:15:5)
+replay: sisu test --replay 1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10 properties.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --format=json properties.sisu
+{"event":"start","test":"a share is never more than the whole"}
+{"event":"end","test":"a share is never more than the whole","result":"ok","cached":true}
+{"event":"start","test":"a share of a share is the share of the product"}
+{"event":"end","test":"a share of a share is the share of the product","result":"failed","message":"panic: the property failed for (1, 10) (case 1, shrunk 0 times)\n  the property returned False\n  at test \"a share of a share is the share of the product\" (properties.sisu:15:5)","replay":"1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10"}
+{"event":"summary","passed":1,"failed":1,"blocked":0}

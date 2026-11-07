@@ -268,12 +268,42 @@ Aino is 34
 `Pair[str, int]` gives both. A parameter with a default comes after the
 ones without (E0245). You met one in chapter 14: the operator traits
 are declared `Add[Rhs = Self]`, so `impl Add for Vector` adds two
-vectors and `Mul[f64]` names another type for the right operand. The
-standard collections are to take their allocator this way,
-`list[T, A: Allocator = Global]`, so that ordinary code never names it
-(D-060); that parameter is designed in
-[03](../../proposal/03-types-and-generics.md#generic-syntax) and is not
-in the compiler yet.
+vectors and `Mul[f64]` names another type for the right operand.
+
+The standard collections take their allocator this way, `list[T, A:
+Allocator = Global]`, and `dict`, `set` and `String` likewise (D-060),
+so that ordinary code never names it. `Global` is the allocator every
+program has, and `list[int]` is `list[int, Global]`:
+
+<!-- file: examples/15-generics/allocator.sisu -->
+```sisu
+# A collection's allocator is a type parameter whose default is `Global`.
+def total(prices: list[int]) -> int:
+    var sum = 0
+    for p in prices:
+        sum += p
+    return sum
+
+def main():
+    let prices: list[int, Global] = [280, 350]
+    print(total(prices))
+    print(len(prices))
+```
+
+<!-- output: examples/15-generics/allocator.out -->
+```text
+630
+2
+```
+
+The parameter is the first step of the allocators that
+[03](../../proposal/03-types-and-generics.md#generic-syntax) and
+[04](../../proposal/04-memory-and-ownership.md#allocators) design. A
+collection on another allocator, such as a region that frees everything
+at once, has none of the collections' methods and traits yet, and
+nothing builds one: until
+the later steps every collection allocates from `Global`
+([chapter 27](27-systems.md#what-is-still-to-come)).
 
 ## Values that carry their type
 
