@@ -195,7 +195,7 @@ sisu run -- query values FILE               # a worksheet's values and output by
 sisu run -- grammar                         # the parser's grammar, from its `##!` comments (R202)
 sisu run -- doc [--std] --digest [PATH] [--output DIR]  # the API as one plain text, each item's declaration and its doc's first paragraph (R207)
 sisu run -- sir --tests (--mutants | --mutant=K) [PATH]  # each mutant of `sisu test --mutate` after a line `# mutant K: FILE:LINE:COL: WHAT` (R208)
-sisu run -- sir --tests --cover [PATH]      # the SIR, then a line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and branch, for `sisu test --cover` (R216)
+sisu run -- sir --tests --cover [PATH]      # the SIR, then a line `# region FILE:SPAN KIND FUNCTION bbB:S` for each statement and branch, for `sisu test --cover`, a black-box test file's with its package's after its own (R216, R233)
 sisu run -- sir --tests --module-fixtures [PATH]  # each test's fixtures on its line, a module's fixture the test's `ref T` parameter (R219)
 sisu run -- sir --tests --std               # outside a package: the standard library's doc examples alone, as tests of an empty `examples.sisu` (R221)
 sisu run -- sir --tests --transcripts [PATH]  # the world of transcripts kept whatever is beside the program, for the driver (R223)
@@ -3195,6 +3195,53 @@ fixture, stage 0's.
 Stage 1's version stays 0.21.0: no form the driver relies on is added.
 The new cases are in `cases/findings27/`.
 
+### The twenty-eighth round: the driver's asks of `E0282` and `--cover`, D-060's allocators' second step, the type checker's memo weighed, the merge's differences
+
+This round took what decisions 1280, 1282 and 1286 ask of stage 1, R225's
+second and third steps, R228's decided-against and the merge. RULES.md
+has the rules (R233 to R236, decisions 1300 to 1303) and their decision
+texts:
+
+- **The driver's asks** (R233): a run's build, and `sisu test`'s refusal,
+  of a program whose ownership checker finds `@no_alloc`'s `E0282` ends
+  with `D0006` itself, counting the program's errors, and
+  `--defer-borrow` does not defer it, answering as the build without the
+  option, so the driver's `owned_line` and `NOT_OWNERSHIP` can go; `sir
+  --tests --cover` of a black-box test file lists the tested package's
+  regions after its own, its functions as the file's SIR names them
+  (`steps.clamp`), so the driver counts them by span where it mapped
+  names; and `check.sh` no longer sets `SISU_STAGE1_TRANSCRIPTS`.
+- **D-060's allocators, the second step** (R234): `list.with_allocator(a)`,
+  `dict`'s, `set`'s and `String`'s, and `try_push`, `try_insert` and
+  `try_add` returning `! OutOfMemory` (`std.mem`'s and the prelude's), with
+  `ref Region` an allocator; on `Global` they lower to the collection's
+  `new` and its growth in `Ok`, so such a program runs on today's
+  runtime, and on another allocator to the intrinsics of their names,
+  which RULES.md lists for the runtime's half. The collections' other
+  methods stay at `Global`.
+- **The type checker's memo** (R235), decided against for the round: the
+  table of types already maps by structure, as R220's memo of the
+  standard library's bodies uses it; the program's definitions renumbered
+  by each resolution and the checker's unrecorded reads of the
+  declarations are what a memo needs first.
+- **The merge's differences** (R236).
+
+Decided against: the type checker's and lowering's memo (R235); the
+collections' other methods generic over the allocator, `try_reserve`
+(no collection has a `reserve`) and an error code of its own for an
+allocator a type does not take, which `E0300`, `E0347` and `E0351` say
+(R234). Open: the allocators' runtime half, `@no_alloc` passing a
+region's growth and `freestanding` (R225's steps 2, 4 and 5), compile-time
+types (R155), and the runner's halves of `--mutate` and a module's
+fixture, stage 0's.
+
+Stage 1's version is 0.22.0. The driver may rely on `D0006` and status 1
+for a program with `E0282` from `build --for-run` (with `--emit-sir`,
+with `--defer-borrow`) and `sir --tests` (with `--defer-borrow`), and on
+the tested package's regions in `sir --tests --cover` of a black-box test
+file (R233), each served. The new cases are in `cases/findings28/` and
+`cases/packages/cover_tested.pkg`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -4130,6 +4177,15 @@ memo's records and comparisons 0.7 G of it; a save of `live/swap` is
 unchanged, 0.011 to 0.014 s. The allocators' parameter (R227) costs a
 look-up in a small table at each collection type the checker makes.
 
+The twenty-eighth round weighed the type checker's memo (R235) and found
+the table of types no part of the 3.3 G a request's check takes on `rt`:
+interning is by structure already, and what a memo would save is the
+checking of the unchanged bodies, which waits for the program's
+definitions numbered by path and each body's reads recorded. The
+allocators' second step (R234) costs a comparison of an intrinsic's name
+at each intrinsic call lowering makes, and a black-box file's map (R233)
+the parse of the tested package's modules once more under `--cover`.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -4380,7 +4436,14 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     over the collections generic over their allocator, which step 3
     takes (R227); left: compile-time types (R155), the allocators' steps
     2 to 5 (R225), and the runner's halves of `--mutate` and a module's
-    fixture, stage 0's. The tenth round took a variant's
+    fixture, stage 0's. The twenty-eighth round took the allocators'
+    `with_allocator` and `try_` growths, on `Global` on today's path
+    (R234), and the driver's asks of `E0282` and of a black-box file's
+    regions (R233); decided against: the collections' other methods
+    generic over the allocator and `try_reserve` (R234), and the type
+    checker's memo (R235); left: compile-time types (R155), the
+    allocators' runtime half and steps 4 and 5 (R225, R234), and the
+    runner's halves of `--mutate` and a module's fixture, stage 0's. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

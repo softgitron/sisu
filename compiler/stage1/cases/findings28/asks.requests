@@ -1,0 +1,5 @@
+build	--for-run	--emit-sir	--defer-borrow	no_alloc_run.sisu	--dir	cases/findings28
+sir	--tests	--defer-borrow	no_alloc_run.sisu	--dir	cases/findings28
+build	--for-run	--emit-sir	no_alloc_run.sisu	--dir	cases/findings28
+sir	allocator_region.sisu	--dir	cases/findings28
+sir	--tests	--cover	tests/clamp.sisu	--dir	cases/packages/cover_tested.pkg

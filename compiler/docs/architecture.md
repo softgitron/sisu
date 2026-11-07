@@ -13266,3 +13266,40 @@ query layer and the driver", "Stage 2: the native backend"; D-078, D-089;
       round's, which spent its time on 1320 to 1327; the formatting
       family stays the first, with 903's measurement. This changes no
       rule of the language.
+
+**Stage 1's twenty-eighth round** (stage 1's RULES.md, R233 to R236; `E0282` ended with `D0006` by stage 1 and not deferred, a black-box file's coverage map with its package's regions, D-060's allocators' second step with `with_allocator` and the `try_` growths on `Global`'s path and the runtime's forms named, the type checker's memo decided against for the round, the merge's differences; `sisu1 --version` 0.22.0)
+
+1300. Stage 1 ends a run's build, and `sisu test`'s refusal, of a program
+      whose ownership checker finds `@no_alloc`'s `E0282` with `D0006`,
+      counting the program's errors, and `--defer-borrow` does not defer
+      it, answering as the build without the option; `sir --tests --cover`
+      of a black-box test file lists the tested package's regions after
+      its own, its functions as the file's SIR names them. From `sisu1
+      0.22.0` the driver may drop `owned_line`, `NOT_OWNERSHIP` and its
+      mapping of names. Stage 1 decides it (RULES.md, R233).
+
+1301. `list.with_allocator(a)`, `dict`'s, `set`'s and `String`'s build a
+      collection on `a`'s allocator, a `ref Region` among them, and
+      `list.try_push`, `dict.try_insert`, `set.try_add` and
+      `String.try_push` return `! OutOfMemory` (std.mem's and the
+      prelude's) where the growth panics; on `Global` they lower to the
+      collection's `new` and to its growth with `Ok` around the result, so
+      such a program runs on today's runtime and one that names no
+      allocator has the SIR it had, and on another allocator to the
+      intrinsics of their names, which the runtime's half of the step
+      runs. The collections' other methods stay at `Global`. Stage 1
+      decides it (RULES.md, R234).
+
+1302. The type checker's and lowering's memo across a server's requests
+      waits: a body's types already map from one table to another by
+      structure (R220's memo of the standard library's bodies), but the
+      program's own definitions are renumbered by each resolution and the
+      checker records no body's reads of the program's declarations, so a
+      memo needs both first. Stage 1 decides it (RULES.md, R235).
+
+1303. The conformance suite's `testing/module_fixture` differs from stage
+      0's front end under stage 1's fixtures and
+      `ownership/no_alloc_not_deferred` under `@no_alloc`, as their rules'
+      own cases do, and `testing/failure_database`, `testing/json_events` and
+      `packages/cover_black_box` do not differ. Stage 1 decides it
+      (RULES.md, R236).

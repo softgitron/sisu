@@ -353,8 +353,14 @@ impl Checker:
                             self.check_method_vis(cx, d, name.range)
                             let explicit = self.explicit_method_args.copy()
                             self.explicit_method_args = None
+                            # `list.with_allocator(a)` infers the allocator a
+                            # written `list` leaves at `Global` (RULES.md,
+                            # R234).
+                            var owner = ty
+                            if name.text == "with_allocator":
+                                owner = self.allocator_inferred(ty)
                             return self.call_fn(
-                                cx, d, explicit, Some(ty), None, a, trailing, at, expected
+                                cx, d, explicit, Some(owner), None, a, trailing, at, expected
                             )
                         case None:
                             self.check_method_vis(cx, d, name.range)
@@ -1021,6 +1027,18 @@ impl Checker:
                     self.report(d)
                     out.push(self.error_expr(at))
         return self.add(TExprKind.Variant(def_=def_, variant=vi, args=out), ty, at)
+
+    ## A collection's type with its allocator, which the type leaves out at
+    ## `Global` (RULES.md, R227), a fresh variable instead: the owner of
+    ## `with_allocator`, whose argument tells it (R234).
+    pure def allocator_inferred(mut self, ty: Ty) -> Ty:
+        let TyData.Adt(d, args) = self.types.data(ty).copy() else:
+            return ty
+        if self.types.left_out(d) == 0 or self.types.written_args(d, args) == args:
+            return ty
+        var full = args.copy()
+        full.push(self.infer.fresh(mut self.types))
+        return self.types.adt(d, full)
 
     ## Instantiates a function's signature with fresh type variables, or
     ## the explicit type arguments for its own generic parameters; its

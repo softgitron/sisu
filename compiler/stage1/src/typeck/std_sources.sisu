@@ -64,9 +64,10 @@ pub pure def allocated(name: str) -> bool:
     return name == "list" or name == "dict" or name == "set" or name == "String"
 
 ## The names of `std.mem` that the prelude's collections name, which every
-## module sees as the prelude's (RULES.md, R227).
+## module sees as the prelude's (RULES.md, R227): the allocators', and the
+## error of the collections' `try_` growth (R234).
 pub pure def allocator_names() -> list[str]:
-    return ["Allocator", "Global"]
+    return ["Allocator", "Global", "OutOfMemory"]
 
 ## The headers of the prelude's collections as `std/prelude.sisu` writes
 ## them, each with the header stage 1 reads in its place: the collection

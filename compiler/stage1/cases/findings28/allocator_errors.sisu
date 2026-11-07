@@ -1,0 +1,12 @@
+# The errors of D-060's allocators' second step (RULES.md, R234): an
+# allocator a type that takes `Global` is not given, a value that is not
+# an allocator, a type that takes no allocator, and a `try_push` whose
+# failure is dropped.
+
+def main():
+    var xs: list[int] = list.with_allocator(5)
+    let ys = list.with_allocator("heap")
+    var a: Array[int, 2] = Array.with_allocator(Global())
+    var zs = [1]
+    zs.try_push(2)
+    print("{len(xs)} {len(zs)}")
