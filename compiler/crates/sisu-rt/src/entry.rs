@@ -78,6 +78,9 @@ unsafe extern "C" fn sisu_rt_start(
     crate::par::set_single(flags & abi::ENTRY_SINGLE != 0);
     crate::par::set_unprobed(unprobed as usize);
     let _ = ARGS.set(args);
+    // `SISU_RT_RECORD` and `SISU_RT_REPLAY`: the capability log (decision
+    // 1321).
+    crate::world::start();
     let run = move || {
         // The root task runs on this thread's stack, whose probe limit is
         // near its bottom; spawned tasks get slots of the pool.
@@ -157,19 +160,20 @@ unsafe extern "C" fn sisu_rt_start(
         crate::checked::let_go();
         crate::sched::write_trail();
         if let Some(stats) = crate::sched::finish() {
-            rt::stderr(&stats_report(&stats));
+            rt::report(&stats_report(&stats));
         }
         // `SISU_RT_ALLOCS`: what the program left allocated (decision 217),
         // and with `peak` the most it held at once (decision 229).
         if let Some(how) = std::env::var_os("SISU_RT_ALLOCS") {
             if how == "peak" {
                 let line = rt::render(msg::RUN_PEAK_ALLOCATIONS, &[("count", mem::peak().to_string())]);
-                rt::stderr(&format!("{line}\n"));
+                rt::report(&format!("{line}\n"));
             }
             let line = rt::render(msg::RUN_LIVE_ALLOCATIONS, &[("count", mem::live().to_string())]);
-            rt::stderr(&format!("{line}\n"));
+            rt::report(&format!("{line}\n"));
         }
         rt::flush();
+        crate::world::finish();
         code
     };
     match std::thread::Builder::new().name("sisu-main".into()).stack_size(STACK_BYTES).spawn(run) {

@@ -1252,10 +1252,10 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             // A native run takes the seed of its schedule, `--explore`, the
-            // scheduler's `--stats` (decision 203) and the other schedulers
-            // (decisions 501 and 541); the interpreter's other modes are its
-            // own.
-            let schedulers: &[&str] = &["--record"];
+            // scheduler's `--stats` (decision 203), the other schedulers
+            // (decisions 501 and 541) and, on stage 1, `--record` (decision
+            // 1321); the interpreter's other modes are its own.
+            let schedulers: &[&str] = if stage1 { &[] } else { &["--record"] };
             if p.flags.contains(&"--native")
                 && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--watch"]
                     .iter()
@@ -1744,27 +1744,30 @@ fn test_from_sir(
     // simulates, updates snapshots or defers the ownership checker, nor the
     // standard library's examples without a program, which have no file
     // to keep it beside (decision 1144).
-    let cached = sources
+    // The failure database is kept for such a run natively too (decision
+    // 1325), where a native run caches no result.
+    let keeps_failures = sources
         && !deferring
         && regions.is_none()
         && input.shown != "--std"
         && !has("--no-cache")
-        && crate::native_tests::chosen().is_none()
         && opts.seeds.explore.is_none()
         && opts.sim.is_none()
         && !options.update
         && matches!(options.strategy, sisu_interp::Strategy::Random);
+    let cached = keeps_failures && crate::native_tests::chosen().is_none();
+    let cache_path = || match &input.package {
+        Some((name, _)) => crate::native::output_for(
+            &input.disk,
+            Some(name),
+            input.build_root.as_deref(),
+            crate::native::Profile::of(false),
+        )
+        .with_file_name("test-cache"),
+        None => input.disk.with_extension("test-cache"),
+    };
     let cache = cached.then(|| {
-        let path = match &input.package {
-            Some((name, _)) => crate::native::output_for(
-                &input.disk,
-                Some(name),
-                input.build_root.as_deref(),
-                crate::native::Profile::of(false),
-            )
-            .with_file_name("test-cache"),
-            None => input.disk.with_extension("test-cache"),
-        };
+        let path = cache_path();
         let salt = format!(
             "seed={} monitor={} fuel={:?} snapshots={:?}",
             options.seed, options.monitor, options.fuel, options.snapshots
@@ -1777,6 +1780,7 @@ fn test_from_sir(
     // decision 1280); a SIR without it is a stage 1 older than 0.21.0's,
     // which the driver no longer builds around (`D0164`).
     let mut transcripts = Vec::new();
+    let mut transcript_coverage = Coverage::new();
     let found = if sources && opts.select.is_all() {
         crate::transcript::find(&input.disk.display().to_string())
     } else {
@@ -1797,15 +1801,26 @@ fn test_from_sir(
         for path in found {
             let shown = path.display().to_string();
             let outcome = match &world {
-                Ok(sir) => run_transcript(sir, host, &options, &path),
+                Ok(sir) => {
+                    let (outcome, reached) = run_transcript(sir, host, &options, &path);
+                    // `--cover` counts what the transcripts reach too
+                    // (decision 1320).
+                    if regions.is_some() {
+                        for (key, n) in reached {
+                            *transcript_coverage.entry(key).or_default() += n;
+                        }
+                    }
+                    outcome
+                }
                 Err(why) => Err(why.clone()),
             };
             transcripts.push((shown, outcome.err()));
         }
     }
     // The failure database beside the cache, read and written when it is
-    // (decision 1285): each test's last failing case tried first.
-    let failures = cache.as_ref().map(|(path, _)| crate::testcache::failures_beside(path));
+    // (decision 1285) and by such a native run (decision 1325): each
+    // test's last failing case tried first.
+    let failures = keeps_failures.then(|| crate::testcache::failures_beside(&cache_path()));
     let saved = failures.as_deref().map(crate::testcache::read_failures).unwrap_or_default();
     let options = Options { saved_cases: std::sync::Arc::new(saved_by_function(prog, &saved)), ..options };
     let run = TestRun {
@@ -1830,14 +1845,18 @@ fn test_from_sir(
     }
     // `--cover` of a package with black-box test files: the counts kept for
     // one report after them (decision 1286).
+    let mut covered = merge_coverage(&reports);
+    for (key, n) in transcript_coverage {
+        *covered.entry(key).or_default() += n;
+    }
     match (regions, kept) {
         (Some(_), Some(kept)) => {
             let mut k = kept.borrow_mut();
-            for (key, n) in merge_coverage(&reports) {
+            for (key, n) in covered {
                 *k.entry(key).or_default() += n;
             }
         }
-        (Some(regions), None) => host.stdout(&cover_report(prog, regions, &merge_coverage(&reports))),
+        (Some(regions), None) => host.stdout(&cover_report(prog, regions, &covered)),
         (None, _) => {}
     }
     if let Some(stderr) = deferred {
@@ -3108,7 +3127,8 @@ fn stage1_command(
                 if r.status != exit::OK {
                     return r.status;
                 }
-                return build_emitted(&r.stdout, crate::native::Profile::of(opts.release), host);
+                let profile = crate::native::Profile::of(opts.release);
+                return build_emitted(&r.stdout, profile, opts.output.is_none(), host);
             }
             let mut words = vec!["build".to_string()];
             if native {
@@ -3195,7 +3215,8 @@ fn stage1_command(
                 }
                 // A file's executable from the cache of built executables,
                 // built again only when its SIR or the toolchain changed
-                // (decision 1287); a package's where its builds go.
+                // (decision 1287); a package's where its builds go, copied
+                // from the same cache (decision 1323).
                 let cached = match exe.is_some() {
                     true => crate::native::cached_build(
                         &prog,
@@ -3203,7 +3224,7 @@ fn stage1_command(
                         profile,
                         host,
                     ),
-                    false => None,
+                    false => crate::native::cached_at(&prog, e, profile, host).map(|r| r.map(|()| e.to_path_buf())),
                 };
                 let built = match cached {
                     Some(r) => r,
@@ -3222,7 +3243,36 @@ fn stage1_command(
                             bound: opts.bound,
                             keep: None,
                         };
-                        crate::native::run_built(e, &args, &how, host)
+                        match &opts.record {
+                            // `--record LOG` (decision 1321): the log of the
+                            // interpreter's run on stage 1, its header holding
+                            // the SIR that ran and its records the runtime's.
+                            Some(log) => {
+                                let mut built_with = Vec::new();
+                                program(&mut built_with);
+                                if target.path.is_some() {
+                                    built_with.pop();
+                                }
+                                let header = sisu_interp::record::Header {
+                                    toolchain: crate::replay::TOOLCHAIN.into(),
+                                    file: target.path.clone().unwrap_or_else(|| ".".to_string()),
+                                    hash: sisu_interp::record::content_hash(r.stdout.as_bytes()),
+                                    source: r.stdout.clone(),
+                                    seed: opts.seeds.first,
+                                    hash_key: 0,
+                                    contracts: opts.level.name().into(),
+                                    files: Vec::new(),
+                                    layout: None,
+                                    watch: false,
+                                    sir: true,
+                                    warnings: r.stderr.clone(),
+                                    options: built_with,
+                                    directory: None,
+                                };
+                                crate::native::run_recorded(e, &args, &how, &header, log, &opts.redact, host)
+                            }
+                            None => crate::native::run_built(e, &args, &how, host),
+                        }
                     }
                     Err(code) => code,
                 };
@@ -3644,8 +3694,10 @@ fn emitted(stdout: &str) -> Vec<(Option<std::path::PathBuf>, String)> {
 /// decision 1140): each program's SIR compiled into the executable its
 /// line names, whose directory is made, with the backend's `built` line
 /// (and `--explain-size`'s parts), and a library's line as the build
-/// prints it; the first program that fails stops the build.
-fn build_emitted(stdout: &str, profile: crate::native::Profile, host: &mut dyn Host) -> i32 {
+/// prints it; the first program that fails stops the build. Where its
+/// builds go, not at `--output`, an executable comes from the cache of
+/// built executables when nothing changed (`cached`, decision 1323).
+fn build_emitted(stdout: &str, profile: crate::native::Profile, cached: bool, host: &mut dyn Host) -> i32 {
     for (exe, text) in emitted(stdout) {
         let Some(exe) = exe else {
             host.stdout(&format!("{text}\n"));
@@ -3658,7 +3710,11 @@ fn build_emitted(stdout: &str, profile: crate::native::Profile, host: &mut dyn H
         if let Some(dir) = exe.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let code = crate::native::build_command(crate::native::Code::Sir(&prog), &exe, profile, host);
+        let code = if cached {
+            crate::native::build_command_cached(&prog, &exe, profile, host)
+        } else {
+            crate::native::build_command(crate::native::Code::Sir(&prog), &exe, profile, host)
+        };
         if code != exit::OK {
             return code;
         }
@@ -4541,7 +4597,7 @@ fn command(
                         for path in found {
                             let shown = path.display().to_string();
                             let outcome = match (&sir, &prog.entry) {
-                                (Some(sir), Some(_)) => run_transcript(sir, host, &options, &path),
+                                (Some(sir), Some(_)) => run_transcript(sir, host, &options, &path).0,
                                 _ => Err(text(msg::CLI_TRANSCRIPT_NO_MAIN, &[("file", file.to_string())])),
                             };
                             transcripts.push((shown, outcome.err()));
@@ -5208,22 +5264,38 @@ fn nanos(n: i128) -> String {
 
 /// Runs the transcript at `path` (17): `Err` with what differs, unless
 /// `--update` takes what the program printed instead.
+/// A transcript's runs against what it says they print, and what of the
+/// program they reached when `options.coverage` counts it (`--cover`,
+/// decision 1320), under the monitor that counts it.
 fn run_transcript(
     sir: &sisu_sir::Program,
     host: &mut dyn Host,
     options: &Options,
     path: &std::path::Path,
-) -> Result<(), String> {
+) -> (Result<(), String>, Coverage) {
     let source = std::fs::read_to_string(path).unwrap_or_default();
     let t = crate::transcript::parse(&source);
     let runs: Vec<(Vec<String>, Vec<String>)> =
         t.runs.iter().map(|r| (r.args.clone(), r.stdin.clone())).collect();
-    let o = Options { monitor: false, ..options.clone() };
-    let results = sisu_interp::run_transcript(sir, host, &o, &crate::transcript::fixtures(path), &runs);
+    let o = Options { monitor: options.coverage, ..options.clone() };
+    let (results, coverage) =
+        sisu_interp::run_transcript_report(sir, host, &o, &crate::transcript::fixtures(path), &runs);
+    (compare_transcript(&t, &results, options, path, host), coverage)
+}
+
+/// [`run_transcript`]'s comparison of the runs with the transcript, which
+/// `--update` rewrites.
+fn compare_transcript(
+    t: &crate::transcript::Transcript,
+    results: &[(String, i32)],
+    options: &Options,
+    path: &std::path::Path,
+    host: &mut dyn Host,
+) -> Result<(), String> {
     let outputs: Vec<Vec<String>> =
         results.iter().map(|(out, status)| crate::transcript::shown(out, *status)).collect();
-    let expected = crate::transcript::write(&t, &[]);
-    let actual = crate::transcript::write(&t, &outputs);
+    let expected = crate::transcript::write(t, &[]);
+    let actual = crate::transcript::write(t, &outputs);
     if actual == expected {
         return Ok(());
     }
@@ -6141,13 +6213,75 @@ fn audit_caps(files: &[&String], host: &mut dyn Host) -> i32 {
     exit::OK
 }
 
+/// `sisu replay --native LOG` (decision 1321): the log's SIR built as `sisu
+/// run --native` builds a file's, from the cache of built executables, and
+/// run against the log's records by the runtime. A log of the Rust front
+/// end's run holds the program's source, and one of a run under `--watch`
+/// its saves, which only the interpreter replays (`D0166`).
+fn replay_natively(
+    path: &str,
+    log: &sisu_interp::record::Log,
+    monitor: bool,
+    release: bool,
+    host: &mut dyn Host,
+) -> i32 {
+    if monitor {
+        host.stderr(&plain_error(msg::NATIVE_ALONE, &[("option", "--monitor".into())]));
+        return EXIT_USAGE;
+    }
+    let reason = if !log.header.sir {
+        Some("holds its program's source, not the SIR its run ran")
+    } else if log.header.watch {
+        Some("is of a run under `--watch`, whose saves a native run cannot take")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        host.stderr(&plain_error(
+            msg::CLI_REPLAY_NOT_NATIVE,
+            &[("path", path.to_string()), ("reason", reason.to_string())],
+        ));
+        return exit::ERROR;
+    }
+    let prog = match read_sir(&log.header.source, host) {
+        Ok(prog) => prog,
+        Err(code) => return code,
+    };
+    host.stderr(&log.header.warnings);
+    let name = std::path::Path::new(&log.header.file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "program".to_string());
+    let profile = crate::native::Profile::of(release);
+    let aside = std::env::temp_dir().join(format!("sisu-native-{}", std::process::id()));
+    let exe = match crate::native::cached_build(&prog, &name, profile, host) {
+        Some(Ok(exe)) => exe,
+        Some(Err(code)) => return code,
+        None => {
+            let exe = aside.join(&name);
+            let _ = std::fs::create_dir_all(&aside);
+            if let Err(code) = crate::native::build(crate::native::Code::Sir(&prog), &exe, profile, host) {
+                let _ = std::fs::remove_dir_all(&aside);
+                return code;
+            }
+            exe
+        }
+    };
+    let code = crate::native::replay(&exe, log, host);
+    let _ = std::fs::remove_dir_all(&aside);
+    code
+}
+
 /// `sisu replay LOG`: the run a capability log recorded, again, with the
 /// log standing in for the world (10, "Debugging and profiling"). The
 /// program is the log's own copy of the source, checked at the level it
-/// was recorded at; `--monitor` runs it under the ownership monitor.
+/// was recorded at; `--monitor` runs it under the ownership monitor, and
+/// `--native [--release]` runs the log's SIR natively (decision 1321),
+/// whichever runtime recorded it.
 fn replay(args: &[String], host: &mut dyn Host) -> i32 {
     let p = split_args(args, false);
-    if let Some(bad) = p.flags.iter().find(|f| **f != "--monitor") {
+    if let Some(bad) = p.flags.iter().find(|f| !matches!(**f, "--monitor" | "--native" | "--release")) {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
             &[("option", bad.to_string()), ("command", "replay".into())],
@@ -6206,6 +6340,14 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
     };
     if hashed != log.header.hash {
         return bad_log(host, "its source does not match its content hash".into());
+    }
+    let native = p.flags.contains(&"--native");
+    if p.flags.contains(&"--release") && !native {
+        host.stderr(&plain_error(msg::NATIVE_RELEASE, &[]));
+        return EXIT_USAGE;
+    }
+    if native {
+        return replay_natively(path, &log, p.flags.contains(&"--monitor"), p.flags.contains(&"--release"), host);
     }
     // A run whose front end was stage 1 logged the SIR it ran, which runs
     // again without a front end (decision 303).

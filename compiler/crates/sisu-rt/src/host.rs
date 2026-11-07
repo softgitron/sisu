@@ -9,6 +9,7 @@ use crate::intrinsics::{Call, Part, write_err, write_parts};
 use crate::mem::{self, List};
 use crate::rt::{self, ty};
 use crate::sched::{self, Attempt, Site, Wait, with};
+use crate::world;
 use sisu_diag::msg;
 use std::cell::RefCell;
 use std::io::{Read as _, Write as _};
@@ -32,6 +33,7 @@ fn add(s: Socket) -> u64 {
 }
 
 /// The interpreter's `NetFail`.
+#[derive(Clone)]
 enum Fail {
     Refused,
     NotAllowed,
@@ -46,6 +48,44 @@ fn net_fail(e: &std::io::Error) -> Fail {
         K::ConnectionReset | K::ConnectionAborted | K::BrokenPipe | K::UnexpectedEof => Fail::Closed,
         K::PermissionDenied => Fail::NotAllowed,
         _ => Fail::Other(e.to_string()),
+    }
+}
+
+/// A failure as the capability log writes it (decision 1321).
+fn fail_word(f: &Fail) -> String {
+    match f {
+        Fail::Refused => "refused".into(),
+        Fail::NotAllowed => "not-allowed".into(),
+        Fail::Closed => "closed".into(),
+        Fail::Other(m) => format!("other {}", world::quote(m)),
+    }
+}
+
+fn fail_read(f: &[String], i: usize) -> Fail {
+    match world::word(f, i) {
+        "refused" => Fail::Refused,
+        "not-allowed" => Fail::NotAllowed,
+        "closed" => Fail::Closed,
+        _ => Fail::Other(world::word(f, i + 1).to_string()),
+    }
+}
+
+/// A poll of a socket as the log writes it: `ok ready ...`, `ok wait`, or
+/// the failure.
+fn poll_word<T>(r: &Result<Option<T>, Fail>, ready: impl FnOnce(&T) -> String) -> String {
+    match r {
+        Ok(Some(v)) => format!("ok ready {}", ready(v)),
+        Ok(None) => "ok wait".into(),
+        Err(f) => format!("err {}", fail_word(f)),
+    }
+}
+
+/// A poll read back from the log's fields.
+fn poll_read<T>(f: &[String], ready: impl FnOnce(&[String]) -> T) -> Result<Option<T>, Fail> {
+    match (world::word(f, 0), world::word(f, 1)) {
+        ("ok", "ready") => Ok(Some(ready(&f[2.min(f.len())..]))),
+        ("ok", _) => Ok(None),
+        _ => Err(fail_read(f, 1)),
     }
 }
 
@@ -169,20 +209,31 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 if cancelled(c) {
                     return Attempt::Done(abi::OK);
                 }
-                let r = with_socket(h, |s| match s {
-                    Socket::Listener(l) => match l.accept() {
-                        Ok((s, peer)) => {
-                            s.set_nonblocking(true).map_err(|e| net_fail(&e))?;
-                            Ok(Some((s, peer.to_string())))
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-                        Err(e) => Err(net_fail(&e)),
-                    },
-                    Socket::Stream(_) => Err(Fail::Closed),
-                });
+                let real = || {
+                    with_socket(h, |s| match s {
+                        Socket::Listener(l) => match l.accept() {
+                            Ok((s, peer)) => {
+                                s.set_nonblocking(true).map_err(|e| net_fail(&e))?;
+                                Ok(Some((s, peer.to_string())))
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+                            Err(e) => Err(net_fail(&e)),
+                        },
+                        Socket::Stream(_) => Err(Fail::Closed),
+                    })
+                    .map(|o| o.map(|(s, peer)| (add(Socket::Stream(s)), peer)))
+                };
+                let r = world::call(
+                    "net",
+                    format!("tcp_accept {h}"),
+                    real,
+                    |r| poll_word(r, |(c, peer)| format!("{c} {}", world::quote(peer))),
+                    |f| poll_read(f, |f| (world::int(f, 0), world::word(f, 1).to_string())),
+                    || Err(Fail::Closed),
+                );
                 match r {
-                    Ok(Some((s, peer))) => {
-                        write_conn(c, add(Socket::Stream(s)), &peer);
+                    Ok(Some((conn, peer))) => {
+                        write_conn(c, conn, &peer);
                         Attempt::Done(abi::OK)
                     }
                     Ok(None) => wait_io(site),
@@ -193,25 +244,36 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }),
             Intrinsic::HostNetRead => {
-                let max = usize::try_from(c.int(1)).unwrap_or(0).clamp(1, 1 << 20);
+                let asked = usize::try_from(c.int(1)).unwrap_or(0);
+                let max = asked.clamp(1, 1 << 20);
                 sched::blocking(|| {
                     if cancelled(c) {
                         return Attempt::Done(abi::OK);
                     }
-                    let r = with_socket(h, |s| match s {
-                        Socket::Stream(s) => {
-                            let mut buf = vec![0u8; max];
-                            match s.read(&mut buf) {
-                                Ok(n) => {
-                                    buf.truncate(n);
-                                    Ok(Some(buf))
+                    let real = || {
+                        with_socket(h, |s| match s {
+                            Socket::Stream(s) => {
+                                let mut buf = vec![0u8; max];
+                                match s.read(&mut buf) {
+                                    Ok(n) => {
+                                        buf.truncate(n);
+                                        Ok(Some(buf))
+                                    }
+                                    Err(e) if not_ready(&e) => Ok(None),
+                                    Err(e) => Err(net_fail(&e)),
                                 }
-                                Err(e) if not_ready(&e) => Ok(None),
-                                Err(e) => Err(net_fail(&e)),
                             }
-                        }
-                        Socket::Listener(_) => Err(Fail::Closed),
-                    });
+                            Socket::Listener(_) => Err(Fail::Closed),
+                        })
+                    };
+                    let r = world::call(
+                        "net",
+                        format!("tcp_read {h} {asked}"),
+                        real,
+                        |r| poll_word(r, |b| world::quote(&world::hex(b))),
+                        |f| poll_read(f, |f| world::unhex(world::word(f, 0)).unwrap_or_default()),
+                        || Err(Fail::Closed),
+                    );
                     match r {
                         Ok(Some(b)) => {
                             mem::set_word(c.ret, 0, 0);
@@ -234,14 +296,25 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                     if cancelled(c) {
                         return Attempt::Done(abi::OK);
                     }
-                    let r = with_socket(h, |s| match s {
-                        Socket::Stream(s) => match s.write(&data[sent..]) {
-                            Ok(n) => Ok(Some(n)),
-                            Err(e) if not_ready(&e) => Ok(None),
-                            Err(e) => Err(net_fail(&e)),
-                        },
-                        Socket::Listener(_) => Err(Fail::Closed),
-                    });
+                    let left = &data[sent..];
+                    let real = || {
+                        with_socket(h, |s| match s {
+                            Socket::Stream(s) => match s.write(left) {
+                                Ok(n) => Ok(Some(n)),
+                                Err(e) if not_ready(&e) => Ok(None),
+                                Err(e) => Err(net_fail(&e)),
+                            },
+                            Socket::Listener(_) => Err(Fail::Closed),
+                        })
+                    };
+                    let r = world::call(
+                        "net",
+                        format!("tcp_write {h} #{:016x}", world::content_hash(left)),
+                        real,
+                        |r| poll_word(r, usize::to_string),
+                        |f| poll_read(f, |f| world::int(f, 0)),
+                        || Err(Fail::Closed),
+                    );
                     match r {
                         Ok(Some(n)) if sent + n >= data.len() => {
                             mem::set_word(c.ret, 0, 0);
@@ -283,11 +356,24 @@ pub(crate) unsafe fn call_system(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
                     Err(st) => return Some(st),
                 };
                 let address = format!("{host}:{p}");
-                let r = std::net::TcpStream::connect((host.as_str(), p))
-                    .and_then(|s| s.set_nonblocking(true).map(|()| s))
-                    .map_err(|e| net_fail(&e));
+                let r = world::call(
+                    "net",
+                    format!("tcp_connect {} {p}", world::quote(&host)),
+                    || {
+                        std::net::TcpStream::connect((host.as_str(), p))
+                            .and_then(|s| s.set_nonblocking(true).map(|()| s))
+                            .map(|s| add(Socket::Stream(s)))
+                            .map_err(|e| net_fail(&e))
+                    },
+                    |r| match r {
+                        Ok(h) => format!("ok {h}"),
+                        Err(f) => format!("err {}", fail_word(f)),
+                    },
+                    |f| if world::word(f, 0) == "ok" { Ok(world::int(f, 1)) } else { Err(fail_read(f, 1)) },
+                    || Err(Fail::Closed),
+                );
                 match r {
-                    Ok(s) => write_conn(c, add(Socket::Stream(s)), &address),
+                    Ok(h) => write_conn(c, h, &address),
                     Err(f) => write_fail(c, f, &address),
                 }
             }
@@ -298,13 +384,34 @@ pub(crate) unsafe fn call_system(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
                 };
                 let host = String::from_utf8_lossy(c.text(2)).into_owned();
                 let address = format!("{host}:{p}");
-                let r = std::net::TcpListener::bind((host.as_str(), p))
-                    .and_then(|l| l.set_nonblocking(true).map(|()| l))
-                    .map_err(|e| net_fail(&e));
+                let r = world::call(
+                    "net",
+                    format!("tcp_listen {} {p}", world::quote(&host)),
+                    || {
+                        std::net::TcpListener::bind((host.as_str(), p))
+                            .and_then(|l| l.set_nonblocking(true).map(|()| l))
+                            .map(|l| {
+                                let at = l.local_addr().map(|a| a.port()).unwrap_or(p);
+                                (add(Socket::Listener(l)), at)
+                            })
+                            .map_err(|e| net_fail(&e))
+                    },
+                    |r| match r {
+                        Ok((h, at)) => format!("ok {h} {at}"),
+                        Err(f) => format!("err {}", fail_word(f)),
+                    },
+                    |f| {
+                        if world::word(f, 0) == "ok" {
+                            Ok((world::int(f, 1), world::int(f, 2)))
+                        } else {
+                            Err(fail_read(f, 1))
+                        }
+                    },
+                    || Err(Fail::Closed),
+                );
                 match r {
-                    Ok(l) => {
-                        let at = l.local_addr().map(|a| a.port()).unwrap_or(p);
-                        let inner = boxed_socket("HostListener", add(Socket::Listener(l)));
+                    Ok((handle, at)) => {
+                        let inner = boxed_socket("HostListener", handle);
                         mem::set_word(c.ret, 0, 0);
                         write_parts(
                             c.ret.add(8),
@@ -317,13 +424,16 @@ pub(crate) unsafe fn call_system(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
             }
             Intrinsic::HostNetClose => {
                 let h = c.word(0);
-                SOCKETS.with(|t| match t.borrow_mut().get_mut(h as usize) {
-                    Some(Some(Socket::Stream(s))) => {
-                        let _ = s.shutdown(std::net::Shutdown::Write);
-                    }
-                    Some(slot @ Some(Socket::Listener(_))) => *slot = None,
-                    _ => {}
-                });
+                let real = || {
+                    SOCKETS.with(|t| match t.borrow_mut().get_mut(h as usize) {
+                        Some(Some(Socket::Stream(s))) => {
+                            let _ = s.shutdown(std::net::Shutdown::Write);
+                        }
+                        Some(slot @ Some(Socket::Listener(_))) => *slot = None,
+                        _ => {}
+                    })
+                };
+                world::call("net", format!("tcp_close {h}"), real, |()| String::new(), |_| (), || ());
             }
             Intrinsic::HostProcRun => proc_run(c),
             _ => return None,
@@ -349,12 +459,39 @@ unsafe fn proc_run(c: &Call<'_>) {
         let words: Vec<String> = (0..l.len)
             .map(|k| String::from_utf8_lossy(mem::str_at(l.at(k, size)).bytes()).into_owned())
             .collect();
-        let out =
-            std::process::Command::new(&program).args(&words).stdin(std::process::Stdio::null()).output();
-        match out {
-            Ok(o) => {
-                let status = i64::from(o.status.code().unwrap_or(-1));
-                let (out, err) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        let real = || {
+            std::process::Command::new(&program)
+                .args(&words)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .map(|o| {
+                    let status = i64::from(o.status.code().unwrap_or(-1));
+                    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+                    (status, out, String::from_utf8_lossy(&o.stderr).into_owned())
+                })
+                .map_err(|e| crate::intrinsics::io_kind(&e))
+        };
+        let shown: Vec<String> = words.iter().map(|w| world::quote(w)).collect();
+        let what = format!("run_process {} {} {}", world::quote(&program), words.len(), shown.join(" "));
+        let r = world::call(
+            "proc",
+            what.trim_end().to_string(),
+            real,
+            |r| match r {
+                Ok((status, out, err)) => format!("ok {status} {} {}", world::quote(out), world::quote(err)),
+                Err(k) => format!("err {}", world::io_word(k)),
+            },
+            |f| {
+                if world::word(f, 0) == "ok" {
+                    Ok((world::int(f, 1), world::word(f, 2).to_string(), world::word(f, 3).to_string()))
+                } else {
+                    Err(world::io_read(f, 1))
+                }
+            },
+            world::io_gone,
+        );
+        match r {
+            Ok((status, out, err)) => {
                 mem::set_word(c.ret, 0, 0);
                 write_parts(
                     c.ret.add(8),
@@ -362,15 +499,15 @@ unsafe fn proc_run(c: &Call<'_>) {
                     &[Part::Word(status as u64), Part::Text(out.as_bytes()), Part::Text(err.as_bytes())],
                 );
             }
-            Err(e) => {
-                use std::io::ErrorKind as K;
-                let (variant, text) = match e.kind() {
+            Err(k) => {
+                use crate::intrinsics::IoKind as K;
+                let (variant, text) = match k {
                     K::NotFound => ("NotFound", program),
                     K::PermissionDenied => ("PermissionDenied", program),
                     K::AlreadyExists => ("Other", "AlreadyExists".to_string()),
                     K::InvalidData => ("Other", "InvalidData".to_string()),
                     K::Interrupted => ("Other", "Interrupted".to_string()),
-                    _ => ("Other", e.to_string()),
+                    K::Other(m) => ("Other", m),
                 };
                 write_err(c, "ProcError", variant, &[Part::Text(text.as_bytes())]);
             }

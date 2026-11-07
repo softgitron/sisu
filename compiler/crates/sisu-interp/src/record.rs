@@ -657,6 +657,40 @@ impl Log {
             .collect()
     }
 
+    /// The records a native run's replay answers from (decision 1321), in
+    /// the form the runtime reads (`SISU_RT_REPLAY`): for each record but
+    /// the last, `exit`, its fields, each its length in bytes, a colon and
+    /// its bytes: its kind (`c` a call, `o` and `e` what was printed, `r` a
+    /// redacted call, `w` a save), the call as the log writes it or the
+    /// text, the record as a divergence shows it, and the number of the
+    /// result's fields and each field's text.
+    pub fn script(&self) -> String {
+        fn item(out: &mut String, s: &str) {
+            out.push_str(&s.len().to_string());
+            out.push(':');
+            out.push_str(s);
+        }
+        let mut out = String::new();
+        for r in &self.records {
+            let (kind, what, result): (&str, &str, &[Field]) = match r {
+                Record::Call { call, result } => ("c", call, result),
+                Record::Out(t) => ("o", t, &[]),
+                Record::Err(t) => ("e", t, &[]),
+                Record::Redacted(c) => ("r", c, &[]),
+                Record::Edit(_, f, _) => ("w", f, &[]),
+                Record::Exit(_) => continue,
+            };
+            item(&mut out, kind);
+            item(&mut out, what);
+            item(&mut out, &show(r));
+            item(&mut out, &result.len().to_string());
+            for f in result {
+                item(&mut out, f.text());
+            }
+        }
+        out
+    }
+
     /// The status the recorded run exited with.
     pub fn status(&self) -> Option<i32> {
         self.records.iter().rev().find_map(|r| match r {

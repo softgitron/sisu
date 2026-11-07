@@ -1291,3 +1291,110 @@ fn an_allocation_error_is_not_an_ownership_rules() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `sisu help` names every option of `sisu test` but those every command
+/// of its kind takes (`--locked`, `--accept-unsafe` and the features), as
+/// it names `--mutate`: `--cover` was missing from it (decision 1322, the
+/// manual's finding of its step 39).
+#[test]
+fn help_names_every_option_of_test() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_sisu")).arg("help").output().expect("sisu runs");
+    let help = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = help.lines().find(|l| l.trim_start().starts_with("test [<file>]")).unwrap_or_default();
+    for option in [
+        "--mutate",
+        "--since REV",
+        "--cover",
+        "--native",
+        "--release",
+        "--no-monitor",
+        "--defer-borrow",
+        "--sim",
+        "--update",
+        "--std",
+        "--no-cache",
+        "--format=json",
+        "--replay TOKEN",
+        "--jobs N",
+        "--from-sir FILE",
+    ] {
+        assert!(line.contains(&format!("`{option}")), "`sisu help` does not name `{option}` for `sisu test`: {line}");
+    }
+}
+
+/// A native run's capability log (decision 1321) replays natively and in
+/// the interpreter, and a native replay of a log that no longer matches
+/// the run reports the divergence as the interpreter's replay reports it.
+#[test]
+fn a_native_log_replays_and_diverges_as_the_interpreters() {
+    let dir = std::env::temp_dir().join(format!("sisu-native-log-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(dir.join("note.txt"), "kept\n").expect("the file");
+    std::fs::write(
+        dir.join("log.sisu"),
+        "def main(sys: System):\n    print(sys.fs.read_to_string(\"note.txt\"))\n    print(sys.env.args())\n",
+    )
+    .expect("the program");
+    let sisu = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(args)
+            .current_dir(&dir)
+            .env("SISU_RUN_CACHE", "0")
+            .output()
+            .expect("sisu runs")
+    };
+    let ran = sisu(&["run", "--native", "--record", "n.log", "log.sisu", "a", "b"]);
+    let printed = "Ok(\"kept\\n\")\n[\"a\", \"b\"]\n";
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), printed, "{}", String::from_utf8_lossy(&ran.stderr));
+    let log = std::fs::read_to_string(dir.join("n.log")).expect("the log");
+    assert!(log.contains("call read_file \"note.txt\" -> ok \"kept\\n\"\n"), "{log}");
+    assert!(log.contains("call args -> 2 \"a\" \"b\"\n"), "{log}");
+    std::fs::remove_file(dir.join("note.txt")).expect("the file removed");
+    for replay in [&["replay", "n.log"][..], &["replay", "--native", "n.log"]] {
+        let again = sisu(replay);
+        assert_eq!(String::from_utf8_lossy(&again.stdout), printed, "{replay:?}: {}", String::from_utf8_lossy(&again.stderr));
+        assert_eq!(again.status.code(), Some(0), "{replay:?}");
+    }
+    std::fs::write(dir.join("n.log"), log.replace("ok \"kept\\n\"", "ok \"changed\\n\"")).expect("the log changed");
+    let mut details = Vec::new();
+    for replay in [&["replay", "n.log"][..], &["replay", "--native", "n.log"]] {
+        let again = sisu(replay);
+        assert_eq!(again.status.code(), Some(1), "{replay:?}");
+        details.push(String::from_utf8_lossy(&again.stderr).into_owned());
+    }
+    assert!(details[0].starts_with("error[D0037]: the replay diverged from the log"), "{}", details[0]);
+    assert_eq!(details[0], details[1]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A native test run keeps the failure database as the interpreter's run
+/// does (decision 1325): a property's failing case is saved beside the
+/// program, and the next native run tries it first.
+#[test]
+fn a_native_test_run_keeps_the_failure_database() {
+    let dir = std::env::temp_dir().join(format!("sisu-native-failures-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(
+        dir.join("small.sisu"),
+        "test \"small numbers stay small\":\n    check(arbitrary[int]) do n:\n        return n < 50\n",
+    )
+    .expect("the program");
+    let test = || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_sisu"))
+            .args(["test", "--native", "small.sisu"])
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs")
+    };
+    let first = test();
+    let out = String::from_utf8_lossy(&first.stdout).into_owned();
+    assert_eq!(first.status.code(), Some(1), "{out}");
+    let saved = std::fs::read_to_string(dir.join("small.failures")).expect("the failure database");
+    assert!(saved.starts_with("{\"test\":\"small numbers stay small\",\"choices\":["), "{saved}");
+    let second = test();
+    let again = String::from_utf8_lossy(&second.stdout).into_owned();
+    assert!(again.contains("(case 1, shrunk 0 times)"), "{again}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

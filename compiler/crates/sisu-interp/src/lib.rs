@@ -973,6 +973,19 @@ pub fn run_transcript(
     files: &[(String, String)],
     runs: &[(Vec<String>, Vec<String>)],
 ) -> Vec<(String, i32)> {
+    run_transcript_report(prog, host, options, files, runs).0
+}
+
+/// [`run_transcript`], and the runs of each statement the transcript's
+/// runs reached, which `options.coverage` under the monitor counts (`sisu
+/// test --cover`, decision 1320).
+pub fn run_transcript_report(
+    prog: &sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    files: &[(String, String)],
+    runs: &[(Vec<String>, Vec<String>)],
+) -> (Vec<(String, i32)>, HashMap<(String, u32, u32), u32>) {
     on_big_stack(host, |host| {
         let written = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let mut held = parallel::Merged { inner: host, out: written.clone() };
@@ -982,9 +995,12 @@ pub fn run_transcript(
             files.iter().map(|(p, t)| Value::Tuple(vec![Value::str(p), Value::str(t)])).collect();
         let world = match i.call_by_name("transcript_world", vec![Value::List(pairs)]) {
             Ok(w) => w,
-            Err(Unwind::Panic(p)) => return vec![(panic_report(&p), exit::PANIC)],
-            Err(Unwind::Abort(m)) => return vec![(m, exit::ABORT)],
-            Err(_) => return vec![("the transcript's world could not be made".to_string(), exit::ABORT)],
+            Err(Unwind::Panic(p)) => return (vec![(panic_report(&p), exit::PANIC)], HashMap::new()),
+            Err(Unwind::Abort(m)) => return (vec![(m, exit::ABORT)], HashMap::new()),
+            Err(_) => {
+                let why = "the transcript's world could not be made".to_string();
+                return (vec![(why, exit::ABORT)], HashMap::new());
+            }
         };
         let mut out = Vec::new();
         for (args, stdin) in runs {
@@ -1002,7 +1018,7 @@ pub fn run_transcript(
             };
             out.push((text, status));
         }
-        out
+        (out, i.report(0).coverage)
     })
     .unwrap_or_default()
 }

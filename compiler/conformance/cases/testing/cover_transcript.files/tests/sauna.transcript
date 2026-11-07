@@ -1,0 +1,4 @@
+$ sauna 80
+80 degrees
+$ sauna
+usage: sauna LEVEL

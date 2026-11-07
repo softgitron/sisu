@@ -89,6 +89,10 @@ pub struct NativeReport {
     /// a release build refuses, one whose errors stop it (decision 463),
     /// or one that only pins `sisu test` runs (decision 460).
     pub programs: usize,
+    /// In the native mode: the cases recorded natively and replayed in both
+    /// runtimes, and recorded in the interpreter and replayed natively
+    /// (decision 1321).
+    pub replayed: usize,
 }
 
 impl NativeReport {
@@ -122,6 +126,9 @@ impl NativeReport {
         }
         if let Some((n, t)) = self.sisu {
             lowered.push_str(&format!(", {n} compiled by the Sisu backend in {:.2} s", t.as_secs_f64()));
+        }
+        if self.replayed > 0 {
+            lowered.push_str(&format!(", {} recorded and replayed natively", self.replayed));
         }
         out.push_str(&format!(
             "{what}{lowered}, built in {:.2} s, run in {:.2} s, {} failed\n",
@@ -349,6 +356,7 @@ fn run_list_checked(
         report.cases += 1;
         report.refused += usize::from(r.refused);
         report.programs += usize::from(r.program && !r.refused);
+        report.replayed += usize::from(r.replayed);
         report.build += r.build;
         report.run += r.run;
         report.lines += r.lines;
@@ -429,6 +437,8 @@ struct CaseResult {
     refused: bool,
     /// Its program was built (or interpreted), and its run compared.
     program: bool,
+    /// Its run was recorded and replayed natively (decision 1321).
+    replayed: bool,
 }
 
 /// `unchecked`: the release build of a case whose run the checked memory
@@ -454,6 +464,7 @@ fn native_case(
         sisu: None,
         refused: false,
         program: false,
+        replayed: false,
     };
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
@@ -691,7 +702,74 @@ fn native_case(
         return r;
     }
     run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), !from_sir, &mut r);
+    if mode == Mode::Native {
+        recorded(sisu, case, &cwd, &mut r);
+    }
     r
+}
+
+/// The capability log natively (N-04; decision 1321), in the native mode:
+/// the case's run again by `sisu run --native --record LOG`, which prints
+/// what the case's run prints, its log replayed by `sisu replay LOG` in the
+/// interpreter and by `sisu replay --native LOG`, and the interpreter's
+/// log of it (`sisu run --record LOG`) replayed natively, each replay
+/// printing what the recorded run printed and exiting as it did. (Each
+/// run writes its files again, into the same directory, as the plain run
+/// did.) A program its errors stop writes no log.
+fn recorded(sisu: &Sisu, case: &Case, cwd: &Path, r: &mut CaseResult) {
+    let args: Vec<String> =
+        case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
+    let input = case.expected("stdin");
+    let shown = |o: &Output| format!("{}\n--- stderr\n{}\n--- status {}\n", o.stdout, o.stderr, o.status);
+    let words = |first: &[&str]| {
+        let mut a: Vec<String> = first.iter().map(|x| x.to_string()).collect();
+        if !case.package {
+            a.push(format!("{}.sisu", case.stem));
+        } else if !args.is_empty() {
+            a.push("--".into());
+        }
+        a.extend(args.iter().cloned());
+        a
+    };
+    let native_log = cwd.join("native-run.log").display().to_string();
+    let recorded = invoke_with_input(sisu, cwd, &words(&["run", "--native", "--record", &native_log]), input.as_deref());
+    let mut fail = |check: &str, detail: String| {
+        r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
+    };
+    let expected = case.expected("native-out").or_else(|| case.expected("out")).unwrap_or_default();
+    let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
+    let err = case.expected("err").unwrap_or_default();
+    let printed = format!("{expected}\n--- stderr\n{err}\n--- status {status}\n");
+    if printed != shown(&recorded) {
+        fail("sisu run --native --record prints what the run prints", diff::diff(&printed, &shown(&recorded)));
+        return;
+    }
+    if !Path::new(&native_log).exists() {
+        return;
+    }
+    for replay in [&["replay"][..], &["replay", "--native"]] {
+        let mut a: Vec<String> = replay.iter().map(|x| x.to_string()).collect();
+        a.push(native_log.clone());
+        let replayed = invoke_with_input(sisu, cwd, &a, None);
+        if shown(&replayed) != shown(&recorded) {
+            fail(
+                &format!("{} of a native log prints what the recorded run printed", a[..a.len() - 1].join(" ")),
+                diff::diff(&shown(&recorded), &shown(&replayed)),
+            );
+        }
+    }
+    let log = cwd.join("interpreted-run.log").display().to_string();
+    let interpreted = invoke_with_input(sisu, cwd, &words(&["run", "--record", &log]), input.as_deref());
+    if Path::new(&log).exists() {
+        let replayed = invoke_with_input(sisu, cwd, &["replay".into(), "--native".into(), log], None);
+        if shown(&replayed) != shown(&interpreted) {
+            fail(
+                "replay --native of the interpreter's log prints what its run printed",
+                diff::diff(&shown(&interpreted), &shown(&replayed)),
+            );
+        }
+    }
+    r.replayed = true;
 }
 
 /// The `sisu test` runs a case pins (`NAME.test`, and the runs that `#

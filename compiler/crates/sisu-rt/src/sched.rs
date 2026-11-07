@@ -1336,7 +1336,7 @@ impl Sched {
             && let Some(d) = real
             && d > 0
         {
-            std::thread::sleep(std::time::Duration::from_nanos(d.min(i128::from(u64::MAX)) as u64));
+            crate::world::sleep_nanos(d.min(i128::from(u64::MAX)) as u64);
         }
         self.wake_due_timers()
     }
@@ -1414,10 +1414,8 @@ impl Sched {
     pub(crate) fn clock_now(&self, c: u32) -> i128 {
         match self.clocks.get(c as usize) {
             Some(k) if k.virtual_ => k.now,
-            Some(_) => std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as i128)
-                .unwrap_or(0),
+            // The host's, which a capability log records (decision 1321).
+            Some(_) => crate::world::now_nanos(),
             None => 0,
         }
     }
@@ -1425,10 +1423,9 @@ impl Sched {
     /// A clock's monotonic reading (decision 643): a virtual clock's time,
     /// or the process's monotonic clock from its first reading.
     pub(crate) fn clock_monotonic(&self, c: u32) -> i128 {
-        static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         match self.clocks.get(c as usize) {
             Some(k) if k.virtual_ => k.now,
-            Some(_) => ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i128,
+            Some(_) => crate::world::monotonic_nanos(),
             None => 0,
         }
     }

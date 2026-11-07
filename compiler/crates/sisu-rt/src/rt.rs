@@ -639,6 +639,7 @@ pub(crate) fn abort(message: &str) -> ! {
         stderr(&format!("{message}\n"));
     }
     flush();
+    crate::world::finish();
     std::process::exit(crate::entry::EXIT_ABORT)
 }
 
@@ -648,7 +649,7 @@ pub(crate) fn internal(detail: &str) -> ! {
 }
 
 pub(crate) fn stdout(bytes: &[u8]) {
-    if expect_copy() {
+    if expect_copy() || !crate::world::printed(false, bytes) {
         return;
     }
     OUT.with(|o| {
@@ -663,9 +664,16 @@ pub(crate) fn stdout(bytes: &[u8]) {
 
 /// Writes to standard error, after what is waiting for standard output.
 pub(crate) fn stderr(text: &str) {
-    if expect_copy() {
+    if expect_copy() || !crate::world::printed(true, text.as_bytes()) {
         return;
     }
+    report(text);
+}
+
+/// Writes the runtime's own report to standard error (`--stats`, the live
+/// allocations), after what is waiting for standard output: no text of
+/// the program's, so no record of a capability log (decision 1321).
+pub(crate) fn report(text: &str) {
     flush();
     let _ = std::io::stderr().write_all(text.as_bytes());
 }

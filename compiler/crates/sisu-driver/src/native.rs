@@ -612,17 +612,40 @@ fn report(e: sisu_codegen::Error, output: &Path, host: &mut dyn Host) -> i32 {
 /// relative to the working directory.
 pub(crate) fn build_command(code: Code<'_>, output: &Path, profile: Profile, host: &mut dyn Host) -> i32 {
     match build(code, output, profile, host) {
-        Ok(()) => {
-            let shown =
-                std::env::current_dir().map_or_else(|_| output.to_path_buf(), |cwd| relative(output, &cwd));
-            host.stdout(&text(msg::NATIVE_BUILT, &[("output", shown.display().to_string())]));
-            if EXPLAIN_SIZE.load(std::sync::atomic::Ordering::Relaxed) {
-                return explain_size(output, &shown.display().to_string(), host);
-            }
-            0
-        }
+        Ok(()) => built(output, host),
         Err(code) => code,
     }
+}
+
+/// [`build_command`] of a program's SIR whose executable goes where its
+/// builds go, taken from the cache of built executables when the SIR and
+/// what compiles and links it are unchanged (decision 1323,
+/// [`cached_at`]).
+pub(crate) fn build_command_cached(
+    prog: &sisu_sir::Program,
+    output: &Path,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> i32 {
+    let made = match cached_at(prog, output, profile, host) {
+        Some(r) => r,
+        None => build(Code::Sir(prog), output, profile, host),
+    };
+    match made {
+        Ok(()) => built(output, host),
+        Err(code) => code,
+    }
+}
+
+/// The line a build prints of the executable at `output`, and with
+/// `--explain-size` its parts.
+fn built(output: &Path, host: &mut dyn Host) -> i32 {
+    let shown = std::env::current_dir().map_or_else(|_| output.to_path_buf(), |cwd| relative(output, &cwd));
+    host.stdout(&text(msg::NATIVE_BUILT, &[("output", shown.display().to_string())]));
+    if EXPLAIN_SIZE.load(std::sync::atomic::Ordering::Relaxed) {
+        return explain_size(output, &shown.display().to_string(), host);
+    }
+    0
 }
 
 /// `--explain-size` (decision 944): set by the command, read by
@@ -739,8 +762,10 @@ pub(crate) fn run_command(
 pub const RUN_CACHE_VAR: &str = "SISU_RUN_CACHE";
 
 /// How many executables the cache of `sisu run --native` keeps, the most
-/// recently run.
+/// recently run, and how many bytes they may take together (a package's
+/// executable is larger than a file's: stage 1's is 46 MB).
 const RUN_CACHE_KEEP: usize = 32;
+const RUN_CACHE_BYTES: u64 = 512 << 20;
 
 /// The executable of a file's `sisu run --native` from the cache of built
 /// executables (decision 1287; D-089's condition): the program is built
@@ -826,7 +851,7 @@ pub(crate) fn cached_build(
 }
 
 /// Removes all but the [`RUN_CACHE_KEEP`] most recently run executables
-/// of the cache.
+/// of the cache, and the older ones past [`RUN_CACHE_BYTES`].
 fn evict(root: &Path) {
     let Ok(entries) = std::fs::read_dir(root) else { return };
     let mut kept: Vec<(std::time::SystemTime, PathBuf)> = entries
@@ -836,9 +861,130 @@ fn evict(root: &Path) {
         .filter_map(|p| Some((std::fs::metadata(p.join("used")).ok()?.modified().ok()?, p)))
         .collect();
     kept.sort_by_key(|k| std::cmp::Reverse(k.0));
-    for (_, p) in kept.into_iter().skip(RUN_CACHE_KEEP) {
-        let _ = std::fs::remove_dir_all(p);
+    let mut bytes = 0u64;
+    for (k, (_, p)) in kept.into_iter().enumerate() {
+        bytes += std::fs::read_dir(&p)
+            .map(|d| d.flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum::<u64>())
+            .unwrap_or(0);
+        if k >= RUN_CACHE_KEEP || (k > 0 && bytes > RUN_CACHE_BYTES) {
+            let _ = std::fs::remove_dir_all(p);
+        }
     }
+}
+
+/// A package's executable, or a file's that `sisu build --native` writes
+/// beside it, from the cache of built executables (decision 1323): the
+/// cache's, keyed as a file's run is ([`cached_build`]), copied to
+/// `output`, where its builds go, so that a second build of an unchanged
+/// program compiles and links nothing. None when the cache is off or
+/// cannot be written, and when the build's steps are asked for
+/// (`SISU_NATIVE_TIMES`), of which an executable from the cache has none:
+/// the caller builds at `output`.
+pub(crate) fn cached_at(
+    prog: &sisu_sir::Program,
+    output: &Path,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> Option<Result<(), i32>> {
+    if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
+        return None;
+    }
+    let name = output.file_name()?.to_string_lossy().into_owned();
+    let exe = match cached_build(prog, &name, profile, host)? {
+        Ok(exe) => exe,
+        Err(code) => return Some(Err(code)),
+    };
+    // A copy, not a link: a later build that writes the executable in
+    // place must not change the cache's.
+    let _ = std::fs::remove_file(output);
+    std::fs::copy(&exe, output).ok()?;
+    Some(Ok(()))
+}
+
+/// `sisu run --native --record LOG` (decision 1321): the executable run
+/// once with the runtime writing the records of its capability log
+/// (`SISU_RT_RECORD`, the capabilities `--redact` names in
+/// `SISU_RT_REDACT`), which go after `header` and before the `exit` line of
+/// the run's status in the log written to `log`.
+pub(crate) fn run_recorded(
+    exe: &Path,
+    args: &[String],
+    how: &Run,
+    header: &sisu_interp::record::Header,
+    log: &str,
+    redact: &[String],
+    host: &mut dyn Host,
+) -> i32 {
+    let body = std::env::temp_dir().join(format!("sisu-record-{}", std::process::id()));
+    let mut cmd = command(exe, args, how.seed, how);
+    cmd.env("SISU_RT_RECORD", &body);
+    if !redact.is_empty() {
+        cmd.env("SISU_RT_REDACT", redact.join(","));
+    }
+    let status = match cmd.status() {
+        Ok(st) => exit_code(st),
+        Err(e) => return cannot_run(exe, &e, host),
+    };
+    let records = std::fs::read_to_string(&body).unwrap_or_default();
+    let _ = std::fs::remove_file(&body);
+    let text = format!("{}{records}exit {status}\n", header.write());
+    if let Err(e) = std::fs::write(log, text) {
+        host.stderr(&crate::cli::plain_error(
+            msg::CLI_CANNOT_WRITE,
+            &[("path", log.to_string()), ("reason", e.to_string())],
+        ));
+        return EXIT_ERROR;
+    }
+    status
+}
+
+/// `sisu replay --native LOG` (decision 1321): the executable built from
+/// the log's SIR, run with the runtime answering each call of the host
+/// contract from the log's records (`SISU_RT_REPLAY`) and printing only
+/// what the log printed; the first difference is the divergence (`D0037`)
+/// the runtime writes to its report (`SISU_RT_REPLAY_REPORT`), and another
+/// status than the log's is `D0040`, as the interpreter's replay reports
+/// them.
+pub(crate) fn replay(exe: &Path, log: &sisu_interp::record::Log, host: &mut dyn Host) -> i32 {
+    let dir = std::env::temp_dir().join(format!("sisu-replay-native-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let (script, report) = (dir.join("script"), dir.join("report"));
+    if let Err(e) = std::fs::write(&script, log.script()) {
+        let _ = std::fs::remove_dir_all(&dir);
+        host.stderr(&crate::cli::plain_error(
+            msg::CLI_CANNOT_WRITE,
+            &[("path", script.display().to_string()), ("reason", e.to_string())],
+        ));
+        return EXIT_ERROR;
+    }
+    let mut cmd = std::process::Command::new(exe);
+    cmd.env("SISU_RT_REPLAY", &script).env("SISU_RT_REPLAY_REPORT", &report).stdin(std::process::Stdio::null());
+    if log.header.seed != 0 {
+        cmd.env("SISU_SCHEDULE_SEED", log.header.seed.to_string());
+    }
+    let status = match cmd.status() {
+        Ok(st) => exit_code(st),
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return cannot_run(exe, &e, host);
+        }
+    };
+    let said = std::fs::read_to_string(&report).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&dir);
+    if let Some(detail) = said.strip_prefix("diverged\n") {
+        host.stderr(&crate::cli::plain_error(msg::CLI_REPLAY_DIVERGED, &[("detail", detail.to_string())]));
+        return EXIT_ERROR;
+    }
+    if let Some(expected) = log.status()
+        && expected != status
+    {
+        host.stderr(&crate::cli::plain_error(
+            msg::CLI_REPLAY_STATUS,
+            &[("found", status.to_string()), ("expected", expected.to_string())],
+        ));
+        return EXIT_ERROR;
+    }
+    status
 }
 
 /// Runs a built executable as `sisu run --native` does: once with the seed

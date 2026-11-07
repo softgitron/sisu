@@ -1,0 +1,17 @@
+# `sisu test --cover` counts what the program's transcripts run, as it
+# counts its tests (decision 1320; the manual's finding of its step 39,
+# a program that only its transcript tests): `tests/sauna.transcript`
+# runs `main` twice, so the regions of `heat` and `main` it reaches are
+# reached, and only the hot branch, which no run takes, is not.
+# select --cover
+def heat(level: int) -> String:
+    if level > 90:
+        return "too hot"
+    return "{level} degrees"
+
+def main(sys: System):
+    let args = sys.env.args()
+    if len(args) == 0:
+        print("usage: sauna LEVEL")
+        return
+    print(heat(args[0].parse_int().expect("a level")))

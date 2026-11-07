@@ -409,7 +409,7 @@ pub(crate) fn scheduler_env(strategy: &sisu_interp::Strategy) -> Option<String> 
 }
 
 /// One test's run.
-fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> Done {
+fn run_one(exe: &Path, k: usize, name: &str, function: Option<&str>, options: &Options, real: bool) -> Done {
     let report = exe.with_file_name(format!("report-{}-{k}", std::process::id()));
     let _ = std::fs::remove_file(&report);
     let mut cmd = std::process::Command::new(exe);
@@ -443,7 +443,10 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
     // What std's `check` reads (decision 461): the seed of its cases and
     // the case a replay token names.
     cmd.env("SISU_TEST_CASE_SEED", options.case_seed.to_string());
-    if let Some(choices) = &options.replay_case {
+    // Else the case of the test's last failure the failure database keeps,
+    // tried first as the interpreter's run tries it (decision 1325).
+    let saved = function.and_then(|f| options.saved_cases.get(f));
+    if let Some(choices) = options.replay_case.as_ref().or(saved) {
         let shown: Vec<String> = choices.iter().map(i64::to_string).collect();
         cmd.env("SISU_TEST_REPLAY_CASE", shown.join("."));
     }
@@ -520,8 +523,9 @@ pub(crate) fn run(
                 loop {
                     let at = next.fetch_add(1, Ordering::SeqCst);
                     let Some(&i) = parallel.get(at) else { break };
-                    let name = prog.tests.get(which[i]).map_or("", |t| t.0.as_str());
-                    let r = run_one(&exe, which[i], name, options, false);
+                    let test = prog.tests.get(which[i]);
+                    let name = test.map_or("", |t| t.0.as_str());
+                    let r = run_one(&exe, which[i], name, test.map(|t| t.1.as_str()), options, false);
                     done.lock().unwrap_or_else(|p| p.into_inner())[i] = Some(r);
                 }
             });
@@ -530,8 +534,9 @@ pub(crate) fn run(
     let mut done = done.into_inner().unwrap_or_else(|p| p.into_inner());
     for (i, &k) in which.iter().enumerate() {
         if done[i].is_none() {
-            let name = prog.tests.get(k).map_or("", |t| t.0.as_str());
-            done[i] = Some(run_one(&exe, k, name, options, true));
+            let test = prog.tests.get(k);
+            let name = test.map_or("", |t| t.0.as_str());
+            done[i] = Some(run_one(&exe, k, name, test.map(|t| t.1.as_str()), options, true));
         }
     }
     let mut out = Vec::new();

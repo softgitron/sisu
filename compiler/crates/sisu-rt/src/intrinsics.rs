@@ -12,6 +12,7 @@ use crate::iter;
 use crate::mem::{self, List, Str, Text};
 use crate::rt::{self, ty};
 use crate::value::{self, target};
+use crate::world;
 use sisu_diag::msg;
 use std::cmp::Ordering;
 
@@ -578,8 +579,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::F32FromLiteral | I::F64ToF32 => c.set_f32(c.float(0) as f32),
             I::IntToF32 => c.set_f32(c.int(0) as f32),
             I::HostEnvArgs => {
-                // Views of the process's arguments, which live as long as it.
-                let args = crate::entry::args();
+                // Views of the process's arguments, which live as long as it
+                // (or of a replayed log's, kept as long).
+                let args = world::args();
                 let size = 16;
                 let mut l = List::empty();
                 l.reserve(args.len() as u64, size);
@@ -591,66 +593,150 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             }
             I::HostEnvGet => {
                 let name = String::from_utf8_lossy(c.text(1)).into_owned();
-                match std::env::var(&name) {
-                    Ok(v) => {
+                let v = world::call(
+                    "env",
+                    format!("env_var {}", world::quote(&name)),
+                    || std::env::var(&name).ok(),
+                    |v| match v {
+                        Some(x) => format!("some {}", world::quote(x)),
+                        None => "none".into(),
+                    },
+                    |f| (world::word(f, 0) == "some").then(|| world::word(f, 1).to_string()),
+                    || None,
+                );
+                match v {
+                    Some(v) => {
                         mem::set_word(c.ret, 0, 0);
                         value::write_string(c.ret.add(8), v.as_bytes());
                     }
-                    Err(_) => c.none(),
+                    None => c.none(),
                 }
             }
             I::HostStdinReadLine => {
-                let mut line = String::new();
-                match std::io::stdin().read_line(&mut line) {
-                    Ok(0) | Err(_) => c.none(),
-                    Ok(_) => {
-                        if line.ends_with('\n') {
-                            line.pop();
-                            if line.ends_with('\r') {
+                let read = || {
+                    let mut line = String::new();
+                    match std::io::stdin().read_line(&mut line) {
+                        Ok(0) | Err(_) => None,
+                        Ok(_) => {
+                            if line.ends_with('\n') {
                                 line.pop();
+                                if line.ends_with('\r') {
+                                    line.pop();
+                                }
                             }
+                            Some(line)
                         }
+                    }
+                };
+                let v = world::call(
+                    "stdin",
+                    "read_line".into(),
+                    read,
+                    |v| match v {
+                        Some(l) => format!("some {}", world::quote(l)),
+                        None => "none".into(),
+                    },
+                    |f| (world::word(f, 0) == "some").then(|| world::word(f, 1).to_string()),
+                    || None,
+                );
+                match v {
+                    Some(line) => {
                         mem::set_word(c.ret, 0, 0);
                         value::write_string(c.ret.add(8), line.as_bytes());
                     }
+                    None => c.none(),
                 }
             }
-            I::HostRandBits => c.set_word(random_bits()),
+            I::HostRandBits => c.set_word(world::call(
+                "rand",
+                "random_bits".into(),
+                random_bits,
+                u64::to_string,
+                |f| world::int(f, 0),
+                || 0,
+            )),
             I::HostFsReadToString => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
-                match std::fs::read(&path) {
-                    Ok(bytes) => match String::from_utf8(bytes) {
-                        Ok(t) => {
-                            mem::set_word(c.ret, 0, 0);
-                            value::write_string(c.ret.add(8), t.as_bytes());
-                        }
-                        Err(_) => io_error(c, IoKind::InvalidData, &path),
+                let r = world::call(
+                    "fs",
+                    format!("read_file {}", world::quote(&path)),
+                    || match std::fs::read(&path) {
+                        Ok(bytes) => String::from_utf8(bytes).map_err(|_| IoKind::InvalidData),
+                        Err(e) => Err(io_kind(&e)),
                     },
-                    Err(e) => io_error(c, io_kind(&e), &path),
+                    |r| match r {
+                        Ok(t) => format!("ok {}", world::quote(t)),
+                        Err(k) => format!("err {}", world::io_word(k)),
+                    },
+                    |f| {
+                        if world::word(f, 0) == "ok" {
+                            Ok(world::word(f, 1).to_string())
+                        } else {
+                            Err(world::io_read(f, 1))
+                        }
+                    },
+                    world::io_gone,
+                );
+                match r {
+                    Ok(t) => {
+                        mem::set_word(c.ret, 0, 0);
+                        value::write_string(c.ret.add(8), t.as_bytes());
+                    }
+                    Err(k) => io_error(c, k, &path),
                 }
             }
             I::HostFsRead => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
-                match std::fs::read(&path) {
+                let r = world::call(
+                    "fs",
+                    format!("read_bytes {}", world::quote(&path)),
+                    || std::fs::read(&path).map_err(|e| io_kind(&e)),
+                    |r| match r {
+                        Ok(b) => format!("ok {}", world::quote(&world::hex(b))),
+                        Err(k) => format!("err {}", world::io_word(k)),
+                    },
+                    |f| {
+                        if world::word(f, 0) == "ok" {
+                            world::unhex(world::word(f, 1)).ok_or(IoKind::InvalidData)
+                        } else {
+                            Err(world::io_read(f, 1))
+                        }
+                    },
+                    world::io_gone,
+                );
+                match r {
                     Ok(b) => {
                         mem::set_word(c.ret, 0, 0);
                         crate::bytes::write(c.ret.add(8), &b);
                     }
-                    Err(e) => io_error(c, io_kind(&e), &path),
+                    Err(k) => io_error(c, k, &path),
                 }
             }
             I::HostFsWrite | I::HostFsWriteText | I::HostFsRemove | I::HostFsCreateDir | I::HostFsSync => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
-                let r = match i {
-                    I::HostFsWrite => std::fs::write(&path, crate::bytes::arg(c, 2)),
-                    I::HostFsWriteText => std::fs::write(&path, c.text(2)),
-                    I::HostFsRemove => std::fs::remove_file(&path),
-                    I::HostFsCreateDir => std::fs::create_dir_all(&path),
-                    _ => std::fs::File::open(&path).and_then(|f| f.sync_all()),
+                let q = world::quote(&path);
+                // The interpreter's host contract's names, data the
+                // program wrote by its content hash.
+                let what = match i {
+                    I::HostFsWrite => format!("write_bytes {q} #{:016x}", world::content_hash(crate::bytes::arg(c, 2))),
+                    I::HostFsWriteText => format!("write_file {q} #{:016x}", world::content_hash(c.text(2))),
+                    I::HostFsRemove => format!("remove_file {q}"),
+                    I::HostFsCreateDir => format!("create_dir {q}"),
+                    _ => format!("sync_path {q}"),
                 };
-                match r {
+                let real = || {
+                    let r = match i {
+                        I::HostFsWrite => std::fs::write(&path, crate::bytes::arg(c, 2)),
+                        I::HostFsWriteText => std::fs::write(&path, c.text(2)),
+                        I::HostFsRemove => std::fs::remove_file(&path),
+                        I::HostFsCreateDir => std::fs::create_dir_all(&path),
+                        _ => std::fs::File::open(&path).and_then(|f| f.sync_all()),
+                    };
+                    r.map_err(|e| io_kind(&e))
+                };
+                match world::call("fs", what, real, world::unit_word, world::unit_read, world::io_gone) {
                     Ok(()) => mem::set_word(c.ret, 0, 0),
-                    Err(e) => io_error(c, io_kind(&e), &path),
+                    Err(k) => io_error(c, k, &path),
                 }
             }
             I::TestCaseSeed => {
@@ -706,48 +792,105 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 // target (decision 420).
                 let from = String::from_utf8_lossy(c.text(1)).into_owned();
                 let to = String::from_utf8_lossy(c.text(2)).into_owned();
-                match std::fs::rename(&from, &to) {
+                let r = world::call(
+                    "fs",
+                    format!("rename_file {} {}", world::quote(&from), world::quote(&to)),
+                    || std::fs::rename(&from, &to).map_err(|e| io_kind(&e)),
+                    world::unit_word,
+                    world::unit_read,
+                    world::io_gone,
+                );
+                match r {
                     Ok(()) => mem::set_word(c.ret, 0, 0),
-                    Err(e) => {
-                        let kind = io_kind(&e);
-                        let gone = matches!(kind, IoKind::NotFound) && !std::path::Path::new(&from).exists();
+                    Err(kind) => {
+                        // The host is asked whether the source is there, as
+                        // the interpreter asks it.
+                        let gone = matches!(kind, IoKind::NotFound) && !exists(&from);
                         io_error(c, kind, if gone { &from } else { &to })
                     }
                 }
             }
             I::HostFsExists => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
-                c.set_bool(std::path::Path::new(&path).exists());
+                c.set_bool(exists(&path));
             }
             I::HostFsMetadata => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
-                match std::fs::metadata(&path) {
-                    Ok(m) => {
-                        let modified = m
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
-                            .unwrap_or(0);
+                let real = || {
+                    std::fs::metadata(&path)
+                        .map(|m| {
+                            let modified = m
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+                                .unwrap_or(0);
+                            (i64::try_from(m.len()).unwrap_or(i64::MAX), modified, m.is_dir())
+                        })
+                        .map_err(|e| io_kind(&e))
+                };
+                let r = world::call(
+                    "fs",
+                    format!("metadata {}", world::quote(&path)),
+                    real,
+                    |r| match r {
+                        Ok((len, modified, dir)) => format!("ok {len} {modified} {dir}"),
+                        Err(k) => format!("err {}", world::io_word(k)),
+                    },
+                    |f| {
+                        if world::word(f, 0) == "ok" {
+                            Ok((world::int(f, 1), world::int(f, 2), world::word(f, 3) == "true"))
+                        } else {
+                            Err(world::io_read(f, 1))
+                        }
+                    },
+                    world::io_gone,
+                );
+                match r {
+                    Ok((len, modified, dir)) => {
                         mem::set_word(c.ret, 0, 0);
                         // `Metadata(len, modified, is_dir)`: three words.
-                        mem::set_word(c.ret, 8, i64::try_from(m.len()).unwrap_or(i64::MAX) as u64);
+                        mem::set_word(c.ret, 8, len as u64);
                         mem::set_word(c.ret, 16, modified as u64);
-                        mem::set_word(c.ret, 24, u64::from(m.is_dir()));
+                        mem::set_word(c.ret, 24, u64::from(dir));
                     }
-                    Err(e) => io_error(c, io_kind(&e), &path),
+                    Err(k) => io_error(c, k, &path),
                 }
             }
             I::HostFsListDir => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
-                let names = std::fs::read_dir(&path).and_then(|rd| {
-                    let mut names = Vec::new();
-                    for e in rd {
-                        names.push(e?.file_name().to_string_lossy().into_owned());
-                    }
-                    names.sort();
-                    Ok(names)
-                });
+                let real = || {
+                    std::fs::read_dir(&path)
+                        .and_then(|rd| {
+                            let mut names = Vec::new();
+                            for e in rd {
+                                names.push(e?.file_name().to_string_lossy().into_owned());
+                            }
+                            names.sort();
+                            Ok(names)
+                        })
+                        .map_err(|e| io_kind(&e))
+                };
+                let names = world::call(
+                    "fs",
+                    format!("list_dir {}", world::quote(&path)),
+                    real,
+                    |r| match r {
+                        Ok(names) => {
+                            let shown: Vec<String> = names.iter().map(|n| world::quote(n)).collect();
+                            format!("ok {} {}", names.len(), shown.join(" ")).trim_end().to_string()
+                        }
+                        Err(k) => format!("err {}", world::io_word(k)),
+                    },
+                    |f| {
+                        if world::word(f, 0) == "ok" {
+                            Ok(f.iter().skip(2).cloned().collect())
+                        } else {
+                            Err(world::io_read(f, 1))
+                        }
+                    },
+                    world::io_gone,
+                );
                 match names {
                     Ok(names) => {
                         let dir = path.trim_end_matches('/');
@@ -762,7 +905,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         mem::set_word(c.ret, 0, 0);
                         (c.ret.add(8) as *mut List).write(l);
                     }
-                    Err(e) => io_error(c, io_kind(&e), &path),
+                    Err(k) => io_error(c, k, &path),
                 }
             }
             I::ClockNow => {
@@ -894,7 +1037,7 @@ unsafe fn number_op(c: &Call<'_>, i: Intrinsic) -> u8 {
 
 /// The kinds of `IoError` a host operation reports (decision 11).
 #[derive(Clone, Debug)]
-enum IoKind {
+pub(crate) enum IoKind {
     NotFound,
     PermissionDenied,
     AlreadyExists,
@@ -903,7 +1046,7 @@ enum IoKind {
     Other(String),
 }
 
-fn io_kind(e: &std::io::Error) -> IoKind {
+pub(crate) fn io_kind(e: &std::io::Error) -> IoKind {
     match e.kind() {
         std::io::ErrorKind::NotFound => IoKind::NotFound,
         std::io::ErrorKind::PermissionDenied => IoKind::PermissionDenied,
@@ -1014,6 +1157,19 @@ pub(crate) unsafe fn write_err(c: &Call<'_>, set: &str, variant: &str, parts: &[
         mem::set_word(e, abi::ERROR_TAG, tag as u64);
         write_parts(e, &variants[tag].fields, parts);
     }
+}
+
+/// Whether there is a file or directory at `path`, the host asked as the
+/// interpreter asks it (`exists`).
+fn exists(path: &str) -> bool {
+    world::call(
+        "fs",
+        format!("exists {}", world::quote(path)),
+        || std::path::Path::new(path).exists(),
+        bool::to_string,
+        |f| world::word(f, 0) == "true",
+        || false,
+    )
 }
 
 /// 64 random bits: a SplitMix64 stream seeded once from the clock and the
