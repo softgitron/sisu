@@ -958,7 +958,9 @@ pub(crate) fn replay(exe: &Path, log: &sisu_interp::record::Log, host: &mut dyn 
         return EXIT_ERROR;
     }
     let mut cmd = std::process::Command::new(exe);
-    cmd.env("SISU_RT_REPLAY", &script).env("SISU_RT_REPLAY_REPORT", &report).stdin(std::process::Stdio::null());
+    cmd.env("SISU_RT_REPLAY", &script)
+        .env("SISU_RT_REPLAY_REPORT", &report)
+        .stdin(std::process::Stdio::null());
     if log.header.seed != 0 {
         cmd.env("SISU_SCHEDULE_SEED", log.header.seed.to_string());
     }

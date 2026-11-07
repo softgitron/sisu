@@ -146,7 +146,12 @@ fn main() {
                 &sisu_conformance::native::read_checked(&text),
             )
         } else {
-            sisu_conformance::native::run_native(&sisu, &root, &names)
+            sisu_conformance::native::run_native(
+                &sisu,
+                &root,
+                &names,
+                &sisu_conformance::native::read_unrecorded(&text),
+            )
         };
         print!("{}", report.render());
         std::process::exit(if report.failures.is_empty() { 0 } else { 1 });

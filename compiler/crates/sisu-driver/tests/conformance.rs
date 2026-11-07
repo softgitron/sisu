@@ -1318,7 +1318,10 @@ fn help_names_every_option_of_test() {
         "--jobs N",
         "--from-sir FILE",
     ] {
-        assert!(line.contains(&format!("`{option}")), "`sisu help` does not name `{option}` for `sisu test`: {line}");
+        assert!(
+            line.contains(&format!("`{option}")),
+            "`sisu help` does not name `{option}` for `sisu test`: {line}"
+        );
     }
 }
 
@@ -1353,10 +1356,16 @@ fn a_native_log_replays_and_diverges_as_the_interpreters() {
     std::fs::remove_file(dir.join("note.txt")).expect("the file removed");
     for replay in [&["replay", "n.log"][..], &["replay", "--native", "n.log"]] {
         let again = sisu(replay);
-        assert_eq!(String::from_utf8_lossy(&again.stdout), printed, "{replay:?}: {}", String::from_utf8_lossy(&again.stderr));
+        assert_eq!(
+            String::from_utf8_lossy(&again.stdout),
+            printed,
+            "{replay:?}: {}",
+            String::from_utf8_lossy(&again.stderr)
+        );
         assert_eq!(again.status.code(), Some(0), "{replay:?}");
     }
-    std::fs::write(dir.join("n.log"), log.replace("ok \"kept\\n\"", "ok \"changed\\n\"")).expect("the log changed");
+    std::fs::write(dir.join("n.log"), log.replace("ok \"kept\\n\"", "ok \"changed\\n\""))
+        .expect("the log changed");
     let mut details = Vec::new();
     for replay in [&["replay", "n.log"][..], &["replay", "--native", "n.log"]] {
         let again = sisu(replay);

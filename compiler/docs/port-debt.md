@@ -604,10 +604,12 @@ the oracle behind `--front-end=rust`:
 - (Done: **hot replacement**, `sisu run --watch` and a run under it
   recorded and replayed, is stage 1's from `sisu1 0.17.0`, each save
   built again by the served `build --for-run --emit-sir` and a replay's
-  in a directory of the files its log holds, decision 1200; a save
-  takes about 0.07 to 0.13 s where the Rust front end's kept queries take
-  0.03 to 0.07 s. An older stage 1 and `--front-end=rust` keep the Rust
-  front end's queries.) The language server is no longer a role
+  in a directory of the files its log holds, decision 1200; since stage
+  1's memo between the server's requests (its R220, decision 1220) the
+  build of `live/swap`'s save takes 0.022 to 0.029 s served, and the
+  watched run 0.084 s where the plain one takes 0.042 s, so the save
+  costs about 0.04 s in all, decision 1324. An older stage 1 and
+  `--front-end=rust` keep the Rust front end's queries.) The language server is no longer a role
   of the Rust front end: from `sisu1 0.15.0` its requests are answered by
   stage 1's queries (its R164 and R169, decisions 983 and 1060), from
   `sisu1 0.17.0` `sisu.explainBorrow` too (its `query explain`, R187,
@@ -616,11 +618,11 @@ the oracle behind `--front-end=rust`:
   running stage 1's program of the worksheet where stage 1's evaluator
   stops at the world; the Rust front end answers only an older stage 1
   and `--front-end=rust`. (The capability log and replay of a plain run
-  are stage 1's, the log holding the SIR that ran, decision 303.) *Pay*:
-  for a save of hot replacement as fast as the Rust front end's, stage
-  1's checks kept between saves (its memo); for the language server the
-  ends of `query explain`'s loans, whose ranges are their starts until
-  then. **The REPL** (`sisu repl`) and **worksheets**
+  are stage 1's, the log holding the SIR that ran, decision 303, and
+  natively too, decision 1321.) Nothing is left to pay for either: the
+  editor marks a loan from its start to its last use's end since
+  `sisu.explainBorrow` asks `query explain --ranges` (decision 1242).
+  **The REPL** (`sisu repl`) and **worksheets**
   (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
   --worksheet` (`sisu1 0.8.0` and later, decisions 563 and 620), and
   `:why` reads the inputs' trees from its `parse --tree` (decision 621);
@@ -756,8 +758,10 @@ leaves out:
   closure of its value wrapper instead, decision 225). *Pay*: a read
   through a switch on the member, if another front end needs one.
 - **The interpreter's modes**: the ownership monitor, the counterexample
-  mode, the capability log and replay, hot replacement, `--stats
-  stack-depth` and `--stats shared`, and the test cache. The schedulers
+  mode, hot replacement, `--stats stack-depth` and `--stats shared`
+  (decision 1326), `--cover`, and the test cache; the capability log and
+  replay are native too (decision 1321), and so is the failure database
+  (decision 1325). The schedulers
   other than the seeded one run natively for `sisu test` and `sisu run`
   (decisions 501 and 541), and so do the `sim` profile's faults,
   `sim.always`, `sim.choose`, `expect`'s recording and a property's
@@ -1168,9 +1172,10 @@ Nothing here switches the default.
   keyed by the SIR's text and the toolchain that compiles and links it,
   so a second run of a two-line program takes 0.016 s where its build
   took 0.067 s and the interpreter's run 0.014 s; a package's executable
-  stays under `build/`.) *Need*: a script (`#!`, 10) stays interpreted
-  until the cache holds it, and the cache of a package's build keyed as a
-  file's is.
+  stays under `build/`, and from decision 1323 is copied there from the
+  same cache, keyed as a file's: a second `build --native` of
+  `packages/workspace.pkg` takes 0.029 s where it took 0.096 s.) *Need*:
+  a script (`#!`, 10) stays interpreted until the cache holds it.
 - **The seeded scheduler**: native code has it, with `--explore N`, the
   same seeds and `--stats`, and yield checks where the interpreter has
   them (decisions 203 and 204), so a seed names the same schedule but for
@@ -1209,17 +1214,17 @@ Nothing here switches the default.
   table of return addresses would avoid, if one is ever kept for the
   debugger.
 - **The capability log and replay** (N-04; `--record`, `sisu replay`):
-  only the interpreter's host is wrapped (`record.rs`). *Need*: the same
-  wrapper in the runtime in Rust, around each host intrinsic (files,
-  environment, clock, random bits, standard input, processes, the
-  network's polls) and standard output and error, writing the log of
-  `record.rs`'s format with the SIR in its header (decision 303); a
-  replaying host in the runtime that answers from the log a path names
-  and reports the first divergence (`D0037`), so that `sisu replay`
-  rebuilds the executable from the log's SIR and runs it against the log;
-  the same call names and fields as the interpreter's, so that a log
-  replays in either. *Estimate*: four to five days, the network's polls
-  and the interleaving of output records the most of it.
+  done (decision 1321): the runtime in Rust records each call of the host
+  contract and each text printed in the interpreter's names and order
+  (`world.rs`), `sisu run --native --record` writes the log with the SIR
+  in its header, and `sisu replay --native` runs a log's SIR against its
+  records, so that a log replays in either runtime; the native mode of
+  the suite records and replays 259 of `native.list`'s running cases both
+  ways. *Need*: a C function that writes to standard output itself
+  (`unsafe/foreign`) is outside the log natively, where the interpreter
+  emulates it as the host's output; a native default would record its
+  C calls of `write` too, or leave such a program's log to the
+  interpreter.
 - **The ownership monitor and the counterexample mode** (`--monitor`,
   `--defer-borrow`, decision 54): the monitor is the checker's check
   (18, principle 5), and stays the interpreter's, as the conformance
@@ -1228,8 +1233,9 @@ Nothing here switches the default.
 - **Hot replacement** (`--watch`, stage 1's from decision 1200) needs
   the backend's indirection table (10's debug ABI); it stays the
   interpreter's. `--stats stack-depth` and
-  `--stats shared` need the native frames' depths from the probe and the
-  runtime's counts of `Shared` cells. *Estimate*: one day each.
+  `--stats shared` stay the interpreter's too, as `--monitor` does
+  (decision 1326): a native default sends a run that asks for them to the
+  interpreter. *Estimate*: none.
 - **The suite**: once these are done, the runner's default run of a case
   is the native one, compared with the interpreter's expectations as
   `--native` compares them now, and `--interpreted` runs the oracle.
@@ -1252,7 +1258,11 @@ capability log and replay, the two `--stats` kinds and the cache of
 executables are still to do, a round of their own. Decision 1287 made the
 cache of executables, and decision 1289 orders the rest: the capability
 log and its replaying host first, then the two `--stats` kinds, which a
-native default may send to the interpreter as `--monitor` is.
+native default may send to the interpreter as `--monitor` is. Decision
+1321 made the log and its replay, decision 1323 the cache of a package's
+build, and decision 1326 leaves the two `--stats` kinds to the
+interpreter, so what a native default still lacks is the rule itself and
+the checked memory model's provenance for `unsafe` code.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

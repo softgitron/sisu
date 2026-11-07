@@ -154,11 +154,23 @@ pub fn read_list(text: &str) -> Vec<String> {
 /// build, whose raw memory is unchecked, does not; `--native-release`
 /// builds them and does not run them.
 pub fn read_checked(text: &str) -> Vec<String> {
+    read_marked(text, "checked")
+}
+
+/// The cases of `native.list` marked `unrecorded` after their name: their
+/// output is not all the host contract's, a C function writing to standard
+/// output itself, so the native mode records and replays them in neither
+/// runtime (decision 1321).
+pub fn read_unrecorded(text: &str) -> Vec<String> {
+    read_marked(text, "unrecorded")
+}
+
+fn read_marked(text: &str, mark: &str) -> Vec<String> {
     text.lines()
         .filter_map(|l| {
             let mut words = l.split('#').next().unwrap_or("").split_whitespace();
             let name = words.next()?;
-            words.any(|w| w == "checked").then(|| name.to_string())
+            words.any(|w| w == mark).then(|| name.to_string())
         })
         .collect()
 }
@@ -236,8 +248,10 @@ impl Mode {
 /// Builds and runs every case of `list` natively, on as many threads as
 /// the machine has (at most eight), with the debug profile's backend, the
 /// one written in Sisu (decision 331).
-pub fn run_native(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::Native, None)
+/// Each case is recorded and replayed natively too, but those of
+/// `unrecorded` ([`read_unrecorded`]).
+pub fn run_native(sisu: &Sisu, root: &Path, list: &[String], unrecorded: &[String]) -> NativeReport {
+    run_list_checked(sisu, root, list, Mode::Native, None, unrecorded)
 }
 
 /// [`run_native`], each case built from serialised SIR (decision 212).
@@ -307,7 +321,8 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
 }
 
 /// [`run_list`], the cases of `checked` (`read_checked`) built and not run
-/// in the release profile.
+/// in the release profile, and in the native mode the cases of
+/// `unrecorded` not recorded.
 fn run_list_checked(
     sisu: &Sisu,
     root: &Path,
@@ -336,7 +351,8 @@ fn run_list_checked(
     }
     let results = parallel(&cases, |case, n| {
         let unchecked = mode == Mode::Release && checked.contains(&case.name);
-        native_case(sisu, case, n, mode, stage2, unchecked)
+        let record = mode == Mode::Native && !checked.contains(&case.name);
+        native_case(sisu, case, n, mode, stage2, unchecked, record)
     });
     if matches!(mode, Mode::FromSir | Mode::Interpreted | Mode::FromLir) {
         report.from_sir = Some(results.iter().filter(|r| r.own_sir).count());
@@ -370,7 +386,7 @@ fn run_list_checked(
 pub fn survey(sisu: &Sisu, root: &Path, list: &[String]) -> Vec<(String, String)> {
     let cases: Vec<Case> =
         discover(root).into_iter().filter(|c| !list.contains(&c.name) && runnable(c)).collect();
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native, None, false));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native, None, false, false));
     cases
         .iter()
         .zip(results)
@@ -450,6 +466,7 @@ fn native_case(
     mode: Mode,
     stage2: Option<&Path>,
     unchecked: bool,
+    record: bool,
 ) -> CaseResult {
     let from_sir = matches!(mode, Mode::FromSir | Mode::Interpreted | Mode::FromLir);
     let release = mode == Mode::Release;
@@ -702,7 +719,7 @@ fn native_case(
         return r;
     }
     run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), !from_sir, &mut r);
-    if mode == Mode::Native {
+    if record {
         recorded(sisu, case, &cwd, &mut r);
     }
     r
@@ -732,7 +749,8 @@ fn recorded(sisu: &Sisu, case: &Case, cwd: &Path, r: &mut CaseResult) {
         a
     };
     let native_log = cwd.join("native-run.log").display().to_string();
-    let recorded = invoke_with_input(sisu, cwd, &words(&["run", "--native", "--record", &native_log]), input.as_deref());
+    let recorded =
+        invoke_with_input(sisu, cwd, &words(&["run", "--native", "--record", &native_log]), input.as_deref());
     let mut fail = |check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
     };
@@ -741,7 +759,10 @@ fn recorded(sisu: &Sisu, case: &Case, cwd: &Path, r: &mut CaseResult) {
     let err = case.expected("err").unwrap_or_default();
     let printed = format!("{expected}\n--- stderr\n{err}\n--- status {status}\n");
     if printed != shown(&recorded) {
-        fail("sisu run --native --record prints what the run prints", diff::diff(&printed, &shown(&recorded)));
+        fail(
+            "sisu run --native --record prints what the run prints",
+            diff::diff(&printed, &shown(&recorded)),
+        );
         return;
     }
     if !Path::new(&native_log).exists() {
@@ -753,7 +774,10 @@ fn recorded(sisu: &Sisu, case: &Case, cwd: &Path, r: &mut CaseResult) {
         let replayed = invoke_with_input(sisu, cwd, &a, None);
         if shown(&replayed) != shown(&recorded) {
             fail(
-                &format!("{} of a native log prints what the recorded run printed", a[..a.len() - 1].join(" ")),
+                &format!(
+                    "{} of a native log prints what the recorded run printed",
+                    a[..a.len() - 1].join(" ")
+                ),
                 diff::diff(&shown(&recorded), &shown(&replayed)),
             );
         }

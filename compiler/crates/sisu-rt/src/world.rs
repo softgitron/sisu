@@ -86,7 +86,8 @@ pub(crate) fn start() {
         });
         MODE.store(RECORD, Ordering::SeqCst);
     }
-    let _ = call("clock", "virtual_time".into(), || false, |v| v.to_string(), |f| word(f, 0) == "true", || false);
+    let _ =
+        call("clock", "virtual_time".into(), || false, |v| v.to_string(), |f| word(f, 0) == "true", || false);
 }
 
 /// Writes the record, or the replay's report, when the run ends (at its
@@ -282,7 +283,8 @@ pub(crate) fn printed(err: bool, text: &[u8]) -> bool {
                     ));
                 }
                 None => {
-                    w.diverged = Some(format!("the log ended, but the program printed {what} {}", quote(&text)));
+                    w.diverged =
+                        Some(format!("the log ended, but the program printed {what} {}", quote(&text)));
                 }
             }
         }

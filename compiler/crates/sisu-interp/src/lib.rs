@@ -976,6 +976,9 @@ pub fn run_transcript(
     run_transcript_report(prog, host, options, files, runs).0
 }
 
+/// The runs of each statement by its function's name and place.
+pub type Coverage = HashMap<(String, u32, u32), u32>;
+
 /// [`run_transcript`], and the runs of each statement the transcript's
 /// runs reached, which `options.coverage` under the monitor counts (`sisu
 /// test --cover`, decision 1320).
@@ -985,7 +988,7 @@ pub fn run_transcript_report(
     options: &Options,
     files: &[(String, String)],
     runs: &[(Vec<String>, Vec<String>)],
-) -> (Vec<(String, i32)>, HashMap<(String, u32, u32), u32>) {
+) -> (Vec<(String, i32)>, Coverage) {
     on_big_stack(host, |host| {
         let written = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let mut held = parallel::Merged { inner: host, out: written.clone() };

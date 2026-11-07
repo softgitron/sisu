@@ -1,0 +1,5 @@
+transcript "tests/sauna.transcript" ... ok
+1 passed, 0 failed, 0 blocked
+cover_transcript.sisu:9:9: no test reaches this branch
+cover_transcript.sisu:9:9: no test reaches this statement
+regions: 10, 8 reached by the tests and 2 not

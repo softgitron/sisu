@@ -2627,7 +2627,8 @@ declares, the package compiled as `sisu test` compiles it, which stage 1's
   after the last as a `drop` of its type drops it, a list of values with
   a `Drop` element by element (`run_group` in `parallel.rs`, decisions
   1202 and 1244).
-- **Coverage**: `sisu test --cover` runs the tests with each statement's
+- **Coverage**: `sisu test --cover` runs the tests, and the program's
+  transcripts (decision 1320), with each statement's
   runs counted, as the counterexample mode counts them, and prints each
   region of stage 1's `sir --tests --cover` (its R216: a statement, or a
   branch's body) whose first SIR statement no test ran, by its place
@@ -2659,6 +2660,30 @@ divergence (`D0037`), reported with both, and a different exit status is
 `D0040`. In the interpreter every source of nondeterminism is a host call
 or the seeded scheduler, so a replay is exact; the conformance runner
 records and replays every case that runs.
+
+**A native run's log** (decision 1321; `sisu-rt/src/world.rs`). `sisu run
+--native --record FILE` runs the executable with `SISU_RT_RECORD`: the
+runtime in Rust, whose intrinsics make the native program's calls of the
+host contract, writes a record of each in the interpreter's names,
+fields and order (the host's clock asked whether it is virtual when the
+run starts, the real clock's readings, the scheduler's wait for one of
+its timers, `exists` after a rename that found nothing, each poll of a
+socket) and of each text the program printed, but none of the runtime's
+own reports; the driver puts them under the header a run on stage 1
+writes, the SIR that ran with it, and after them the `exit` line of the
+child's status. `sisu replay --native FILE` builds the log's SIR from the
+cache of built executables and runs it with `SISU_RT_REPLAY`, the log's
+records written by the driver as fields of a length and their bytes, each
+with how a divergence names it, so that the runtime reads no quoting: it
+answers each call from them, prints a text only when it is the log's,
+and writes the first difference to the report the driver turns into
+`D0037`, in the interpreter's words. So a log replays in either runtime,
+whichever recorded it, where the program makes the same calls in both;
+the native conformance mode records and replays every case of
+`native.list` both ways, but one whose C function writes to standard
+output itself (`unrecorded`). A log of the Rust front end's run holds the
+source, and one of a run under `--watch` its saves, which only the
+interpreter replays (`D0166`).
 
 **Replay tokens** (`sisu-driver/src/replay.rs`) are one word,
 `1-HASH-TOOLCHAIN-tT-sS-rR[-cCHOICES][-pDEPTH|-xSCHEDULE][-mPPM]`: the
@@ -3230,11 +3255,13 @@ sisu run [FILE] [ARGS...]    check, lower and run; `--watch` swaps in each save 
                              `--monitor` runs under the ownership monitor,
                              `--defer-borrow` runs a rejected program in the counterexample mode,
                              `--contracts=off|preconditions|all` what it checks (07),
-                             `--record LOG [--redact fs,net,...]` writes the capability log,
+                             `--record LOG [--redact fs,net,...]` writes the capability log
+                             (natively too, decision 1321),
                              `--stats` the scheduler's numbers, `--stats stack-depth` the
                              frame depths, `--stats shared` each `Shared` construction site,
                              `--native [--release]` builds it natively and runs that
-sisu replay LOG              run a recorded program again against its log (`--monitor`)
+sisu replay LOG              run a recorded program again against its log (`--monitor`;
+                             `--native [--release]` natively, decision 1321)
 sisu check [FILE]            diagnostics; `--format=ids` for the conformance form,
                              `--diary LOG` appends them to the friction log,
                              `--holes FILE` each typed hole and what fits it (decision 1063)
@@ -3250,9 +3277,11 @@ sisu sir [FILE]              the serialised SIR, drops placed and `comptime` val
                              (also for a program the ownership checker rejects)
 sisu test [FILE]             run the tests (and `tests/*.transcript`) under the monitor: ok,
                              FAILED, or blocked by a hole; `--no-monitor`, `--defer-borrow`,
-                             `--no-cache`, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
+                             `--no-cache` (no cached result, no saved case), `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
                              `--update` (snapshots and transcripts), `--replay TOKEN`,
                              `--sim [--faults P]`, `--std` (the standard library's doc examples),
+                             `--mutate [--since REV]`, `--cover` (decision 1322),
+                             `--format=json`,
                              `--native [--release]` (compiled, decision 460); a test's output
                              is shown with its failure (decision 466)
 sisu bench [FILE]            run the benchmarks; `--iterations N`, `--samples K`
@@ -3417,7 +3446,7 @@ command, and exits with its status (decision 197). It takes
 `--scheduler pct` or `exhaustive` with `--depth` (section "Tasks" below;
 decision 541); it does not combine with the options that only the
 interpreter has (`--sir`, `--monitor`, `--defer-borrow`, `--stats
-stack-depth`, `--stats shared`, `--watch`, `--record`; `D0109`), and `--release` goes with `--native` only (`D0111`). A
+stack-depth`, `--stats shared`, `--watch`, and `--record` on the Rust front end; `D0109`; on stage 1 `--record` writes a native run's capability log, decision 1321), and `--release` goes with `--native` only (`D0111`). A
 construct the backend does not compile yet is `D0103`, naming it and the
 function it is in; the program still runs without `--native`. `SISU_NATIVE_SURVEY=1`
 lists every such construct of a program with the number of functions
@@ -4466,8 +4495,9 @@ runnable case the list leaves out and says which would pass, or the first
 construct that stops each.
 
 The interpreter's modes have no native counterpart: the ownership
-monitor, the counterexample mode, the capability log and replay, hot
-replacement, and `sisu test`. port-debt.md ("Stage 2") lists these and
+monitor, the counterexample mode, hot replacement, `--stats stack-depth`
+and `--stats shared` (decision 1326), and `--cover`; the capability log
+and its replay are native too (decision 1321). port-debt.md ("Stage 2") lists these and
 what the backend still leaves out.
 
 ### Compile time and run time
@@ -13080,3 +13110,159 @@ query layer and the driver", "Stage 2: the native backend"; D-078, D-089;
       0's front end under R4 and R5, as `unsafe/tuple_pointer` does, and
       `testing/cover` does not differ. Stage 1 decides it (RULES.md,
       R232).
+
+**Stage 0's twenty-sixth round: three findings of the manual, the capability log and its replay natively, a package's build from the cache of built executables, the failure database of a native test run, and what stays the interpreter's or waits** (sections "Testing", "Simulation, schedulers and replay", "The query layer and the driver", "Stage 2: the native backend"; D-060, D-086, D-089; 06, 10, 17, N-04; decisions 1200, 1220, 1225, 1241, 1242, 1285, 1287 and 1289; stage 1's R225)
+
+1320. `sisu test --cover` counts what a program's transcripts run, as it
+      counts its tests (17, "Coverage and mutation"; the manual's finding
+      of its step 39): under `--cover` each transcript runs under the
+      monitor that counts each statement's runs
+      (`sisu_interp::run_transcript_report`), and its counts join the
+      tests' in the report, where a program that only its transcripts
+      test, chapter 19's `sauna`, had every region reported unreached
+      though its transcript passed. The case `testing/cover_transcript`
+      holds a program tested by one transcript whose hot branch alone is
+      unreached (2 of its 10 regions, the branch and its statement, where all 10 were). This changes no
+      rule of the language.
+
+1321. A native run's capability log and its replay (06; N-04; D-089,
+      decision 1289's first item): `sisu run --native --record LOG` on
+      stage 1 writes the log a run in the interpreter writes, its header
+      holding the SIR that ran (decision 303) and its records the native
+      runtime's, in the interpreter's names, fields and order, and `sisu
+      replay --native [--release] LOG` runs a log's SIR natively against
+      its records, `D0037` at the first call or text unlike the log's and
+      `D0040` at another status, so that a log replays in either runtime,
+      whichever recorded it. The records are written by the runtime in
+      Rust (`sisu-rt/src/world.rs`), not the runtime in Sisu: the calls
+      of the host contract are its intrinsics (port-debt.md, "The runtime
+      in Sisu"), and the log is written where each call is made, as the
+      interpreter's `Recorder` wraps its host; it holds the host's clock
+      asked whether it is virtual when the run starts, as the interpreter
+      asks it, routes the real clock's readings and the scheduler's wait
+      for its timers through the log, asks `exists` after a rename that
+      found nothing, as the interpreter does, and writes none of its own
+      reports (`--stats`, the live allocations). A replay reads the log's
+      records as the driver writes them for it (`Log::script`: each field
+      its length and its bytes, with how a divergence names the record),
+      so the runtime has the log's quoting for writing only. A log of the
+      Rust front end's run holds the source, and one under `--watch` its
+      saves, which only the interpreter replays (`D0166`). Measured on
+      `native.list`: the native conformance mode now records each case
+      natively, replays its log in the interpreter and natively, and
+      replays the interpreter's log natively, and 259 of its 260 running
+      cases give the same records in both runtimes (`capabilities/host`'s
+      log is the interpreter's call for call, its times and random bits
+      aside); the one apart, `unsafe/foreign`, calls C's `write`, which
+      the interpreter emulates as standard output and native code calls
+      itself, and is marked `unrecorded`. The mode ran in 132 s of wall
+      time, each recorded run's executable built once into the cache of
+      built executables and each replay's taken from it. The driver's
+      test `a_native_log_replays_and_diverges_as_the_interpreters` holds
+      a native log replayed both ways and a changed one diverging in
+      both with the same words. The token a failing run prints remains a
+      test's (decision 461), which a native test already replays
+      natively. This changes no rule of the language.
+
+1322. `sisu help` names every option of `sisu test` but the ones each
+      command of its kind takes (`--locked`, `--accept-unsafe`, the
+      features): `--cover`, `--format=json` and `--defer-borrow` join
+      it (`D0002`), and `--no-cache` says that it tries no case the
+      failure database saved (decision 1325), where the line left out
+      what decisions 1241 and 1285 added (the manual's finding of its
+      step 39). The driver's test `help_names_every_option_of_test`
+      holds the line to the options the parser takes. This changes no
+      rule of the language.
+
+1323. A package's `sisu build --native` and `run --native` take their
+      executable from the cache of built executables (decision 1287), as a
+      file's run does, keyed as it is, and copy it where the package's
+      builds go (`native::cached_at`; a copy, so that a build that writes
+      the executable in place leaves the cache's as it was), so a second
+      build of an unchanged program compiles and links nothing; a file's
+      `build --native` without `--output` does the same, and a build with
+      `--output` or with `SISU_NATIVE_TIMES`, whose steps a cached
+      executable has none of, builds as before. The cache now keeps at
+      most 512 MB besides its 32 entries, the most recently run kept
+      first, since a package's executable is larger than a file's (stage
+      1's is 46 MB). Measured on the suite's `packages/workspace.pkg`
+      (the release driver, the median of 9 under a load of about 4): a
+      second `build --native` takes 0.029 s where it took 0.096 s, and a
+      second `run --native` 0.021 s where it took 0.077 s. This changes no
+      rule of the language.
+
+1324. port-debt.md's item on hot replacement says what decisions 1220
+      and 1242 made of it (the manual's finding of its step 39): a save of
+      `sisu run --watch` is built by the served stage 1 with its memo
+      between requests (its R220, 0.022 to 0.029 s a build of
+      `live/swap`'s save, where the item said 0.07 to 0.13 s), and the
+      editor marks a loan from its start to its last use's end (`query
+      explain --ranges`), where the item left them at their starts. A
+      watched run of `live/swap` takes 0.084 s and its plain run 0.042 s
+      (the release driver, the median of 9 under a load of about 4), so
+      its one save, its build, the poll and the swap, costs about 0.04 s;
+      the item's *Pay* is now only the REPL's. This changes no rule of
+      the language.
+
+1325. The failure database (decision 1285) is kept by a native test run
+      as by an interpreted one: `sisu test --native` reads it beside the
+      test cache, hands each test its saved choices as a replay token's
+      (`SISU_TEST_REPLAY_CASE`), so `check` tries that case first, and
+      writes back the case each failing property recorded, where it read
+      and wrote nothing natively. A native run still caches no result
+      (decision 1145), and `--no-cache` leaves out both the cache and the
+      database, which `sisu help` now says. The case
+      `testing/failure_database` joins `native.list`, and the driver's
+      test `a_native_test_run_keeps_the_failure_database` holds a native
+      run that saves a failing case and a second that fails at it first.
+      This changes no rule of the language.
+
+1326. `--stats stack-depth` and `--stats shared` stay the interpreter's,
+      as `--monitor` is (decision 1289's second item): a native default of
+      `sisu run` would send a run that asks for either to the interpreter, and
+      `run --native` with either stays `D0109`. Natively the first would
+      need a count at every call of each depth's bucket and the deepest
+      stack's size, a hook in the prologue of every function in both
+      lowerings, where the probe reads the depth only to compare it, and
+      the second each `Shared.new` call's site passed to the runtime and a
+      table of the program's own sites, a descriptor field in both
+      lowerings; each is a day, as port-debt.md estimates, for numbers a
+      run asks for only on request, which the interpreter gives of the
+      same program, and the native stack's depths would not be the
+      interpreter's estimate of them (16 bytes a local, 64 a frame) but
+      the real ones, a second meaning for the same report. The
+      scheduler's `--stats`, with its counts of `Shared` cells, is
+      native already (decision 203). This changes no rule of the
+      language.
+
+1327. The allocators' runtime half (R225's second step; stage 1's R234,
+      its `with_allocator`, `try_push`, `try_insert`, `try_add` and
+      `String.try_push` on an allocator other than `Global`) is not this
+      round's: stage 1 lowers them on `Global` to today's operations, so
+      every program that names no allocator, and one on `Global`, runs as
+      it did in both runtimes, and the eight intrinsics R234 names are
+      reached only by a collection on another allocator, which no case of
+      the suite builds yet. They need, in the interpreter, a collection
+      value that holds its allocator and the room its allocator gave
+      (`Value::List` and the tables' values a field each), each growth
+      past that room a call of the program's `Allocator.acquire` through
+      the trait's dispatch, the old room released, and
+      `Err(OutOfMemory.Exhausted)` with the collection unchanged when
+      `acquire` gives none, a drop through `release`, and a `Region`'s
+      blocks from its own range in the checked model; natively, a
+      collection on another allocator holding the allocator value beside
+      its buffer (a `ref Region` a pointer), so a second layout of each
+      collection that every inline operation of both lowerings must tell
+      from `Global`'s by its type, and the runtime in Sisu's growth
+      (`list.sisu`, `table.sisu`, `text.sisu`) calling the program's
+      `acquire` and `release` through the function table, which gives the
+      runtime only drop glue today. That is a round of its own after
+      stage 1's other methods take the allocator (R234 leaves them at
+      `Global`, so such a list has no `len`). This changes no rule of the
+      language.
+
+1328. The intrinsic families of decisions 1107, 1148, 1208, 1248 and
+      1290 and tagged-pointer provenance (decision 1108) are not this
+      round's, which spent its time on 1320 to 1327; the formatting
+      family stays the first, with 903's measurement. This changes no
+      rule of the language.

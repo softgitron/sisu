@@ -11,7 +11,10 @@
 # a debug build gives as the interpreter does (decisions 543, 544, 560
 # and 561):
 # `--native-release`, whose raw memory is unchecked, builds it and does not
-# run it.
+# run it. `--native` records each case's run natively and replays its log
+# in both runtimes, and the interpreter's log natively (decision 1321),
+# but a case marked `unrecorded`, whose C function writes to standard
+# output itself, outside the host contract.
 capabilities/attenuation
 capabilities/closure_drops
 capabilities/datetime
@@ -256,6 +259,7 @@ testing/blocked_closure
 testing/doc_examples
 testing/expect
 testing/explore_output
+testing/failure_database
 testing/fakes
 testing/hole_in_task
 testing/json_events
@@ -283,7 +287,7 @@ types/typed_hole
 unsafe/bit_cast_sizes
 unsafe/cstring
 unsafe/export_by_pointer
-unsafe/foreign
+unsafe/foreign unrecorded
 unsafe/free_twice checked
 unsafe/gone checked
 unsafe/invalid_bits checked

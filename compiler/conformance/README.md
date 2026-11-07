@@ -235,6 +235,17 @@ environment holding only `SISU_RT_ALLOCS=1`), and compares:
   exit`), which must say 0 and is left out of the comparison above; a
   program that aborts (status 134) ends without one.
 
+Then the mode records the case's run natively, `sisu run --native
+--record LOG` (decision 1321), which must print what `sisu run` prints,
+replays that log with `sisu replay LOG` in the interpreter and with
+`sisu replay --native LOG`, each printing what the recorded run printed
+and exiting as it did, and replays the interpreter's log of the case
+(`sisu run --record`) natively the same way, so that a log replays in
+either runtime whichever recorded it; a case marked `unrecorded` after
+its name, whose C function writes to standard output itself, outside the
+host contract the log records (`unsafe/foreign`), is not recorded. The
+summary counts the cases recorded and replayed.
+
 The expectations are the interpreter's: the native mode reads no file of
 its own and does not bless, except `NAME.release` (below) and
 `NAME.native-out`: a program built from its source is built for the

@@ -718,7 +718,9 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 // The interpreter's host contract's names, data the
                 // program wrote by its content hash.
                 let what = match i {
-                    I::HostFsWrite => format!("write_bytes {q} #{:016x}", world::content_hash(crate::bytes::arg(c, 2))),
+                    I::HostFsWrite => {
+                        format!("write_bytes {q} #{:016x}", world::content_hash(crate::bytes::arg(c, 2)))
+                    }
                     I::HostFsWriteText => format!("write_file {q} #{:016x}", world::content_hash(c.text(2))),
                     I::HostFsRemove => format!("remove_file {q}"),
                     I::HostFsCreateDir => format!("create_dir {q}"),

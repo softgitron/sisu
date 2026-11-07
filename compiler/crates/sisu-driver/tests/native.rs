@@ -21,7 +21,8 @@ fn native_conformance() {
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
     let list = sisu_conformance::native::read_list(&text);
-    let report = sisu_conformance::native::run_native(&sisu, &root, &list);
+    let unrecorded = sisu_conformance::native::read_unrecorded(&text);
+    let report = sisu_conformance::native::run_native(&sisu, &root, &list, &unrecorded);
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());

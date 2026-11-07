@@ -3224,7 +3224,9 @@ fn stage1_command(
                         profile,
                         host,
                     ),
-                    false => crate::native::cached_at(&prog, e, profile, host).map(|r| r.map(|()| e.to_path_buf())),
+                    false => {
+                        crate::native::cached_at(&prog, e, profile, host).map(|r| r.map(|()| e.to_path_buf()))
+                    }
                 };
                 let built = match cached {
                     Some(r) => r,
@@ -6347,7 +6349,13 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         return EXIT_USAGE;
     }
     if native {
-        return replay_natively(path, &log, p.flags.contains(&"--monitor"), p.flags.contains(&"--release"), host);
+        return replay_natively(
+            path,
+            &log,
+            p.flags.contains(&"--monitor"),
+            p.flags.contains(&"--release"),
+            host,
+        );
     }
     // A run whose front end was stage 1 logged the SIR it ran, which runs
     // again without a front end (decision 303).
