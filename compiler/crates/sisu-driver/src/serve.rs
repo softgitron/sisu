@@ -49,9 +49,12 @@ pub fn served(words: &[String]) -> bool {
     ) && !words.iter().any(|w| w == "--repl" || w == "--worksheet" || w == "--repl-serve")
 }
 
-/// The size and time of a file, by which the server tells that it was
-/// built again.
-fn stamp(path: &Path) -> Option<(u64, u128)> {
+/// A file's size and time, by which the server tells that it was built
+/// again; none when it cannot be read.
+type Stamp = Option<(u64, u128)>;
+
+/// The [`Stamp`] of the file at `path`.
+fn stamp(path: &Path) -> Stamp {
     let meta = std::fs::metadata(path).ok()?;
     let time = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
     Some((meta.len(), time.as_nanos()))
@@ -276,7 +279,7 @@ struct State {
     /// The stage 1 it serves.
     sisu1: PathBuf,
     /// This executable's stamp and its stage 1's when the server started.
-    built: (Option<(u64, u128)>, Option<(u64, u128)>),
+    built: (Stamp, Stamp),
     sock: PathBuf,
     /// How many processes of stage 1 it keeps at most: one for each core.
     most: usize,

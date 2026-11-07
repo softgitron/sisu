@@ -813,7 +813,11 @@ pub(crate) fn cached_build(
 /// The cache of built executables' directory and the key of the program's
 /// entry in it ([`cached_build`]); none when the cache is off or this
 /// executable's parts cannot be found.
-fn cache_key(prog: &sisu_sir::Program, profile: Profile, host: &mut dyn Host) -> Option<Result<(PathBuf, String), i32>> {
+fn cache_key(
+    prog: &sisu_sir::Program,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> Option<Result<(PathBuf, String), i32>> {
     if std::env::var(RUN_CACHE_VAR).is_ok_and(|v| v == "0") {
         return None;
     }
@@ -873,7 +877,8 @@ pub(crate) fn reaches_raw_memory(prog: &sisu_sir::Program) -> bool {
     !prog.exports.is_empty()
         || prog.intrinsics.iter().any(|i| {
             let n = i.name.as_str();
-            n.starts_with("extern.") || (n.starts_with("mem.") && !matches!(n, "mem.size_of" | "mem.align_of"))
+            n.starts_with("extern.")
+                || (n.starts_with("mem.") && !matches!(n, "mem.size_of" | "mem.align_of"))
         })
 }
 
@@ -900,7 +905,12 @@ const REFUSED: &str = "refused";
 /// first when it is not there, or, with the cache off, built in `aside`.
 /// What the build printed is shown only when the program runs natively or
 /// the build failed otherwise.
-pub(crate) fn default_build(prog: &sisu_sir::Program, name: &str, aside: &Path, host: &mut dyn Host) -> Chosen {
+pub(crate) fn default_build(
+    prog: &sisu_sir::Program,
+    name: &str,
+    aside: &Path,
+    host: &mut dyn Host,
+) -> Chosen {
     if reaches_raw_memory(prog) {
         return Chosen::Interpreted;
     }

@@ -3512,11 +3512,13 @@ fn stage1_command(
                         return code;
                     }
                     crate::native::Chosen::Interpreted if native_runtime && stage1.assists() => {
-                        let mut words = ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
+                        let mut words =
+                            ["build", "--native", "--for-run", "--emit-sir"].map(String::from).to_vec();
                         words.extend(contracts.clone());
                         program_on(&mut words, false);
                         let mut quiet = sisu_interp::TestHost::default();
-                        let again = run(&mut quiet, &words, Backend::Unused).ok().filter(|a| a.status == exit::OK);
+                        let again =
+                            run(&mut quiet, &words, Backend::Unused).ok().filter(|a| a.status == exit::OK);
                         match again.and_then(|a| Some((sisu_sir::read(&a.stdout).ok()?, a.stdout))) {
                             Some((p, t)) if p.entry.is_some() => {
                                 let mut with = Vec::new();
