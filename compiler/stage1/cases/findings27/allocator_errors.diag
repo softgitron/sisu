@@ -1,2 +1,1 @@
 6:18-6:43 E0208 resolve.type-argument-count name="list" expected="2" found="3"
-10:12-10:19 E0347 type.bound-not-satisfied ty="list[int, ref mem.Region]" bound="Len"

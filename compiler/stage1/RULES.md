@@ -12454,3 +12454,332 @@ made it `(1)`, as R233 says.
       own cases do, and `testing/failure_database`, `testing/json_events` and
       `packages/cover_black_box` do not differ. Stage 1 decides it
       (RULES.md, R236).
+
+## R237. D-060's allocators, the third step: the collections' other methods on any allocator, `Global`'s SIR kept (decision 1340)
+
+**The rule.** R225's plan, the methods' part of its third step, which
+R234 left at `Global` ("a `list[int, ref Region]` grows by `try_push` and
+has no `len` yet"), and decision 1327's ask of stage 1 before the
+runtime's half: every method of `list`, `dict`, `set` and `String` works
+on a collection on another allocator, and in a function generic over `A:
+Allocator`. R234 decided against the impls generic over the allocator
+because each of their methods would then name it in its SIR
+(`list.sort_by[int, Global]`) where a program that names no allocator has
+`list.sort_by[int]`. Stage 1 now has both:
+
+- **Two impls of each method.** The prelude's impls over `list[T]`,
+  `dict[K, V]`, `set[T]` and `String` stay what they are, impls over the
+  collection at `Global` (R227), so a program that names no allocator, or
+  names `Global`, calls the functions it called and has its SIR byte for
+  byte. Beside them `std.mem` declares, in the part the base declares
+  (after its last line, `MEM_TAIL_START`, so that every other line of the
+  module keeps its place), the same methods over the collection on any
+  allocator: `impl[T, A: Allocator] list[T, A]` with `push`, `pop`,
+  `insert`, `remove`, `is_empty`, `contains`, `is_sorted`, `get`, `first`,
+  `last`, `iter`, `as_slice`, `sort`, `sort_by`, `reverse`, `swap`,
+  `clear`, `extend`, `join` and `sum`; `dict`'s `get` to `items`; `set`'s
+  `add` to `iter`; `String`'s `push`, `push_char` and `clear`; and the
+  trait impls, `Debug`, `Display`, `Eq`, `PartialOrd`, `Ord`, `Hash`,
+  `Len` and `Contains` of `list[T, A]`, those of `set[T, A]` and
+  `dict[K, V, A]`, and `String[A]`'s `Display`, `Debug`, `Eq`,
+  `PartialOrd`, `Ord`, `Hash` and `Len`. Each is the prelude method's
+  intrinsic or its body again, but `sort_by`, which sorts the elements in
+  a list on `Global` and puts them back in the room they had, and
+  `extend`, which takes a list on the same allocator.
+- **Which a call reaches.** A collection's type leaves `Global` out
+  (R227), so a type that names its allocator, `list[int, ref Region]` or
+  `list[T, A]`, is one on another allocator or on a type parameter. Its
+  methods are registered under a key of their own (`TyKey.Allocated`,
+  `Types.key`, `names_allocator`), so a call on a collection on `Global`
+  finds the prelude's and a call on any other finds `std.mem`'s; a call
+  on `Global` that the prelude does not have, `with_allocator` and the
+  `try_` growths of R234, finds the impl over any allocator
+  (`Program.method`). A trait impl over `list[T, A]` matches only a type
+  that names its allocator, since `list[T]` and `list[T, A]` have
+  different arguments, so the two never overlap. The lookups by `str` of
+  R113 and R134 and the structural fast path of `contains`, `sort` and
+  `join` hold on any allocator (`is_lookup_key`, `allocator_bound`).
+- **Their SIR names.** The functions of the impls over any allocator are
+  `list#allocator.sort_by`, `list#allocator.Eq.eq` and so on
+  (`Ctx.owner_name`, `adt_owner`), a name a program cannot declare, beside
+  the prelude's `list.sort_by` and `list.Eq.eq`; their intrinsics are the
+  prelude's, `list.push`, `len`, `structural.eq`, whose operands' types
+  name the allocator. Lowering adds an impl over any allocator to the
+  SIR's impls only for a program that mentions a collection naming its
+  allocator (`allocated_name`), and a program on `Global` reaches none of
+  their functions, so it has the SIR it had.
+- **What still cannot.** A collection on another allocator is made by
+  `with_allocator`, which takes it: `list[int, A].new()` is `E0351` (no
+  `new` of a list on `A`; `new` makes one on `Global`). Mixing allocators
+  is a type error: `xs.extend(ys)` of a `list[int]` into a `list[int, ref
+  Region]` is `E0300`, and `xs == ys` is `E0369`. A list on a borrowed
+  `Region` that outlives it is `E0407`, as any view returned past its
+  referent is (R21, R234: `with_allocator` borrows from its argument). The
+  prelude's other impls over a collection, `Default` (which has no
+  allocator value to hold), `FromLiteral`, and the std modules' impls
+  over `list[T]` (`Lookup` and the iterators' `collect`), stay at
+  `Global`.
+
+**What stage 0 must do**, beyond R234's eight intrinsics: run each
+intrinsic of the collections on a collection whose SIR type names an
+allocator other than `mem.Global` (`list[int, ref mem.Region]`, or
+`list[$0, $1]` in a generic function's instance), in the interpreter and
+natively, as the same intrinsic does on `Global`, every growth through
+the allocator the collection holds (`A.acquire`, the old room given back
+by `A.release`), a growth that gets no block panicking as `push` does on
+`Global`: `list.push`, `list.pop`, `list.insert`, `list.remove`,
+`list.is_empty`, `list.contains`, `list.get`, `list.first`, `list.last`,
+`list.iter`, `list.as_slice`, `list.sort`, `list.join`, `list.reverse`,
+`list.swap`, `list.clear`, `list.extend`, `sum` and `len` of a list;
+`dict.get` (and `dict.get_str`), `dict.insert`, `dict.remove` (and
+`dict.remove_str`), `dict.contains`, `dict.is_empty`, `dict.entry` (with
+`Entry.or_insert` growing the dict through its allocator), `dict.keys`,
+`dict.values`, `dict.items` and `len`; `set.add`, `set.remove` (and
+`set.remove_str`), `set.contains` (and `set.contains_str`),
+`set.is_empty`, `set.iter` and `len`; `String.push`, `String.push_char`,
+`String.clear`, `len` and the `structural.*` intrinsics of `String[A]`;
+and what the SIR does to a collection without an intrinsic: an index
+(`xs[i]`, a place's projection), iteration (`iter.ref` and `Iter.next`),
+a `.copy()` (a copy on the same allocator), a `String[A]` read as a
+`str`, and the drop (each element dropped, the room released through the
+allocator). A generic function's instance with `A` = `mem.Global` calls
+the same intrinsics on a collection of today's layout, which must behave
+as `Global`'s do: the case `findings29/allocators_generic.sisu` does it
+on today's runtime, interpreted and natively. The functions
+`list#allocator.*` are ordinary SIR functions. R234's forms are as they
+were, byte for byte (`findings28/asks.answers`' SIR of
+`allocator_region.sisu` is unchanged): its eight intrinsics, their type
+arguments and their declarations; this rule only adds the intrinsics
+above on a collection that names its allocator.
+
+No form the driver relies on is added by this rule, and `sisu1
+--version` stays 0.22.0.
+
+**Decided against**: the prelude's impls made generic over the allocator,
+which would name it in every method's SIR (R234's reason) or, with each
+function lowered twice, once with `Global` put for the parameter under the
+allocator-free name and once as it is, a substitution of every type of a
+typed body before lowering, through every place lowering reads a type;
+two impls of each method, the prelude's and `std.mem`'s, give the same
+SIR for `Global` with no change to lowering's walk, at the cost of the
+methods' text written twice, which the case `allocators_generic` and the
+corpus keep in step. And for the round, `Default` of a collection on
+another allocator (no value to make the allocator from) and the std
+modules' impls over a `list[T]`.
+
+**Why.** Item 1 of the round: R225's third step and decision 1327.
+
+**In stage 1.** `std/mem.sisu` (the impls after `MEM_TAIL_START`),
+`typeck.ty` (`TyKey.Allocated`, `key`, `adt_key`, `names_allocator`),
+`typeck.program` (`method`, `RANK_STEP` 512, which the base's part of
+`std.mem` now needs, R227's `reranked`), `typeck.collect`
+(`MEM_TAIL_START`), `typeck.call` (`is_lookup_key`), `typeck.expr`
+(`builtin_call`), `lower.names` (`owner_name`, `adt_owner`), `lower`
+(`allocated_name`, the impls a program mentions), `lower.exprs`
+(`allocator_bound`).
+
+**What it changes.** No program of the corpus. The cases
+`cases/findings29/allocators_generic.sisu` (its `.out`: functions over `A:
+Allocator` growing, sorting, joining and comparing a list, a dict and a
+set, called on `Global`, interpreted and natively),
+`allocator_methods.sisu` (no error: every method of the four collections
+on a borrowed `Region`, which the runtime does not run yet, so it has no
+`.out`), `allocator_region_sorted.sisu` (no error; its SIR, asked by
+`findings29/asks.requests`, calls `list#allocator.sort_by` and
+`list#allocator.contains` and the intrinsics on `ref mem.Region`),
+`allocator_mixing.sisu` (its `.diag`: `E0300`, `E0369` and `E0351`) and
+`allocator_outlives.sisu` (its `.diag`: `E0407`). The Rust front end
+has none of these names (`E0201`, `E0220`), as R227 lists.
+
+Blessed again: `cases/findings27/allocator_errors.diag`, whose `E0347`
+for `len` of a `list[int, ref Region]` is gone (the list has its `len`
+now; the case's comment says so), leaving `E0208`.
+
+- Differs: `compiler/stage1/cases/findings29/allocators_generic.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings29/allocator_methods.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings29/allocator_region_sorted.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings29/allocator_mixing.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings29/allocator_outlives.sisu`: names, ids, human, doc, doc-output
+
+**Decision 1340**, for docs/architecture.md:
+
+1340. Every method of `list`, `dict`, `set` and `String`, and their impls
+      of `Debug`, `Display`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Len` and
+      `Contains`, works on a collection on another allocator and on one
+      of a type parameter `A: Allocator`: `std.mem` declares them over the
+      collection on any allocator, beside the prelude's over the
+      collection at `Global`, a type that names its allocator finds
+      `std.mem`'s and one on `Global` the prelude's, so a program that
+      names no allocator has the SIR it had, and their functions are
+      named `list#allocator.sort_by` and so on in the SIR. The runtime
+      runs the collections' intrinsics on a collection whose type names
+      another allocator through it. Stage 1 decides it (RULES.md, R237).
+
+## R238. The type checker's memo's prerequisites: each definition's key across requests, and each body's reads recorded (decision 1341)
+
+**The rule.** Nothing a command prints changes but the new `query reads`.
+R235 named what a memo of the type checker's results needs before it can
+come: the program's own definitions numbered by something a request does
+not change, where each resolution numbers them in the order of the
+program's modules and items (`DefId`), so that a function added above
+another renumbers everything after it; and the checker recording, for
+each body, the declarations its check read, which it recorded nowhere.
+Stage 1 now has both:
+
+- **A definition's key** (`Program.def_key`): its module, what it is and
+  its path in the module, `main fn Point.moved`, `main impl Display for
+  Point`, `main fn impl Display for Point.fmt`, `prelude struct list`,
+  with `#2` and on for a second definition of one key, which the checker
+  reports as a duplicate. The key is the same in every request that
+  declares the definition the same way, whatever its number; the base's
+  definitions, whose numbers are the same in every request, have keys of
+  the same form, so that one record names both kinds.
+- **Each body's reads** (`Checker.reads`, `Finished.reads`, `Typed.reads`):
+  after a body is checked, the definitions it named, in the order of
+  definitions, each once: the functions it calls or takes as values, the
+  constants, structs, variants and defaults it names, the definitions the
+  types of its values, locals and patterns name (a type's type arguments,
+  a tuple's elements, a function type's, an error set's members, a
+  `dyn`'s and an associated type's trait), the traits its bounds and its
+  calls of trait methods ask for, and the templates it asks instances of.
+  What the memo then compares of each, by its key, is what the check read
+  of it: a function's signature and inferred error set, a type's fields,
+  variants and methods' signatures, a trait's impls, a constant's value;
+  a body with a diagnostic is checked again whatever it read.
+- **`query reads FILE`**: each function of the program's own modules by
+  its key, a tab, and the keys of what its check read, separated by `; `,
+  a line each in the order of the keys, so that a request whose change
+  renumbers the definitions answers the same lines for the bodies it
+  leaves as they were. No form the driver relies on; the language server
+  does not ask it.
+
+The checker's results themselves are not kept across requests yet: the
+memo, a body's `TBody`, its diagnostics and its requests taken again when
+its text and what it read are unchanged, then lowering's per module
+(R235), is a round's work of its own, decided against for this one (below).
+
+**Measured** (natively, the release profile, served, the mean of 20
+requests after the first, at a load of about 2): a `query
+diagnostics` of `compiler/rt`'s `src/show.sisu`, each request with the
+module changed by a line from the last, takes 0.71 to 0.75 s (a mean of
+0.73 s over four runs) where it took 0.69 to 0.72 s (0.71 s) before the
+reads were recorded: the walk of each body's expressions, locals,
+patterns and bounds once, with each type it meets walked once, is about
+3 % of a request. The 21 answers are byte for byte those before.
+
+**Decided against**, for the round: the memo itself. With the keys and
+the reads, what is left is the comparison of each read definition between
+two requests (a fingerprint of what the check reads of it, by kind), the
+`TBody` kept with its types carried from the request's table to the next
+(R220's `remap_body`, with the program's own definitions carried by their
+keys as well as the types by structure), and lowering's names made per
+module (`lower.index_names`, `StdSlots`), each of the size of R228's
+whole rule; the round's first item, the allocators' methods, took its
+time.
+
+**Why.** Item 2 of the round: R235's prerequisites.
+
+**In stage 1.** `typeck.check` (`Checker.reads`, `read_def`, `ty_reads`,
+`Finished.reads`), `typeck` (`BodyResult.reads`, `Round.reads`,
+`Typed.reads`, `check_one`), `typeck.program` (`def_key`, `key_of`,
+`def_path`, `def_kind_word`), `main` (`query reads`, `query_reads`).
+
+**What it changes.** No output of the corpus. The case
+`cases/findings29/reads.sisu`, asked by `findings29/asks.requests` with
+`query reads` of its text and of `reads_changed.txt`, the same text with
+a function added above the others, which renumbers every definition after
+it: the lines of the functions it leaves as they were are the same.
+
+**Decision 1341**, for docs/architecture.md:
+
+1341. Each definition of a program has a key across a server's requests,
+      its module, its kind and its path in the module, which a definition
+      added above it does not change as it changes its number, and the
+      type checker records for each body the definitions its check read
+      (what it calls and names, what its types name, the traits its
+      bounds ask for), which `sisu1 query reads FILE` prints by key: what
+      a memo of the checker's results, a later round's, compares before
+      it takes a body's results again. Stage 1 decides it (RULES.md,
+      R238).
+
+## R239. `E0282`'s note through a call names the callee's own operation (decision 1342)
+
+**The rule.** The manual's finding (its step 40, "Diagnostics without
+fixes"): R229 made `E0282` itself name what the program wrote, but the
+note at a call of a function that allocates still named the intrinsic the
+callee's statement lowers to, "`louder` calls `list.new`" of a
+comprehension, "`Logged.Reading.celsius` calls `fmt.new`" of an
+interpolation, "calls `list.push`" of a `push`. The note now says what the
+callee does, in the program's words (`how_words`):
+
+- a list, a set or a dict it makes (a literal, a comprehension, `new`):
+  "makes a list", "makes a set", "makes a dict";
+- an interpolation or a `String` it builds: "builds a `String`";
+- a growth: "grows a list with `push`" (`insert`, `extend`), "grows a dict
+  with `insert`" (`entry`), "grows a set with `add`", "grows a `String`
+  with `push`" (`push_char`);
+- "makes a `Shared` value", "joins two byte strings", and of any other
+  intrinsic whose result owns memory "makes a value that owns memory with
+  `to_string`", the method the program called.
+
+What the note said already in words (a closure that holds what it
+captures, a copy, a function value, a method of a type only the run
+knows) does not change, and neither does the place after "at".
+
+```text
+error[E0282]: `play` is `@no_alloc`, but `louder` may allocate
+  --> e0282_no_alloc.sisu:10:16
+   |
+10 |     let loud = louder(samples, gain)
+   |                ^^^^^^^^^^^^^^^^^^^^^
+  = note: `louder` makes a list, at e0282_no_alloc.sisu:5:12
+  = fix: remove `@no_alloc`, so that `play` may allocate
+```
+
+**Why.** Item 3 of the round: the manual's finding.
+
+**In stage 1.** `borrowck.alloc` (`how_words`, `allocation`).
+
+**What it changes.** The words of the notes of `E0282` at a call; the
+`.diag` files, which hold the identifiers, do not change. Blessed again:
+`cases/findings25/asks.answers` ("`Synth.next_sample` grows a list with
+`push`") and `cases/findings26/asks.answers` ("`Big.Weighed.weight` grows
+a list with `push`"). The new case `cases/findings29/no_alloc_through.sisu`
+(its `.diag`; its words in `findings29/asks.answers`): a comprehension, an
+interpolation and a `push` in three callees. The manual's
+`e0282_no_alloc.console` shows the old note, which `sisu`, whose front
+end is stage 1, now prints otherwise. The Rust front end answers it with
+`W0030`, as R215 lists.
+
+- Differs: `compiler/stage1/cases/findings29/no_alloc_through.sisu`: ids, human
+
+**Decision 1342**, for docs/architecture.md:
+
+1342. `E0282`'s note at a call of a function that allocates names what
+      the callee does in the program's words, "`louder` makes a list",
+      "builds a `String`", "grows a list with `push`", where it named the
+      intrinsic the callee's statement lowers to (`list.new`, `fmt.new`,
+      `list.push`), as R229 made the error itself. Stage 1 decides it
+      (RULES.md, R239).
+
+## R240. The merge's differences: none (decision 1343)
+
+**The rule.** Nothing a command prints changes. Stage 0's twenty-sixth
+round added the conformance case `testing/cover_transcript` (decision
+1320), a program tested by one transcript, which differs from stage 0's
+front end in no class: its AST, names, types, SIR, diagnostics and pages
+are the Rust front end's, its transcripts' SIR (`transcripts`) is too, and
+what it does is its expectation, from stage 1's SIR (`behaviour`),
+interpreted and natively. The round's run of `check.sh --native --names
+--types --sir` reported no difference that no rule lists but the round's
+own cases' and `findings27/allocator_errors`'s `.diag`, which R237 changes.
+
+**Why.** Item 4 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 1343**, for docs/architecture.md:
+
+1343. Stage 1's twenty-ninth round brought no difference from the merge:
+      the conformance suite's `testing/cover_transcript` differs from
+      stage 0's front end in nothing. Stage 1 decides it (RULES.md, R240).

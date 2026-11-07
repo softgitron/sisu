@@ -400,6 +400,11 @@ pub struct Resolver:
 ## and `Plain` after.
 const MEM_HEAD_END: str = "## The alignment of a `Region`'s base."
 
+## Where the impls over the collections on any allocator start, at the end
+## of `std.mem`, which the base declares with its head (RULES.md, R237), so
+## that every other line of the module keeps its place.
+const MEM_TAIL_START: str = "# The collections' other methods on any allocator"
+
 impl Resolver:
     pub pure def new() -> Resolver:
         let parsed: dict[String, Module] = {}
@@ -622,8 +627,10 @@ impl Resolver:
             var head = whole.copy()
             head.items = []
             let cut = mem_text.find(MEM_HEAD_END) ?? mem_text.byte_len()
+            let tail = mem_text.find(MEM_TAIL_START) ?? mem_text.byte_len()
             for id in whole.items:
-                if whole.ast.item(id).range.start < cut:
+                let start = whole.ast.item(id).range.start
+                if start < cut or start >= tail:
                     head.items.push(id)
             # Its derived impls come with the rest, whose `Debug` of `RawBuf`
             # they hold.

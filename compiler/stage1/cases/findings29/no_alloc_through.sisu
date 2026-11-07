@@ -1,0 +1,29 @@
+# `E0282`'s note through a call names what the callee does, in the
+# program's words (RULES.md, R237): `louder` makes a list, `label` builds
+# a `String`, `tally` grows a list with `push`, never the intrinsic each
+# lowers to (`list.new`, `fmt.new`, `list.push`).
+
+## The samples, made louder by `gain`.
+def louder(samples: list[f32], gain: f32) -> list[f32]:
+    return [s * gain for s in samples]
+
+## The text of `n`.
+def label(n: int) -> String:
+    return "n is {n}"
+
+## `n` pushed onto `xs`.
+def tally(mut xs: list[int], n: int):
+    xs.push(n)
+
+@no_alloc
+def play(mut out: Array[f32, 2], samples: list[f32], mut seen: list[int]):
+    let loud = louder(samples, 2.0)
+    out[0] = loud[0]
+    _ = label(1)
+    tally(mut seen, 1)
+
+def main():
+    var out: Array[f32, 2] = Array.filled(0.0f32)
+    var seen: list[int] = []
+    play(mut out, [0.5, 0.25], mut seen)
+    print(out[0])

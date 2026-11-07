@@ -1,6 +1,6 @@
 # The allocator parameter's errors (RULES.md, R227): a collection of too
-# many arguments, and one on another allocator than `Global`, whose impls
-# wait for the allocators' third step (R225), so that it has no `len`.
+# many arguments; one on another allocator than `Global` has its `len`
+# since the allocators' third step (R237).
 from std.mem import Region
 
 def too_many(xs: list[int, Global, Global]) -> int:

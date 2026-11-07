@@ -35,7 +35,7 @@ from stage1.sir import (
     VALUE_WRAPPER,
 )
 from stage1.syntax.ast import BinOp, CmpOp, Mode, UnOp
-from stage1.typeck.program import param_local_ty
+from stage1.typeck.program import Program, param_local_ty
 from stage1.typeck.std_sources import own_kind, sized
 from stage1.typeck.thir import (
     ArgMode,
@@ -1512,6 +1512,10 @@ impl FnLower:
         if let Some(s) = f.structural:
             var all = True
             for p in f.predicates:
+                # The allocator of an impl over a collection on any
+                # allocator is no trait the host computes (RULES.md, R237).
+                if allocator_bound(cx.prog, p.bound.def_):
+                    continue
                 let subst = self.types.subst(p.ty, type_args)
                 let subject = cx.prog.normalize(mut self.types, subst, self.bounds)
                 if not cx.prog.is_structural(mut self.types, subject, p.bound.def_):
@@ -1958,6 +1962,11 @@ pure def keyed(p: Place) -> bool:
         if let Proj.Key(_) = x:
             return True
     return False
+
+## Whether `t` is `std.mem`'s `Allocator`, the bound of a collection's
+## allocator parameter (RULES.md, R227, R237).
+pure def allocator_bound(prog: Program, t: DefId) -> bool:
+    return prog.qualified_name(t) == "mem.Allocator"
 
 pub pure def str_lookup(name: str) -> String?:
     return match name:

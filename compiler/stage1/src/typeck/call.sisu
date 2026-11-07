@@ -1722,13 +1722,19 @@ impl Checker:
     pure def is_lookup_key(self, cx: Cx) -> bool:
         let (callee, _) = self.arg_callee else:
             return False
+        # A collection on any allocator looks up as one on `Global` does
+        # (RULES.md, R237).
         if let Some(d) = cx.prog.wk.dict:
             for name in ["get", "contains", "remove"]:
                 if cx.prog.method(TyKey.Adt(d), name) == Some(callee):
                     return True
+                if cx.prog.method(TyKey.Allocated(d), name) == Some(callee):
+                    return True
         if let Some(t) = cx.prog.wk.set:
             for name in ["contains", "remove"]:
                 if cx.prog.method(TyKey.Adt(t), name) == Some(callee):
+                    return True
+                if cx.prog.method(TyKey.Allocated(t), name) == Some(callee):
                     return True
         return False
 

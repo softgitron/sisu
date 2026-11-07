@@ -1,0 +1,817 @@
+answer 1
+error[E0282]: `play` is `@no_alloc`, but `louder` may allocate
+  --> no_alloc_through.sisu:20:16
+   |
+20 |     let loud = louder(samples, 2.0)
+   |                ^^^^^^^^^^^^^^^^^^^^
+  = note: `louder` makes a list, at no_alloc_through.sisu:8:12
+  = fix: remove `@no_alloc`, so that `play` may allocate
+
+error[E0282]: `play` is `@no_alloc`, but `label` may allocate
+  --> no_alloc_through.sisu:22:9
+   |
+22 |     _ = label(1)
+   |         ^^^^^^^^
+  = note: `label` builds a `String`, at no_alloc_through.sisu:12:12
+  = fix: remove `@no_alloc`, so that `play` may allocate
+
+error[E0282]: `play` is `@no_alloc`, but `tally` may allocate
+  --> no_alloc_through.sisu:23:5
+   |
+23 |     tally(mut seen, 1)
+   |     ^^^^^^^^^^^^^^^^^^
+  = note: `tally` grows a list with `push`, at no_alloc_through.sisu:16:5
+  = fix: remove `@no_alloc`, so that `play` may allocate
+
+error: Failed
+answer 1
+error[E0300]: expected `list[int, ref mem.Region]`, found `list[int]`
+  --> allocator_mixing.sisu:10:15
+   |
+10 |     xs.extend(ys)
+   |               ^^
+
+error[E0369]: `list[int, ref mem.Region]` and `list[int]` cannot be compared
+  --> allocator_mixing.sisu:11:11
+   |
+11 |     print(xs == ys)
+   |           ^^^^^^^^
+
+error[E0351]: `list[int, A]` has no associated function `new`
+  --> allocator_mixing.sisu:14:25
+   |
+14 |     return list[int, A].new()
+   |                         ^^^
+
+error: Failed
+answer 0
+sir 0
+source 0 "allocator_region_sorted.sisu"
+source 1 "<std>/prelude.sisu"
+source 2 "<std>/mem.sisu"
+entry main
+
+struct u8 {  }
+
+struct Cell[T] {  }
+
+enum Ordering { Less, Equal, Greater }
+
+struct ptr_mut[T] {  }
+
+struct mem.Layout { size: int, align: int }
+
+struct mem.Global {  }
+
+struct mem.Region drop mem.Region.Drop.drop { base: ptr_mut[u8], size: int, used: Cell[int] }
+
+intrinsic Cell.new pure from 0 own 0
+intrinsic Iter.next pure inner 0 keeps 0
+intrinsic Option.expect pure from 0 inner 1 own 0
+intrinsic int.cmp pure
+intrinsic len pure
+intrinsic list.contains pure
+intrinsic list.extend pure own 1 keeps 0 1
+intrinsic list.is_empty pure
+intrinsic list.pop pure inner 0 keeps 0
+intrinsic list.push pure own 1 keeps 0 1
+intrinsic list.reverse pure keeps 0
+intrinsic list.with_allocator pure from 0 own 0
+intrinsic mem.global.acquire pure
+intrinsic mem.global.release pure
+intrinsic panic pure
+intrinsic range pure
+
+fn sorted_in(2) source 0 @9:5-9:14 {
+    let _0: int
+    let _1: ref mem.Region "r" @9:15-9:28
+    let _2: int "n" @9:30-9:36
+    let _3: list[int, ref mem.Region] "xs" @10:9-10:11
+    let _4: Iter[int]
+    let _5: int
+    let _6: ref mut Iter[int]
+    let _7: Option[int]
+    let _8: int
+    let _9: int "i" @11:9-11:10
+    let _10: ()
+    let _11: ref mut list[int, ref mem.Region]
+    let _12: int
+    let _13: ()
+    let _14: ref mut list[int, ref mem.Region]
+    let _15: pure fn(ref int, ref int) -> Ordering
+    let _16: bool
+    let _17: bool
+    let _18: ref list[int, ref mem.Region]
+    let _19: int
+    let _20: ref int
+    let _21: int
+    let _22: ref list[int, ref mem.Region]
+    let _23: int
+    let _24: Option[int]
+    let _25: ref mut list[int, ref mem.Region]
+    let _26: int
+  bb0:
+    _3 = call intrinsic list.with_allocator[int, ref mem.Region](copy _1) @10:37-10:59
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = call fn range#step() @11:14-11:22
+    _4 = call intrinsic range(const 0, copy _2, copy _5) @11:14-11:22
+    goto bb4
+  bb2 (cleanup):
+    drop _3
+    resume
+  bb3 (cleanup):
+    drop _4
+    goto bb2
+  bb4 (unwind bb3):
+    _6 = ref mut _4 @11:5-11:22
+    _7 = call intrinsic Iter.next(copy _6) @11:5-11:22
+    _8 = discriminant _7 @11:5-11:22
+    switch copy _8 [0: bb5, else: bb6] @11:5-11:22
+  bb5 (unwind bb3):
+    _9 = copy _7.as(0).0 @11:9-11:10
+    _11 = ref mut _3 @12:9-12:11
+    _12 = sub copy _2, copy _9 @12:17-12:22
+    _10 = call intrinsic list.push(copy _11, copy _12) @12:9-12:23
+    goto bb4
+  bb6 (unwind bb2):
+    drop _4 @12:23-12:23
+    goto bb7
+  bb7 (unwind bb2):
+    dead _4 @12:23-12:23
+    _14 = ref mut _3 @13:5-13:7
+    _15 = closure sorted_in#closure0() @13:16-13:34
+    goto bb8
+  bb8 (unwind bb9):
+    _13 = call fn list#allocator.sort_by[int, ref mem.Region](copy _14, copy _15) @13:5-13:35
+    goto bb10
+  bb9 (cleanup):
+    drop _15
+    goto bb2
+  bb10 (unwind bb2):
+    drop _15 @13:35-13:35
+    goto bb11
+  bb11 (unwind bb2):
+    _18 = ref _3 @14:12-14:14
+    _19 = const 1 @14:24-14:25
+    _20 = ref _19 @14:24-14:25
+    _17 = call intrinsic list.contains(copy _18, copy _20) @14:12-14:26
+    _16 = not copy _17 @14:8-14:26
+    switch copy _16 [0: bb13, else: bb12] @14:8-14:26
+  bb12 (unwind bb2):
+    _0 = const 0 @15:16-15:17
+    goto bb14
+  bb13 (unwind bb2):
+    dead _19
+    _22 = ref _3 @16:16-16:18
+    _21 = call intrinsic len(copy _22) @16:12-16:19
+    _25 = ref mut _3 @16:23-16:25
+    _24 = call intrinsic list.pop(copy _25) @16:23-16:31
+    _26 = discriminant _24 @16:22-16:37
+    switch copy _26 [0: bb15, else: bb16] @16:22-16:37
+  bb14:
+    drop _3 @15:9-15:17
+    return @15:9-15:17
+  bb15 (unwind bb2):
+    _23 = copy _24.as(0).0 @16:22-16:37
+    goto bb17
+  bb16 (unwind bb2):
+    _23 = const 0 @16:35-16:36
+    goto bb17
+  bb17 (unwind bb2):
+    _0 = add copy _21, copy _23 @16:12-16:37
+    goto bb18
+  bb18:
+    drop _3 @16:5-16:37
+    return @16:5-16:37
+}
+
+fn sorted_in#closure0(3) closure pure source 0 from 0 1 2 @13:16-13:34 {
+    let _0: Ordering
+    let _1: () "env"
+    let _2: ref int "a" @13:17-13:18
+    let _3: ref int "b" @13:20-13:21
+    let _4: int
+  bb0:
+    _4 = copy _3.* @13:32-13:33
+    _0 = call intrinsic int.cmp(copy _2.*, copy _4) @13:26-13:34
+    return @13:26-13:34
+}
+
+fn main(0) source 0 @18:5-18:9 {
+    let _0: ()
+    let _1: mem.Region "region" @19:9-19:15
+    let _2: int
+    let _3: ref mem.Region
+  bb0:
+    _1 = call fn mem.Region.bump(const 1024) @19:18-19:44
+    goto bb1
+  bb1 (unwind bb2):
+    _3 = ref _1 @20:19-20:29
+    _2 = call fn sorted_in(copy _3, const 3) @20:9-20:33
+    _0 = const ()
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3:
+    drop _1 @20:33-20:33
+    return
+}
+
+fn merge_runs[T](3) pure source 1 from 0 1 own 0 1 @2234:10-2234:20 {
+    let _0: list[$0]
+    let _1: list[$0] "earlier" @2235:5-2235:25
+    let _2: list[$0] "later" @2235:27-2235:45
+    let _3: pure fn(ref $0, ref $0) -> Ordering "cmp" @2235:47-2235:83
+    let _4: list[$0] "a" @2237:9-2237:10
+    let _5: list[$0] "b" @2238:9-2238:10
+    let _6: list[$0] "out" @2239:9-2239:12
+    let _7: bool
+    let _8: bool
+    let _9: ref list[$0]
+    let _10: bool
+    let _11: ref list[$0]
+    let _12: bool
+    let _13: Ordering
+    let _14: ref $0
+    let _15: int
+    let _16: ref $0
+    let _17: int
+    let _18: Ordering
+    let _19: ()
+    let _20: ref mut list[$0]
+    let _21: $0
+    let _22: Option[$0]
+    let _23: ref mut list[$0]
+    let _24: ()
+    let _25: ref mut list[$0]
+    let _26: $0
+    let _27: Option[$0]
+    let _28: ref mut list[$0]
+    let _29: bool
+    let _30: bool
+    let _31: ref list[$0]
+    let _32: ()
+    let _33: ref mut list[$0]
+    let _34: $0
+    let _35: Option[$0]
+    let _36: ref mut list[$0]
+    let _37: bool
+    let _38: bool
+    let _39: ref list[$0]
+    let _40: ()
+    let _41: ref mut list[$0]
+    let _42: $0
+    let _43: Option[$0]
+    let _44: ref mut list[$0]
+    let _45: ()
+    let _46: ref mut list[$0]
+    let _47: bool "flag"
+    let _48: bool "flag"
+  bb0:
+    _47 = const true
+    _48 = const false
+    goto bb1
+  bb1 (unwind bb4):
+    _4 = move _1 @2237:13-2237:20
+    goto bb5
+  bb2 (cleanup):
+    resume
+  bb3 (cleanup):
+    drop _2 if _47
+    resume
+  bb4 (cleanup):
+    drop _3
+    goto bb3
+  bb5 (unwind bb6):
+    _47 = const false
+    _5 = move _2 @2238:13-2238:18
+    goto bb7
+  bb6 (cleanup):
+    drop _4
+    goto bb4
+  bb7 (unwind bb8):
+    _6 = list() @2239:24-2239:26
+    _48 = const true
+    goto bb10
+  bb8 (cleanup):
+    drop _5
+    goto bb6
+  bb9 (cleanup):
+    drop _6 if _48
+    goto bb8
+  bb10 (unwind bb9):
+    _9 = ref _4 @2241:15-2241:16
+    _8 = call intrinsic list.is_empty(copy _9) @2241:15-2241:27
+    _7 = not copy _8 @2241:11-2241:27
+    switch copy _7 [0: bb12, else: bb11] @2241:11-2241:48
+  bb11 (unwind bb9):
+    _11 = ref _5 @2241:36-2241:37
+    _10 = call intrinsic list.is_empty(copy _11) @2241:36-2241:48
+    _7 = not copy _10 @2241:32-2241:48
+    switch copy _7 [0: bb16, else: bb13] @2241:11-2241:48
+  bb12 (unwind bb9):
+    switch copy _7 [0: bb16, else: bb13] @2241:11-2241:48
+  bb13 (unwind bb9):
+    _15 = const 1 @2242:23-2242:24
+    _14 = ref _5[^_15] @2242:16-2242:25
+    _17 = const 1 @2242:34-2242:35
+    _16 = ref _4[^_17] @2242:27-2242:36
+    _13 = call copy _3(copy _14, copy _16) @2242:12-2242:37
+    _18 = variant Ordering::Less() @2242:41-2242:45
+    _12 = ne copy _13, copy _18 @2242:12-2242:45
+    switch copy _12 [0: bb14, else: bb15] @2242:12-2242:45
+  bb14 (unwind bb9):
+    _25 = ref mut _6 @2245:13-2245:16
+    _28 = ref mut _4 @2245:22-2245:23
+    _27 = call intrinsic list.pop(copy _28) @2245:22-2245:29
+    _26 = call intrinsic Option.expect(move _27, const "an element") @2245:22-2245:50
+    _24 = call intrinsic list.push(copy _25, move _26) @2245:13-2245:51
+    goto bb10
+  bb15 (unwind bb9):
+    _20 = ref mut _6 @2243:13-2243:16
+    _23 = ref mut _5 @2243:22-2243:23
+    _22 = call intrinsic list.pop(copy _23) @2243:22-2243:29
+    _21 = call intrinsic Option.expect(move _22, const "an element") @2243:22-2243:50
+    _19 = call intrinsic list.push(copy _20, move _21) @2243:13-2243:51
+    goto bb10
+  bb16 (unwind bb9):
+    _31 = ref _4 @2246:15-2246:16
+    _30 = call intrinsic list.is_empty(copy _31) @2246:15-2246:27
+    _29 = not copy _30 @2246:11-2246:27
+    switch copy _29 [0: bb18, else: bb17] @2246:11-2246:27
+  bb17 (unwind bb9):
+    _33 = ref mut _6 @2247:9-2247:12
+    _36 = ref mut _4 @2247:18-2247:19
+    _35 = call intrinsic list.pop(copy _36) @2247:18-2247:25
+    _34 = call intrinsic Option.expect(move _35, const "an element") @2247:18-2247:46
+    _32 = call intrinsic list.push(copy _33, move _34) @2247:9-2247:47
+    goto bb16
+  bb18 (unwind bb9):
+    _39 = ref _5 @2248:15-2248:16
+    _38 = call intrinsic list.is_empty(copy _39) @2248:15-2248:27
+    _37 = not copy _38 @2248:11-2248:27
+    switch copy _37 [0: bb19, else: bb20] @2248:11-2248:27
+  bb19 (unwind bb9):
+    _46 = ref mut _6 @2250:5-2250:8
+    _45 = call intrinsic list.reverse(copy _46) @2250:5-2250:18
+    _48 = const false
+    _0 = move _6 @2251:12-2251:15
+    goto bb21
+  bb20 (unwind bb9):
+    _41 = ref mut _6 @2249:9-2249:12
+    _44 = ref mut _5 @2249:18-2249:19
+    _43 = call intrinsic list.pop(copy _44) @2249:18-2249:25
+    _42 = call intrinsic Option.expect(move _43, const "an element") @2249:18-2249:46
+    _40 = call intrinsic list.push(copy _41, move _42) @2249:9-2249:47
+    goto bb18
+  bb21 (unwind bb8):
+    _48 = const false
+    goto bb22
+  bb22 (unwind bb6):
+    drop _5 @2251:5-2251:15
+    goto bb23
+  bb23 (unwind bb4):
+    drop _4 @2251:5-2251:15
+    goto bb24
+  bb24 (unwind bb3):
+    drop _3 @2251:5-2251:15
+    goto bb25
+  bb25 (unwind bb2):
+    _47 = const false
+    goto bb26
+  bb26:
+    return @2251:5-2251:15
+}
+
+fn list#allocator.sort_by[T, A](2) pure source 2 @989:14-989:21 {
+    let _0: ()
+    let _1: ref mut list[$0, $1] "self" @989:14-989:21
+    let _2: pure fn(ref $0, ref $0) -> Ordering "cmp" @989:32-989:68
+    let _3: bool
+    let _4: int
+    let _5: ref list[$0, $1]
+    let _6: list[$0] "all" @992:13-992:16
+    let _7: Option[$0]
+    let _8: ref mut list[$0, $1]
+    let _9: int
+    let _10: $0 "x" @993:24-993:25
+    let _11: ()
+    let _12: ref mut list[$0]
+    let _13: ()
+    let _14: ref mut list[$0]
+    let _15: pure fn(ref $0, ref $0) -> Ordering
+    let _16: ref pure fn(ref $0, ref $0) -> Ordering
+    let _17: Option[$0]
+    let _18: ref mut list[$0]
+    let _19: int
+    let _20: $0 "x" @996:24-996:25
+    let _21: ()
+    let _22: ref mut list[$0, $1]
+    let _23: bool "flag"
+    let _24: bool "flag"
+    let _25: bool "flag"
+    let _26: bool "flag"
+  bb0:
+    _23 = const false
+    _24 = const false
+    _25 = const false
+    _26 = const false
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = ref _1.* @990:16-990:20
+    _4 = call intrinsic len(copy _5) @990:12-990:21
+    _3 = lt copy _4, const 2 @990:12-990:25
+    switch copy _3 [0: bb3, else: bb4] @990:12-990:25
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3 (unwind bb2):
+    _6 = list() @992:28-992:30
+    goto bb7
+  bb4 (unwind bb2):
+    _0 = const () @991:13-991:19
+    goto bb5
+  bb5:
+    drop _2 @991:13-991:19
+    return @991:13-991:19
+  bb6 (cleanup):
+    drop _6
+    goto bb2
+  bb7 (unwind bb6):
+    _8 = ref mut _1.* @993:29-993:33
+    _7 = call intrinsic list.pop(copy _8) @993:29-993:39
+    _25 = const true
+    goto bb8
+  bb8 (unwind bb9):
+    _9 = discriminant _7 @993:19-993:26
+    switch copy _9 [0: bb11, else: bb10] @993:19-993:26
+  bb9 (cleanup):
+    drop _7.as(0).0 if _25
+    goto bb6
+  bb10 (unwind bb6):
+    _25 = const false
+    _14 = ref mut _6 @995:9-995:12
+    _16 = ref _2 @995:21-995:40
+    _15 = closure list#allocator.sort_by#closure0[$0, $1](copy _16) @995:21-995:40
+    goto bb16
+  bb11 (unwind bb9):
+    _25 = const false
+    _10 = move _7.as(0).0 @993:24-993:25
+    _23 = const true
+    goto bb12
+  bb12 (unwind bb13):
+    _12 = ref mut _6 @994:13-994:16
+    _23 = const false
+    _11 = call intrinsic list.push(copy _12, move _10) @994:13-994:24
+    goto bb14
+  bb13 (cleanup):
+    drop _10 if _23
+    goto bb9
+  bb14 (unwind bb9):
+    _23 = const false
+    goto bb15
+  bb15 (unwind bb6):
+    _25 = const false
+    goto bb7
+  bb16 (unwind bb17):
+    _13 = call fn list.sort_by[$0](copy _14, copy _15) @995:9-995:41
+    goto bb18
+  bb17 (cleanup):
+    drop _15
+    goto bb6
+  bb18 (unwind bb6):
+    drop _15 @995:41-995:41
+    goto bb19
+  bb19 (unwind bb6):
+    _18 = ref mut _6 @996:29-996:32
+    _17 = call intrinsic list.pop(copy _18) @996:29-996:38
+    _26 = const true
+    goto bb20
+  bb20 (unwind bb21):
+    _19 = discriminant _17 @996:19-996:26
+    switch copy _19 [0: bb23, else: bb22] @996:19-996:26
+  bb21 (cleanup):
+    drop _17.as(0).0 if _26
+    goto bb6
+  bb22 (unwind bb6):
+    _26 = const false
+    _0 = const ()
+    goto bb28
+  bb23 (unwind bb21):
+    _26 = const false
+    _20 = move _17.as(0).0 @996:24-996:25
+    _24 = const true
+    goto bb24
+  bb24 (unwind bb25):
+    _22 = ref mut _1.* @997:13-997:17
+    _24 = const false
+    _21 = call intrinsic list.push(copy _22, move _20) @997:13-997:25
+    goto bb26
+  bb25 (cleanup):
+    drop _20 if _24
+    goto bb21
+  bb26 (unwind bb21):
+    _24 = const false
+    goto bb27
+  bb27 (unwind bb6):
+    _26 = const false
+    goto bb19
+  bb28 (unwind bb2):
+    drop _6 @997:25-997:25
+    goto bb29
+  bb29:
+    drop _2 @997:25-997:25
+    return
+}
+
+fn list#allocator.sort_by#closure0[T, A](3) closure pure source 2 from 0 1 2 @995:21-995:40 {
+    let _0: Ordering
+    let _1: (ref pure fn(ref $0, ref $0) -> Ordering,) "env(cmp)"
+    let _2: ref $0 "a" @995:22-995:23
+    let _3: ref $0 "b" @995:25-995:26
+  bb0:
+    _0 = call copy _1.0.*(copy _3, copy _2) @995:31-995:40
+    return @995:31-995:40
+}
+
+fn mem.Region.bump(1) pure source 2 @424:18-424:22 {
+    let _0: mem.Region
+    let _1: int "capacity" @424:23-424:36
+    let _2: mem.Layout "layout" @425:13-425:19
+    let _3: int
+    let _4: Option[ptr_mut[u8]]
+    let _5: mem.Global
+    let _6: ref mem.Global
+    let _7: int
+    let _8: ptr_mut[u8] "base" @426:13-426:17
+    let _9: Never
+    let _10: Cell[int]
+  bb0:
+    _3 = call fn mem.REGION_ALIGN() @425:50-425:62
+    _2 = struct mem.Layout(copy _1, copy _3) @425:22-425:63
+    _5 = struct mem.Global() @426:20-426:28
+    _6 = ref _5 @426:20-426:28
+    _4 = call intrinsic mem.global.acquire(copy _6, copy _2) @426:20-426:44
+    _7 = discriminant _4 @426:9-427:35
+    switch copy _7 [0: bb1, else: bb2] @426:9-427:35
+  bb1:
+    _8 = copy _4.as(0).0 @426:9-427:35
+    dead _5 @427:35-427:35
+    _10 = call intrinsic Cell.new(const 0) @428:54-428:61
+    _0 = struct mem.Region(copy _8, copy _1, move _10) @428:16-428:62
+    return @428:9-428:62
+  bb2:
+    _9 = call intrinsic panic(const "out of memory") @427:13-427:35
+    unreachable @427:13-427:35
+}
+
+fn list.sort_by[T](2) pure source 1 @2067:14-2067:21 {
+    let _0: ()
+    let _1: ref mut list[$0] "self" @2067:14-2067:21
+    let _2: pure fn(ref $0, ref $0) -> Ordering "cmp" @2067:32-2067:68
+    let _3: bool
+    let _4: int
+    let _5: ref list[$0]
+    let _6: list[list[$0]] "runs" @2070:13-2070:17
+    let _7: bool
+    let _8: bool
+    let _9: ref list[$0]
+    let _10: ()
+    let _11: ref mut list[list[$0]]
+    let _12: list[$0]
+    let _13: $0
+    let _14: Option[$0]
+    let _15: ref mut list[$0]
+    let _16: ()
+    let _17: ref mut list[list[$0]]
+    let _18: bool
+    let _19: int
+    let _20: ref list[list[$0]]
+    let _21: list[list[$0]] "merged" @2075:17-2075:23
+    let _22: bool
+    let _23: int
+    let _24: int
+    let _25: ref list[list[$0]]
+    let _26: ()
+    let _27: ref mut list[list[$0]]
+    let _28: list[$0]
+    let _29: Option[list[$0]]
+    let _30: ref mut list[list[$0]]
+    let _31: bool
+    let _32: int
+    let _33: ref list[list[$0]]
+    let _34: list[$0] "later" @2079:21-2079:26
+    let _35: Option[list[$0]]
+    let _36: ref mut list[list[$0]]
+    let _37: list[$0] "earlier" @2080:21-2080:28
+    let _38: Option[list[$0]]
+    let _39: ref mut list[list[$0]]
+    let _40: ()
+    let _41: ref mut list[list[$0]]
+    let _42: list[$0]
+    let _43: ()
+    let _44: ref mut list[list[$0]]
+    let _45: ()
+    let _46: ref mut list[$0]
+    let _47: list[$0]
+    let _48: Option[list[$0]]
+    let _49: ref mut list[list[$0]]
+    let _50: bool "flag"
+    let _51: bool "flag"
+    let _52: bool "flag"
+    let _53: bool "flag"
+  bb0:
+    _50 = const false
+    _51 = const false
+    _52 = const false
+    _53 = const false
+    goto bb1
+  bb1 (unwind bb2):
+    _5 = ref _1.* @2068:16-2068:20
+    _4 = call intrinsic len(copy _5) @2068:12-2068:21
+    _3 = lt copy _4, const 2 @2068:12-2068:25
+    switch copy _3 [0: bb3, else: bb4] @2068:12-2068:25
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3 (unwind bb2):
+    _6 = list() @2070:35-2070:37
+    _50 = const true
+    goto bb7
+  bb4 (unwind bb2):
+    _0 = const () @2069:13-2069:19
+    goto bb5
+  bb5:
+    drop _2 @2069:13-2069:19
+    return @2069:13-2069:19
+  bb6 (cleanup):
+    drop _6 if _50
+    goto bb2
+  bb7 (unwind bb6):
+    _9 = ref _1.* @2071:19-2071:23
+    _8 = call intrinsic list.is_empty(copy _9) @2071:19-2071:34
+    _7 = not copy _8 @2071:15-2071:34
+    switch copy _7 [0: bb8, else: bb9] @2071:15-2071:34
+  bb8 (unwind bb6):
+    _17 = ref mut _6 @2073:9-2073:13
+    _16 = call intrinsic list.reverse(copy _17) @2073:9-2073:23
+    goto bb10
+  bb9 (unwind bb6):
+    _11 = ref mut _6 @2072:13-2072:17
+    _15 = ref mut _1.* @2072:24-2072:28
+    _14 = call intrinsic list.pop(copy _15) @2072:24-2072:34
+    _13 = call intrinsic Option.expect(move _14, const "an element") @2072:24-2072:55
+    _12 = list(move _13) @2072:23-2072:56
+    _10 = call intrinsic list.push(copy _11, move _12) @2072:13-2072:57
+    goto bb7
+  bb10 (unwind bb6):
+    _20 = ref _6 @2074:19-2074:23
+    _19 = call intrinsic len(copy _20) @2074:15-2074:24
+    _18 = gt copy _19, const 1 @2074:15-2074:28
+    switch copy _18 [0: bb11, else: bb12] @2074:15-2074:28
+  bb11 (unwind bb6):
+    _46 = ref mut _1.* @2084:9-2084:13
+    _49 = ref mut _6 @2084:21-2084:25
+    _48 = call intrinsic list.pop(copy _49) @2084:21-2084:31
+    _47 = call intrinsic Option.expect(move _48, const "a run") @2084:21-2084:47
+    _45 = call intrinsic list.extend(copy _46, move _47) @2084:9-2084:48
+    _0 = const ()
+    goto bb27
+  bb12 (unwind bb6):
+    _21 = list() @2075:41-2075:43
+    _51 = const true
+    goto bb13
+  bb13 (unwind bb14):
+    _25 = ref _6 @2076:20-2076:24
+    _24 = call intrinsic len(copy _25) @2076:16-2076:25
+    _23 = mod copy _24, const 2 @2076:16-2076:29
+    _22 = eq copy _23, const 1 @2076:16-2076:34
+    switch copy _22 [0: bb16, else: bb15] @2076:16-2076:34
+  bb14 (cleanup):
+    drop _21 if _51
+    goto bb6
+  bb15 (unwind bb14):
+    _27 = ref mut _21 @2077:17-2077:23
+    _30 = ref mut _6 @2077:29-2077:33
+    _29 = call intrinsic list.pop(copy _30) @2077:29-2077:39
+    _28 = call intrinsic Option.expect(move _29, const "a run") @2077:29-2077:55
+    _26 = call intrinsic list.push(copy _27, move _28) @2077:17-2077:56
+    goto bb16
+  bb16 (unwind bb14):
+    _33 = ref _6 @2078:23-2078:27
+    _32 = call intrinsic len(copy _33) @2078:19-2078:28
+    _31 = ge copy _32, const 2 @2078:19-2078:33
+    switch copy _31 [0: bb17, else: bb18] @2078:19-2078:33
+  bb17 (unwind bb14):
+    _44 = ref mut _21 @2082:13-2082:19
+    _43 = call intrinsic list.reverse(copy _44) @2082:13-2082:29
+    _50 = const false
+    drop _6 @2083:13-2083:26
+    goto bb25
+  bb18 (unwind bb14):
+    _36 = ref mut _6 @2079:29-2079:33
+    _35 = call intrinsic list.pop(copy _36) @2079:29-2079:39
+    _34 = call intrinsic Option.expect(move _35, const "a run") @2079:29-2079:55
+    _52 = const true
+    goto bb19
+  bb19 (unwind bb20):
+    _39 = ref mut _6 @2080:31-2080:35
+    _38 = call intrinsic list.pop(copy _39) @2080:31-2080:41
+    _37 = call intrinsic Option.expect(move _38, const "a run") @2080:31-2080:57
+    _53 = const true
+    goto bb21
+  bb20 (cleanup):
+    drop _34 if _52
+    goto bb14
+  bb21 (unwind bb22):
+    _41 = ref mut _21 @2081:17-2081:23
+    _53 = const false
+    _52 = const false
+    _42 = call fn merge_runs[$0](move _37, move _34, copy _2) @2081:29-2081:60
+    _40 = call intrinsic list.push(copy _41, move _42) @2081:17-2081:61
+    goto bb23
+  bb22 (cleanup):
+    drop _37 if _53
+    goto bb20
+  bb23 (unwind bb20):
+    _53 = const false
+    goto bb24
+  bb24 (unwind bb14):
+    _52 = const false
+    goto bb16
+  bb25 (unwind bb14):
+    _51 = const false
+    _6 = move _21 @2083:13-2083:26
+    _50 = const true
+    goto bb26
+  bb26 (unwind bb6):
+    _51 = const false
+    _51 = const false
+    dead _21 @2083:26-2083:26
+    goto bb10
+  bb27 (unwind bb2):
+    _50 = const false
+    drop _6 @2084:48-2084:48
+    goto bb28
+  bb28:
+    drop _2 @2084:48-2084:48
+    return
+}
+
+fn mem.Region.Drop.drop(1) drop pure source 2 @464:14-464:18 {
+    let _0: ()
+    let _1: ref mut mem.Region "self" @464:14-464:18
+    let _2: ()
+    let _3: mem.Global
+    let _4: ref mem.Global
+    let _5: mem.Layout
+    let _6: int
+  bb0:
+    _3 = struct mem.Global() @468:16-468:24
+    _4 = ref _3 @468:16-468:24
+    _6 = call fn mem.REGION_ALIGN() @468:73-468:85
+    _5 = struct mem.Layout(copy _1.*.1, copy _6) @468:44-468:86
+    _2 = call intrinsic mem.global.release(copy _4, copy _1.*.0, copy _5) @468:16-468:87
+    dead _3 @468:87-468:87
+    _0 = const ()
+    return
+}
+
+fn range#step(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 1 @1194:55-1194:56
+    return @1194:55-1194:56
+}
+
+fn mem.REGION_ALIGN(0) value pure source 2 {
+    let _0: int
+  bb0:
+    _0 = const 64 @413:31-413:33
+    return @413:31-413:33
+}
+
+fn mem.Region#drop(1) glue source 0 own 0 {
+    let _0: ()
+    let _1: mem.Region "self"
+    let _2: ref mut mem.Region
+  bb0:
+    _2 = ref mut _1
+    _0 = call fn mem.Region.Drop.drop(move _2)
+    goto bb1
+  bb1:
+    return
+}
+answer 0
+main fn ends	main enum Shape; main struct Point; prelude struct list
+main fn impl Display for Point.fmt	main struct Point; prelude fn Formatter.write; prelude struct Formatter; prelude struct String
+main fn main	main enum Shape; main fn ends; main fn moved; main struct Point; prelude fn print; prelude struct list
+main fn moved	main const ORIGIN; main struct Point
+answer 0
+main fn ends	main enum Shape; main struct Point; prelude struct list
+main fn impl Display for Point.fmt	main struct Point; prelude fn Formatter.write; prelude struct Formatter; prelude struct String
+main fn main	main enum Shape; main fn ends; main fn moved; main struct Point; prelude fn print; prelude struct list
+main fn moved	main const ORIGIN; main struct Point
+main fn unused	

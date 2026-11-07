@@ -97,6 +97,11 @@ pub enum TyKey:
     Char
     Str
     Adt(DefId)
+    ## A builtin collection on an allocator its type names, another than
+    ## `Global` or a type parameter (`list[T, ref Region]`, `list[T, A]`):
+    ## its methods are those of `std.mem`'s impls generic over the allocator,
+    ## where a collection on `Global` has the prelude's (RULES.md, R237).
+    Allocated(DefId)
 
 ## The table of the types of a program. The index of a structure is found
 ## by its key, a text: stage 0's interpreter hashes no list.
@@ -290,7 +295,8 @@ impl Types:
         return self.intern(TyData.Fn(params=params, ret=ret, pure=pure))
 
     ## The key a type's methods are registered under, for the types that
-    ## have one.
+    ## have one: a collection whose type names its allocator, which `Global`
+    ## leaves out (R227), has a key of its own (RULES.md, R237).
     pub pure def key(self, t: Ty) -> TyKey?:
         return match self.data(t):
             case TyData.Int: Some(TyKey.Int)
@@ -298,8 +304,22 @@ impl Types:
             case TyData.Bool: Some(TyKey.Bool)
             case TyData.Char: Some(TyKey.Char)
             case TyData.Str: Some(TyKey.Str)
-            case TyData.Adt(d, _): Some(TyKey.Adt(d))
+            case TyData.Adt(d, args): Some(self.adt_key(d, len(args)))
             case _: None
+
+    ## The key of a type of `d` with `n` arguments (`key`).
+    pub pure def adt_key(self, d: DefId, n: int) -> TyKey:
+        if self.names_allocator(d, n):
+            return TyKey.Allocated(d)
+        return TyKey.Adt(d)
+
+    ## Whether a type of the collection `d` with `n` arguments names its
+    ## allocator: one whose default the table leaves out, written whole
+    ## (RULES.md, R237).
+    pub pure def names_allocator(self, d: DefId, n: int) -> bool:
+        if let Some((count, _)) = self.interned.get(d.index):
+            return n == count
+        return False
 
     ## Replaces `Param(i)` by `args[i]`. A type that mentions no parameter
     ## is itself again, as substituting its parts and making it again

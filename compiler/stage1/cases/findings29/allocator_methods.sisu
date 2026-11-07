@@ -1,0 +1,54 @@
+# Every method of the collections on a borrowed `Region` (04,
+# "Allocators"; RULES.md, R237): the same methods as on `Global`, from the
+# impls over a collection on any allocator, whose SIR names the allocator
+# in the collection's type and the impls `list#allocator.*`. The runtime
+# does not run a collection on another allocator yet (R234's and R237's
+# runtime half), so the case has no `.out`: it checks without an error,
+# and `allocator_region_sorted.sisu`'s SIR shows the forms.
+from std.mem import Region
+
+def lists(r: ref Region) -> int:
+    var xs: list[int, ref Region] = list.with_allocator(r)
+    xs.push(3)
+    xs.try_push(1).expect("room")
+    xs.insert(0, 2)
+    xs.sort()
+    xs.sort_by((a, b) -> b.cmp(a))
+    xs.reverse()
+    xs.swap(0, 1)
+    _ = xs.remove(0)
+    print("{len(xs)} {xs.contains(2)} {xs.is_sorted()} {xs.join(", ")} {xs} {xs == xs}")
+    print("{xs.get(0)} {xs.first()} {xs.last()} {xs.sum()} {xs[0]} {2 in xs}")
+    var n = 0
+    for x in xs:
+        n += x
+    var more: list[int, ref Region] = list.with_allocator(r)
+    more.push(n)
+    xs.extend(more)
+    let last = xs.pop() ?? 0
+    xs.clear()
+    return last + len(xs)
+
+def tables(r: ref Region) -> int:
+    var d: dict[String, int, ref Region] = dict.with_allocator(r)
+    _ = d.insert("a".to_string(), 1)
+    _ = d.try_insert("b".to_string(), 2).expect("room")
+    _ = d.remove("b")
+    print("{d.get("a")} {d.contains("a")} {"a" in d} {len(d)} {d} {d == d}")
+    var s: set[int, ref Region] = set.with_allocator(r)
+    _ = s.add(1)
+    _ = s.try_add(2).expect("room")
+    _ = s.remove(2)
+    print("{s.contains(1)} {1 in s} {len(s)} {s} {s == s}")
+    var t: String[ref Region] = String.with_allocator(r)
+    t.push("ab")
+    t.push_char('c')
+    t.try_push("d").expect("room")
+    print("{t} {len(t)} {t == t}")
+    t.clear()
+    return len(d) + len(s)
+
+def main():
+    let region = Region.bump(capacity=4096)
+    print(lists(ref region))
+    print(tables(ref region))

@@ -1,0 +1,5 @@
+check	no_alloc_through.sisu	--dir	cases/findings29
+check	allocator_mixing.sisu	--dir	cases/findings29
+sir	allocator_region_sorted.sisu	--dir	cases/findings29
+query	reads	reads.sisu	--dir	cases/findings29
+query	reads	reads.sisu	--text	reads_changed.txt	--dir	cases/findings29

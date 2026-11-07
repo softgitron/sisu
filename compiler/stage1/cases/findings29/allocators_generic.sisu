@@ -1,0 +1,41 @@
+# The collections' methods generic over the allocator (04, "Allocators";
+# RULES.md, R237): a function over `A: Allocator` calls `push`, `sort`,
+# `len`, `join`, `==` and the rest of a `list[int, A]`, a `dict` and a
+# `set` on `A`, which the impls over a collection on any allocator give,
+# and runs here on `Global`; a program that names no allocator keeps the
+# prelude's methods and its SIR.
+def grow[A: Allocator](mut xs: list[int, A], n: int):
+    for i in range(n):
+        xs.push(n - i)
+    xs.sort()
+    xs.insert(0, 9)
+    _ = xs.pop()
+
+def describe[A: Allocator](xs: list[int, A]) -> String:
+    var t = String.new()
+    t.push("{len(xs)} {xs.contains(2)} {xs.is_sorted()} {xs.join("+")} {xs} {xs == xs}")
+    return t
+
+def count[A: Allocator](mut d: dict[String, int, A], k: str):
+    let n = d.get(k) ?? 0
+    _ = d.insert(k.to_string(), n + 1)
+
+def add_all[A: Allocator](mut s: set[int, A], xs: list[int]) -> int:
+    for x in xs:
+        _ = s.add(x)
+    return len(s)
+
+def main():
+    var xs: list[int] = []
+    grow(mut xs, 4)
+    print(describe(xs))
+    var ys: list[int] = list.with_allocator(Global())
+    grow(mut ys, 2)
+    print(describe(ys))
+    var d: dict[String, int] = {}
+    count(mut d, "a")
+    count(mut d, "a")
+    print(d)
+    var s: set[int] = set()
+    print(add_all(mut s, [1, 2, 2]))
+    print(s)

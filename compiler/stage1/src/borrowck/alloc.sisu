@@ -433,7 +433,7 @@ pure def allocation(
             match callee:
                 case Callee.Intrinsic(n, _):
                     if grows(n):
-                        return Some(made(intrinsic_words(n), "calls `{n}`"))
+                        return Some(made(intrinsic_words(n), how_words(n)))
                     if moves_out(n):
                         return None
                     if not dest.proj.is_empty():
@@ -445,8 +445,8 @@ pure def allocation(
                         return None
                     if owns_memory(types, t, 0):
                         if n == "list.new":
-                            return Some(made_list(intrinsic_words(n), "calls `{n}`"))
-                        return Some(made(intrinsic_words(n), "calls `{n}`"))
+                            return Some(made_list(intrinsic_words(n), how_words(n)))
+                        return Some(made(intrinsic_words(n), how_words(n)))
                     return None
                 case Callee.Value(_):
                     return Some(
@@ -503,6 +503,25 @@ pure def intrinsic_words(n: str) -> String:
         case "dict.new": "the dict it makes".to_string()
         case "fmt.new": "the text it formats".to_string()
         case _: "a call of `{method_of(n)}`".to_string()
+
+## The words of the note at a call of a function that allocates for what
+## an intrinsic in it does: the function's own operation, `makes a list` of
+## a comprehension, `builds a `String`` of an interpolation, `grows a list
+## with `push``, never the intrinsic's own name (RULES.md, R239).
+pure def how_words(n: str) -> String:
+    let m = method_of(n)
+    return match n:
+        case "list.new" | "list.with_capacity": "makes a list".to_string()
+        case "set.new": "makes a set".to_string()
+        case "dict.new": "makes a dict".to_string()
+        case "fmt.new" | "String.new": "builds a `String`".to_string()
+        case "list.push" | "list.insert" | "list.extend": "grows a list with `{m}`".to_string()
+        case "dict.insert" | "dict.entry": "grows a dict with `{m}`".to_string()
+        case "set.add": "grows a set with `{m}`".to_string()
+        case "String.push" | "String.push_char": "grows a `String` with `{m}`".to_string()
+        case "Shared.new": "makes a `Shared` value".to_string()
+        case "bytes.concat": "joins two byte strings".to_string()
+        case _: "makes a value that owns memory with `{m}`".to_string()
 
 ## The method of an intrinsic's name, `push` of `list.push`.
 pure def method_of(n: str) -> String:

@@ -602,8 +602,8 @@ pure def trait_decls(
         let self_ty = ctx.ty(prog, mut types, info.self_ty)
         var has_assoc = not info.assoc.is_empty() and projected.contains(trait_name)
         if has_assoc:
-            if let Type.Named(n, _) = self_ty:
-                has_assoc = mentioned.contains(n)
+            if let Type.Named(n, a) = self_ty:
+                has_assoc = mentioned.contains(allocated_name(n, len(a)))
         if not dispatched and not has_assoc:
             continue
         # An impl for a type no kept function makes was pruned with its
@@ -616,6 +616,12 @@ pure def trait_decls(
                         pruned = True
         if pruned and not has_assoc:
             continue
+        # An impl over a collection on any allocator is for a program that
+        # names one; one on `Global` has the prelude's (RULES.md, R237).
+        if let Type.Named(n, a) = self_ty.copy():
+            let named = allocated_name(n, len(a))
+            if named != n and not mentioned.contains(named):
+                continue
         var ms: list[(String, ImplTarget)] = []
         for (n, m) in info.methods:
             let f = prog.fn_info(m) else:
@@ -1083,8 +1089,8 @@ pure def lower_reached(
             if added_impls.contains(i) or not dispatched.contains(info.trait_ref.def_):
                 continue
             var needed = True
-            if let Type.Named(n, _) = ctx.ty(prog, mut types, info.self_ty):
-                needed = mentioned.contains(n)
+            if let Type.Named(n, a) = ctx.ty(prog, mut types, info.self_ty):
+                needed = mentioned.contains(allocated_name(n, len(a)))
             if needed:
                 _ = added_impls.add(i)
                 for (_, m) in info.methods:
@@ -1104,11 +1110,25 @@ pure def lower_reached(
                     out.push(f.copy())
     return (out, types)
 
+## The name a type mentions for the impls it may reach: its own, and
+## `list#allocator` for a collection whose type names its allocator, which
+## the impls over a collection on any allocator are for, where one on
+## `Global` reaches the prelude's alone (RULES.md, R237).
+pure def allocated_name(n: str, args: int) -> String:
+    let whole = match n:
+        case "list" | "set": 2
+        case "dict": 3
+        case "String": 1
+        case _: -1
+    if args == whole:
+        return "{n}#allocator"
+    return n.to_string()
+
 ## The names of the named types in a type.
 pure def type_names(t: Type, mut out: set[String]):
     match t:
         case Type.Named(n, args):
-            _ = out.add(n.copy())
+            _ = out.add(allocated_name(n, len(args)))
             for a in args:
                 type_names(a, mut out)
         case Type.Tuple(es):

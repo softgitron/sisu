@@ -176,7 +176,7 @@ error[E0282]: `total[Big]` is `@no_alloc`, but `Big.Weighed.weight` may allocate
    |
 31 |         sum += xs[i].weight()
    |                ^^^^^^^^^^^^^^
-  = note: `Big.Weighed.weight` calls `list.push`, at no_alloc_instances.sisu:24:9
+  = note: `Big.Weighed.weight` grows a list with `push`, at no_alloc_instances.sisu:24:9
   = note: in this instance, which the program makes at no_alloc_instances.sisu:43:11
   = fix: remove `@no_alloc`, so that `total` may allocate
 

@@ -174,6 +174,8 @@ pub struct Finished:
     ## its definition when it is a function (RULES.md, R90).
     pub impure: (String, DefId?)?
     pub const_calls: list[ConstCall]
+    ## The declarations the body read (`Checker.reads`; RULES.md, R238).
+    pub reads: list[DefId]
 
 ## An unsafe operation of a body (22, "The unsafe operations"): a call of
 ## an `unsafe def` or of a foreign function, with the callee's name and
@@ -428,7 +430,87 @@ impl Checker:
             asserts=asserts,
             const_calls=calls,
             impure=None,
+            reads=[],
         )
+
+    ## The declarations the body read (RULES.md, R238), each once, in the
+    ## order of definitions: the functions, constants, structs, variants
+    ## and defaults it names, the definitions the types of its values,
+    ## locals and patterns name, the traits its bounds and its calls of
+    ## trait methods ask for, and the templates it asks instances of. A
+    ## type stands for its fields, variants and methods, a trait for its
+    ## impls: what a memo of the body compares of each, by the definition's
+    ## key (`Program.def_key`), before it takes the body's results again.
+    pub pure def reads(mut self) -> list[DefId]:
+        var seen: set[int] = set()
+        var tys: set[int] = set()
+        var out: list[int] = []
+        for i in range(len(self.exprs)):
+            let t = self.infer.zonk(mut self.types, self.exprs[i].ty)
+            ty_reads(self.types, t, mut tys, mut seen, mut out)
+            var named: DefId? = None
+            var targs: list[Ty] = []
+            match self.exprs[i].kind:
+                case TExprKind.Call(Callee.Fn(d, ts), _):
+                    named = Some(d)
+                    targs = ts.copy()
+                case TExprKind.FnRef(d, ts):
+                    named = Some(d)
+                    targs = ts.copy()
+                case TExprKind.RefineTry(_, d, ts):
+                    named = Some(d)
+                    targs = ts.copy()
+                case TExprKind.Const(d):
+                    named = Some(d)
+                case TExprKind.Variant(d, _, _):
+                    named = Some(d)
+                case TExprKind.Struct(d, _):
+                    named = Some(d)
+                case TExprKind.DefaultArg(d, _):
+                    named = Some(d)
+                case TExprKind.FieldDefault(d, _):
+                    named = Some(d)
+                case _:
+                    pass
+            if let Some(d) = named:
+                read_def(d, mut seen, mut out)
+            for a in targs:
+                let z = self.infer.zonk(mut self.types, a)
+                ty_reads(self.types, z, mut tys, mut seen, mut out)
+        for i in range(len(self.locals)):
+            let t = self.infer.zonk(mut self.types, self.locals[i].ty)
+            ty_reads(self.types, t, mut tys, mut seen, mut out)
+        for i in range(len(self.pats)):
+            let t = self.infer.zonk(mut self.types, self.pats[i].ty)
+            ty_reads(self.types, t, mut tys, mut seen, mut out)
+            match self.pats[i].kind:
+                case TPatKind.Variant(d, _, _):
+                    read_def(d, mut seen, mut out)
+                case TPatKind.Struct(d, _):
+                    read_def(d, mut seen, mut out)
+                case _:
+                    pass
+        var traits: list[TraitRef] = []
+        for (_, tr, _) in self.bounds:
+            traits.push(tr.copy())
+        for (_, tr, _) in self.impl_bounds:
+            traits.push(tr.copy())
+        for tr in traits:
+            read_def(tr.def_, mut seen, mut out)
+            for a in tr.args:
+                let z = self.infer.zonk(mut self.types, a)
+                ty_reads(self.types, z, mut tys, mut seen, mut out)
+        for q in self.requests:
+            match q:
+                case Request.Instance(d, _, _):
+                    read_def(d, mut seen, mut out)
+                case Request.Promote(d):
+                    read_def(d, mut seen, mut out)
+        out.sort()
+        var ids: list[DefId] = []
+        for i in out:
+            ids.push(DefId(index=i))
+        return ids
 
     ## The body as lowering reads it (stage 0's `Body` once `zonk.rs` has
     ## finished it): every type final, a variable left open `()`. A closure
@@ -2698,3 +2780,49 @@ pub pure def primitive(name: str) -> Ty?:
 ## Whether a byte belongs to a name: an ASCII letter or digit, or `_`.
 pure def is_name_byte(b: u8) -> bool:
     return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95
+
+## Adds the definition `d` to a body's reads, once (RULES.md, R238).
+pure def read_def(d: DefId, mut seen: set[int], mut out: list[int]):
+    if d.index < 0 or seen.contains(d.index):
+        return
+    _ = seen.add(d.index)
+    out.push(d.index)
+
+## Adds the definitions a type names to a body's reads, each type walked
+## once (`tys`): its type definitions, and the traits of a `dyn` type or
+## of an associated type (RULES.md, R238).
+pure def ty_reads(types: Types, t: Ty, mut tys: set[int], mut seen: set[int], mut out: list[int]):
+    if tys.contains(t.index):
+        return
+    _ = tys.add(t.index)
+    match types.data(t).copy():
+        case TyData.Adt(d, args):
+            read_def(d, mut seen, mut out)
+            for a in args:
+                ty_reads(types, a, mut tys, mut seen, mut out)
+        case TyData.Tuple(es, _):
+            for e in es:
+                ty_reads(types, e, mut tys, mut seen, mut out)
+        case TyData.ErrSet(ms):
+            for m in ms:
+                read_def(m, mut seen, mut out)
+        case TyData.Fn(ps, r, _):
+            for p in ps:
+                ty_reads(types, p, mut tys, mut seen, mut out)
+            ty_reads(types, r, mut tys, mut seen, mut out)
+        case TyData.Ref(inner, _):
+            ty_reads(types, inner, mut tys, mut seen, mut out)
+        case TyData.Dyn(tr):
+            read_def(tr.def_, mut seen, mut out)
+            for a in tr.args:
+                ty_reads(types, a, mut tys, mut seen, mut out)
+        case TyData.Assoc(s, tr, _):
+            ty_reads(types, s, mut tys, mut seen, mut out)
+            read_def(tr.def_, mut seen, mut out)
+            for a in tr.args:
+                ty_reads(types, a, mut tys, mut seen, mut out)
+        case TyData.ConstOp(_, args):
+            for a in args:
+                ty_reads(types, a, mut tys, mut seen, mut out)
+        case _:
+            pass

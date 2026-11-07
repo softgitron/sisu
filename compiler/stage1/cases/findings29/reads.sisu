@@ -1,0 +1,31 @@
+# What each body's check read, by the definitions' keys (RULES.md, R238):
+# `findings29/asks.requests` asks `query reads` of this text and of
+# `reads_changed.txt`, which adds a function above the others, renumbering
+# every definition after it; the lines of the bodies it leaves as they
+# were are the same.
+struct Point:
+    x: int
+    y: int
+
+impl Display for Point:
+    pure def fmt(self, mut f: Formatter):
+        f.write("({self.x}, {self.y})")
+
+enum Shape:
+    Dot(Point)
+    Line(Point, Point)
+
+const ORIGIN: int = 0
+
+def moved(p: Point, by: int) -> Point:
+    return Point(x=p.x + by, y=p.y + ORIGIN)
+
+def ends(s: Shape) -> list[Point]:
+    return match s:
+        case Shape.Dot(p): [p.copy()]
+        case Shape.Line(a, b): [a.copy(), b.copy()]
+
+def main():
+    let p = moved(Point(x=1, y=2), 3)
+    for q in ends(Shape.Line(p.copy(), p)):
+        print(q)

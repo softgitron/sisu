@@ -1,0 +1,20 @@
+# Mixing allocators (04, "Allocators"; RULES.md, R237): a collection's
+# methods take a collection on its own allocator, and one on another is
+# made by `with_allocator`, which takes it, where `new` makes one on
+# `Global`.
+from std.mem import Region
+
+def mixed(r: ref Region):
+    var xs: list[int, ref Region] = list.with_allocator(r)
+    let ys: list[int] = [1, 2]
+    xs.extend(ys)
+    print(xs == ys)
+
+def made[A: Allocator]() -> list[int, A]:
+    return list[int, A].new()
+
+def main():
+    let r = Region.bump(capacity=64)
+    mixed(ref r)
+    let ok: list[int] = made()
+    _ = ok

@@ -922,3 +922,317 @@ pure def u64_word(n: u64) -> int:
         return i
     let low = (n - 9223372036854775808u64).to_int() ?? 0
     return low + (-9223372036854775807 - 1)
+
+# The collections' other methods on any allocator (D-060; stage 1's
+# RULES.md, R237): the prelude's impls are over a collection on `Global`,
+# whose SIR they keep; these, the same methods over a collection on an
+# allocator its type names, a `list[T, ref Region]` or a `list[T, A]` of a
+# function generic over `A`, are what such a collection's methods are. Each
+# is the intrinsic of the prelude's method or its body again, so a
+# collection on another allocator does what one on `Global` does, its
+# growth from its allocator.
+
+impl[T, A: Allocator] list[T, A]:
+    ## Appends `x` at the end.
+    @intrinsic("list.push")
+    @keeps(self, x)
+    pure def push(mut self, own x: T)
+    ## Removes and returns the last element, or `None`.
+    @intrinsic("list.pop")
+    @keeps(self)
+    pure def pop(mut self) -> T?
+    ## Inserts `x` before index `i`, which may equal the length.
+    @intrinsic("list.insert")
+    @keeps(self, x)
+    pure def insert(mut self, i: int, own x: T)
+    ## Removes and returns the element at `i`; panics if out of bounds.
+    @intrinsic("list.remove")
+    @keeps(self)
+    pure def remove(mut self, i: int) -> T
+    @intrinsic("list.is_empty")
+    pure def is_empty(self) -> bool
+    ## Whether an element equals `x`.
+    @structural("list.contains")
+    pure def contains(self, x: T) -> bool where T: Eq:
+        for y in self:
+            if y == x:
+                return True
+        return False
+    ## Whether the elements are in order, each at most the next.
+    pure def is_sorted(self) -> bool where T: Ord:
+        var i = 1
+        while i < len(self):
+            if self[i - 1] > self[i]:
+                return False
+            i += 1
+        return True
+    ## The element at `i`, or `None` when out of bounds.
+    @intrinsic("list.get")
+    pure def get(self, i: int) -> ref T?
+    @intrinsic("list.first")
+    pure def first(self) -> ref T?
+    @intrinsic("list.last")
+    pure def last(self) -> ref T?
+    ## Borrows each element in order.
+    @intrinsic("list.iter")
+    pure def iter(self) -> Iter[ref T]
+    ## The elements as a `Slice[T]`.
+    @intrinsic("list.as_slice")
+    pure def as_slice(self) -> Slice[T]
+    ## Sorts in ascending order; stable.
+    @structural("list.sort")
+    @keeps(self)
+    pure def sort(mut self) where T: Ord:
+        self.sort_by((a, b) -> a.cmp(b))
+    ## Sorts by `cmp`; stable: the elements are sorted in a list on
+    ## `Global` and put back in order, in the room they had.
+    pure def sort_by(mut self, cmp: pure (ref T, ref T) -> Ordering):
+        if len(self) < 2:
+            return
+        var all: list[T] = []
+        while let Some(x) = self.pop():
+            all.push(x)
+        all.sort_by((a, b) -> cmp(b, a))
+        while let Some(x) = all.pop():
+            self.push(x)
+    @intrinsic("list.reverse")
+    @keeps(self)
+    pure def reverse(mut self)
+    ## Exchanges the elements at `i` and `j`; panics if either is out of bounds.
+    @intrinsic("list.swap")
+    @keeps(self)
+    pure def swap(mut self, i: int, j: int)
+    @intrinsic("list.clear")
+    pure def clear(mut self)
+    ## Moves the elements of `other`, a list on the same allocator, to the
+    ## end.
+    @intrinsic("list.extend")
+    @keeps(self, other)
+    pure def extend(mut self, own other: list[T, A])
+    ## The `Display` renderings of the elements, separated by `sep`.
+    @structural("list.join")
+    pure def join(self, sep: str) -> String where T: Display:
+        var out = String.new()
+        var first = True
+        for x in self:
+            if not first:
+                out.push(sep)
+            first = False
+            out.push("{x}")
+        return out
+    ## The sum of the elements, 0 for none; integer overflow panics.
+    @intrinsic("sum")
+    pure def sum(self) -> T where T: Num
+
+impl[K, V, A: Allocator] dict[K, V, A]:
+    @intrinsic("dict.get")
+    pure def get(self, key: K) -> ref V?
+    ## Inserts or replaces; returns the previous value.
+    @intrinsic("dict.insert")
+    @keeps(self, value)
+    pure def insert(mut self, own key: K, own value: V) -> V?
+    @intrinsic("dict.remove")
+    @keeps(self)
+    pure def remove(mut self, key: K) -> V?
+    @intrinsic("dict.contains")
+    pure def contains(self, key: K) -> bool
+    @intrinsic("dict.is_empty")
+    pure def is_empty(self) -> bool
+    ## The slot for `key`, filled or not.
+    @intrinsic("dict.entry")
+    pure def entry(mut self, own key: K) -> Entry[K, V]
+    @intrinsic("dict.keys")
+    pure def keys(self) -> Iter[ref K]
+    @intrinsic("dict.values")
+    pure def values(self) -> Iter[ref V]
+    ## The entries in insertion order.
+    @intrinsic("dict.items")
+    pure def items(self) -> Iter[(ref K, ref V)]
+
+impl[T, A: Allocator] set[T, A]:
+    ## Adds `x`; returns whether it was new.
+    @intrinsic("set.add")
+    pure def add(mut self, own x: T) -> bool
+    @intrinsic("set.remove")
+    pure def remove(mut self, x: T) -> bool
+    @intrinsic("set.contains")
+    pure def contains(self, x: T) -> bool
+    @intrinsic("set.is_empty")
+    pure def is_empty(self) -> bool
+    @intrinsic("set.iter")
+    pure def iter(self) -> Iter[ref T]
+
+impl[A: Allocator] String[A]:
+    ## Appends `text`.
+    @intrinsic("String.push")
+    pure def push(mut self, text: str)
+    @intrinsic("String.push_char")
+    pure def push_char(mut self, c: char)
+    @intrinsic("String.clear")
+    pure def clear(mut self)
+
+impl[T: Debug, A: Allocator] Debug for list[T, A]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("[")
+        f.depth += 1
+        var first = True
+        for x in self:
+            if not first:
+                f.write(", ")
+            first = False
+            x.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("]")
+
+impl[T: Debug, A: Allocator] Display for list[T, A]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Eq, A: Allocator] Eq for list[T, A]:
+    pure def eq(self, other: list[T, A]) -> bool:
+        if len(self) != len(other):
+            return False
+        for i in range(len(self)):
+            if self[i] != other[i]:
+                return False
+        return True
+
+impl[T: PartialOrd, A: Allocator] PartialOrd for list[T, A]:
+    pure def partial_cmp(self, other: list[T, A]) -> Ordering?:
+        var i = 0
+        while i < len(self) and i < len(other):
+            let c = self[i].partial_cmp(other[i])
+            if c != Some(Equal):
+                return c
+            i += 1
+        return Some(len(self).cmp(len(other)))
+
+impl[T: Ord, A: Allocator] Ord for list[T, A]:
+    pure def cmp(self, other: list[T, A]) -> Ordering:
+        var i = 0
+        while i < len(self) and i < len(other):
+            let c = self[i].cmp(other[i])
+            if c != Equal:
+                return c
+            i += 1
+        return len(self).cmp(len(other))
+
+impl[T: Hash, A: Allocator] Hash for list[T, A]:
+    pure def hash(self, mut h: Hasher):
+        h.write_int(len(self))
+        for x in self:
+            x.hash(mut h)
+
+impl[T, A: Allocator] Len for list[T, A]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Eq, A: Allocator] Contains[T] for list[T, A]:
+    pure def contains(self, x: T) -> bool:
+        for v in self:
+            if v == x:
+                return True
+        return False
+
+impl[T: Debug, A: Allocator] Debug for set[T, A]:
+    pure def fmt_debug(self, mut f: Formatter):
+        if len(self) == 0:
+            f.write("set()")
+            return
+        f.write("{{")
+        f.depth += 1
+        var first = True
+        for x in self:
+            if not first:
+                f.write(", ")
+            first = False
+            x.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("}}")
+
+impl[T: Debug, A: Allocator] Display for set[T, A]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[T: Hash, A: Allocator] Eq for set[T, A]:
+    pure def eq(self, other: set[T, A]) -> bool:
+        if len(self) != len(other):
+            return False
+        for x in self:
+            if not other.contains(x):
+                return False
+        return True
+
+impl[T, A: Allocator] Len for set[T, A]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[T: Hash, A: Allocator] Contains[T] for set[T, A]:
+    pure def contains(self, x: T) -> bool:
+        return x in self
+
+impl[K: Debug, V: Debug, A: Allocator] Debug for dict[K, V, A]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("{{")
+        f.depth += 1
+        var first = True
+        for k, v in self:
+            if not first:
+                f.write(", ")
+            first = False
+            k.fmt_debug(mut f)
+            f.write(": ")
+            v.fmt_debug(mut f)
+        f.depth -= 1
+        f.write("}}")
+
+impl[K: Debug, V: Debug, A: Allocator] Display for dict[K, V, A]:
+    pure def fmt(self, mut f: Formatter):
+        self.fmt_debug(mut f)
+
+impl[K: Hash, V: Eq, A: Allocator] Eq for dict[K, V, A]:
+    pure def eq(self, other: dict[K, V, A]) -> bool:
+        if len(self) != len(other):
+            return False
+        for k, v in self:
+            let Some(w) = other.get(k) else:
+                return False
+            if v != w:
+                return False
+        return True
+
+impl[K, V, A: Allocator] Len for dict[K, V, A]:
+    @intrinsic("len")
+    pure def len(self) -> int
+
+impl[K: Hash, V, A: Allocator] Contains[K] for dict[K, V, A]:
+    pure def contains(self, key: K) -> bool:
+        return key in self
+
+impl[A: Allocator] Display for String[A]:
+    @intrinsic("structural.display")
+    pure def fmt(self, mut f: Formatter)
+
+impl[A: Allocator] Debug for String[A]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[A: Allocator] Eq for String[A]:
+    @intrinsic("structural.eq")
+    pure def eq(self, other: String[A]) -> bool
+
+impl[A: Allocator] PartialOrd for String[A]:
+    @intrinsic("structural.partial_cmp")
+    pure def partial_cmp(self, other: String[A]) -> Ordering?
+
+impl[A: Allocator] Ord for String[A]:
+    @intrinsic("structural.cmp")
+    pure def cmp(self, other: String[A]) -> Ordering
+
+impl[A: Allocator] Hash for String[A]:
+    @intrinsic("structural.hash")
+    pure def hash(self, mut h: Hasher)
+
+impl[A: Allocator] Len for String[A]:
+    @intrinsic("len")
+    pure def len(self) -> int

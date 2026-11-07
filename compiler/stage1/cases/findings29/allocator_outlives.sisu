@@ -1,0 +1,12 @@
+# A collection on a borrowed `Region` is a view of it (04, "Allocators";
+# RULES.md, R234, R237): it cannot outlive the region its room is in.
+from std.mem import Region
+
+def outlives() -> list[int, ref Region]:
+    let r = Region.bump(capacity=64)
+    var xs: list[int, ref Region] = list.with_allocator(ref r)
+    xs.push(1)
+    return xs
+
+def main():
+    print(len(outlives()))

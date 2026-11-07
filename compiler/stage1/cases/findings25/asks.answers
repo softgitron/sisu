@@ -169,7 +169,7 @@ error[E0282]: `render` is `@no_alloc`, but `Synth.next_sample` may allocate
    |
 19 |         out[i] = synth.next_sample()
    |                  ^^^^^^^^^^^^^^^^^^^
-  = note: `Synth.next_sample` calls `list.push`, at no_alloc.sisu:13:9
+  = note: `Synth.next_sample` grows a list with `push`, at no_alloc.sisu:13:9
   = fix: remove `@no_alloc`, so that `render` may allocate
 
 error[E0282]: `label` is `@no_alloc`, but `[n, n + 1]` may allocate

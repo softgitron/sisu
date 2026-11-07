@@ -1209,7 +1209,7 @@ impl Checker:
     ) -> TExprId?:
         let TyData.Adt(d, a) = self.types.data(owner).copy() else:
             return None
-        let m = cx.prog.method(TyKey.Adt(d), name) else:
+        let m = cx.prog.method(self.types.adt_key(d, len(a)), name) else:
             return None
         let span = self.span_of(recv)
         let r = self.receiver_arg(cx, recv)

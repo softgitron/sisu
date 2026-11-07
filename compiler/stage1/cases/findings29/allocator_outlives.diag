@@ -1,0 +1,2 @@
+9:5-9:14 E0407 borrow.return-local name="r" function="outlives"
+  label 7:57-7:62 borrow.borrowed-here

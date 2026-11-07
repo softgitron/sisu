@@ -4240,6 +4240,7 @@ def query_command(
         return Err(Usage(text=usage()))
     let kind = words[0].copy()
     let whole = kind == "diagnostics"
+        or kind == "reads"
         or kind == "values"
         or kind == "symbols"
         or kind == "inlay"
@@ -4784,6 +4785,8 @@ def query_answer(
     let typed = checked.typed else:
         return Ok(String.new())
     let m = query_module(typed.prog, program, at)
+    if kind == "reads":
+        return Ok(query_reads(typed))
     if kind == "inlay":
         return Ok(query.inlay(typed, m, text))
     if kind == "holes":
@@ -4805,6 +4808,25 @@ def query_answer(
 ## of which it is a module, or the file alone (with the dependencies its
 ## inline metadata names); with the index of the file's module among the
 ## program's and each module's path on disk.
+## `query reads FILE` (RULES.md, R238): each function of the program's own
+## modules by its key, a tab, and the keys of the declarations its check
+## read, separated by `; `, a line each in the order of the keys: what a
+## memo of the type checker compares, the same whatever the definitions'
+## numbers in a request.
+pure def query_reads(typed: typeck.Typed) -> String:
+    var lines: list[String] = []
+    for (d, reads) in typed.reads:
+        var keys: list[String] = []
+        for r in reads:
+            keys.push(typed.prog.def_key(typed.types, r))
+        keys.sort()
+        lines.push("{typed.prog.def_key(typed.types, d)}\t{keys.join("; ")}")
+    lines.sort()
+    var out = String.new()
+    for l in lines:
+        out.push("{l}\n")
+    return out
+
 def query_input(
     sys: System, home: str, file: str, text: str, mut env: Environment, catalog: Catalog
 ) -> (Input, int, list[String]) ! IoError:

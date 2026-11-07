@@ -384,6 +384,9 @@ pub struct Typed:
     ## syntax `Base.std_syntax` holds), and the inferred error sets.
     pub syntax: list[Module]
     pub inferred: dict[DefId, list[DefId]]
+    ## Each function of the program's own modules with the declarations its
+    ## check read (RULES.md, R238), in the order of definitions.
+    pub reads: list[(DefId, list[DefId])]
 
 ## The type diagnostics of a file, rendered as `sisu check --format=ids`
 ## writes them: each position in its own file's lines and columns. The
@@ -433,6 +436,7 @@ struct BodyResult:
     asserts: list[Assert]
     const_calls: list[ConstCall]
     impure: (String, DefId?)?
+    reads: list[DefId]
 
 pure def result_of(done: Finished) -> BodyResult:
     return BodyResult(
@@ -447,6 +451,7 @@ pure def result_of(done: Finished) -> BodyResult:
         asserts=done.asserts.copy(),
         const_calls=done.const_calls.copy(),
         impure=done.impure.copy(),
+        reads=done.reads.copy(),
     )
 
 ## What checking the bodies of one file gave: the diagnostics, why bodies
@@ -521,6 +526,8 @@ struct Round:
     ## among the program's modules.
     asserts: dict[DefId, list[Assert]]
     const_calls: list[(int, ConstCall)]
+    ## What each function of the program's own modules read (R238).
+    reads: list[(DefId, list[DefId])]
 
 ## Checks one file against the resolved prelude. `name_error` says
 ## whether stage 0's name pass reports an error in it; `keep` asks for
@@ -752,6 +759,7 @@ pub pure def check_program(
                             quiet=r.quiet_fns,
                             syntax=r.sources,
                             inferred=round.inferred,
+                            reads=round.reads,
                         )
                     )
                 return checked
@@ -896,6 +904,7 @@ pure def check_round(
     var requests: list[Request] = []
     var typed: list[TBody] = []
     var impure_of: dict[int, (String, DefId?)] = {}
+    var reads: list[(DefId, list[DefId])] = []
     for d in fns:
         var result: BodyResult? = None
         if let Some(x) = memo.get(d):
@@ -911,6 +920,8 @@ pure def check_round(
         let x = result ?? continue_never()
         if let Some(i) = x.impure:
             _ = impure_of.insert(d.index, i.copy())
+        if prog.user_modules.contains(prog.defs[d.index].module):
+            reads.push((d, x.reads.copy()))
         let at = at_module.get(prog.defs[d.index].module) ?? 0
         if reporting.contains(prog.defs[d.index].module):
             files[at].add(x, r.quiet_fns.contains(d))
@@ -1116,6 +1127,7 @@ pure def check_round(
         inferred=inferred,
         asserts=asserts,
         const_calls=calls,
+        reads=reads,
     )
 
 ## The diagnostics, each `E0335` about a function passed where a `pure` one
@@ -1185,6 +1197,7 @@ pure def continue_never() -> BodyResult:
         asserts=[],
         const_calls=[],
         impure=None,
+        reads=[],
     )
 
 ## The syntax and the text a definition's body is checked with: its
@@ -1782,11 +1795,13 @@ pure def check_one(
     c.unsafe_lints(cx)
     c.requests = c.template_requests(cx)
     let impure = c.body_impure(cx)
+    let reads = c.reads()
     var typed: TBody? = None
     if keep:
         let span = prog.defs[d.index].span
         typed = Some(c.typed_body(cx, BodyKind.Fn, span))
     var done = c.finish()
+    done.reads = reads
     done.typed = typed
     done.impure = impure
     return done

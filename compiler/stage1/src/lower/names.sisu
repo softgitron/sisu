@@ -138,9 +138,13 @@ impl Ctx:
             return def_.name.copy()
         return "{m.name}.{def_.name}"
 
+    ## The name of a method's owner in its SIR name: a collection's own,
+    ## and `list#allocator` for the impls over a collection on any allocator,
+    ## whose methods are another function than the prelude's of the same
+    ## name on `Global` (RULES.md, R237).
     pure def owner_name(self, prog: Resolved, types: Types, owner: Ty) -> String:
         return match types.data(owner):
-            case TyData.Adt(d, _): self.type_name(prog, d)
+            case TyData.Adt(d, a): self.adt_owner(prog, types, d, len(a))
             case TyData.Int: "int".to_string()
             case TyData.Float: "f64".to_string()
             case TyData.Bool: "bool".to_string()
@@ -155,6 +159,12 @@ impl Ctx:
                 prog, ms[0]
             ) else: "any".to_string()
             case _: "any".to_string()
+
+    pure def adt_owner(self, prog: Resolved, types: Types, d: DefId, n: int) -> String:
+        let name = self.type_name(prog, d)
+        if types.names_allocator(d, n):
+            return "{name}#allocator"
+        return name
 
     ## Names every trait impl's methods: `Type.Trait.method`, with `#2` and
     ## on for a second impl of one trait for one type constructor.

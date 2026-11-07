@@ -1,0 +1,5 @@
+4 True False 9+1+2+3 [9, 1, 2, 3] True
+2 False False 9+1 [9, 1] True
+{"a": 2}
+2
+{1, 2}

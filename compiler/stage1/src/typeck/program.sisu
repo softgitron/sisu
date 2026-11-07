@@ -578,11 +578,26 @@ pub enum Auto:
     Send
     Sync
 
+## What a definition is, in its key (`Program.def_key`; RULES.md, R238).
+pure def def_kind_word(k: DefKind) -> str:
+    return match k:
+        case DefKind.Struct(_): "struct"
+        case DefKind.Enum(_): "enum"
+        case DefKind.ErrorSet(_): "error"
+        case DefKind.Fn(_): "fn"
+        case DefKind.Const(_): "const"
+        case DefKind.Module(_): "module"
+        case DefKind.TypeAlias(_): "type"
+        case DefKind.Trait(_): "trait"
+        case DefKind.Impl(_): "impl"
+        case DefKind.Refinement(_): "type"
+        case DefKind.Unsupported: "item"
+
 ## A phase's and an index's weight in `lower.def_rank`: an index takes
 ## `RANK_STEP` places, so that the definitions of a std module the base
 ## declared in part fit between two others (RULES.md, R227).
 pub const RANK_PHASE: int = 100000000
-pub const RANK_STEP: int = 128
+pub const RANK_STEP: int = 512
 
 pub struct Program:
     pub defs: list[Def]
@@ -1639,9 +1654,62 @@ impl Program:
             return Some(d)
         return None
 
+    ## A definition's key across a server's requests (RULES.md, R238): its
+    ## module, what it is and its path in the module, `main fn
+    ## Point.moved`, `main impl Display for Point`, where its `DefId` is its
+    ## place in one resolution's order of definitions, which a definition
+    ## added above it changes. A second definition of one key, which the
+    ## checker reports, takes `#2` after it, and so on.
+    pub pure def def_key(self, types: Types, d: DefId) -> String:
+        let key = self.key_of(types, d)
+        let def_ = ref self.defs[d.index]
+        var n = 1
+        for i in range(d.index):
+            let other = ref self.defs[i]
+            if other.module == def_.module and other.name == def_.name:
+                if self.key_of(types, DefId(index=i)) == key:
+                    n += 1
+        if n == 1:
+            return key
+        return "{key}#{n}"
+
+    ## `def_key` without its count.
+    pure def key_of(self, types: Types, d: DefId) -> String:
+        let def_ = ref self.defs[d.index]
+        var module = "?".to_string()
+        if def_.module.index >= 0 and def_.module.index < len(self.modules):
+            module = self.modules[def_.module.index].name.copy()
+        return "{module} {def_kind_word(def_.kind())} {self.def_path(types, d)}"
+
+    ## A definition's path in its module: a method after its impl's or its
+    ## owner's, an impl by its trait and its type.
+    pure def def_path(self, types: Types, d: DefId) -> String:
+        let def_ = ref self.defs[d.index]
+        match def_.kind():
+            case DefKind.Impl(i):
+                let tr = self.display_trait_in(types, i.trait_ref, [])
+                return "impl {tr} for {self.display(types, i.self_ty)}"
+            case DefKind.Fn(f):
+                if let Some(i) = f.impl_:
+                    if i != d and i.index < len(self.defs):
+                        return "{self.def_path(types, i)}.{def_.name}"
+                if let Some(t) = f.trait_:
+                    return "{self.qualified_name(t)}.{def_.name}"
+                if let Some(o) = f.owner:
+                    return "{self.display(types, o)}.{def_.name}"
+                return def_.name.copy()
+            case _:
+                return def_.name.copy()
+
     pub pure def method(self, key: TyKey, name: str) -> DefId?:
         if let Some(d) = self.methods.get((key, name.to_string())):
             return Some(d)
+        # A collection on `Global` has the functions of the impls generic
+        # over the allocator besides its own (`with_allocator`, the `try_`
+        # growths; RULES.md, R234, R237).
+        if let TyKey.Adt(d) = key:
+            if let Some(m) = self.methods.get((TyKey.Allocated(d), name.to_string())):
+                return Some(m)
         return None
 
     ## The function `main` of the root module.
